@@ -1,0 +1,975 @@
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { PublicLayout } from "@/components/public-layout";
+import { Button } from "@/components/ui/button";
+import { GlassCard } from "@/components/glass-card";
+import { motion, Reveal, Floating, fadeUp, stagger } from "@/components/motion-primitives";
+import { DEFAULT_CONFIG } from "@/lib/homepage-config";
+import type { SectionConfig } from "@/lib/homepage-config";
+import { fetchHomepageConfig, fetchSlides } from "@/lib/api/homepage";
+import type { HomepageSlide } from "@/lib/api/homepage";
+import { useQuery } from "@tanstack/react-query";
+import {
+  ArrowRight,
+  Bolt,
+  Building2,
+  CheckCircle2,
+  Clock,
+  Compass,
+  FilePlus,
+  FileText,
+  HeartHandshake,
+  Search,
+  ShieldCheck,
+  Users,
+  AlertTriangle,
+  Megaphone,
+  ChevronLeft,
+  ChevronRight,
+  Wrench,
+  Shield,
+  BookOpen,
+  Zap,
+  Bell,
+  Info,
+} from "lucide-react";
+import { useState, useEffect } from "react";
+import { AnimatePresence } from "framer-motion";
+import {
+  announcementPriorityLabels,
+  announcementCategoryLabels,
+  type Announcement,
+  type AnnouncementPriority,
+  type AnnouncementCategory,
+} from "@/lib/mock-data";
+import { fetchPublishedAnnouncements } from "@/lib/api/communication";
+import { fetchActiveDirectionsCount } from "@/lib/api/directions-units";
+
+export const Route = createFileRoute("/")({
+  head: () => ({
+    meta: [
+      { title: "EDG Connect — Espace employé EDG" },
+      {
+        name: "description",
+        content:
+          "Plateforme interne de gestion des demandes pour les employés d'Électricité de Guinée. Soumettez, suivez et résolvez vos incidents.",
+      },
+      { property: "og:title", content: "EDG Connect" },
+      {
+        property: "og:description",
+        content: "L'espace numérique des employés EDG — demandes, suivi, support, en un seul endroit.",
+      },
+    ],
+  }),
+  component: Home,
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Sections extraites — chacune est un composant autonome et statique
+// ══════════════════════════════════════════════════════════════════════════════
+
+function MissionBand({ text }: { text: string }) {
+  return (
+    <section className="mx-auto mt-8 max-w-3xl px-4 text-center sm:mt-14 sm:px-6">
+      <Reveal>
+        <div className="space-y-4">
+          {/* <div className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/8 px-3 py-1 text-xs font-medium text-primary">
+            <Sparkles className="h-3.5 w-3.5" />
+            Notre mission
+          </div> */}
+          <p className="text-base leading-relaxed text-muted-foreground sm:text-lg">
+            {text}
+          </p>
+          <div className="flex items-center justify-center gap-3 pt-2" aria-hidden>
+            <div className="h-px w-16 bg-gradient-to-r from-transparent to-border/60" />
+            <div className="h-1.5 w-1.5 rounded-full bg-primary/40" />
+            <div className="h-px w-24 bg-border/40" />
+            <div className="h-1.5 w-1.5 rounded-full bg-accent/50" />
+            <div className="h-px w-16 bg-gradient-to-l from-transparent to-border/60" />
+          </div>
+        </div>
+      </Reveal>
+    </section>
+  );
+}
+
+function ServicesSection() {
+  return (
+    <section className="mx-auto mt-10 max-w-screen-2xl px-4 sm:mt-16 sm:px-8 lg:mt-20 lg:px-12">
+      <Reveal className="mb-8 text-center sm:mb-10">
+        <h2 className="text-2xl font-bold tracking-tight sm:text-3xl lg:text-4xl">
+          Tout ce dont vous avez besoin
+        </h2>
+        <p className="mt-3 text-sm text-muted-foreground sm:text-base">
+          Un outil unique pour gérer toutes vos demandes internes, de la soumission à la résolution.
+        </p>
+      </Reveal>
+
+      <motion.div
+        className="grid gap-5 sm:grid-cols-2 md:grid-cols-3"
+        initial="hidden"
+        whileInView="show"
+        viewport={{ once: true, margin: "-80px" }}
+        variants={stagger}
+      >
+        {[
+          {
+            icon: Bolt,
+            title: "Signaler un incident",
+            desc: "Panne, court-circuit, équipement défectueux. Signalez et suivez l'intervention en temps réel.",
+            cta: "Signaler",
+            to: "/login",
+          },
+          {
+            icon: FileText,
+            title: "Demander un document",
+            desc: "Attestations, rapports, certificats administratifs. Traitement par le service compétent.",
+            cta: "Demander",
+            to: "/login",
+          },
+          {
+            icon: HeartHandshake,
+            title: "Obtenir de l'aide",
+            desc: "Posez vos questions à l'équipe support EDG. Réponse rapide depuis votre espace personnel.",
+            cta: "Contacter",
+            to: "/login",
+          },
+        ].map((s) => (
+          <motion.div
+            key={s.title}
+            variants={fadeUp}
+            whileHover={{ y: -8, scale: 1.02 }}
+            transition={{ type: "spring", stiffness: 280, damping: 22 }}
+            className="h-full"
+          >
+              <GlassCard className="group flex h-full flex-col gap-4 transition-shadow duration-300 hover:shadow-2xl">
+                <motion.div
+                  className="flex h-12 w-12 items-center justify-center rounded-2xl gradient-accent text-white shadow-lg shadow-accent/30"
+                  whileHover={{ rotate: 8, scale: 1.1 }}
+                  transition={{ type: "spring", stiffness: 300 }}
+                >
+                  <s.icon className="h-5 w-5" />
+                </motion.div>
+                <div>
+                  <h3 className="text-lg font-semibold">{s.title}</h3>
+                  <p className="mt-1.5 text-sm text-muted-foreground">{s.desc}</p>
+                </div>
+                <Button
+                  asChild
+                  variant="ghost"
+                  className="mt-auto justify-start rounded-full px-3 text-primary hover:bg-primary/10"
+                >
+                  <Link to={s.to}>
+                    {s.cta}
+                    <ArrowRight className="ml-1 h-4 w-4 transition-transform group-hover:translate-x-1" />
+                  </Link>
+                </Button>
+              </GlassCard>
+            </motion.div>
+        ))}
+      </motion.div>
+    </section>
+  );
+}
+
+function HowSection() {
+  const steps = [
+    {
+      n: "01",
+      icon: FilePlus,
+      title: "Déposez votre demande",
+      desc: "Connectez-vous avec votre compte EDG et remplissez le formulaire en quelques clics. Votre référence est générée immédiatement.",
+    },
+    {
+      n: "02",
+      icon: Compass,
+      title: "Orientation automatique",
+      desc: "Votre demande est dirigée vers le service compétent selon sa nature et sa localisation.",
+    },
+    {
+      n: "03",
+      icon: Clock,
+      title: "Suivi en temps réel",
+      desc: "Consultez l'avancement à tout moment depuis votre espace personnel ou via le suivi par référence.",
+    },
+    {
+      n: "04",
+      icon: CheckCircle2,
+      title: "Résolution & confirmation",
+      desc: "Un agent clôture votre dossier et vous êtes notifié en temps réel dès la résolution.",
+    },
+  ] as const;
+
+  return (
+    <section className="mx-auto mt-10 max-w-screen-2xl px-4 sm:mt-16 sm:px-8 lg:mt-20 lg:px-12">
+      <Reveal className="mb-10 text-center sm:mb-12">
+        <h2 className="text-2xl font-bold tracking-tight sm:text-3xl lg:text-4xl">
+          Comment ça marche
+        </h2>
+        <p className="mt-3 text-sm text-muted-foreground sm:text-base">
+          En quatre étapes, votre demande est prise en charge et résolue par le bon service.
+        </p>
+      </Reveal>
+
+      <div className="relative">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute top-[2.35rem] left-[calc(12.5%+2rem)] right-[calc(12.5%+2rem)] hidden h-px bg-gradient-to-r from-primary/20 via-border/60 to-primary/20 lg:block"
+        />
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+          {steps.map((step, i) => (
+            <Reveal key={step.n} delay={i * 0.07}>
+              <GlassCard className="group relative flex h-full flex-col gap-4 overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-xl">
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute right-4 top-3 select-none text-5xl font-black text-primary/8 dark:text-primary/10"
+                >
+                  {step.n}
+                </span>
+                <div className="relative z-10 flex h-12 w-12 items-center justify-center rounded-2xl gradient-primary text-background shadow-md shadow-primary/25 ring-4 ring-background">
+                  <step.icon className="h-5 w-5" />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[11px] font-semibold uppercase tracking-widest text-primary/70">
+                    Étape {step.n}
+                  </span>
+                  <h3 className="text-base font-semibold leading-snug">{step.title}</h3>
+                  <p className="text-sm text-muted-foreground">{step.desc}</p>
+                </div>
+              </GlassCard>
+            </Reveal>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ForWhoSection() {
+  const profiles = [
+    {
+      icon: Users,
+      gradient: "gradient-accent",
+      shadow: "shadow-accent/30",
+      title: "Demandeur",
+      subtitle: "Employé EDG — tout niveau",
+      desc: "Soumettez vos demandes de support, suivez leur avancement en temps réel et échangez avec les agents en charge de votre dossier.",
+      cta: "Accéder à mon espace",
+      to: "/login",
+    },
+    {
+      icon: Building2,
+      gradient: "gradient-primary",
+      shadow: "shadow-primary/30",
+      title: "Agent & Chef de service",
+      subtitle: "Traitement et supervision",
+      desc: "File d'attente, triage, gestion des tickets assignés et suivi des délais SLA. Le tableau de bord de supervision couvre toute l'activité de votre équipe.",
+      cta: "Espace agent",
+      to: "/login",
+    },
+    {
+      icon: ShieldCheck,
+      gradient: "gradient-primary",
+      shadow: "shadow-primary/25",
+      title: "Directeur & DG",
+      subtitle: "Pilotage et reporting",
+      desc: "KPIs en temps réel, performances par direction, rapports CSAT et SLA, règles de routage — tout ce qu'il faut pour piloter la qualité de service.",
+      cta: "Tableau de bord",
+      to: "/login",
+    },
+  ] as const;
+
+  return (
+    <section className="mx-auto mt-10 max-w-screen-2xl px-4 sm:mt-16 sm:px-8 lg:mt-20 lg:px-12">
+      <Reveal className="mb-10 text-center sm:mb-12">
+        <h2 className="text-2xl font-bold tracking-tight sm:text-3xl lg:text-4xl">
+          Une plateforme pour tous les employés EDG
+        </h2>
+        <p className="mt-3 text-sm text-muted-foreground sm:text-base">
+          Chaque rôle dispose d'un espace adapté à ses responsabilités.
+        </p>
+      </Reveal>
+
+      <div className="grid gap-5 md:grid-cols-3">
+        {profiles.map((p, i) => (
+          <Reveal key={p.title} delay={i * 0.07}>
+            <GlassCard
+              strong
+              className="group flex h-full flex-col gap-6 p-7 transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl"
+            >
+              <div className="flex items-center gap-4">
+                <div className={`grid h-14 w-14 shrink-0 place-items-center rounded-2xl ${p.gradient} shadow-lg ${p.shadow}`}>
+                  <p.icon className="h-7 w-7 text-background" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold">{p.title}</h3>
+                  <p className="text-xs text-muted-foreground">{p.subtitle}</p>
+                </div>
+              </div>
+              <p className="flex-1 leading-relaxed text-muted-foreground">{p.desc}</p>
+              <div>
+                <Button asChild className={`rounded-full ${p.gradient} shadow-md ${p.shadow}`}>
+                  <Link to={p.to}>
+                    {p.cta} <ArrowRight className="ml-1.5 h-4 w-4" />
+                  </Link>
+                </Button>
+              </div>
+            </GlassCard>
+          </Reveal>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function TrustSection() {
+  const features = [
+    { icon: ShieldCheck,    t: "Sécurisé",    d: "Accès RBAC strict, JWT + biométrie optionnelle." },
+    { icon: Clock,          t: "Temps réel",  d: "Notifications SSE à chaque changement de statut." },
+    { icon: CheckCircle2,   t: "Traçable",    d: "Historique complet et audit trail sur chaque demande." },
+    { icon: HeartHandshake, t: "Collaboratif", d: "Un agent dédié pour chaque dossier, escalades incluses." },
+  ] as const;
+
+  return (
+    <section className="mx-auto mt-10 max-w-screen-2xl px-4 sm:mt-16 sm:px-8 lg:mt-20 lg:px-12 pb-12 sm:pb-16 lg:pb-20">
+      <Reveal>
+        <GlassCard strong className="grid gap-8 p-8 sm:p-12 lg:grid-cols-2 lg:gap-12">
+          <div>
+            <h2 className="text-3xl font-bold tracking-tight">
+              Une plateforme conçue pour la{" "}
+              <span className="text-gradient">confiance</span>.
+            </h2>
+            <p className="mt-3 text-muted-foreground">
+              EDG Connect centralise les demandes internes vers la bonne direction
+              et le bon service. Chaque employé sait à tout moment où en est son
+              dossier — et qui s'en occupe.
+            </p>
+            <motion.div
+              whileHover={{ scale: 1.04 }}
+              whileTap={{ scale: 0.97 }}
+              className="mt-6 inline-block"
+            >
+              <Button asChild className="rounded-full gradient-primary shadow-lg shadow-primary/30">
+                <Link to="/login">
+                  Accéder à mon espace <ArrowRight className="ml-2 h-4 w-4" />
+                </Link>
+              </Button>
+            </motion.div>
+          </div>
+          <motion.ul
+            className="grid gap-4 sm:grid-cols-2"
+            initial="hidden"
+            whileInView="show"
+            viewport={{ once: true, margin: "-60px" }}
+            variants={stagger}
+          >
+            {features.map((f) => (
+              <motion.li
+                key={f.t}
+                variants={fadeUp}
+                whileHover={{ x: 4 }}
+                className="flex gap-3 rounded-2xl border border-border/40 bg-background/50 p-4"
+              >
+                <f.icon className="h-5 w-5 shrink-0 text-primary" />
+                <div>
+                  <div className="font-medium">{f.t}</div>
+                  <div className="text-sm text-muted-foreground">{f.d}</div>
+                </div>
+              </motion.li>
+            ))}
+          </motion.ul>
+        </GlassCard>
+      </Reveal>
+    </section>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Map section ID → composant de rendu
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Carrousel des publications publiques
+// ══════════════════════════════════════════════════════════════════════════════
+
+const PRIORITY_CARD: Record<
+  AnnouncementPriority,
+  { bg: string; border: string; badge: string; bar: string; dot: string; Icon: typeof Info }
+> = {
+  critical: {
+    bg: "bg-gradient-to-br from-red-950/50 via-background/60 to-background/60",
+    border: "border-red-500/40",
+    badge: "bg-red-500/15 text-red-400 border-red-500/30",
+    bar: "bg-red-500",
+    dot: "bg-red-400",
+    Icon: AlertTriangle,
+  },
+  high: {
+    bg: "bg-gradient-to-br from-orange-950/40 via-background/60 to-background/60",
+    border: "border-orange-500/35",
+    badge: "bg-orange-500/15 text-orange-400 border-orange-500/30",
+    bar: "bg-orange-500",
+    dot: "bg-orange-400",
+    Icon: AlertTriangle,
+  },
+  medium: {
+    bg: "bg-gradient-to-br from-yellow-950/30 via-background/60 to-background/60",
+    border: "border-yellow-500/30",
+    badge: "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
+    bar: "bg-yellow-500",
+    dot: "bg-yellow-400",
+    Icon: Bell,
+  },
+  low: {
+    bg: "bg-card/60",
+    border: "border-border/40",
+    badge: "bg-muted/50 text-muted-foreground border-border/40",
+    bar: "bg-muted-foreground/40",
+    dot: "bg-muted-foreground/40",
+    Icon: Info,
+  },
+  absolute_emergency: {
+    bg: "bg-gradient-to-br from-red-950/70 via-background/60 to-background/60",
+    border: "border-red-400/60",
+    badge: "bg-red-400/20 text-red-300 border-red-400/40",
+    bar: "bg-red-400",
+    dot: "bg-red-300",
+    Icon: AlertTriangle,
+  },
+};
+
+const CATEGORY_ICON: Record<AnnouncementCategory, typeof Info> = {
+  general:       Info,
+  service_note:  FileText,
+  maintenance:   Wrench,
+  system_update: Zap,
+  training:      BookOpen,
+  security:      Shield,
+  alert:         Bell,
+  emergency:     AlertTriangle,
+  outage:        Zap,
+};
+
+const EASE_SMOOTH = [0.25, 0.46, 0.45, 0.94] as [number, number, number, number];
+
+const slideVars = {
+  enter:  (d: number) => ({ x: d > 0 ? "110%" : "-110%", opacity: 0 }),
+  center: { x: 0, opacity: 1, transition: { duration: 0.45, ease: EASE_SMOOTH } },
+  exit:   (d: number) => ({ x: d > 0 ? "-60%" : "60%",   opacity: 0, transition: { duration: 0.3 } }),
+};
+
+function SlidesCarousel({ slides }: { slides: HomepageSlide[] }) {
+  const [idx, setIdx] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const prefersReduced =
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  useEffect(() => {
+    if (prefersReduced || paused || slides.length <= 1) return;
+    const t = setInterval(() => setIdx((i) => (i + 1) % slides.length), 6000);
+    return () => clearInterval(t);
+  }, [paused, prefersReduced, slides.length]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "ArrowLeft")
+        setIdx((i) => (i - 1 + slides.length) % slides.length);
+      if (e.key === "ArrowRight")
+        setIdx((i) => (i + 1) % slides.length);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [slides.length]);
+
+  const slide = slides[idx];
+  if (!slide) return null;
+
+  return (
+    <section
+      aria-label="Carrousel d'accueil"
+      className="mx-auto mt-10 max-w-screen-2xl px-4 sm:mt-14 sm:px-8 lg:px-12"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+    >
+      <div className="relative overflow-hidden rounded-2xl">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={slide.id}
+            initial={{ opacity: 0, x: 40 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -40 }}
+            transition={{ duration: 0.4, ease: "easeOut" }}
+            className={`rounded-2xl border border-border/40 bg-gradient-to-br from-primary/8 via-card/80 to-accent/5 backdrop-blur-md${slide.image_url ? " grid grid-cols-1 lg:grid-cols-[1fr_380px]" : ""}`}
+          >
+            <div className="flex flex-col justify-center gap-4 p-8 sm:p-10 lg:p-12">
+              {slide.title && (
+                <h2 className="text-2xl font-bold leading-tight tracking-tight sm:text-3xl lg:text-4xl">
+                  {slide.title}
+                </h2>
+              )}
+              {slide.message && (
+                <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
+                  {slide.message}
+                </p>
+              )}
+              {slide.cta_label && slide.cta_url && (
+                <div className="mt-2">
+                  <a
+                    href={slide.cta_url}
+                    className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow transition-opacity hover:opacity-90"
+                    target={slide.cta_url.startsWith("http") ? "_blank" : undefined}
+                    rel={slide.cta_url.startsWith("http") ? "noopener noreferrer" : undefined}
+                  >
+                    {slide.cta_label}
+                    <ArrowRight className="h-4 w-4" />
+                  </a>
+                </div>
+              )}
+            </div>
+            {slide.image_url && (
+              <div className="hidden lg:flex items-center justify-center overflow-hidden rounded-r-2xl bg-background/20">
+                <img
+                  src={slide.image_url}
+                  alt=""
+                  aria-hidden
+                  className="h-full w-full object-cover"
+                />
+              </div>
+            )}
+          </motion.div>
+        </AnimatePresence>
+
+        {/* Arrows */}
+        {slides.length > 1 && (
+          <>
+            <button
+              onClick={() => setIdx((i) => (i - 1 + slides.length) % slides.length)}
+              className="absolute left-3 top-1/2 -translate-y-1/2 rounded-xl border border-border/40 bg-card/70 p-2 backdrop-blur-sm transition-colors hover:bg-card"
+              aria-label="Slide précédent"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => setIdx((i) => (i + 1) % slides.length)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 rounded-xl border border-border/40 bg-card/70 p-2 backdrop-blur-sm transition-colors hover:bg-card"
+              aria-label="Slide suivant"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* Dots */}
+      {slides.length > 1 && (
+        <div className="mt-4 flex justify-center gap-2" role="tablist" aria-label="Slides">
+          {slides.map((s, i) => (
+            <button
+              key={s.id}
+              role="tab"
+              aria-selected={i === idx}
+              aria-label={`Slide ${i + 1}`}
+              onClick={() => setIdx(i)}
+              className={`h-2 rounded-full transition-all ${
+                i === idx
+                  ? "w-6 bg-primary"
+                  : "w-2 bg-border/60 hover:bg-border"
+              }`}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function AnnouncementsCarousel({ items }: { items: Announcement[] }) {
+  const [idx, setIdx]     = useState(0);
+  const [dir, setDir]     = useState(1);
+  const [pbKey, setPbKey] = useState(0);
+
+  function go(to: number, d: number) {
+    setDir(d);
+    setIdx(to);
+    setPbKey((k) => k + 1);
+  }
+
+  function advance() {
+    setDir(1);
+    setIdx((c) => (c + 1) % items.length);
+    setPbKey((k) => k + 1);
+  }
+
+  const ann = items[idx];
+  const s   = PRIORITY_CARD[ann.priority];
+  const CatIcon = CATEGORY_ICON[ann.category] ?? Info;
+
+  return (
+    <section className="mx-auto mt-12 max-w-screen-2xl px-4 sm:mt-16 sm:px-8 lg:px-12">
+      <Reveal>
+        <div className="mb-5 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <div className="rounded-xl bg-primary/10 p-2">
+              <Megaphone className="h-4 w-4 text-primary" />
+            </div>
+            <div>
+              <h2 className="font-semibold">Informations &amp; Actualités EDG</h2>
+              <p className="text-xs text-muted-foreground">Publications officielles de l'Électricité de Guinée</p>
+            </div>
+          </div>
+          {items.length > 1 && (
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => go((idx - 1 + items.length) % items.length, -1)}
+                className="rounded-xl border border-border/40 bg-card/60 p-1.5 transition-colors hover:bg-card"
+                aria-label="Précédent"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <span className="min-w-[40px] text-center text-xs text-muted-foreground">
+                {idx + 1} / {items.length}
+              </span>
+              <button
+                onClick={() => go((idx + 1) % items.length, 1)}
+                className="rounded-xl border border-border/40 bg-card/60 p-1.5 transition-colors hover:bg-card"
+                aria-label="Suivant"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+        </div>
+      </Reveal>
+
+      <div className="relative overflow-hidden rounded-2xl">
+        <AnimatePresence mode="wait" custom={dir}>
+          <motion.div
+            key={ann.id}
+            custom={dir}
+            variants={slideVars}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            drag="x"
+            dragConstraints={{ left: 0, right: 0 }}
+            dragElastic={0.1}
+            onDragEnd={(_, info) => {
+              if (info.offset.x < -60)  go((idx + 1) % items.length, 1);
+              else if (info.offset.x > 60) go((idx - 1 + items.length) % items.length, -1);
+            }}
+            className="cursor-grab active:cursor-grabbing will-change-transform select-none"
+          >
+            <div className={`rounded-2xl border backdrop-blur-md p-6 sm:p-8 ${s.bg} ${s.border}`}>
+              {/* Badge row */}
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${s.badge}`}>
+                    <s.Icon className="h-3 w-3" />
+                    {announcementPriorityLabels[ann.priority]}
+                  </span>
+                  <span className="flex items-center gap-1.5 rounded-full border border-border/40 bg-background/50 px-3 py-1 text-xs text-muted-foreground">
+                    <CatIcon className="h-3 w-3" />
+                    {announcementCategoryLabels[ann.category]}
+                  </span>
+                </div>
+                <time className="text-xs text-muted-foreground">
+                  {new Date(ann.publishedAt).toLocaleDateString("fr-FR", {
+                    day: "numeric", month: "long", year: "numeric",
+                  })}
+                </time>
+              </div>
+
+              {/* Title */}
+              <h3 className="max-w-3xl text-xl font-bold leading-snug sm:text-2xl">
+                {ann.title}
+              </h3>
+
+              {/* Description */}
+              <p className="mt-3 line-clamp-3 max-w-3xl text-sm leading-relaxed text-muted-foreground sm:line-clamp-4">
+                {ann.description}
+              </p>
+
+              {/* Footer */}
+              <div className="mt-6 flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">
+                  Électricité de Guinée · {ann.authorName}
+                </span>
+                <Link
+                  to="/track"
+                  className="text-xs font-medium text-primary hover:underline underline-offset-2"
+                >
+                  Suivre ma demande →
+                </Link>
+              </div>
+            </div>
+          </motion.div>
+        </AnimatePresence>
+
+        {/* Progress bar & dots */}
+        {items.length > 1 && (
+          <div className="mt-4 space-y-3">
+            <div className="h-1 overflow-hidden rounded-full bg-border/30">
+              <motion.div
+                key={`pb-${pbKey}`}
+                className={`h-full rounded-full ${s.bar}`}
+                initial={{ width: "0%" }}
+                animate={{ width: "100%" }}
+                transition={{ duration: 5, ease: "linear" }}
+                onAnimationComplete={advance}
+              />
+            </div>
+            <div className="flex justify-center gap-2">
+              {items.map((_, i) => (
+                <button
+                  key={i}
+                  onClick={() => go(i, i > idx ? 1 : -1)}
+                  className={`rounded-full transition-all duration-300 ${
+                    i === idx ? `h-2 w-6 ${s.dot}` : "h-2 w-2 bg-muted-foreground/25 hover:bg-muted-foreground/50"
+                  }`}
+                  aria-label={`Annonce ${i + 1}`}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function CustomSection({ id, title, content }: { id: string; title: string; content?: string }) {
+  return (
+    <section className="mx-auto mt-16 max-w-screen-lg px-4 sm:px-8" key={id}>
+      <GlassCard className="p-6 sm:p-8 text-center space-y-4">
+        <h2 className="text-2xl font-bold tracking-tight">{title}</h2>
+        {content && (
+          <p className="text-muted-foreground leading-relaxed whitespace-pre-line">{content}</p>
+        )}
+      </GlassCard>
+    </section>
+  );
+}
+
+function renderSection(section: SectionConfig, missionText: string) {
+  switch (section.id) {
+    case "mission":  return <MissionBand key="mission" text={missionText} />;
+    case "services": return <ServicesSection key="services" />;
+    case "how":      return <HowSection key="how" />;
+    case "for-who":  return <ForWhoSection key="for-who" />;
+    case "trust":    return <TrustSection key="trust" />;
+    default:         return (
+      <CustomSection
+        key={section.id}
+        id={section.id}
+        title={section.title ?? section.label}
+        content={section.content}
+      />
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Page principale
+// ══════════════════════════════════════════════════════════════════════════════
+
+function Home() {
+  const { data: config = DEFAULT_CONFIG } = useQuery({
+    queryKey: ["homepage-config"],
+    queryFn: () => fetchHomepageConfig(),
+    staleTime: 5 * 60 * 1000,
+  });
+  const { data: announcementsData } = useQuery({
+    queryKey: ["announcements", "public"],
+    queryFn: () => fetchPublishedAnnouncements({ audience: "external", limit: 20 }),
+    staleTime: 5 * 60_000,
+  });
+  const publicAnnouncements = announcementsData?.items ?? [];
+
+  const { data: slides = [] } = useQuery({
+    queryKey: ["homepage-slides"],
+    queryFn: fetchSlides,
+    staleTime: 5 * 60_000,
+  });
+
+  const { data: activeDirectionsCount, isLoading: dirCountLoading } = useQuery({
+    queryKey: ["public-directions-count"],
+    queryFn: fetchActiveDirectionsCount,
+    staleTime: 10 * 60_000,
+    retry: 1,
+  });
+
+  const visibleSections = [...config.sections]
+    .sort((a, b) => a.order - b.order)
+    .filter((s) => s.visible);
+
+  return (
+    <PublicLayout>
+
+      {/* ── Fond animé ambiant ── */}
+      <motion.div
+        aria-hidden
+        className="pointer-events-none fixed inset-0 -z-10 overflow-hidden"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 1.2 }}
+      >
+        <motion.div
+          className="absolute -top-32 -left-32 h-[480px] w-[480px] rounded-full bg-primary/15 blur-3xl"
+          animate={{ x: [0, 60, 0], y: [0, 40, 0] }}
+          transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }}
+        />
+        <motion.div
+          className="absolute -bottom-32 -right-32 h-[520px] w-[520px] rounded-full bg-accent/15 blur-3xl"
+          animate={{ x: [0, -50, 0], y: [0, -30, 0] }}
+          transition={{ duration: 22, repeat: Infinity, ease: "easeInOut" }}
+        />
+      </motion.div>
+
+      {/* ══════ HERO — toujours affiché ══════ */}
+      <section className="relative px-4 pt-8 sm:px-8 sm:pt-16 lg:px-12 lg:pt-24">
+        <div className="mx-auto max-w-screen-2xl">
+          <div className="grid items-center gap-10 md:gap-14 lg:grid-cols-2">
+            <motion.div initial="hidden" animate="show" variants={stagger}>
+              <motion.h1
+                variants={fadeUp}
+                className="text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl xl:text-7xl"
+              >
+                L'espace numérique{" "}
+                <span className="text-gradient">des employés EDG</span>.
+              </motion.h1>
+
+              <motion.p
+                variants={fadeUp}
+                className="mt-5 max-w-xl text-sm text-muted-foreground sm:text-base lg:text-lg"
+              >
+                Soumettez vos demandes internes, suivez leur avancement en temps
+                réel, collaborez avec les équipes EDG. Une plateforme pensée
+                pour les employés d'Électricité de Guinée.
+              </motion.p>
+
+              <motion.div variants={fadeUp} className="mt-8 flex flex-row flex-wrap gap-3">
+                <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}>
+                  <Button
+                    asChild
+                    size="lg"
+                    className="rounded-full gradient-primary shadow-xl shadow-primary/30 h-11 px-5 sm:h-12 sm:px-7 text-sm sm:text-base"
+                  >
+                    <Link to="/login">
+                      Accéder à mon espace <ArrowRight className="ml-2 h-4 w-4" />
+                    </Link>
+                  </Button>
+                </motion.div>
+                <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}>
+                  <Button
+                    asChild
+                    size="lg"
+                    variant="outline"
+                    className="h-11 rounded-full px-5 sm:h-12 sm:px-7 backdrop-blur-xl bg-background/60 text-sm sm:text-base"
+                  >
+                    <Link to="/track">
+                      <Search className="mr-2 h-4 w-4" />
+                      Suivre ma demande
+                    </Link>
+                  </Button>
+                </motion.div>
+              </motion.div>
+
+              <motion.div variants={stagger} className="mt-10 grid grid-cols-3 gap-3 sm:gap-8">
+                {[
+                  { v: "24/7", l: "Disponibilité" },
+                  { v: "< 4h", l: "Pannes critiques" },
+                  { v: dirCountLoading ? "…" : activeDirectionsCount != null ? String(activeDirectionsCount) : "—", l: "Directions" },
+                ].map((s) => (
+                  <motion.div key={s.l} variants={fadeUp}>
+                    <div className="text-2xl font-bold sm:text-3xl">{s.v}</div>
+                    <div className="text-[11px] sm:text-xs text-muted-foreground">{s.l}</div>
+                  </motion.div>
+                ))}
+              </motion.div>
+            </motion.div>
+
+            {/* Maquette flottante — masquée sur mobile pour éviter un héro trop long */}
+            <motion.div
+              className="relative hidden lg:block"
+              initial={{ opacity: 0, scale: 0.92, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1], delay: 0.2 }}
+            >
+              <motion.div
+                aria-hidden
+                className="pointer-events-none absolute -inset-6 sm:-inset-10 bg-gradient-to-br from-primary/30 via-accent/20 to-success/20 blur-3xl rounded-full"
+                animate={{ scale: [1, 1.08, 1], opacity: [0.6, 0.9, 0.6] }}
+                transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
+              />
+              <Floating>
+                <motion.div whileHover={{ y: -4 }} transition={{ type: "spring", stiffness: 300 }}>
+                  <GlassCard strong className="relative space-y-4">
+                    {/* En-tête ticket */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Demande</div>
+                        <div className="font-mono text-sm font-semibold">EDG-2025-0178</div>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-success/15 px-3 py-1 text-xs font-semibold text-success ring-1 ring-success/30">
+                        Résolu
+                      </span>
+                    </div>
+
+                    {/* Carte ticket */}
+                    <div className="rounded-2xl border border-border/40 p-3.5 glass-subtle">
+                      <div className="text-sm font-semibold leading-snug">Compteur défectueux — Ratoma</div>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                        <span className="rounded-full bg-muted/60 px-2 py-0.5 text-[10px] text-muted-foreground">Dir. Commerciale</span>
+                        <span className="rounded-full bg-orange-500/10 px-2 py-0.5 text-[10px] font-medium text-orange-500">Haute priorité</span>
+                      </div>
+                    </div>
+
+                    {/* Historique */}
+                    <div className="space-y-2.5">
+                      {[
+                        { t: "Demande soumise",        d: "08 jan. 2025 · 09h14", done: true },
+                        { t: "Prise en charge",         d: "08 jan. 2025 · 10h02", done: true },
+                        { t: "Technicien dépêché",      d: "08 jan. 2025 · 14h30", done: true },
+                        { t: "Clôturée — problème résolu", d: "09 jan. 2025 · 11h20", done: true },
+                      ].map((step, i) => (
+                        <motion.div key={i} variants={fadeUp} className="flex items-start gap-3">
+                          <div className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full bg-success ring-4 ring-success/20" />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-medium">{step.t}</div>
+                            <div className="text-[10px] text-muted-foreground">{step.d}</div>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+
+                    {/* Note satisfaction */}
+                    <div className="flex items-center justify-between rounded-xl border border-success/20 bg-success/5 px-3 py-2">
+                      <span className="text-[11px] text-muted-foreground">Satisfaction client</span>
+                      <div className="flex gap-0.5">
+                        {[1,2,3,4,5].map((s) => (
+                          <span key={s} className={s <= 4 ? "text-amber-400 text-xs" : "text-muted-foreground/30 text-xs"}>★</span>
+                        ))}
+                      </div>
+                    </div>
+                  </GlassCard>
+                </motion.div>
+              </Floating>
+            </motion.div>
+          </div>
+        </div>
+      </section>
+
+      {/* ══════ CARROUSEL D'ACCUEIL — slides personnalisables par l'admin ══════ */}
+      {slides.length > 0 && <SlidesCarousel slides={slides} />}
+
+      {/* ══════ PUBLICATIONS PUBLIQUES — carrousel animé ══════ */}
+      {publicAnnouncements.length > 0 && (
+        <AnnouncementsCarousel items={publicAnnouncements} />
+      )}
+
+      {/* ══════ SECTIONS DYNAMIQUES — ordre et visibilité décidés par l'admin ══════ */}
+      {visibleSections.map((s) => renderSection(s, config.missionText))}
+
+    </PublicLayout>
+  );
+}

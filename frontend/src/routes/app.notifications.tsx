@@ -1,0 +1,669 @@
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { GlassCard } from "@/components/glass-card";
+import {
+  Bell,
+  CheckCircle2,
+  AlertTriangle,
+  MessageSquare,
+  X,
+  Mail,
+  MailOpen,
+  ArrowRight,
+  Zap,
+  RotateCcw,
+  MessageCircleReply,
+  ShieldAlert,
+  BellOff,
+  Megaphone,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { useState, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  fetchNotifications,
+  markNotificationRead,
+  markAllNotificationsRead,
+  deleteNotification,
+} from "@/lib/api/notifications";
+import { closeRequest, requestReopen } from "@/lib/api/requests";
+import { cn } from "@/lib/utils";
+import { PaginationBar, usePagination } from "@/components/pagination-bar";
+import { LayoutToggle, type LayoutMode } from "@/components/layout-toggle";
+import { toast } from "sonner";
+import { announcementCategoryLabels } from "@/lib/mock-data";
+import {
+  fetchPublishedAnnouncements,
+  roleToAnnounceAudience,
+} from "@/lib/api/communication";
+import { useRole, useUser } from "@/lib/session";
+
+export const Route = createFileRoute("/app/notifications")({
+  head: () => ({ meta: [{ title: "Notifications — EDG Support" }] }),
+  component: Notifications,
+});
+
+type NotifType = "info" | "success" | "warning";
+
+type Notif = {
+  id: string;
+  type: NotifType;
+  title: string;
+  body: string;
+  at: string;
+  read: boolean;
+  requestId?: string;
+  source: "request" | "announcement";
+  announcementId?: string;
+};
+
+
+// ── Utilitaires visuels ────────────────────────────────────────────────────
+const iconFor = (t: NotifType) =>
+  t === "success" ? CheckCircle2 : t === "warning" ? AlertTriangle : MessageSquare;
+
+const toneFor = (t: NotifType) =>
+  t === "success"
+    ? "bg-success/15 text-success"
+    : t === "warning"
+      ? "bg-warning/20 text-warning-foreground dark:text-warning"
+      : "bg-info/15 text-info";
+
+const labelFor = (t: NotifType, source?: "request" | "announcement") =>
+  source === "announcement" ? "Annonce" : t === "success" ? "Résolution" : t === "warning" ? "Alerte" : "Info";
+
+const labelToneFor = (t: NotifType) =>
+  t === "success"
+    ? "bg-success/12 text-success"
+    : t === "warning"
+      ? "bg-warning/15 text-warning-foreground dark:text-warning"
+      : "bg-info/12 text-info";
+
+const borderFor = (n: Notif) =>
+  !n.read
+    ? n.type === "warning"
+      ? "border-l-4 border-l-warning/60"
+      : n.type === "success"
+        ? "border-l-4 border-l-success/60"
+        : "border-l-4 border-l-primary/50"
+    : "";
+
+// ── Actions contextuelles ──────────────────────────────────────────────────
+type ActionDef = {
+  label: string;
+  icon: typeof ArrowRight;
+  variant: "default" | "outline" | "ghost";
+  action: "navigate" | "close" | "reopen";
+};
+
+function getActions(n: Notif): ActionDef[] {
+  const t = n.title.toLowerCase();
+  if (t.includes("sla"))
+    return [
+      { label: "Voir la demande", icon: ArrowRight, variant: "outline", action: "navigate" },
+      { label: "Prendre en charge", icon: Zap, variant: "default", action: "navigate" },
+    ];
+  if (t.includes("escalade"))
+    return [
+      { label: "Voir", icon: ArrowRight, variant: "outline", action: "navigate" },
+      { label: "Traiter", icon: ShieldAlert, variant: "default", action: "navigate" },
+    ];
+  if (t.includes("commentaire") || t.includes("réponse reçue"))
+    return [
+      { label: "Répondre", icon: MessageCircleReply, variant: "outline", action: "navigate" },
+    ];
+  if (t.includes("résolue"))
+    return [
+      { label: "Confirmer clôture", icon: CheckCircle2, variant: "default", action: "close" },
+      { label: "Rouvrir", icon: RotateCcw, variant: "ghost", action: "reopen" },
+    ];
+  // Toutes les notifications liées à une demande (assignée, routée, rejetée, etc.)
+  if (n.requestId && n.source === "request")
+    return [
+      { label: "Voir la demande", icon: ArrowRight, variant: "outline", action: "navigate" },
+    ];
+  return [];
+}
+
+// ── Composant carte — mode LISTE ───────────────────────────────────────────
+function NotifListCard({
+  n,
+  onCardClick,
+  onToggleRead,
+  onRemove,
+  navigate,
+  onActionToast,
+  onClose,
+  onReopen,
+}: {
+  n: Notif;
+  onCardClick: (n: Notif) => void;
+  onToggleRead: (id: string) => void;
+  onRemove: (id: string, title: string) => void;
+  navigate: ReturnType<typeof useNavigate>;
+  onActionToast: (msg: string) => void;
+  onClose: (id: string) => void;
+  onReopen: (id: string) => void;
+}) {
+  const Icon = iconFor(n.type);
+  const actions = getActions(n);
+  return (
+    <GlassCard
+      className={cn(
+        "group relative overflow-hidden p-0 transition-all hover:shadow-lg",
+        borderFor(n),
+      )}
+    >
+      {/* Zone cliquable principale */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => onCardClick(n)}
+        onKeyDown={(e) => e.key === "Enter" && onCardClick(n)}
+        className={cn(
+          "flex cursor-pointer items-start gap-4 px-5 py-4",
+          n.requestId && "hover:bg-foreground/3",
+        )}
+      >
+        <span className={cn("mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-xl", toneFor(n.type))}>
+          <Icon className="h-5 w-5" />
+        </span>
+
+        <div className="min-w-0 flex-1 pr-14">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide", labelToneFor(n.type))}>
+              {labelFor(n.type, n.source)}
+            </span>
+            <h3 className="font-semibold leading-tight">{n.title}</h3>
+            {!n.read && (
+              <span className="h-2 w-2 shrink-0 rounded-full bg-primary" />
+            )}
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground leading-relaxed">{n.body}</p>
+          <div className="mt-1.5 text-xs text-muted-foreground">{n.at}</div>
+        </div>
+      </div>
+
+      {/* Boutons d'action contextuels */}
+      {actions.length > 0 && (
+        <div
+          className="flex flex-wrap gap-2 border-t border-border/30 px-5 pb-3.5 pt-2.5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {actions.map((a) => (
+            <Button
+              key={a.label}
+              size="sm"
+              variant={a.variant}
+              className={cn(
+                "h-7 rounded-full px-3 text-xs",
+                a.variant === "default" && "gradient-primary text-primary-foreground",
+              )}
+              onClick={() => {
+                onToggleRead(n.id);
+                if (a.action === "navigate") {
+                  if (n.requestId) {
+                    navigate({ to: "/app/requests/$id", params: { id: n.requestId } });
+                  } else {
+                    toast.info("Aucune demande liée à cette notification.");
+                  }
+                } else if (a.action === "close") {
+                  if (n.requestId) onClose(n.requestId);
+                  else toast.info("Aucune demande liée à cette notification.");
+                } else if (a.action === "reopen") {
+                  if (n.requestId) onReopen(n.requestId);
+                  else toast.info("Aucune demande liée à cette notification.");
+                }
+              }}
+            >
+              <a.icon className="mr-1 h-3 w-3" />
+              {a.label}
+            </Button>
+          ))}
+        </div>
+      )}
+
+      {/* Boutons lu/supprimer */}
+      <div
+        className="absolute right-3 top-3 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          onClick={() => onToggleRead(n.id)}
+          className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-foreground/8 hover:text-foreground"
+          title={n.read ? "Marquer non lue" : "Marquer lue"}
+        >
+          {n.read ? <Mail className="h-3.5 w-3.5" /> : <MailOpen className="h-3.5 w-3.5" />}
+        </button>
+        <button
+          onClick={() => onRemove(n.id, n.title)}
+          className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+          title="Supprimer"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </GlassCard>
+  );
+}
+
+// ── Composant carte — mode GRILLE ──────────────────────────────────────────
+function NotifGridCard({
+  n,
+  onCardClick,
+  onToggleRead,
+  onRemove,
+  navigate,
+  onActionToast,
+  onClose,
+  onReopen,
+}: {
+  n: Notif;
+  onCardClick: (n: Notif) => void;
+  onToggleRead: (id: string) => void;
+  onRemove: (id: string, title: string) => void;
+  navigate: ReturnType<typeof useNavigate>;
+  onActionToast: (msg: string) => void;
+  onClose: (id: string) => void;
+  onReopen: (id: string) => void;
+}) {
+  const Icon = iconFor(n.type);
+  const actions = getActions(n);
+  return (
+    <GlassCard
+      className={cn(
+        "group relative flex h-full flex-col overflow-hidden p-0 transition-all hover:shadow-lg hover:-translate-y-0.5",
+        borderFor(n),
+      )}
+    >
+      {/* Haut : icône + type + temps + actions lu/del */}
+      <div className="flex items-start justify-between gap-2 px-4 pt-4">
+        <div className="flex items-center gap-2.5">
+          <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl", toneFor(n.type))}>
+            <Icon className="h-4.5 w-4.5" />
+          </span>
+          <div>
+            <span className={cn("rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide", labelToneFor(n.type))}>
+              {labelFor(n.type, n.source)}
+            </span>
+            <div className="mt-0.5 text-[10px] text-muted-foreground">{n.at}</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+          <button
+            onClick={(e) => { e.stopPropagation(); onToggleRead(n.id); }}
+            className="rounded-md p-1 text-muted-foreground transition hover:bg-foreground/8 hover:text-foreground"
+            title={n.read ? "Marquer non lue" : "Marquer lue"}
+          >
+            {n.read ? <Mail className="h-3 w-3" /> : <MailOpen className="h-3 w-3" />}
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onRemove(n.id, n.title); }}
+            className="rounded-md p-1 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
+            title="Supprimer"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      </div>
+
+      {/* Corps : titre + body cliquable */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => onCardClick(n)}
+        onKeyDown={(e) => e.key === "Enter" && onCardClick(n)}
+        className={cn(
+          "flex-1 cursor-pointer px-4 pb-3 pt-2",
+          n.requestId && "hover:bg-foreground/3",
+        )}
+      >
+        <div className="flex items-start gap-1.5">
+          <h3 className="flex-1 text-sm font-semibold leading-snug">{n.title}</h3>
+          {!n.read && (
+            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" />
+          )}
+        </div>
+        <p className="mt-1 line-clamp-3 text-xs text-muted-foreground leading-relaxed">
+          {n.body}
+        </p>
+      </div>
+
+      {/* Pied : actions */}
+      {actions.length > 0 && (
+        <div
+          className="flex flex-wrap gap-1.5 border-t border-border/30 px-4 pb-3.5 pt-2.5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {actions.map((a) => (
+            <Button
+              key={a.label}
+              size="sm"
+              variant={a.variant}
+              className={cn(
+                "h-6 rounded-full px-2.5 text-[11px]",
+                a.variant === "default" && "gradient-primary text-primary-foreground",
+              )}
+              onClick={() => {
+                onToggleRead(n.id);
+                if (a.action === "navigate") {
+                  if (n.requestId) {
+                    navigate({ to: "/app/requests/$id", params: { id: n.requestId } });
+                  } else {
+                    toast.info("Aucune demande liée à cette notification.");
+                  }
+                } else if (a.action === "close") {
+                  if (n.requestId) onClose(n.requestId);
+                  else toast.info("Aucune demande liée à cette notification.");
+                } else if (a.action === "reopen") {
+                  if (n.requestId) onReopen(n.requestId);
+                  else toast.info("Aucune demande liée à cette notification.");
+                }
+              }}
+            >
+              <a.icon className="mr-1 h-3 w-3" />
+              {a.label}
+            </Button>
+          ))}
+        </div>
+      )}
+    </GlassCard>
+  );
+}
+
+// ── Page principale ────────────────────────────────────────────────────────
+function Notifications() {
+  const [role] = useRole();
+  const sessionUser = useUser();
+  const meId = sessionUser?.id;
+  const qc = useQueryClient();
+
+  /* ── Notifications API — rafraîchissement auto toutes les 30 s ── */
+  const { data: apiData } = useQuery({
+    queryKey: ["notifications", meId],
+    queryFn: () => fetchNotifications({ meId, limit: 100 }),
+    enabled: !!meId,
+    staleTime: 10_000,
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
+  });
+
+  const [reqNotifs, setReqNotifs] = useState<Notif[]>([]);
+  useEffect(() => {
+    if (!apiData?.items) return;
+    setReqNotifs(apiData.items as Notif[]);
+  }, [apiData]);
+
+  /* ── Mutations ── */
+  const markReadMut = useMutation({
+    mutationFn: markNotificationRead,
+    onError: () => toast.error("Impossible de marquer comme lue"),
+  });
+
+  const deleteNotifMut = useMutation({
+    mutationFn: deleteNotification,
+    onError: () => toast.error("Impossible de supprimer la notification"),
+  });
+
+  const markAllReadMut = useMutation({
+    mutationFn: () => markAllNotificationsRead(meId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
+    onError: () => toast.error("Erreur lors du marquage"),
+  });
+
+  /* ── État lu/masqué pour les annonces (IDs sans préfixe "ann_") ── */
+  const [readAnnIds, setReadAnnIds]     = useState<string[]>([]);
+  const [hiddenAnnIds, setHiddenAnnIds] = useState<string[]>([]);
+
+  /* ── Annonces publiées depuis le backend ── */
+  const { data: annData } = useQuery({
+    queryKey: ["announcements-active", role],
+    queryFn: () => fetchPublishedAnnouncements({ audience: roleToAnnounceAudience(role), limit: 50 }),
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  });
+
+  const annNotifs: Notif[] = (annData?.items ?? [])
+    .filter((a) => !hiddenAnnIds.includes(a.id))
+    .map((a) => ({
+      id: `ann_${a.id}`,
+      type: (a.priority === "critical" || a.priority === "absolute_emergency"
+        ? "warning" : "info") as NotifType,
+      title: a.title,
+      body: `${announcementCategoryLabels[a.category] ?? a.category} — ${a.description.slice(0, 130)}${a.description.length > 130 ? "…" : ""}`,
+      at: new Date(a.publishedAt).toLocaleDateString("fr-FR", {
+        day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+      }),
+      read: readAnnIds.includes(a.id),
+      source: "announcement" as const,
+      announcementId: a.id,
+    }));
+
+  /* ── Liste combinée pour l'affichage ── */
+  const notifs: Notif[] = [...reqNotifs, ...annNotifs];
+
+  const [filter, setFilter] = useState<"all" | "unread">("all");
+  const [sourceFilter, setSourceFilter] = useState<"all" | "request" | "announcement">("all");
+  const [layout, setLayout] = useState<LayoutMode>("list");
+  const navigate = useNavigate();
+
+  const unread   = notifs.filter((n) => !n.read).length;
+  const slaCount = reqNotifs.filter((n) => n.type === "warning" && n.title.toLowerCase().includes("sla")).length;
+  const escCount = reqNotifs.filter((n) => n.title.toLowerCase().includes("escalade")).length;
+  const resCount = reqNotifs.filter((n) => n.title.toLowerCase().includes("résolue")).length;
+  const annCount = annNotifs.length;
+
+  const visible = notifs
+    .filter((n) => (filter === "unread" ? !n.read : true))
+    .filter((n) => (sourceFilter === "all" ? true : n.source === sourceFilter));
+
+  const pageSize = layout === "grid" ? 9 : 6;
+  const { paged, page, setPage, totalPages, total, setPageSize } =
+    usePagination(visible, pageSize);
+
+  const markRead = (id: string) => {
+    if (id.startsWith("ann_")) {
+      const aid = id.slice(4);
+      setReadAnnIds((p) => (p.includes(aid) ? p : [...p, aid]));
+    } else {
+      setReqNotifs((p) => p.map((n) => (n.id === id ? { ...n, read: true } : n)));
+      markReadMut.mutate(id);
+    }
+  };
+
+  const toggleRead = (id: string) => {
+    if (id.startsWith("ann_")) {
+      const aid = id.slice(4);
+      setReadAnnIds((p) => (p.includes(aid) ? p.filter((x) => x !== aid) : [...p, aid]));
+    } else {
+      const current = reqNotifs.find((n) => n.id === id);
+      setReqNotifs((p) => p.map((n) => (n.id === id ? { ...n, read: !n.read } : n)));
+      // API only supports mark-as-read (one-way); call only when transitioning unread→read
+      if (current && !current.read) markReadMut.mutate(id);
+    }
+  };
+
+  const remove = (id: string, title: string) => {
+    if (id.startsWith("ann_")) {
+      setHiddenAnnIds((p) => [...p, id.slice(4)]);
+    } else {
+      setReqNotifs((p) => p.filter((n) => n.id !== id));
+      deleteNotifMut.mutate(id);
+    }
+    toast.success("Notification supprimée", { description: title });
+  };
+
+  const markAllRead = () => {
+    setReqNotifs((p) => p.map((n) => ({ ...n, read: true })));
+    setReadAnnIds((annData?.items ?? []).filter((a) => !hiddenAnnIds.includes(a.id)).map((a) => a.id));
+    markAllReadMut.mutate();
+  };
+
+  const handleCardClick = (n: Notif) => {
+    markRead(n.id);
+    if (n.requestId)
+      navigate({ to: "/app/requests/$id", params: { id: n.requestId } });
+  };
+
+  const handleActionToast = (msg: string) => toast.success(msg);
+
+  const invalidateRequests = () => {
+    qc.invalidateQueries({ queryKey: ["requests"] });
+    qc.invalidateQueries({ queryKey: ["request"] });
+    qc.invalidateQueries({ queryKey: ["queue"] });
+    qc.invalidateQueries({ queryKey: ["my-tickets"] });
+    qc.invalidateQueries({ queryKey: ["stats"] });
+    qc.invalidateQueries({ queryKey: ["dashboard-stats"] });
+    qc.invalidateQueries({ queryKey: ["csat-stats"] });
+  };
+
+  const closeMut = useMutation({
+    mutationFn: (id: string) => closeRequest(id),
+    onSuccess: () => { invalidateRequests(); toast.success("Demande clôturée."); },
+    onError: () => toast.error("Impossible de clôturer la demande."),
+  });
+
+  const reopenMut = useMutation({
+    mutationFn: (id: string) => requestReopen(id, "Réouverture demandée"),
+    onSuccess: () => { invalidateRequests(); toast.success("Demande renvoyée pour réouverture."); },
+    onError: () => toast.error("Impossible de rouvrir la demande."),
+  });
+
+  const cardProps = {
+    onCardClick: handleCardClick,
+    onToggleRead: toggleRead,
+    onRemove: remove,
+    navigate,
+    onActionToast: handleActionToast,
+    onClose: (id: string) => closeMut.mutate(id),
+    onReopen: (id: string) => reopenMut.mutate(id),
+  };
+
+  return (
+    <div className="mx-auto max-w-6xl space-y-6">
+      {/* ── En-tête ── */}
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+            Notifications
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {unread > 0
+              ? `${unread} non lue${unread > 1 ? "s" : ""} sur ${notifs.length}`
+              : "Toutes les notifications sont lues."}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {unread > 0 && (
+            <Button variant="outline" className="rounded-full" onClick={markAllRead}>
+              <MailOpen className="mr-1.5 h-4 w-4" /> Tout marquer lu
+            </Button>
+          )}
+          <LayoutToggle layout={layout} onChange={setLayout} />
+        </div>
+      </header>
+
+      {/* ── Résumé rapide ── */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
+        {[
+          { label: "Non lues", value: unread, icon: Bell, tone: "text-primary bg-primary/10" },
+          { label: "Alertes SLA", value: slaCount, icon: AlertTriangle, tone: "text-warning-foreground dark:text-warning bg-warning/15" },
+          { label: "Escalades", value: escCount, icon: ShieldAlert, tone: "text-destructive bg-destructive/10" },
+          { label: "Résolues", value: resCount, icon: CheckCircle2, tone: "text-success bg-success/12" },
+          { label: "Annonces", value: annCount, icon: Megaphone, tone: "text-primary bg-primary/10" },
+        ].map(({ label, value, icon: Ic, tone }) => (
+          <GlassCard key={label} className="flex items-center gap-3 py-3">
+            <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl", tone)}>
+              <Ic className="h-4 w-4" />
+            </span>
+            <div>
+              <div className="text-xl font-bold">{value}</div>
+              <div className="text-[11px] text-muted-foreground">{label}</div>
+            </div>
+          </GlassCard>
+        ))}
+      </div>
+
+      {/* ── Barre de filtres ── */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex gap-1 rounded-2xl border border-border/40 bg-card/40 p-1">
+          {(["all", "unread"] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => { setFilter(f); setPage(1); }}
+              className={cn(
+                "rounded-xl px-4 py-1.5 text-sm font-medium transition-colors",
+                filter === f
+                  ? "bg-primary text-white shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {f === "all" ? `Toutes (${notifs.length})` : `Non lues${unread > 0 ? ` (${unread})` : ""}`}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-1 rounded-2xl border border-border/40 bg-card/40 p-1">
+          {(["all", "request", "announcement"] as const).map((s) => {
+            const labels = { all: "Tout", request: "Demandes", announcement: "Annonces" };
+            return (
+              <button
+                key={s}
+                onClick={() => { setSourceFilter(s); setPage(1); }}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-medium transition-colors",
+                  sourceFilter === s
+                    ? "bg-primary text-white shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {s === "announcement" && <Megaphone className="h-3.5 w-3.5" />}
+                {labels[s]}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Contenu ── */}
+      {visible.length === 0 ? (
+        <GlassCard className="py-20 text-center">
+          <BellOff className="mx-auto h-10 w-10 text-muted-foreground/40" />
+          <p className="mt-3 font-semibold text-muted-foreground">
+            {filter === "unread" ? "Aucune notification non lue" : "Aucune notification"}
+          </p>
+          {filter === "unread" && (
+            <button
+              onClick={() => setFilter("all")}
+              className="mt-1.5 text-sm text-primary hover:underline"
+            >
+              Voir toutes les notifications
+            </button>
+          )}
+        </GlassCard>
+      ) : layout === "list" ? (
+        /* ── VUE LISTE ── */
+        <div className="space-y-2.5">
+          {paged.map((n) => (
+            <NotifListCard key={n.id} n={n} {...cardProps} />
+          ))}
+        </div>
+      ) : (
+        /* ── VUE GRILLE ── */
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {paged.map((n) => (
+            <NotifGridCard key={n.id} n={n} {...cardProps} />
+          ))}
+        </div>
+      )}
+
+      <PaginationBar
+        page={page}
+        totalPages={totalPages}
+        total={total}
+        pageSize={pageSize}
+        onChange={setPage}
+        onPageSizeChange={setPageSize}
+        pageSizeOptions={layout === "grid" ? [9, 18] : [6, 10, 20]}
+      />
+    </div>
+  );
+}

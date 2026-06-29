@@ -1,0 +1,61 @@
+# ─── Secrets & Environnements ─────────────────────────────────────────────────
+.env
+.env.local
+.env.production
+.env.*.local
+backend/.env
+backend/.env.production
+frontend/.env.development
+frontend/.env.local
+secrets/
+
+# ─── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# ─── Node / Frontend ──────────────────────────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# ─── Docker ───────────────────────────────────────────────────────────────────
+# Ne PAS ignorer docker-compose.yml — il doit être versionné
+
+# ─── Uploads & données ────────────────────────────────────────────────────────
+backend/uploads/
+*.tar.gz
+backups/
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+backend/logs/
+nginx/logs/
+
+# ─── Certificats SSL ──────────────────────────────────────────────────────────
+nginx/certs/
+*.pem
+*.key
+*.crt
+
+# ─── IDE ──────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ─── Dossiers non versionnés ──────────────────────────────────────────────────
+edgrh/
+monitoring/
+nginx/

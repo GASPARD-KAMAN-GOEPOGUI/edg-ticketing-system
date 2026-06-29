@@ -1,0 +1,54 @@
+EDG Connect — Backend API
+=========================
+
+Stack : FastAPI + SQLAlchemy Async (aiomysql) + Pydantic v1 + Gunicorn/Uvicorn
+
+Commandes principales
+─────────────────────
+
+# Installation (pip + venv)
+python -m venv venv
+venv\Scripts\activate          (Windows)
+source venv/bin/activate        (macOS/Linux)
+pip install -r requirements.txt
+
+# Installation (Pipenv)
+pipenv install
+
+# Lancer en développement (uvicorn avec hot-reload)
+uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+
+# Lancer en production (gunicorn + uvicorn workers)
+gunicorn api.main:app -c gunicorn_conf.py
+
+Documentation API
+─────────────────
+Swagger UI   : http://localhost:8000/docs
+ReDoc        : http://localhost:8000/redoc
+Endpoint racine : http://localhost:8000/
+Health check    : http://localhost:8000/health
+
+Base de données
+───────────────
+Host     : localhost
+Port     : 3306
+Base     : edg_ticketing
+User     : root
+Password : (vide)
+
+Créer la base (à lancer une seule fois, dans un terminal admin) :
+  mysql -u root -e "CREATE DATABASE IF NOT EXISTS edg_ticketing CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+
+Structure du projet
+───────────────────
+api/
+  main.py          → app FastAPI, CORS, routeurs
+  dependencies.py  → fonctions Depends() centralisées
+  configs/
+    Environment.py → BaseSettings (lit .env)
+    Database.py    → moteur async + AsyncSession + Base ORM
+  models/          → modèles SQLAlchemy (tables)
+  repositories/    → couche accès données
+  services/        → logique métier
+  schemas/pydantic/→ schémas Pydantic v1
+  routes/          → routeurs FastAPI par domaine

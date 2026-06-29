@@ -1,0 +1,590 @@
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { requireRole } from "@/lib/auth-guard";
+import { useUser } from "@/lib/session";
+import { useState, useEffect, useCallback } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { AnimatePresence, motion } from "framer-motion";
+import { GlassCard } from "@/components/glass-card";
+import { StatusBadge, PriorityBadge } from "@/components/status-badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { fetchQueue } from "@/lib/api/requests";
+import { priorityLabels, statusLabels } from "@/lib/mock-data";
+import type { RequestStatus, Priority } from "@/lib/mock-data";
+import { toast } from "sonner";
+import {
+  Ticket, Clock, Search, Inbox, Loader2, ArrowUpRight,
+  ShieldAlert, AlertTriangle, CheckCircle2, RotateCcw, TrendingUp,
+} from "lucide-react";
+import { LayoutToggle, type LayoutMode } from "@/components/layout-toggle";
+import { format } from "date-fns";
+import { fr } from "date-fns/locale";
+import { PaginationBar } from "@/components/pagination-bar";
+import { AsyncSwap } from "@/components/async-states";
+import {
+  EscalationProgressBar,
+  DEFAULT_LEVELS,
+} from "@/components/escalation-progress-bar";
+import { apiFetch } from "@/lib/api/client";
+import { useSessionState } from "@/lib/use-session-state";
+import { cn } from "@/lib/utils";
+
+export const Route = createFileRoute("/app/my-tickets")({
+  beforeLoad: () => requireRole("agent", "chief", "admin"),
+  head: () => ({ meta: [{ title: "Mes tickets — EDG Support" }] }),
+  component: MyTicketsPage,
+});
+
+const ACTIVE_STATUSES: RequestStatus[] = [
+  "new", "qualifying", "qualified", "assigned",
+  "in_progress", "pending", "escalated", "reopened",
+];
+
+const priorityDotClass: Record<Priority, string> = {
+  low: "text-muted-foreground",
+  medium: "text-info",
+  high: "text-warning-foreground dark:text-warning",
+  critical: "text-destructive",
+};
+
+function MyTicketsPage() {
+  const sessionUser = useUser();
+  const queryClient = useQueryClient();
+
+  const [filterStatus, setFilterStatus] = useSessionState<string>("mt:status", "all");
+  const [filterPriority, setFilterPriority] = useSessionState<string>("mt:priority", "all");
+  const [search, setSearch] = useSessionState<string>("mt:q", "");
+  const [debouncedSearch, setDebouncedSearch] = useState(search);
+  const [layout, setLayout] = useSessionState<LayoutMode>("mt:layout", "list");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 400);
+    return () => clearTimeout(t);
+  }, [search]);
+  useEffect(() => { setPage(1); }, [filterStatus, filterPriority, debouncedSearch]);
+
+  const baseFilters = {
+    assignee_id: sessionUser?.id,
+    ...(filterPriority !== "all" && { priority: filterPriority }),
+    ...(filterStatus !== "all" && { request_status: filterStatus }),
+    ...(debouncedSearch && { search: debouncedSearch }),
+  };
+
+  // Requête principale : paginée pour l'affichage
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["my-tickets", baseFilters, page, pageSize],
+    queryFn: () => fetchQueue({ ...baseFilters, page, limit: pageSize }),
+    staleTime: 30_000,
+    enabled: !!sessionUser?.id,
+  });
+
+  // Requête stats : toute la workload (max 200) pour les KPI exacts
+  const { data: statsData } = useQuery({
+    queryKey: ["my-tickets-stats", sessionUser?.id],
+    queryFn: () => fetchQueue({ assignee_id: sessionUser!.id, limit: 200 }),
+    staleTime: 60_000,
+    enabled: !!sessionUser?.id,
+  });
+
+  // Stats personnelles depuis l'API dédiée
+  const { data: myStats } = useQuery<{
+    assigned_total: number;
+    resolved_total: number;
+    active_total: number;
+    sla_breached: number;
+    avg_resolution_hours: number | null;
+    sla_rate: number | null;
+  }>({
+    queryKey: ["my-stats", sessionUser?.id],
+    queryFn: () => apiFetch("/stats/my"),
+    staleTime: 60_000,
+    enabled: !!sessionUser?.id,
+  });
+
+  const allItems = data?.items ?? [];
+  const paged = allItems;
+
+  const total = data?.total ?? 0;
+  const totalPages = data?.pages ?? 1;
+
+  const allStatItems = statsData?.items ?? [];
+  const kpiTotal    = statsData?.total ?? 0;
+  const kpiBreached = allStatItems.filter((r) => r.slaElapsed > r.slaHours).length;
+  const kpiCritical = allStatItems.filter((r) => r.priority === "critical").length;
+
+  const listState: "loading" | "empty" | "ready" = isLoading
+    ? "loading"
+    : isError || paged.length === 0
+    ? "empty"
+    : "ready";
+
+  const handleSearch = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value),
+    [setSearch],
+  );
+
+  // ── Dialog escalade ───────────────────────────────────────────────────────
+  const [escalateOpen, setEscalateOpen] = useState(false);
+  const [escalateId, setEscalateId] = useState<string>("");
+  const [escalateLevel, setEscalateLevel] = useState<string>(DEFAULT_LEVELS[3]);
+  const [escalateReason, setEscalateReason] = useState("");
+
+  const openEscalade = (id: string) => {
+    setEscalateId(id);
+    setEscalateLevel(DEFAULT_LEVELS[3]);
+    setEscalateReason("");
+    setEscalateOpen(true);
+  };
+
+  const escalateMut = useMutation({
+    mutationFn: () =>
+      apiFetch(`/requests/${escalateId}/escalate${sessionUser?.id ? `?actor_id=${sessionUser.id}` : ""}`, {
+        method: "POST",
+        body: JSON.stringify({
+          level: escalateLevel,
+          reason: escalateReason || "Escalade depuis Mes tickets",
+          from_agent_name: sessionUser?.name ?? "",
+        }),
+      }),
+    onSuccess: () => {
+      toast.success("Ticket escaladé");
+      setEscalateOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["my-tickets"] });
+      queryClient.invalidateQueries({ queryKey: ["my-tickets-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["queue"] });
+      queryClient.invalidateQueries({ queryKey: ["requests"] });
+      queryClient.invalidateQueries({ queryKey: ["escalations"] });
+      queryClient.invalidateQueries({ queryKey: ["stats"] });
+    },
+    onError: () => toast.error("Erreur lors de l'escalade"),
+  });
+
+  return (
+    <div className="mx-auto max-w-7xl space-y-6">
+
+      {/* ── En-tête ────────────────────────────────────────────────────────── */}
+      <motion.header
+        initial={{ opacity: 0, y: -8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+        className="flex flex-wrap items-end justify-between gap-3"
+      >
+        <div>
+          <div className="flex items-center gap-2">
+            <Ticket className="h-6 w-6 text-primary" />
+            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Mes tickets</h1>
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Tickets qui vous sont personnellement assignés.
+          </p>
+        </div>
+        <LayoutToggle layout={layout} onChange={setLayout} />
+      </motion.header>
+
+      {/* ── KPI row ────────────────────────────────────────────────────────── */}
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.04 }}
+        className="grid grid-cols-1 gap-3 sm:grid-cols-3"
+      >
+        <GlassCard className="flex items-center gap-3 p-4">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10">
+            <Ticket className="h-4 w-4 text-primary" />
+          </span>
+          <div>
+            <div className="text-2xl font-bold leading-none">{kpiTotal}</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">En cours</div>
+          </div>
+        </GlassCard>
+
+        <GlassCard className={cn("flex items-center gap-3 p-4", kpiBreached > 0 && "border-destructive/40 bg-destructive/3")}>
+          <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl", kpiBreached > 0 ? "bg-destructive/15" : "bg-muted")}>
+            <AlertTriangle className={cn("h-4 w-4", kpiBreached > 0 ? "text-destructive" : "text-muted-foreground")} />
+          </span>
+          <div>
+            <div className={cn("text-2xl font-bold leading-none", kpiBreached > 0 && "text-destructive")}>{kpiBreached}</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">SLA dépassé</div>
+          </div>
+        </GlassCard>
+
+        <GlassCard className={cn("flex items-center gap-3 p-4", kpiCritical > 0 && "border-orange-500/40 bg-orange-500/3")}>
+          <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl", kpiCritical > 0 ? "bg-orange-500/15" : "bg-muted")}>
+            <ShieldAlert className={cn("h-4 w-4", kpiCritical > 0 ? "text-orange-500" : "text-muted-foreground")} />
+          </span>
+          <div>
+            <div className={cn("text-2xl font-bold leading-none", kpiCritical > 0 && "text-orange-500")}>{kpiCritical}</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">Critiques</div>
+          </div>
+        </GlassCard>
+      </motion.div>
+
+      {/* ── KPI performance personnelle ─────────────────────────────────────── */}
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.06 }}
+        className="grid grid-cols-1 gap-3 sm:grid-cols-3"
+      >
+        <GlassCard className="flex items-center gap-3 p-4">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-green-500/10">
+            <CheckCircle2 className="h-4 w-4 text-green-500" />
+          </span>
+          <div>
+            <div className="text-2xl font-bold leading-none">{myStats?.resolved_total ?? "—"}</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">Total résolus</div>
+          </div>
+        </GlassCard>
+
+        <GlassCard className="flex items-center gap-3 p-4">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10">
+            <TrendingUp className="h-4 w-4 text-primary" />
+          </span>
+          <div>
+            <div className="text-2xl font-bold leading-none">
+              {myStats?.sla_rate != null ? `${myStats.sla_rate}%` : "—"}
+            </div>
+            <div className="mt-0.5 text-xs text-muted-foreground">Taux SLA respecté</div>
+          </div>
+        </GlassCard>
+
+        <GlassCard className="flex items-center gap-3 p-4">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-muted">
+            <Clock className="h-4 w-4 text-muted-foreground" />
+          </span>
+          <div>
+            <div className="text-2xl font-bold leading-none">
+              {myStats?.avg_resolution_hours != null ? `${myStats.avg_resolution_hours}h` : "—"}
+            </div>
+            <div className="mt-0.5 text-xs text-muted-foreground">Délai moyen résolution</div>
+          </div>
+        </GlassCard>
+      </motion.div>
+
+      {/* ── Filtres ────────────────────────────────────────────────────────── */}
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.08 }}
+      >
+        <GlassCard className="p-4">
+          <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={handleSearch}
+                placeholder="Rechercher par référence, titre, demandeur…"
+                className="h-11 pl-9"
+              />
+            </div>
+            <Select value={filterStatus} onValueChange={setFilterStatus}>
+              <SelectTrigger className="h-11 w-full sm:w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous les statuts</SelectItem>
+                {ACTIVE_STATUSES.map((s) => (
+                  <SelectItem key={s} value={s}>{statusLabels[s]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={filterPriority} onValueChange={setFilterPriority}>
+              <SelectTrigger className="h-11 w-full sm:w-36">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Toutes priorités</SelectItem>
+                {(["critical", "high", "medium", "low"] as Priority[]).map((p) => (
+                  <SelectItem key={p} value={p}>{priorityLabels[p]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </GlassCard>
+      </motion.div>
+
+      {/* ── Liste / Grille ─────────────────────────────────────────────────── */}
+      <AsyncSwap
+        state={listState}
+        empty={
+          <GlassCard className="py-16 text-center">
+            <motion.div
+              className="mx-auto mb-3 grid h-14 w-14 place-items-center rounded-2xl bg-muted"
+              initial={{ scale: 0.6, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: "spring", stiffness: 260, damping: 18 }}
+            >
+              {isError ? (
+                <AlertTriangle className="h-6 w-6 text-muted-foreground" />
+              ) : (
+                <CheckCircle2 className="h-6 w-6 text-emerald-500" />
+              )}
+            </motion.div>
+            <h3 className="font-semibold">
+              {isError ? "Erreur de chargement" : "Aucun ticket en cours"}
+            </h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {isError
+                ? "Impossible de charger vos tickets."
+                : "Vous n'avez aucun ticket actif assigné pour le moment."}
+            </p>
+          </GlassCard>
+        }
+      >
+        <>
+          {layout === "list" ? (
+            /* ── Vue liste ──────────────────────────────────────────────── */
+            <GlassCard className="overflow-hidden p-0">
+              <AnimatePresence mode="popLayout" initial={false}>
+                {paged.map((r, i) => {
+                  const slaOver = r.slaElapsed > r.slaHours;
+                  const slaLeft = Math.max(0, r.slaHours - r.slaElapsed);
+                  return (
+                    <motion.div
+                      key={r.id}
+                      layout
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      transition={{ duration: 0.3, delay: i * 0.03 }}
+                      className={cn(
+                        "flex items-start gap-4 border-b px-5 py-4 last:border-0 transition-colors hover:bg-background/50",
+                        r.priority === "critical"
+                          ? "border-destructive/30 bg-destructive/3"
+                          : r.status === "reopened"
+                          ? "border-amber-500/30 bg-amber-500/3"
+                          : slaOver
+                          ? "border-orange-400/30"
+                          : "border-border/30",
+                      )}
+                    >
+                      <div className="min-w-0 flex-1 space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Link
+                            to="/app/requests/$id"
+                            params={{ id: r.id }}
+                            className="font-mono text-[11px] text-primary hover:underline"
+                          >
+                            {r.ref}
+                          </Link>
+                          <PriorityBadge priority={r.priority} />
+                          <StatusBadge status={r.status} />
+                          {r.status === "reopened" && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                              <RotateCcw className="h-2.5 w-2.5" /> Réouvert
+                            </span>
+                          )}
+                          {r.priority === "critical" && (
+                            <span className="inline-flex items-center rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-bold text-destructive">
+                              CRITIQUE
+                            </span>
+                          )}
+                        </div>
+                        <Link
+                          to="/app/requests/$id"
+                          params={{ id: r.id }}
+                          className="block font-semibold leading-snug hover:text-primary"
+                        >
+                          {r.title}
+                        </Link>
+                        {r.description && (
+                          <p className="line-clamp-1 text-xs text-muted-foreground">{r.description}</p>
+                        )}
+                        <div className="text-xs text-muted-foreground">
+                          {r.requesterName} · {format(new Date(r.createdAt), "d MMM yyyy", { locale: fr })}
+                        </div>
+                      </div>
+
+                      <div className="flex shrink-0 flex-col items-end gap-2">
+                        <div className={cn("flex items-center gap-1 text-xs font-medium", slaOver ? "text-destructive" : "text-muted-foreground")}>
+                          <Clock className="h-3.5 w-3.5" />
+                          {slaOver ? "SLA dépassé" : `${slaLeft}h restantes`}
+                        </div>
+                        <div className="flex gap-1.5">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 rounded-full px-3 text-xs"
+                            onClick={() => openEscalade(r.id)}
+                          >
+                            <ArrowUpRight className="mr-1 h-3 w-3" />
+                            Escalader
+                          </Button>
+                          <Button
+                            asChild
+                            size="sm"
+                            className="h-7 rounded-full px-3 text-xs gradient-primary"
+                          >
+                            <Link to="/app/requests/$id" params={{ id: r.id }}>
+                              Traiter
+                            </Link>
+                          </Button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
+            </GlassCard>
+          ) : (
+            /* ── Vue grille ─────────────────────────────────────────────── */
+            <motion.div layout className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <AnimatePresence mode="popLayout" initial={false}>
+                {paged.map((r, i) => {
+                  const slaOver = r.slaElapsed > r.slaHours;
+                  const slaLeft = Math.max(0, r.slaHours - r.slaElapsed);
+                  return (
+                    <motion.div
+                      key={r.id}
+                      layout
+                      initial={{ opacity: 0, scale: 0.96 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.94 }}
+                      transition={{ duration: 0.3, delay: i * 0.04 }}
+                      whileHover={{ y: -3 }}
+                    >
+                      <GlassCard className={cn(
+                        "flex flex-col gap-3 p-4 transition-shadow hover:shadow-xl",
+                        r.priority === "critical" && "border-destructive/40 bg-destructive/3",
+                        r.status === "reopened"   && "border-amber-500/40 bg-amber-500/3",
+                      )}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <StatusBadge status={r.status} />
+                            {r.status === "reopened" && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                                <RotateCcw className="h-2.5 w-2.5" />
+                              </span>
+                            )}
+                          </div>
+                          <div className={cn("flex items-center gap-1 text-xs font-medium shrink-0", slaOver ? "text-destructive" : "text-muted-foreground")}>
+                            <Clock className="h-3 w-3" />
+                            {slaOver ? "SLA !" : `${slaLeft}h`}
+                          </div>
+                        </div>
+
+                        <Link to="/app/requests/$id" params={{ id: r.id }} className="hover:text-primary">
+                          <p className="line-clamp-2 font-semibold leading-snug">{r.title}</p>
+                        </Link>
+                        <div className={cn("flex items-center gap-1.5 text-xs font-medium", priorityDotClass[r.priority])}>
+                          <span className="h-2 w-2 shrink-0 rounded-full bg-current" />
+                          {priorityLabels[r.priority]}
+                        </div>
+                        {r.description && (
+                          <p className="line-clamp-2 text-xs text-muted-foreground">{r.description}</p>
+                        )}
+
+                        <div className="flex-1" />
+                        <div className="space-y-1">
+                          <div className="text-xs text-muted-foreground">{r.requesterName}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {format(new Date(r.createdAt), "d MMM yyyy", { locale: fr })}
+                          </div>
+                          <p className="font-mono text-[11px] text-muted-foreground/60">Réf. {r.ref}</p>
+                        </div>
+
+                        <div className="flex gap-2 border-t border-border/30 pt-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="flex-1 rounded-full text-xs"
+                            onClick={() => openEscalade(r.id)}
+                          >
+                            <ArrowUpRight className="mr-1 h-3 w-3" />
+                            Escalader
+                          </Button>
+                          <Button asChild size="sm" className="flex-1 rounded-full text-xs gradient-primary">
+                            <Link to="/app/requests/$id" params={{ id: r.id }}>Traiter</Link>
+                          </Button>
+                        </div>
+                      </GlassCard>
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
+            </motion.div>
+          )}
+
+          <PaginationBar
+            page={page}
+            totalPages={totalPages}
+            total={total}
+            pageSize={pageSize}
+            onChange={setPage}
+            onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
+          />
+        </>
+      </AsyncSwap>
+
+      {/* ── Dialog escalade ─────────────────────────────────────────────── */}
+      <Dialog open={escalateOpen} onOpenChange={setEscalateOpen}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Escalader le ticket</DialogTitle>
+            <DialogDescription>
+              Transmettre ce ticket à un niveau supérieur avec une justification.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-1">
+            <div className="space-y-1.5">
+              <Label>Niveau cible <span className="text-destructive">*</span></Label>
+              <Select value={escalateLevel} onValueChange={setEscalateLevel}>
+                <SelectTrigger className="h-11">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DEFAULT_LEVELS.slice(3, 6).map((l) => (
+                    <SelectItem key={l} value={l}>{l}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Raison <span className="text-destructive">*</span></Label>
+              <Textarea
+                className="resize-none"
+                rows={3}
+                placeholder="Décrivez pourquoi ce ticket doit être escaladé…"
+                value={escalateReason}
+                onChange={(e) => setEscalateReason(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" className="rounded-full" onClick={() => setEscalateOpen(false)}>
+              Annuler
+            </Button>
+            <Button
+              className="rounded-full gradient-primary"
+              disabled={!escalateReason.trim() || escalateMut.isPending}
+              onClick={() => escalateMut.mutate()}
+            >
+              {escalateMut.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+              Confirmer l'escalade
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
