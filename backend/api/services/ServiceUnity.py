@@ -31,13 +31,24 @@ class UnityService(BaseService):
             raise self.not_found(f"Codename '{codename}' introuvable")
         return obj
 
+    @staticmethod
+    def _translate_direction(data: dict) -> dict:
+        """direction_id est un alias frontend — la vraie colonne est parent_direction_id."""
+        data = dict(data)
+        direction_id = data.pop("direction_id", None)
+        if direction_id is not None and not data.get("parent_direction_id"):
+            data["parent_direction_id"] = direction_id
+        return data
+
     async def create(self, data: dict):
+        data = self._translate_direction(data)
         existing = await self.repo.find_by_codename(data.get("codename", ""))
         if existing:
             raise self.conflict("Une unity avec ce codename existe déjà")
         return await self.repo.create(data)
 
     async def update(self, id: str, data: dict):
+        data = self._translate_direction(data)
         if "codename" in data and data["codename"]:
             existing = await self.repo.find_by_codename(data["codename"])
             if existing and str(existing.id) != str(id):

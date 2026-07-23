@@ -5,10 +5,15 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.core.rbac import normalize_role
 from api.models.ModelNotification import Notification
 from api.repositories.base_repository import BaseRepository
 
-_ADMIN_ROLES: frozenset[str] = frozenset({"admin", "dg"})
+_ADMIN_ROLES: frozenset[str] = frozenset({"admin"})
+
+
+def _is_admin_role(actor_role: str) -> bool:
+    return normalize_role(actor_role) in _ADMIN_ROLES
 
 
 class NotificationRepository(BaseRepository[Notification]):
@@ -30,7 +35,7 @@ class NotificationRepository(BaseRepository[Notification]):
             Notification.recipient_id == recipient_id,
             Notification.deleted_at.is_(None),
         ]
-        if actor_role not in _ADMIN_ROLES:
+        if not _is_admin_role(actor_role):
             base.append(Notification.visibility == "public")
         if unread_only:
             base.append(Notification.is_read == False)  # noqa: E712
@@ -67,7 +72,7 @@ class NotificationRepository(BaseRepository[Notification]):
         filters: dict = {"recipient_id": recipient_id}
         if unread_only:
             filters["is_read"] = False
-        if actor_role not in _ADMIN_ROLES:
+        if not _is_admin_role(actor_role):
             filters["visibility"] = "public"
         return await self.list(
             filters=filters,
@@ -82,7 +87,7 @@ class NotificationRepository(BaseRepository[Notification]):
             Notification.is_read == False,  # noqa: E712
             Notification.deleted_at.is_(None),
         ]
-        if actor_role not in _ADMIN_ROLES:
+        if not _is_admin_role(actor_role):
             conds.append(Notification.visibility == "public")
         stmt = select(func.count()).select_from(Notification)
         for c in conds:

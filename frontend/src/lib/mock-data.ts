@@ -4,7 +4,6 @@ export type Role =
   | "agent"
   | "chief"
   | "director"
-  | "dg"
   | "admin";
 
 export type RequestStatus =
@@ -123,7 +122,7 @@ export const users: AppUser[] = [
   { id: "u2", name: "Ousmane Camara", email: "ousmane@edg.gn", role: "agent", direction: "dsi", service: "dsi-support", matricule: "EDG-1023", job: "Agent support" },
   { id: "u3", name: "Fatoumata Bah", email: "fatoumata@edg.gn", role: "chief", direction: "dsi", service: "dsi-support", matricule: "EDG-0541", job: "Chef service support" },
   { id: "u4", name: "Ibrahima Sow", email: "ibrahima@edg.gn", role: "director", direction: "dsi", matricule: "EDG-0102", job: "Directeur DSI" },
-  { id: "u5", name: "Aïssatou Barry", email: "aissatou@edg.gn", role: "dg", matricule: "EDG-0001", job: "Directrice Générale" },
+  { id: "u5", name: "Aïssatou Barry", email: "aissatou@edg.gn", role: "director", direction: "dg", matricule: "EDG-0001", job: "Directrice" },
   { id: "u6", name: "Mohamed Touré", email: "admin@edg.gn", role: "admin", matricule: "EDG-9999", job: "Administrateur système" },
   { id: "u7", name: "Sékou Condé", email: "sekou@edg.gn", role: "agent", direction: "reseau", service: "res-pannes", matricule: "EDG-3312", job: "Agent terrain réseau" },
   { id: "u8", name: "Hadja Sylla", email: "hadja@edg.gn", role: "agent", direction: "com", service: "com-clients", matricule: "EDG-2204", job: "Chargée clientèle" },
@@ -164,6 +163,24 @@ export type SmsLogEntry = {
   phone: string;
 };
 
+export type TimelineEvent = {
+  id: string;
+  type: string;
+  label: string;
+  at: string;
+  by?: string;
+  actorId?: string;
+  actorRole?: string;
+  targetUserId?: string;
+  targetUserName?: string;
+  targetRole?: string;
+  oldStatus?: string;
+  newStatus?: string;
+  comment?: string;
+  isPublic?: boolean;
+  infos?: Record<string, unknown>;
+};
+
 export type RequestItem = {
   id: string;
   ref: string;
@@ -202,6 +219,10 @@ export type RequestItem = {
   isExternal: boolean;
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string;
+  isArchived?: boolean;
+  resolvedAt?: string;
+  closedAt?: string;
   slaHours: number;
   slaElapsed: number;
   infos?: Record<string, unknown>;
@@ -213,7 +234,7 @@ export type RequestItem = {
     isPublic: boolean;
     createdAt: string;
   }[];
-  timeline: { id: string; type: string; label: string; at: string; by?: string }[];
+  timeline: TimelineEvent[];
   appreciation?: Appreciation;
 };
 
@@ -399,7 +420,7 @@ export const requests: RequestItem[] = [
   {
     id: "r7",
     ref: "EDG-2026-0415",
-    title: "Mise à jour antivirus poste DG",
+    title: "Mise à jour antivirus poste direction",
     description: "Antivirus à jour requis avant audit.",
     status: "closed",
     priority: "medium",
@@ -1211,7 +1232,6 @@ export const roleLabels: Record<Role, string> = {
   agent: "Agent de traitement",
   chief: "Chef de service",
   director: "Directeur",
-  dg: "Directeur Général",
   admin: "Administrateur",
 };
 
@@ -1252,7 +1272,7 @@ export const agentSLAs: AgentSLA[] = [
   { id: "a8", name: "Aminata Touré", direction: "RH", service: "Paie", open: 2, handled: 78, avgResolutionH: 14.0, slaRespect: 89, satisfaction: 4.4, status: "off" },
 ];
 
-export type EscalationLevel = "L1" | "L2" | "L3" | "DG";
+export type EscalationLevel = "L1" | "L2" | "L3";
 
 export type EscalationItem = {
   id: string;
@@ -1266,15 +1286,15 @@ export type EscalationItem = {
   slaOverHours: number;
   priority: Priority;
   at: string;
-  status: "open" | "in_review" | "resolved";
-  dgComment?: string;
+  status: "open" | "in_review" | "resolved" | "rejected";
+  decisionComment?: string;
 };
 
 export const escalations: EscalationItem[] = [
   { id: "e1", requestRef: "EDG-2026-0421", title: "Coupure prolongée — Kaloum", fromAgent: "Sékou Condé", toAgent: "Fatoumata Bah", level: "L2", reason: "SLA dépassé de 2h sur incident critique", slaOverHours: 2, priority: "critical", at: h(1), status: "open" },
   { id: "e2", requestRef: "EDG-2026-0416", title: "Double prélèvement facturation", fromAgent: "Hadja Sylla", toAgent: "Directeur Commercial", level: "L3", reason: "Réclamation client > 48h sans réponse", slaOverHours: 26, priority: "high", at: h(4), status: "in_review" },
   { id: "e3", requestRef: "EDG-2026-0411", title: "Raccordement industriel Coyah", fromAgent: "Mamadou Sylla", toAgent: "Fatoumata Bah", level: "L2", reason: "Manque de validation budgétaire", slaOverHours: 8, priority: "high", at: h(12), status: "open" },
-  { id: "e4", requestRef: "EDG-2026-0402", title: "Panne transformateur Matam", fromAgent: "Sékou Condé", toAgent: "Direction Générale", level: "DG", reason: "Impact > 5 000 abonnés, escalade obligatoire", slaOverHours: 14, priority: "critical", at: h(18), status: "in_review" },
+  { id: "e4", requestRef: "EDG-2026-0402", title: "Panne transformateur Matam", fromAgent: "Sékou Condé", toAgent: "Directeur", level: "L3", reason: "Impact > 5 000 abonnés, escalade obligatoire", slaOverHours: 14, priority: "critical", at: h(18), status: "in_review" },
   { id: "e5", requestRef: "EDG-2026-0395", title: "Demande attestation urgente", fromAgent: "Hadja Sylla", toAgent: "Fatoumata Bah", level: "L2", reason: "Demande VIP — délai contractuel", slaOverHours: 4, priority: "medium", at: h(28), status: "resolved" },
 ];
 
@@ -1350,10 +1370,10 @@ export type ActivityLog = {
 
 const ua = "Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36";
 export const activityLogs: ActivityLog[] = [
-  { id: "l1", at: h(0.2), actor: "Mohamed Touré", actorRole: "admin", action: "Modification du rôle utilisateur", category: "admin", target: "u3 → chief", ip: "196.207.84.12", userAgent: ua, status: "success", metadata: { from: "agent", to: "chief", user_id: "u3", reason: "Promotion service", approved_by: "DG" } },
+  { id: "l1", at: h(0.2), actor: "Mohamed Touré", actorRole: "admin", action: "Modification du rôle utilisateur", category: "admin", target: "u3 → chief", ip: "196.207.84.12", userAgent: ua, status: "success", metadata: { from: "agent", to: "chief", user_id: "u3", reason: "Promotion service", approved_by: "Directeur" } },
   { id: "l2", at: h(0.5), actor: "Sékou Condé", actorRole: "agent", action: "Mise à jour du statut demande", category: "request", target: "EDG-2026-0421", ip: "10.12.3.44", userAgent: ua, status: "success", metadata: { ref: "EDG-2026-0421", previous_status: "qualifying", new_status: "in_progress", sla_ok: true } },
   { id: "l3", at: h(0.7), actor: "system", actorRole: "admin", action: "Escalade automatique", category: "system", target: "EDG-2026-0416", ip: "—", userAgent: "edg-engine/1.4", status: "warning", metadata: { rule: "SLA dépassé > 24h", level: "L3", sla_breach_h: 31.5, escalated_to: "Fatoumata Bah" } },
-  { id: "l4", at: h(1.1), actor: "Aïssatou Barry", actorRole: "dg", action: "Connexion réussie", category: "auth", target: "—", ip: "41.83.12.7", userAgent: ua, status: "success", metadata: { mfa: true, session_id: "sess_8f2a3c" } },
+  { id: "l4", at: h(1.1), actor: "Aïssatou Barry", actorRole: "director", action: "Connexion réussie", category: "auth", target: "—", ip: "41.83.12.7", userAgent: ua, status: "success", metadata: { mfa: true, session_id: "sess_8f2a3c" } },
   { id: "l5", at: h(1.4), actor: "anon", actorRole: "public", action: "Échec d'authentification", category: "security", target: "admin@edg.gn", ip: "185.34.220.18", userAgent: "curl/8.4", status: "error", metadata: { attempts: 5, blocked: true, ip_country: "RU", lockout_min: 30 } },
   { id: "l6", at: h(2.2), actor: "Fatoumata Bah", actorRole: "chief", action: "Assignation de demande", category: "request", target: "EDG-2026-0420 → Hadja Sylla", ip: "10.12.7.89", userAgent: ua, status: "success", metadata: { ref: "EDG-2026-0420", assigned_to: "u7", agent_name: "Hadja Sylla", team: "Service client" } },
   { id: "l7", at: h(3.0), actor: "Mohamed Touré", actorRole: "admin", action: "Modification SLA", category: "admin", target: "Panne réseau · critical", ip: "196.207.84.12", userAgent: ua, status: "success", metadata: { responseH: 1, resolutionH: 4, previous_responseH: 2, previous_resolutionH: 8 } },
@@ -1447,7 +1467,7 @@ export const logCategoryLabels: Record<ActivityLog["category"], string> = {
 };
 
 /* ------------------------------------------------------------------ */
-/* Helpers analytics pour les dashboards DG et Directeur              */
+/* Helpers analytics pour les dashboards Directeur                    */
 /* ------------------------------------------------------------------ */
 
 const CLOSED_STATUSES: RequestStatus[] = ["resolved", "closed", "rejected"];
@@ -1735,7 +1755,7 @@ export const announcements: Announcement[] = [
     priority: "critical",
     publishedAt: h(2),
     expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
-    targets: { roles: ["user", "agent", "chief", "director", "dg", "admin"], directions: [], services: [], audience: "all" },
+    targets: { roles: ["user", "agent", "chief", "director", "admin"], directions: [], services: [], audience: "all" },
     channels: ["internal_notif", "email", "sms", "homepage"],
     authorId: "u6",
     authorName: "Mohamed Touré",
@@ -1752,7 +1772,7 @@ export const announcements: Announcement[] = [
     priority: "high",
     publishedAt: h(12),
     expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
-    targets: { roles: ["user", "agent", "chief", "director", "dg", "admin"], directions: ["dsi", "fin", "rh"], services: [], audience: "internal" },
+    targets: { roles: ["user", "agent", "chief", "director", "admin"], directions: ["dsi", "fin", "rh"], services: [], audience: "internal" },
     channels: ["internal_notif", "email", "dashboard"],
     authorId: "u6",
     authorName: "Mohamed Touré",
@@ -1769,7 +1789,7 @@ export const announcements: Announcement[] = [
     priority: "medium",
     publishedAt: h(48),
     expiresAt: new Date(Date.now() + 12 * 24 * 3600 * 1000).toISOString(),
-    targets: { roles: ["user", "agent", "chief", "director", "dg", "admin"], directions: [], services: [], audience: "internal" },
+    targets: { roles: ["user", "agent", "chief", "director", "admin"], directions: [], services: [], audience: "internal" },
     channels: ["internal_notif", "email"],
     authorId: "u6",
     authorName: "Mohamed Touré",
@@ -1785,7 +1805,7 @@ export const announcements: Announcement[] = [
     category: "service_note",
     priority: "high",
     publishedAt: h(72),
-    targets: { roles: ["agent", "chief", "director", "dg", "admin"], directions: ["tech", "reseau"], services: [], audience: "internal" },
+    targets: { roles: ["agent", "chief", "director", "admin"], directions: ["tech", "reseau"], services: [], audience: "internal" },
     channels: ["internal_notif", "email"],
     authorId: "u5",
     authorName: "Aïssatou Barry",
@@ -1801,7 +1821,7 @@ export const announcements: Announcement[] = [
     category: "security",
     priority: "critical",
     publishedAt: h(1),
-    targets: { roles: ["user", "agent", "chief", "director", "dg", "admin"], directions: [], services: [], audience: "internal" },
+    targets: { roles: ["user", "agent", "chief", "director", "admin"], directions: [], services: [], audience: "internal" },
     channels: ["internal_notif", "email", "sms", "dashboard"],
     authorId: "u6",
     authorName: "Mohamed Touré",
@@ -1818,7 +1838,7 @@ export const announcements: Announcement[] = [
     priority: "medium",
     publishedAt: h(24),
     expiresAt: new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString(),
-    targets: { roles: ["user", "agent", "chief", "director", "dg", "admin"], directions: [], services: [], audience: "all" },
+    targets: { roles: ["user", "agent", "chief", "director", "admin"], directions: [], services: [], audience: "all" },
     channels: ["internal_notif", "email", "homepage"],
     authorId: "u6",
     authorName: "Mohamed Touré",
@@ -1834,7 +1854,7 @@ export const announcements: Announcement[] = [
     category: "service_note",
     priority: "medium",
     publishedAt: h(120),
-    targets: { roles: ["user", "agent", "chief", "director", "dg", "admin"], directions: [], services: [], audience: "internal" },
+    targets: { roles: ["user", "agent", "chief", "director", "admin"], directions: [], services: [], audience: "internal" },
     channels: ["internal_notif"],
     authorId: "u5",
     authorName: "Aïssatou Barry",
@@ -1851,7 +1871,7 @@ export const announcements: Announcement[] = [
     category: "general",
     priority: "low",
     publishedAt: new Date(Date.now() + 38 * 24 * 3600 * 1000).toISOString(),
-    targets: { roles: ["user", "agent", "chief", "director", "dg", "admin"], directions: [], services: [], audience: "all" },
+    targets: { roles: ["user", "agent", "chief", "director", "admin"], directions: [], services: [], audience: "all" },
     channels: ["internal_notif", "email", "homepage"],
     authorId: "u6",
     authorName: "Mohamed Touré",

@@ -13,6 +13,10 @@ const API_BASE =
   import.meta.env.VITE_API_URL ??
   (import.meta.env.DEV ? "http://localhost:8000/api/v1" : "/api/v1");
 
+// Le endpoint /health vit à la racine du backend (health.py, non préfixé par
+// /api/v1 dans main.py — voir CLAUDE.md), d'où ce base URL dédié.
+const API_ROOT = API_BASE.replace(/\/api\/v1$/, "");
+
 const REQUEST_TIMEOUT_MS = 15_000;
 
 export class ApiError extends Error {
@@ -198,4 +202,11 @@ export async function apiFetch<T>(
     return (json as { data: T }).data;
   }
   return json as T;
+}
+
+/** Vérifie la disponibilité du backend et de la base de données. Endpoint public, sans JWT. */
+export async function checkHealth(): Promise<{ status: string; database: string }> {
+  const res = await fetch(`${API_ROOT}/health`);
+  if (!res.ok) throw new ApiError(res.status, "HEALTH_CHECK_FAILED", res.statusText);
+  return res.json();
 }

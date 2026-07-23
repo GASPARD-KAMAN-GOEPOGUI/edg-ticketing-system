@@ -232,6 +232,132 @@
   );
 }
 
+/* ─── Fallback hex/rgba pour navigateurs sans support oklch (Edge < 111) ─── */
+@supports not (color: oklch(0 0 0)) {
+  :root {
+    --background: #f5faf6;
+    --foreground: #1e2e28;
+    --card: #ffffff;
+    --card-foreground: #1e2e28;
+    --popover: #fafdfb;
+    --popover-foreground: #1e2e28;
+    --primary: #16a34a;
+    --primary-foreground: #fafdfb;
+    --secondary: #d1e9d8;
+    --secondary-foreground: #2d5237;
+    --muted: #eaf2ec;
+    --muted-foreground: #5e6d65;
+    --accent: #eab308;
+    --accent-foreground: #312a12;
+    --destructive: #dc2626;
+    --destructive-foreground: #fafdfb;
+    --success: #16a34a;
+    --success-foreground: #fafdfb;
+    --warning: #eab308;
+    --warning-foreground: #312a12;
+    --info: #3b82f6;
+    --info-foreground: #fafdfb;
+    --border: #dde8e1;
+    --input: #e3ede6;
+    --ring: #16a34a;
+    --chart-1: #16a34a;
+    --chart-2: #eab308;
+    --chart-3: #3b82f6;
+    --chart-4: #d15c19;
+    --chart-5: #6d28d9;
+    --sidebar: #fafdfb;
+    --sidebar-foreground: #2c3e35;
+    --sidebar-primary: #16a34a;
+    --sidebar-primary-foreground: #fafdfb;
+    --sidebar-accent: #eaf2ec;
+    --sidebar-accent-foreground: #284030;
+    --sidebar-border: #dde8e1;
+    --sidebar-ring: #16a34a;
+    /* Cartes opaques sur Edge — évite les rayures du gradient qui transparaît */
+    --glass-bg: rgba(255, 255, 255, 0.96);
+    --glass-bg-strong: rgba(255, 255, 255, 0.99);
+    --glass-border: #dde8e1;
+    --glass-shadow: 0 4px 16px -4px rgba(20, 120, 60, 0.15), 0 1px 4px -1px rgba(20, 120, 60, 0.08);
+    --glass-shadow-lg: 0 12px 32px -8px rgba(20, 120, 60, 0.18), 0 4px 12px -4px rgba(20, 120, 60, 0.10);
+    --gradient-bg: radial-gradient(at 12% 8%, rgba(134, 210, 160, 0.25) 0%, transparent 45%), radial-gradient(at 88% 12%, rgba(220, 200, 80, 0.18) 0%, transparent 50%), radial-gradient(at 50% 95%, rgba(134, 210, 160, 0.18) 0%, transparent 55%);
+    --gradient-primary: linear-gradient(135deg, #16a34a, #15803d);
+    --gradient-accent: linear-gradient(135deg, #eab308, #ca8a04);
+    --gradient-edg: linear-gradient(135deg, #16a34a 0%, #eab308 100%);
+  }
+
+  /* Fix Edge < 111 : désactiver TOUS les backdrop-filter — les couches composites bloquent les clics */
+  *, *::before, *::after {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  .dark {
+    --background: #18261f;
+    --foreground: #f2f9f4;
+    --card: #1e2f27;
+    --card-foreground: #f2f9f4;
+    --popover: #1e2f27;
+    --popover-foreground: #f2f9f4;
+    --primary: #22c55e;
+    --primary-foreground: #f8fdf9;
+    --secondary: #1a4d2a;
+    --secondary-foreground: #d8f0e2;
+    --muted: #1f2e27;
+    --muted-foreground: #8ca898;
+    --accent: #facc15;
+    --accent-foreground: #2a2408;
+    --destructive: #ef4444;
+    --destructive-foreground: #f8fdf9;
+    --success: #22c55e;
+    --success-foreground: #101a12;
+    --warning: #facc15;
+    --warning-foreground: #2a2408;
+    --info: #60a5fa;
+    --info-foreground: #101a12;
+    --border: rgba(255, 255, 255, 0.07);
+    --input: rgba(255, 255, 255, 0.09);
+    --ring: #22c55e;
+    --chart-1: #22c55e;
+    --chart-2: #facc15;
+    --chart-3: #60a5fa;
+    --chart-4: #ea580c;
+    --chart-5: #8b5cf6;
+    --sidebar: #131e19;
+    --sidebar-foreground: #e8f5ec;
+    --sidebar-primary: #22c55e;
+    --sidebar-primary-foreground: #101a12;
+    --sidebar-accent: #1c2e25;
+    --sidebar-accent-foreground: #f2f9f4;
+    --sidebar-border: rgba(255, 255, 255, 0.05);
+    --sidebar-ring: #22c55e;
+    --glass-bg: rgba(24, 45, 35, 0.97);
+    --glass-bg-strong: rgba(18, 36, 28, 0.99);
+    --glass-border: rgba(255, 255, 255, 0.09);
+    --glass-shadow: 0 8px 32px -8px rgba(0, 0, 0, 0.55), 0 2px 8px -2px rgba(0, 0, 0, 0.4);
+    --glass-shadow-lg: 0 24px 64px -16px rgba(0, 0, 0, 0.7), 0 8px 24px -8px rgba(0, 0, 0, 0.45);
+    --gradient-bg: radial-gradient(at 10% 5%, rgba(60, 135, 80, 0.28) 0%, transparent 45%), radial-gradient(at 92% 8%, rgba(100, 90, 30, 0.18) 0%, transparent 50%), radial-gradient(at 50% 100%, rgba(40, 80, 60, 0.35) 0%, transparent 55%);
+    --gradient-primary: linear-gradient(135deg, #16a34a, #22c55e);
+    --gradient-accent: linear-gradient(135deg, #facc15, #eab308);
+    --gradient-edg: linear-gradient(135deg, #22c55e 0%, #facc15 100%);
+  }
+
+  .glass-subtle {
+    background: rgba(255, 255, 255, 0.95);
+    border-color: #dde8e1;
+  }
+
+  .dark .glass-subtle {
+    background: rgba(24, 45, 35, 0.97);
+    border-color: rgba(255, 255, 255, 0.07);
+  }
+}
+
+/* Fix Edge ≥ 111 : détection JS via data-edge sur <html> → même neutralisation */
+[data-edge] *, [data-edge] *::before, [data-edge] *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
 @layer base {
   * {
     border-color: var(--color-border);

@@ -40,6 +40,7 @@ from api.routes import (
     unity_router,
     organigram_router,
     directions_router,
+    departments_router,
     units_router,
     public_dirs_router,
     account_router,
@@ -66,6 +67,7 @@ from api.routes import (
     users_router,
     users_me_router,
     users_avatars_router,
+    users_staff_router,
     knowledge_router,
     knowledge_public_router,
     stats_router,
@@ -251,6 +253,7 @@ app.include_router(unity_router,                 prefix=_API)
 app.include_router(organigram_router,            prefix=_API)
 app.include_router(public_dirs_router,           prefix=_API)
 app.include_router(directions_router,            prefix=_API)
+app.include_router(departments_router,           prefix=_API)
 app.include_router(units_router,                 prefix=_API)
 app.include_router(account_router,               prefix=_API)
 app.include_router(public_request_router,        prefix=_API)
@@ -275,6 +278,7 @@ app.include_router(communication_setting_router,   prefix=_API)
 app.include_router(admin_config_router,          prefix=_API)
 app.include_router(users_avatars_router,         prefix=_API)
 app.include_router(users_me_router,              prefix=_API)
+app.include_router(users_staff_router,           prefix=_API)
 app.include_router(users_router,                 prefix=_API)
 app.include_router(knowledge_public_router,      prefix=_API)
 app.include_router(knowledge_router,             prefix=_API)

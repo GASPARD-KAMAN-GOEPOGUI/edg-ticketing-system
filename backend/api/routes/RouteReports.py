@@ -5,7 +5,8 @@ Endpoints JSON :
   GET /reports/daily?date=YYYY-MM-DD
   GET /reports/monthly?year=YYYY&month=MM
   GET /reports/by-agent?start=...&end=...&unity_id=...
-  GET /reports/by-unity?start=...&end=...
+  GET /reports/by-unity?start=...&end=...&direction_id=...
+  GET /reports/decision?start=...&end=...&direction_id=...
   GET /reports/sla?start=...&end=...
 
 Exports (ajout de ?format=csv|excel|pdf) :
@@ -13,20 +14,21 @@ Exports (ajout de ?format=csv|excel|pdf) :
   GET /reports/monthly/export
   GET /reports/by-agent/export
   GET /reports/by-unity/export
+  GET /reports/decision/export
   GET /reports/sla/export
 
-Accès : chief, director, dg, admin
+Accès : chief, director, admin
 """
 from __future__ import annotations
 
 from datetime import date
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.dependencies import get_db, require_roles
+from api.dependencies import get_db, get_current_user, require_roles
 from api.services.ServiceReport import ReportService
 from api.services.ServiceExport import (
     ExportFormat,
@@ -39,7 +41,7 @@ from api.services.ServiceExport import (
 router = APIRouter(
     prefix="/reports",
     tags=["reports"],
-    dependencies=[Depends(require_roles("chief", "director", "dg", "admin"))],
+    dependencies=[Depends(require_roles("chief", "director", "admin"))],
 )
 
 
@@ -65,6 +67,21 @@ def _do_export(
     else:
         data = export_pdf(rows, columns, headers=headers, title=title, subtitle=subtitle)
     return build_response(data, fmt, filename)
+
+
+def _apply_decision_scope(
+    actor,
+    direction_id: Optional[int],
+    unity_id: Optional[int],
+) -> tuple[Optional[int], Optional[int]]:
+    role = getattr(actor, "role", None)
+    if role == "director":
+        actor_direction_id = getattr(actor, "direction_id", None)
+        direction_id = int(actor_direction_id) if actor_direction_id else -1
+    elif role == "chief":
+        actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
+        unity_id = int(actor_unity_id) if actor_unity_id else -1
+    return direction_id, unity_id
 
 
 # ── Rapport journalier ────────────────────────────────────────────────────────
@@ -180,21 +197,29 @@ async def export_by_agent(
 async def unity_report(
     start: Optional[date] = Query(None),
     end: Optional[date] = Query(None),
+    direction_id: Optional[int] = Query(None),
+    actor=Depends(get_current_user),
     svc: ReportService = Depends(_svc),
 ):
     """Tickets par unité organisationnelle."""
-    return await svc.unity_report(start, end)
+    if actor.role == "director":
+        direction_id = int(actor.direction_id) if actor.direction_id else None
+    return await svc.unity_report(start, end, direction_id=direction_id)
 
 
 @router.get("/by-unity/export")
 async def export_by_unity(
     start: Optional[date] = Query(None),
     end: Optional[date] = Query(None),
+    direction_id: Optional[int] = Query(None),
     fmt: ExportFormat = Query("excel", alias="format"),
+    actor=Depends(get_current_user),
     svc: ReportService = Depends(_svc),
 ):
     """Export du rapport par unité (csv | excel | pdf)."""
-    rows = await svc.unity_report(start, end)
+    if actor.role == "director":
+        direction_id = int(actor.direction_id) if actor.direction_id else None
+    rows = await svc.unity_report(start, end, direction_id=direction_id)
     cols = ["unity_label", "unity_codename", "total", "resolved", "active", "sla_breached", "resolution_rate"]
     hdrs = ["Service / Unité", "Code", "Total", "Résolus", "Actifs", "SLA breach", "Taux (%)"]
 
@@ -203,6 +228,122 @@ async def export_by_unity(
         filename="rapport_par_service",
         title="Rapport par Service / Unité",
         subtitle="Période : {} → {}".format(start or "J-30", end or "Aujourd'hui"),
+    )
+
+
+# ── Rapport décisionnel ──────────────────────────────────────────────────────
+
+@router.get("/decision")
+async def decision_report(
+    start: Optional[date] = Query(None),
+    end: Optional[date] = Query(None),
+    direction_id: Optional[int] = Query(None),
+    unity_id: Optional[int] = Query(None),
+    assignee_id: Optional[int] = Query(None),
+    status: Optional[str] = Query(None),
+    category: Optional[str] = Query(None),
+    priority: Optional[str] = Query(None),
+    source: Optional[str] = Query(None),
+    origin: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    group_by: Literal["direction", "service", "status", "category", "priority", "assignee", "period"] = Query("service"),
+    inactive_days: int = Query(3, ge=0, le=365),
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=500),
+    sort_by: str = Query("created_at"),
+    sort_dir: Literal["asc", "desc"] = Query("desc"),
+    include_tickets: bool = Query(False),
+    include_audit_rows: bool = Query(False),
+    actor=Depends(get_current_user),
+    svc: ReportService = Depends(_svc),
+):
+    """Moteur décisionnel EDG → direction → service → agent → ticket."""
+    direction_id, unity_id = _apply_decision_scope(actor, direction_id, unity_id)
+    return await svc.decision_report(
+        start,
+        end,
+        direction_id=direction_id,
+        unity_id=unity_id,
+        assignee_id=assignee_id,
+        status=status,
+        category=category,
+        priority=priority,
+        source=source,
+        origin=origin,
+        search=search,
+        group_by=group_by,
+        inactive_days=inactive_days,
+        page=page,
+        limit=limit,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+        include_tickets=include_tickets,
+        include_audit_rows=include_audit_rows,
+        generated_by=getattr(actor, "email", None) or getattr(actor, "name", None),
+    )
+
+
+@router.get("/decision/export")
+async def export_decision_report(
+    start: Optional[date] = Query(None),
+    end: Optional[date] = Query(None),
+    direction_id: Optional[int] = Query(None),
+    unity_id: Optional[int] = Query(None),
+    assignee_id: Optional[int] = Query(None),
+    status: Optional[str] = Query(None),
+    category: Optional[str] = Query(None),
+    priority: Optional[str] = Query(None),
+    source: Optional[str] = Query(None),
+    origin: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    group_by: Literal["global", "executive", "direction", "service", "status", "category", "priority", "assignee", "period", "audit"] = Query("direction"),
+    inactive_days: int = Query(3, ge=0, le=365),
+    sort_by: str = Query("total_tickets"),
+    sort_dir: Literal["asc", "desc"] = Query("desc"),
+    fmt: ExportFormat = Query("excel", alias="format"),
+    actor=Depends(get_current_user),
+    svc: ReportService = Depends(_svc),
+):
+    """Export du rapport décisionnel avec les filtres appliqués."""
+    direction_id, unity_id = _apply_decision_scope(actor, direction_id, unity_id)
+    data = await svc.decision_report(
+        start,
+        end,
+        direction_id=direction_id,
+        unity_id=unity_id,
+        assignee_id=assignee_id,
+        status=status,
+        category=category,
+        priority=priority,
+        source=source,
+        origin=origin,
+        search=search,
+        group_by=("service" if group_by in {"global", "executive", "audit"} else group_by),
+        inactive_days=inactive_days,
+        page=1,
+        limit=500,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+        include_tickets=False,
+        include_audit_rows=group_by == "audit",
+        generated_by=getattr(actor, "email", None) or getattr(actor, "name", None),
+    )
+    rows = svc.decision_export_rows(data, group_by=group_by)
+    cols = list(rows[0].keys()) if rows else ["periode", "genere_le", "genere_par", "filtres"]
+    hdrs = cols
+
+    return _do_export(
+        rows,
+        cols,
+        hdrs,
+        fmt,
+        filename=f"rapport_decisionnel_{group_by}",
+        title="Rapport décisionnel EDG",
+        subtitle="Période : {} → {} | Groupe : {}".format(
+            data["period"]["start"],
+            data["period"]["end"],
+            group_by,
+        ),
     )
 
 

@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_db, get_current_user, require_roles
-from api.schemas.SchemaRequest import RequestCreate, RequestWorkflowCreate, RequestUpdate, RequestResponse, RequestSearch
+from api.schemas.SchemaRequest import RequestCreate, RequestWorkflowCreate, RequestUpdate, RequestResponse, RequestListItemResponse, RequestSearch
 from api.schemas.SchemaWorkflowDetail import WorkflowDetailResponse
 from api.schemas.SchemaEscalation import EscalationResponse
 from api.schemas.SchemaAttachment import AttachmentResponse
@@ -18,7 +18,9 @@ from api.schemas.base import PaginatedResponse
 from api.services import RequestService, AttachmentService
 from api.repositories import WorkflowDetailRepository, WorkflowRepository
 from api.services.ServiceClamAV import scan_bytes as clamav_scan
+from api.core.ticket_actions import assert_escalation_allowed, assert_ticket_action
 from api.core.file_validator import validate_file_magic_bytes
+from api.core.rbac import normalize_role
 from api import storage
 from api.dependencies import get_current_user
 
@@ -41,6 +43,8 @@ async def _get_dir_unity_ids(db: AsyncSession, dir_unity_id: int) -> set[int]:
     """Retourne le set {direction + tous ses services} depuis l'organigramme (2 niveaux)."""
     from sqlalchemy import select as sa_select
     from api.models.ModelOrganigram import Organigram
+    from api.models.ModelUnity import Unity
+
     r1 = await db.execute(
         sa_select(Organigram.id)
         .where(Organigram.unity_id == dir_unity_id, Organigram.deleted_at.is_(None))
@@ -54,6 +58,11 @@ async def _get_dir_unity_ids(db: AsyncSession, dir_unity_id: int) -> set[int]:
             .where(Organigram.parent_id == org_id, Organigram.deleted_at.is_(None))
         )
         ids.update(uid for (uid,) in r2.all())
+    r3 = await db.execute(
+        sa_select(Unity.id)
+        .where(Unity.parent_direction_id == dir_unity_id, Unity.deleted_at.is_(None))
+    )
+    ids.update(uid for (uid,) in r3.all())
     return ids
 
 
@@ -64,12 +73,12 @@ def _check_request_access(actor, req, allowed_dir_unity_ids: set[int] | None = N
 
     Politique d'accès :
       user         → uniquement ses propres demandes
-      agent/chief  → demandes de leur unité exacte
+      agent/chief  → demandes de leur unité ou périmètre file calculé
       director     → demandes de leur direction ET tous ses services (allowed_dir_unity_ids)
-      dg / admin   → accès global
+      admin        → accès global
     """
-    role = actor.role
-    if role in ("dg", "admin"):
+    role = normalize_role(actor.role)
+    if role == "admin":
         return
 
     if role == "user":
@@ -81,9 +90,12 @@ def _check_request_access(actor, req, allowed_dir_unity_ids: set[int] | None = N
         return
 
     if role in ("agent", "chief"):
-        if actor.unity_id and req.unity_id:
-            if str(req.unity_id) == str(actor.unity_id):
-                return
+        allowed_ids = set(allowed_dir_unity_ids or set())
+        if actor.unity_id is not None:
+            allowed_ids.add(int(actor.unity_id))
+        request_ids = {int(req.unity_id)} if req.unity_id is not None else set()
+        if allowed_ids and request_ids.intersection(allowed_ids):
+            return
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Accès refusé : cette demande n'est pas dans votre périmètre.",
@@ -101,11 +113,45 @@ def _check_request_access(actor, req, allowed_dir_unity_ids: set[int] | None = N
 
 
 async def _resolve_access(actor, req, db: AsyncSession) -> None:
-    """Wrapper async : pré-calcule les unity_ids autorisés pour un directeur puis vérifie l'accès."""
+    """Wrapper async : pré-calcule les unity_ids autorisés puis vérifie l'accès."""
     dir_ids = None
-    if actor.role == "director" and actor.unity_id:
+    if normalize_role(actor.role) in ("agent", "chief", "director") and actor.unity_id:
         dir_ids = await _get_dir_unity_ids(db, actor.unity_id)
     _check_request_access(actor, req, dir_ids)
+
+
+async def _check_unity_access(actor, unity_id: str, db: AsyncSession) -> None:
+    role = normalize_role(actor.role)
+    if role == "admin":
+        return
+
+    try:
+        requested_unity_id = int(unity_id)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Identifiant d'unité invalide.",
+        )
+
+    if role in ("agent", "chief"):
+        if actor.unity_id and int(actor.unity_id) == requested_unity_id:
+            return
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Accès refusé : cette unité n'est pas dans votre périmètre.",
+        )
+
+    if role == "director":
+        if actor.unity_id:
+            allowed_ids = await _get_dir_unity_ids(db, int(actor.unity_id))
+            if requested_unity_id in allowed_ids:
+                return
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Accès refusé : cette unité n'est pas dans votre direction.",
+        )
+
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Accès refusé.")
 
 
 def _svc(db: AsyncSession = Depends(get_db)) -> RequestService:
@@ -120,17 +166,50 @@ def _wf_repo(db: AsyncSession = Depends(get_db)) -> WorkflowRepository:
     return WorkflowRepository(db)
 
 
+async def _timeline_workflow(wf_repo: WorkflowRepository, request_id: str):
+    wf = await wf_repo.find_active_workflow(request_id)
+    if wf is not None:
+        return wf
+    workflows = await wf_repo.find_by_request(request_id)
+    return workflows[0] if workflows else None
+
+
 def _att_svc(db: AsyncSession = Depends(get_db)) -> AttachmentService:
     return AttachmentService(db)
 
 
+def _actor_display_name(actor) -> str | None:
+    parts = [getattr(actor, "firstname", None), getattr(actor, "name", None)]
+    return " ".join(part for part in parts if part) or None
+
+
+def _hide_internal_comments(schema: RequestResponse) -> RequestResponse:
+    visible_timelines = []
+    for event in schema.timelines or []:
+        if event.event_type != "comment_added":
+            visible_timelines.append(event)
+            continue
+        infos = event.infos if isinstance(event.infos, dict) else {}
+        if infos.get("is_public") is True:
+            visible_timelines.append(event)
+    return schema.copy(update={"timelines": visible_timelines})
+
+
+def _request_response_for_actor(req, svc: RequestService, actor=None, *, public_only: bool = False) -> RequestResponse:
+    schema = svc._decrypt_schema(RequestResponse.from_orm(req))
+    if public_only or getattr(actor, "role", None) == "user":
+        return _hide_internal_comments(schema)
+    return schema
+
+
 # ── Listes ────────────────────────────────────────────────────────────────────
 
-@router.get("/", response_model=PaginatedResponse)
+@router.get("/", response_model=PaginatedResponse[RequestListItemResponse])
 async def list_requests(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=1000),
     request_status: Optional[str] = Query(None),
+    exclude_status: Optional[str] = Query(None),
     is_external: Optional[bool] = Query(None),
     direction_id: Optional[str] = Query(None),
     unit_id: Optional[str] = Query(None),
@@ -172,16 +251,17 @@ async def list_requests(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Compte non rattaché à une direction. Contactez un administrateur.",
             )
-    # dg, admin : visibilité globale — filtres client acceptés
+    # admin : visibilité globale — filtres client acceptés
 
     has_filter = any(v is not None for v in [
-        request_status, is_external, direction_id, unit_id,
+        request_status, exclude_status, is_external, direction_id, unit_id,
         assignee_id, requester_id, sla_breached, in_triage, search,
         date_from, date_to,
     ])
     if has_filter:
         return await svc.list_filtered(
             request_status=request_status,
+            exclude_status=exclude_status,
             is_external=is_external,
             direction_id=direction_id,
             unit_id=unit_id,
@@ -198,10 +278,10 @@ async def list_requests(
     return await svc.list_all(page=page, limit=limit)
 
 
-_staff = Depends(require_roles("agent", "chief", "director", "dg", "admin"))
+_staff = Depends(require_roles("agent", "chief", "director", "admin"))
 
 
-@router.get("/triage", response_model=PaginatedResponse)
+@router.get("/triage", response_model=PaginatedResponse[RequestListItemResponse])
 async def list_triage(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
@@ -211,7 +291,7 @@ async def list_triage(
     return await svc.list_pending_triage(page=page, limit=limit)
 
 
-@router.get("/sla-breached", response_model=PaginatedResponse)
+@router.get("/sla-breached", response_model=PaginatedResponse[RequestListItemResponse])
 async def list_sla_breached(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
@@ -226,7 +306,7 @@ async def stats_by_status(_=_staff, svc: RequestService = Depends(_svc)):
     return await svc.count_by_status()
 
 
-@router.get("/search", response_model=PaginatedResponse)
+@router.get("/search", response_model=PaginatedResponse[RequestListItemResponse])
 async def search_requests(
     q: str = Query(..., min_length=1),
     page: int = Query(1, ge=1),
@@ -248,19 +328,23 @@ async def track_request(
     svc: RequestService = Depends(_svc),
 ):
     """Suivi public — nécessite ref + (email ou téléphone) du compte ayant créé la demande."""
-    return await svc.track(ref.strip().upper(), email=email, phone=phone)
+    req = await svc.track(ref.strip().upper(), email=email, phone=phone)
+    return _request_response_for_actor(req, svc, public_only=True)
 
 
-@router.get("/queue", response_model=PaginatedResponse)
+@router.get("/queue", response_model=PaginatedResponse[RequestListItemResponse])
 async def list_queue(
     page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
+    # le=200 (pas 100) : "Mes tickets" et la boîte de traitement du chef appellent
+    # cet endpoint avec limit=200 pour afficher une vue complète sans pagination.
+    limit: int = Query(20, ge=1, le=200),
     direction_id: Optional[str] = Query(None),
     assignee_id: Optional[str] = Query(None),
+    unassigned_only: bool = Query(False),
     priority: Optional[str] = Query(None),
     request_status: Optional[str] = Query(None),
     search: Optional[str] = Query(None, min_length=1),
-    actor=Depends(require_roles("agent", "chief", "director", "dg", "admin")),
+    actor=Depends(require_roles("agent", "chief", "director", "admin")),
     svc: RequestService = Depends(_svc),
 ):
     """File d'attente active — réservée aux agents et supérieurs, filtrée par périmètre."""
@@ -270,6 +354,7 @@ async def list_queue(
     return await svc.list_queue(
         direction_id=direction_id,
         assignee_id=assignee_id,
+        unassigned_only=unassigned_only,
         priority=priority,
         request_status=request_status,
         search=search,
@@ -281,8 +366,9 @@ async def list_queue(
 class QualifyTriageBody(BaseModel):
     category: str
     priority: str
-    direction_id: str
+    direction_id: Optional[str] = None
     unit_id: Optional[str] = None
+    assignee_id: Optional[str] = None
 
 
 @router.post("/{id}/qualify", response_model=RequestResponse)
@@ -293,10 +379,17 @@ async def qualify_triage(
     svc: RequestService = Depends(_svc),
 ):
     """Qualifie une demande de triage — réservé agent, chief, admin."""
-    return await svc.qualify_triage(id, body.dict(exclude_none=True), actor_id=str(actor.id))
+    return await svc.qualify_triage(
+        id,
+        body.dict(exclude_none=True),
+        actor_id=str(actor.id),
+        actor_name=_actor_display_name(actor),
+        actor_role=actor.role,
+        actor=actor,
+    )
 
 
-@router.get("/by-status/{request_status}", response_model=PaginatedResponse)
+@router.get("/by-status/{request_status}", response_model=PaginatedResponse[RequestListItemResponse])
 async def list_by_status(
     request_status: str,
     page: int = Query(1, ge=1),
@@ -307,7 +400,7 @@ async def list_by_status(
     return await svc.list_by_status(request_status, page=page, limit=limit)
 
 
-@router.get("/by-assignee/{assignee_id}", response_model=PaginatedResponse)
+@router.get("/by-assignee/{assignee_id}", response_model=PaginatedResponse[RequestListItemResponse])
 async def list_by_assignee(
     assignee_id: str,
     page: int = Query(1, ge=1),
@@ -318,7 +411,7 @@ async def list_by_assignee(
     return await svc.list_by_assignee(assignee_id, page=page, limit=limit)
 
 
-@router.get("/by-requester/{requester_id}", response_model=PaginatedResponse)
+@router.get("/by-requester/{requester_id}", response_model=PaginatedResponse[RequestListItemResponse])
 async def list_by_requester(
     requester_id: str,
     page: int = Query(1, ge=1),
@@ -334,27 +427,31 @@ async def list_by_requester(
     return await svc.list_by_requester(requester_id, page=page, limit=limit)
 
 
-@router.get("/by-direction/{direction_id}", response_model=PaginatedResponse)
+@router.get("/by-direction/{direction_id}", response_model=PaginatedResponse[RequestListItemResponse])
 async def list_by_direction(
     direction_id: str,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    _=_staff,
+    actor=Depends(require_roles("agent", "chief", "director", "admin")),
     svc: RequestService = Depends(_svc),
+    db: AsyncSession = Depends(get_db),
 ):
+    await _check_unity_access(actor, direction_id, db)
     return await svc.list_by_direction(direction_id, page=page, limit=limit)
 
 
-@router.get("/by-unit/{unit_id}", response_model=PaginatedResponse)
-async def list_by_unit(
-    unit_id: str,
+@router.get("/by-unity/{unity_id}", response_model=PaginatedResponse[RequestListItemResponse])
+async def list_by_unity(
+    unity_id: str,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    _=_staff,
+    actor=Depends(require_roles("agent", "chief", "director", "admin")),
     svc: RequestService = Depends(_svc),
+    db: AsyncSession = Depends(get_db),
 ):
     """Requêtes d'une unité spécifique."""
-    return await svc.list_by_unit(unit_id, page=page, limit=limit)
+    await _check_unity_access(actor, unity_id, db)
+    return await svc.list_by_unity(unity_id, page=page, limit=limit)
 
 
 @router.get("/ref/{ref}", response_model=RequestResponse)
@@ -362,31 +459,26 @@ async def get_by_ref(
     ref: str,
     actor=Depends(get_current_user),
     svc: RequestService = Depends(_svc),
+    db: AsyncSession = Depends(get_db),
 ):
     """H-07 — ownership check : un user ne voit que ses propres demandes."""
     req = await svc.get_by_ref(ref)
-    if actor.role == "user" and str(req.requester_id) != str(actor.id):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Accès refusé à cette demande.",
-        )
-    return svc._decrypt_schema(RequestResponse.from_orm(req))
+    await _resolve_access(actor, req, db)
+    return _request_response_for_actor(req, svc, actor)
 
 
 @router.get("/{id}", response_model=RequestResponse)
 async def get_request(
     id: str,
+    include_deleted: bool = Query(False, description="Admin uniquement : inclut les tickets archivés/supprimés."),
     actor=Depends(get_current_user),
     svc: RequestService = Depends(_svc),
+    db: AsyncSession = Depends(get_db),
 ):
     """H-07 — ownership check : un user ne voit que ses propres demandes."""
-    req = await svc.get_by_id(id)
-    if actor.role == "user" and str(req.requester_id) != str(actor.id):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Accès refusé à cette demande.",
-        )
-    return svc._decrypt_schema(RequestResponse.from_orm(req))
+    req = await svc.get_by_id(id, include_deleted=include_deleted and actor.role == "admin")
+    await _resolve_access(actor, req, db)
+    return _request_response_for_actor(req, svc, actor)
 
 
 # ── Premier résultat filtré (pattern edgrh GET /items/) ───────────────────────
@@ -445,14 +537,25 @@ async def update_request(
     svc: RequestService = Depends(_svc),
 ):
     data = body.dict(exclude_unset=True)
-    if actor.role == "user":
+    req = await svc.get_by_id(id)
+    if str(req.requester_id) == str(actor.id):
+        # Quand l'acteur est le demandeur, il garde uniquement les droits demandeur.
+        # Les actions metier sensibles passent par leurs routes dediees.
+        allowed = {"title", "description"}
+        data = {k: v for k, v in data.items() if k in allowed}
+    elif actor.role == "user":
         # Un utilisateur ne peut modifier que ses propres demandes (titre + description)
-        req = await svc.get_by_id(id)
         if str(req.requester_id) != str(actor.id):
             raise HTTPException(status_code=403, detail="Vous ne pouvez modifier que vos propres demandes.")
         allowed = {"title", "description"}
         data = {k: v for k, v in data.items() if k in allowed}
-    return await svc.update(id, data, actor_id=str(actor.id))
+    return await svc.update(
+        id,
+        data,
+        actor_id=str(actor.id),
+        actor_name=_actor_display_name(actor),
+        actor_role=actor.role,
+    )
 
 
 class RequesterEditBody(BaseModel):
@@ -489,8 +592,15 @@ async def assign_request(
     actor=Depends(require_roles("agent", "chief", "admin")),
     svc: RequestService = Depends(_svc),
 ):
-    """Assignation d'une demande — DG interdit (rôles autorisés : agent, chief, admin)."""
-    return await svc.assign(id, assignee_id, actor_id=str(actor.id))
+    """Assignation d'une demande — rôles autorisés : agent, chief, admin."""
+    return await svc.assign(
+        id,
+        assignee_id,
+        actor_id=str(actor.id),
+        actor_name=_actor_display_name(actor),
+        actor_role=actor.role,
+        actor=actor,
+    )
 
 
 @router.post("/{id}/resolve", response_model=RequestResponse)
@@ -500,7 +610,13 @@ async def resolve_request(
     svc: RequestService = Depends(_svc),
 ):
     """Résolution — réservé agent, chef, directeur, admin."""
-    return await svc.resolve(id, actor_id=str(actor.id))
+    return await svc.resolve(
+        id,
+        actor_id=str(actor.id),
+        actor_name=_actor_display_name(actor),
+        actor_role=actor.role,
+        actor=actor,
+    )
 
 
 @router.post("/{id}/close", response_model=RequestResponse)
@@ -524,12 +640,22 @@ async def close_request(
             )
     elif actor.role not in ("agent", "chief", "director", "admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Accès refusé.")
-    return await svc.close(id, actor_id=str(actor.id))
+    return await svc.close(
+        id,
+        actor_id=str(actor.id),
+        actor_name=_actor_display_name(actor),
+        actor_role=actor.role,
+        actor=actor,
+    )
 
 
 class ReopenRequestBody(BaseModel):
     reason: str
     actor_name: Optional[str] = None
+
+
+class RejectReopenBody(BaseModel):
+    reason: str
 
 
 @router.post("/{id}/request-reopen", response_model=RequestResponse, status_code=status.HTTP_200_OK)
@@ -552,7 +678,9 @@ async def user_request_reopen(
     return await svc.request_reopen(
         id,
         actor_id=str(actor.id),
-        actor_name=body.actor_name or actor.name,
+        actor_name=body.actor_name or _actor_display_name(actor) or actor.name,
+        actor_role=actor.role,
+        actor=actor,
         reason=body.reason,
     )
 
@@ -560,11 +688,35 @@ async def user_request_reopen(
 @router.post("/{id}/reopen", response_model=RequestResponse)
 async def reopen_request(
     id: str,
-    actor=Depends(require_roles("agent", "chief", "director", "admin")),
+    actor=Depends(require_roles("chief", "director", "admin")),
     svc: RequestService = Depends(_svc),
 ):
     """Phase 2 — Le chef approuve la réouverture (change le statut en REOPENED)."""
-    return await svc.reopen(id, actor_id=str(actor.id), actor_name=getattr(actor, "name", None))
+    return await svc.reopen(
+        id,
+        actor_id=str(actor.id),
+        actor_name=_actor_display_name(actor),
+        actor_role=actor.role,
+        actor=actor,
+    )
+
+
+@router.post("/{id}/reject-reopen", response_model=RequestResponse)
+async def reject_reopen_request(
+    id: str,
+    body: RejectReopenBody,
+    actor=Depends(require_roles("chief", "director", "admin")),
+    svc: RequestService = Depends(_svc),
+):
+    """Phase 2 — Le chef refuse la réouverture avec motif obligatoire."""
+    return await svc.reject_reopen(
+        id,
+        actor_id=str(actor.id),
+        actor_name=_actor_display_name(actor),
+        actor_role=actor.role,
+        actor=actor,
+        reason=body.reason,
+    )
 
 
 @router.post("/{id}/cancel", response_model=RequestResponse)
@@ -584,7 +736,14 @@ async def cancel_request(
             )
     elif actor.role not in ("agent", "chief", "director", "admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Accès refusé.")
-    return await svc.cancel(id, actor_id=str(actor.id), reason=reason)
+    return await svc.cancel(
+        id,
+        actor_id=str(actor.id),
+        actor_name=_actor_display_name(actor),
+        actor_role=actor.role,
+        actor=actor,
+        reason=reason,
+    )
 
 
 class RejectBody(BaseModel):
@@ -602,8 +761,32 @@ async def reject_request(
     return await svc.reject(
         id,
         actor_id=str(actor.id),
-        actor_name=getattr(actor, "name", None),
+        actor_name=_actor_display_name(actor),
+        actor_role=actor.role,
+        actor=actor,
         reason=body.reason,
+    )
+
+
+class PriorityBody(BaseModel):
+    priority: str
+
+
+@router.post("/{id}/priority", response_model=RequestResponse)
+async def change_request_priority(
+    id: str,
+    body: PriorityBody,
+    actor=Depends(require_roles("chief", "director", "admin")),
+    svc: RequestService = Depends(_svc),
+):
+    """Changement de priorité — autorisé à tous les chefs dans leur périmètre."""
+    return await svc.change_priority(
+        id,
+        body.priority,
+        actor_id=str(actor.id),
+        actor_name=_actor_display_name(actor),
+        actor_role=actor.role,
+        actor=actor,
     )
 
 
@@ -616,7 +799,7 @@ class ReassignBody(BaseModel):
 async def reassign_request(
     id: str,
     body: ReassignBody,
-    actor=Depends(require_roles("chief", "admin")),
+    actor=Depends(require_roles("chief", "director", "admin")),
     svc: RequestService = Depends(_svc),
 ):
     """Réaffectation d'un ticket à un autre service."""
@@ -624,7 +807,33 @@ async def reassign_request(
         id,
         body.target_unity_id,
         actor_id=str(actor.id),
-        actor_name=getattr(actor, "name", None),
+        actor_name=_actor_display_name(actor),
+        actor_role=actor.role,
+        actor=actor,
+        reason=body.reason,
+    )
+
+
+class TransferDirectionBody(BaseModel):
+    target_direction_id: str
+    reason: str
+
+
+@router.post("/{id}/transfer-direction", response_model=RequestResponse)
+async def transfer_direction_request(
+    id: str,
+    body: TransferDirectionBody,
+    actor=Depends(require_roles("director", "admin")),
+    svc: RequestService = Depends(_svc),
+):
+    """Transfert inter-direction — réservé au directeur source et à l'admin."""
+    return await svc.transfer_direction(
+        id,
+        body.target_direction_id,
+        actor_id=str(actor.id),
+        actor_name=_actor_display_name(actor),
+        actor_role=actor.role,
+        actor=actor,
         reason=body.reason,
     )
 
@@ -658,10 +867,19 @@ async def escalate_request(
     svc: RequestService = Depends(_svc),
     detail_repo: WorkflowDetailRepository = Depends(_detail_repo),
     wf_repo: WorkflowRepository = Depends(_wf_repo),
+    db: AsyncSession = Depends(get_db),
 ):
     """Escalade d'une demande — enregistrée comme événement workflow_detail (event_type='escalation_manual')."""
     actor_id = str(actor.id)
     req = await svc.get_by_id(id)
+    await _resolve_access(actor, req, db)
+    if not body.reason.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Le motif d'escalade est obligatoire.",
+        )
+    assert_ticket_action(actor, req, "escalate", target_status="escalated")
+    assert_escalation_allowed(actor, req)
     wf = await wf_repo.find_active_workflow(id)
     if wf is None:
         raise HTTPException(
@@ -674,7 +892,7 @@ async def escalate_request(
         "label": f"Escalade {body.level} — {req.ref}",
         "actor_id": body.from_user_id or actor_id,
         "actor_name": body.from_agent_name or actor.name,
-        "comment": body.reason,
+        "comment": body.reason.strip(),
         "activated": True,
         "infos": {
             "level": body.level,
@@ -683,9 +901,23 @@ async def escalate_request(
             "sla_over_hours": body.sla_over_hours,
             "priority": req.priority,
             "status": "open",
+            "event_status": "escalated",
+            "source_role": actor.role,
+            "actor_role": actor.role,
+            "target_user_id": body.to_user_id,
+            "target_user_name": body.to_agent_name,
+            "target_role": body.level,
+            "old_status": req.request_status,
+            "new_status": "escalated",
         },
     })
-    await svc.update(id, {"request_status": "escalated"}, actor_id=actor_id)
+    await svc.update(
+        id,
+        {"request_status": "escalated"},
+        actor_id=actor_id,
+        actor_name=_actor_display_name(actor),
+        actor_role=actor.role,
+    )
 
     if body.to_user_id:
         from api.services.NotificationEmitter import emit as emit_notif
@@ -693,7 +925,7 @@ async def escalate_request(
             svc.session,
             recipient_id=body.to_user_id,
             title=f"Escalade {body.level} — {req.ref}",
-            body=f"La demande {req.ref} a été escaladée par {body.from_agent_name or actor.name} : {body.reason[:100]}",
+            body=f"La demande {req.ref} a été escaladée par {body.from_agent_name or actor.name} : {body.reason.strip()[:100]}",
             type="warning",
             request_id=str(req.id),
             action_label="Voir la demande",
@@ -751,15 +983,23 @@ async def create_comment(
     event = await detail_repo.create_event({
         "workflow_id": str(wf.id),
         "event_type": "comment_added",
-        "label": body.body[:500],
+        "label": "Commentaire public ajouté" if body.is_public else "Commentaire interne ajouté",
         "actor_id": actor.id,
-        "actor_name": actor.name,
+        "actor_name": _actor_display_name(actor) or actor.name,
         "comment": body.body,
-        "infos": {"is_public": body.is_public},
+        "activated": True,
+        "infos": {
+            "is_public": body.is_public,
+            "visibility": "public" if body.is_public else "internal",
+            "event_status": req.request_status,
+            "request_status": req.request_status,
+            "source_role": actor.role,
+            "actor_role": actor.role,
+        },
     })
 
     # Notifier l'agent assigné quand l'utilisateur répond à une demande en attente
-    if actor.role == "user" and req.request_status in ("pending", "waiting_user"):
+    if actor.role == "user" and req.request_status == "pending":
         assignee_id = getattr(req, "assignee_id", None)
         if assignee_id:
             from api.services.NotificationEmitter import emit as emit_notif
@@ -808,11 +1048,12 @@ async def list_timeline(
     actor=Depends(get_current_user),
     repo: WorkflowDetailRepository = Depends(_detail_repo),
     svc: RequestService = Depends(_svc),
+    db: AsyncSession = Depends(get_db),
 ):
     req = await svc.get_by_id(request_id)
     if req is None:
         raise HTTPException(status_code=404, detail="Demande introuvable")
-    _check_request_access(actor, req)
+    await _resolve_access(actor, req, db)
     return await repo.list_by_request(request_id)
 
 
@@ -825,7 +1066,7 @@ class _TimelineEventBody(BaseModel):
 async def add_timeline_event(
     request_id: str,
     body: _TimelineEventBody,
-    actor=Depends(require_roles("agent", "chief", "director", "dg", "admin")),
+    actor=Depends(require_roles("agent", "chief", "director", "admin")),
     repo: WorkflowDetailRepository = Depends(_detail_repo),
     wf_repo: WorkflowRepository = Depends(_wf_repo),
 ):
@@ -841,7 +1082,12 @@ async def add_timeline_event(
         "event_type": body.event_type,
         "label": body.label,
         "actor_id": actor.id,
-        "actor_name": actor.name,
+        "actor_name": _actor_display_name(actor) or actor.name,
+        "activated": True,
+        "infos": {
+            "source_role": actor.role,
+            "actor_role": actor.role,
+        },
     })
 
 
@@ -876,6 +1122,8 @@ async def upload_attachment(
     actor=Depends(get_current_user),
     svc: AttachmentService = Depends(_att_svc),
     req_svc: RequestService = Depends(_svc),
+    wf_repo: WorkflowRepository = Depends(_wf_repo),
+    detail_repo: WorkflowDetailRepository = Depends(_detail_repo),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -942,6 +1190,28 @@ async def upload_attachment(
         "scan_status": scan_db_status, # C-N°2 — résultat ClamAV
     })
 
+    wf = await _timeline_workflow(wf_repo, request_id)
+    if wf is not None:
+        await detail_repo.create_event({
+            "workflow_id": str(wf.id),
+            "event_type": "attachment_added",
+            "label": f"Pièce jointe ajoutée — {att.filename}",
+            "actor_id": actor.id,
+            "actor_name": _actor_display_name(actor) or actor.name,
+            "activated": True,
+            "infos": {
+                "event_status": req.request_status,
+                "request_status": req.request_status,
+                "source_role": actor.role,
+                "actor_role": actor.role,
+                "attachment_id": str(att.id),
+                "filename": att.filename,
+                "mime_type": real_mime,
+                "size_bytes": len(data),
+                "scan_status": scan_db_status,
+            },
+        })
+
     att.storage_path = storage.presigned_url(storage_path)
     return att
 
@@ -953,15 +1223,45 @@ async def delete_attachment(
     actor=Depends(get_current_user),
     svc: AttachmentService = Depends(_att_svc),
     req_svc: RequestService = Depends(_svc),
+    wf_repo: WorkflowRepository = Depends(_wf_repo),
+    detail_repo: WorkflowDetailRepository = Depends(_detail_repo),
     db: AsyncSession = Depends(get_db),
 ):
     """C-N°4 — ownership check avant suppression d'une pièce jointe."""
     req = await req_svc.get_by_id(request_id)
     await _resolve_access(actor, req, db)
     att = await svc.get_by_id(attachment_id)
-    if att and str(att.request_id) == str(request_id):
-        storage.delete_file(att.storage_path)
+    if str(att.request_id) != str(request_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pièce jointe introuvable.")
+
+    filename = att.filename
+    mime_type = att.mime_type
+    size_bytes = att.size_bytes
+    scan_status = att.scan_status
+    storage.delete_file(att.storage_path)
     await svc.delete(attachment_id)
+
+    wf = await _timeline_workflow(wf_repo, request_id)
+    if wf is not None:
+        await detail_repo.create_event({
+            "workflow_id": str(wf.id),
+            "event_type": "attachment_deleted",
+            "label": f"Pièce jointe supprimée — {filename}",
+            "actor_id": actor.id,
+            "actor_name": _actor_display_name(actor) or actor.name,
+            "activated": True,
+            "infos": {
+                "event_status": req.request_status,
+                "request_status": req.request_status,
+                "source_role": actor.role,
+                "actor_role": actor.role,
+                "attachment_id": str(attachment_id),
+                "filename": filename,
+                "mime_type": mime_type,
+                "size_bytes": size_bytes,
+                "scan_status": scan_status,
+            },
+        })
 
 
 # ── Téléchargement fichiers locaux ────────────────────────────────────────────
@@ -998,55 +1298,10 @@ async def download_file(
         except Exception:
             raise HTTPException(status_code=403, detail="Accès refusé à ce fichier.")
     # Si le chemin ne correspond pas au format attendu, refuser par défaut
-    elif actor.role not in ("dg", "admin"):
+    elif normalize_role(actor.role) != "admin":
         raise HTTPException(status_code=403, detail="Accès refusé à ce fichier.")
 
     return FileResponse(str(full))
-
-
-# ── Fusion de tickets ──────────────────────────────────────────────────────────
-
-class _MergeBody(BaseModel):
-    target_id: str
-
-
-@router.post(
-    "/{id}/merge",
-    response_model=RequestResponse,
-    dependencies=[Depends(require_roles("agent", "chief", "admin"))],
-)
-async def merge_request(
-    id: str,
-    body: _MergeBody,
-    actor=Depends(get_current_user),
-    svc: RequestService = Depends(_svc),
-):
-    """
-    Fusionne la demande {id} (source) dans la demande body.target_id (cible).
-    La demande source est annulée et marquée merged_into_id = target.id.
-    Retourne la demande cible mise à jour.
-    """
-    return await svc.merge(id, body.target_id, actor_id=str(actor.id))
-
-
-# ── Duplication de ticket ──────────────────────────────────────────────────────
-
-@router.post(
-    "/{id}/duplicate",
-    response_model=RequestResponse,
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_roles("agent", "chief", "admin"))],
-)
-async def duplicate_request(
-    id: str,
-    actor=Depends(get_current_user),
-    svc: RequestService = Depends(_svc),
-):
-    """
-    Crée une copie de la demande {id} avec une nouvelle référence et le statut 'new'.
-    L'assignee et le champ merged_into_id ne sont pas copiés.
-    """
-    return await svc.duplicate(id, actor_id=str(actor.id))
 
 
 # ── Suppression avec vérification UUID (pattern edgrh DELETE /{id}/{uuid}) ────

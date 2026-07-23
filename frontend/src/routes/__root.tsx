@@ -122,13 +122,25 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 const themeInitScript = `(function(){try{var k='edg.theme';var s=localStorage.getItem(k);var d=s==='dark';var c=document.documentElement.classList;if(d)c.add('dark');else c.remove('dark');document.documentElement.style.colorScheme=d?'dark':'light';}catch(e){document.documentElement.classList.remove('dark');}})();`;
 
+// Détection Microsoft Edge (Chromium) — neutralise les backdrop-filter qui bloquent
+// les clics sur Edge ≥111 (voir styles.css [data-edge]). Doit s'exécuter avant le
+// premier rendu et sur TOUTES les pages (publiques incluses), d'où le placement ici
+// plutôt que dans un useEffect de layout applicatif.
+const edgeDetectScript = `(function(){try{if(/Edg\\//.test(navigator.userAgent)){document.documentElement.setAttribute('data-edge','');}}catch(e){}})();`;
+
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="fr">
+    // suppressHydrationWarning : themeInitScript/edgeDetectScript (ci-dessous)
+    // mutent volontairement class/style/data-edge sur <html> AVANT l'hydratation
+    // (anti-flash thème sombre + détection Edge) — le mismatch avec le <html>
+    // rendu côté serveur est attendu, pas un bug. Sans ce flag, React logue un
+    // avertissement d'hydratation sur CETTE balise pour absolument chaque page.
+    <html lang="fr" suppressHydrationWarning>
 
       <head>
         <HeadContent />
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        <script dangerouslySetInnerHTML={{ __html: edgeDetectScript }} />
       </head>
       <body>
         {children}

@@ -5,6 +5,8 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, EmailStr, root_validator, validator
 
+from api.core.rbac import normalize_role
+
 from .base import BaseResponse
 
 
@@ -26,15 +28,34 @@ class AccountBase(BaseModel):
     notif_comments: bool = True
     notif_resolutions: bool = True
 
+    @validator("role", pre=True, always=True)
+    def _normalize_role(cls, v):
+        return normalize_role(v)
+
 
 class AccountCreate(AccountBase):
     keycloak_id: Optional[str] = None
+    unit_id: Optional[int] = None       # alias frontend pour unity_id
+    department_id: Optional[int] = None # alias formulaire admin pour unity_id
+    direction_id: Optional[int] = None  # alias formulaire admin pour unity_id
     infos: Optional[Any] = None
+
+    @root_validator(pre=True)
+    def _alias_org_assignment(cls, values):
+        if values.get("unity_id") is None:
+            if values.get("unit_id") is not None:
+                values["unity_id"] = values.get("unit_id")
+            elif values.get("department_id") is not None:
+                values["unity_id"] = values.get("department_id")
+            elif values.get("direction_id") is not None:
+                values["unity_id"] = values.get("direction_id")
+        return values
 
 
 class AccountUpdate(BaseModel):
     unity_id: Optional[int] = None
     unit_id: Optional[int] = None      # alias frontend pour unity_id
+    department_id: Optional[int] = None # alias formulaire admin pour unity_id
     direction_id: Optional[int] = None # ignoré (pas de colonne), accepté pour compatibilité
     name: Optional[str] = None
     firstname: Optional[str] = None
@@ -54,20 +75,22 @@ class AccountUpdate(BaseModel):
     status: Optional[bool] = None
     infos: Optional[Any] = None
 
+    @validator("role", pre=True, always=True)
+    def _normalize_role(cls, v):
+        return normalize_role(v) if v is not None else v
+
     @root_validator(pre=True)
     def _alias_unit_id(cls, values):
-        if values.get("unit_id") is not None and not values.get("unity_id"):
-            try:
-                values["unity_id"] = int(values["unit_id"])
-            except (ValueError, TypeError):
-                pass
+        if values.get("unity_id"):
+            return values
+        for alias in ("unit_id", "department_id", "direction_id"):
+            if values.get(alias) is not None:
+                try:
+                    values["unity_id"] = int(values[alias])
+                except (ValueError, TypeError):
+                    pass
+                break
         return values
-
-    def dict(self, **kwargs):
-        d = super().dict(**kwargs)
-        d.pop("unit_id", None)
-        d.pop("direction_id", None)
-        return d
 
 
 class AccountResponse(BaseResponse):
@@ -97,6 +120,10 @@ class AccountResponse(BaseResponse):
     @validator("unit_id", always=True)
     def _fill_unit_id(cls, v, values):
         return v if v is not None else values.get("unity_id")
+
+    @validator("role", pre=True, always=True)
+    def _normalize_role(cls, v):
+        return normalize_role(v)
 
     class Config:
         orm_mode = True

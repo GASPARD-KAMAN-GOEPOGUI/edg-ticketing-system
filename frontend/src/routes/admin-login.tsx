@@ -19,6 +19,9 @@ import type { Role } from "@/lib/mock-data";
 import { redirect } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/admin-login")({
+  // SSR désactivé : voir login.tsx / app.tsx (isAuthenticated() dépend de
+  // localStorage, absent côté serveur).
+  ssr: false,
   head: () => ({ meta: [{ title: "Console Administrateur — EDG" }] }),
   beforeLoad: () => {
     if (isAuthenticated()) {

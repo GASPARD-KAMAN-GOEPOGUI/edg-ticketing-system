@@ -28,8 +28,6 @@ class TaskTypeEnum(str, Enum):
     DOCUMENTATION  = "documentation"
     COMMUNICATION  = "communication"
     ADMINISTRATIVE = "administrative"
-    REASSIGNMENT   = "reassignment"
-    REOPENING      = "reopening"
 
 
 class TaskStatusEnum(str, Enum):

@@ -3,12 +3,14 @@
  * Endpoints : /users/*, /users/me
  */
 import { apiFetch } from "./client";
+import { normalizeRole } from "../session";
 
 // ── Types bruts backend ───────────────────────────────────────────────────────
 
 export type RawAccount = {
   id: string;
   keycloak_id?: string | null;
+  unity_id?: string | number | null;
   name: string;
   firstname?: string | null;
   email: string;
@@ -18,6 +20,7 @@ export type RawAccount = {
   matricule?: string | null;
   job?: string | null;
   direction_id?: string | number | null;
+  department_id?: string | number | null;
   unit_id?: string | number | null;
   avatar_url?: string | null;
   is_edg_employee: boolean;
@@ -53,6 +56,7 @@ export type AccountUser = {
   notif_resolutions: boolean;
   account_status: string;
   direction_id?: string;
+  department_id?: string;
   unit_id?: string;
 };
 
@@ -78,13 +82,25 @@ export function buildAvatarUrl(avatarPath: string | undefined): string | undefin
 // ── Mapper ────────────────────────────────────────────────────────────────────
 
 export function mapAccount(raw: RawAccount): AccountUser {
+  const role = normalizeRole(raw.role);
+  const unitId = raw.unit_id != null
+    ? String(raw.unit_id)
+    : raw.unity_id != null
+      ? String(raw.unity_id)
+      : undefined;
+  const directionId = raw.direction_id != null
+    ? String(raw.direction_id)
+    : role === "director"
+      ? unitId
+      : undefined;
+
   return {
     id: raw.id,
     name: raw.name,
     firstname: raw.firstname ?? undefined,
     email: raw.email,
     phone: raw.phone ?? undefined,
-    role: raw.role,
+    role,
     avatar: raw.avatar_url ?? undefined,
     matricule: raw.matricule ?? undefined,
     job: raw.job ?? undefined,
@@ -94,8 +110,9 @@ export function mapAccount(raw: RawAccount): AccountUser {
     notif_comments: raw.notif_comments,
     notif_resolutions: raw.notif_resolutions,
     account_status: raw.account_status,
-    direction_id: raw.direction_id != null ? String(raw.direction_id) : undefined,
-    unit_id: raw.unit_id != null ? String(raw.unit_id) : undefined,
+    direction_id: directionId,
+    department_id: raw.department_id != null ? String(raw.department_id) : undefined,
+    unit_id: unitId,
   };
 }
 
@@ -105,6 +122,7 @@ export async function fetchUsers(params?: {
   role?: string;
   search?: string;
   direction_id?: string;
+  unit_id?: string;
   page?: number;
   limit?: number;
 }): Promise<PaginatedAccounts> {
@@ -112,6 +130,7 @@ export async function fetchUsers(params?: {
   if (params?.role) qs.set("role", params.role);
   if (params?.search) qs.set("search", params.search);
   if (params?.direction_id) qs.set("direction_id", params.direction_id);
+  if (params?.unit_id) qs.set("unit_id", params.unit_id);
   if (params?.page) qs.set("page", String(params.page));
   if (params?.limit) qs.set("limit", String(params.limit));
   const raw = await apiFetch<{
@@ -184,7 +203,9 @@ export async function updateUser(
     name: string;
     job: string;
     matricule: string;
+    role: string;
     direction_id: string;
+    department_id: string;
     unit_id: string;
     account_status: string;
     availability: string;
@@ -215,6 +236,7 @@ export async function createUser(data: {
   matricule?: string;
   job?: string;
   direction_id?: string;
+  department_id?: string;
   unit_id?: string;
   is_edg_employee?: boolean;
 }): Promise<AccountUser> {

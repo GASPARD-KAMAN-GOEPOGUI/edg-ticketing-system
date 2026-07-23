@@ -323,6 +323,12 @@ export async function fetchRequestCategories(): Promise<RawRefItem[]> {
   return Array.isArray(raw) ? raw : (raw as { items?: RawRefItem[] }).items ?? [];
 }
 
+/** Endpoint public (tous rôles authentifiés) — utilisé par /app/knowledge, accessible à tous. */
+export async function fetchKnowledgeCategories(): Promise<RawRefItem[]> {
+  const raw = await apiFetch<RawRefItem[]>("/references/knowledge-categories");
+  return Array.isArray(raw) ? raw : (raw as { items?: RawRefItem[] }).items ?? [];
+}
+
 export async function createRefItem(
   table: RefTableName,
   data: { code: string; label: string; sort_order?: number },

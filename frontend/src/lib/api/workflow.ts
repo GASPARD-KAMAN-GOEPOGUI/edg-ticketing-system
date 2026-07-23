@@ -1,6 +1,6 @@
 /**
- * Module API — Workflow & Tâches
- * Endpoints : /requests/:id/workflow, /workflows/:id/*, /tasks/*
+ * Module API — Workflow
+ * Endpoints : /requests/:id/workflow, /workflows/:id/*
  */
 import { apiFetch } from "./client";
 
@@ -32,23 +32,6 @@ export type RawWorkflowDetail = {
   updated_at: string;
 };
 
-export type RawTask = {
-  id: string;
-  task_type: string;
-  request_id: string;
-  workflow_id?: string | null;
-  from_agent_id?: string | null;
-  to_agent_id?: string | null;
-  from_unit_id?: string | null;
-  to_unit_id?: string | null;
-  reason?: string | null;
-  task_status: string;
-  status: boolean;
-  infos?: unknown;
-  created_at: string;
-  updated_at: string;
-};
-
 // ── Types frontend ────────────────────────────────────────────────────────────
 
 export type WorkflowItem = {
@@ -69,20 +52,6 @@ export type WorkflowDetailItem = {
   accepted: boolean;
   activated: boolean;
   workflowStatus: string;
-  createdAt: string;
-};
-
-export type TaskItem = {
-  id: string;
-  taskType: string;
-  requestId: string;
-  workflowId?: string | null;
-  fromAgentId?: string | null;
-  toAgentId?: string | null;
-  fromUnitId?: string | null;
-  toUnitId?: string | null;
-  reason?: string | null;
-  taskStatus: string;
   createdAt: string;
 };
 
@@ -109,22 +78,6 @@ export function mapWorkflowDetail(raw: RawWorkflowDetail): WorkflowDetailItem {
     accepted: raw.accepted,
     activated: raw.activated,
     workflowStatus: raw.workflow_status,
-    createdAt: raw.created_at,
-  };
-}
-
-export function mapTask(raw: RawTask): TaskItem {
-  return {
-    id: raw.id,
-    taskType: raw.task_type,
-    requestId: raw.request_id,
-    workflowId: raw.workflow_id,
-    fromAgentId: raw.from_agent_id,
-    toAgentId: raw.to_agent_id,
-    fromUnitId: raw.from_unit_id,
-    toUnitId: raw.to_unit_id,
-    reason: raw.reason,
-    taskStatus: raw.task_status,
     createdAt: raw.created_at,
   };
 }
@@ -289,68 +242,3 @@ export async function createAutoCircuit(
   };
 }
 
-// ── Tasks ─────────────────────────────────────────────────────────────────────
-
-export type PaginatedTasks = {
-  items: TaskItem[];
-  total: number;
-  page: number;
-  pages: number;
-};
-
-export async function fetchTasks(params?: { page?: number; limit?: number }): Promise<PaginatedTasks> {
-  const qs = new URLSearchParams();
-  if (params?.page) qs.set("page", String(params.page));
-  if (params?.limit) qs.set("limit", String(params.limit));
-  const raw = await apiFetch<{ items: RawTask[]; total: number; page: number; pages: number }>(
-    `/tasks?${qs}`,
-  );
-  return { ...raw, items: raw.items.map(mapTask) };
-}
-
-export async function fetchTask(id: string): Promise<TaskItem> {
-  const raw = await apiFetch<RawTask>(`/tasks/${id}`);
-  return mapTask(raw);
-}
-
-export async function fetchRequestTasks(requestId: string): Promise<PaginatedTasks> {
-  const raw = await apiFetch<{ items: RawTask[]; total: number; page: number; pages: number }>(
-    `/tasks/by-request/${requestId}`,
-  );
-  return { ...raw, items: raw.items.map(mapTask) };
-}
-
-export async function createTask(data: {
-  task_type: "reassignment" | "reopening";
-  request_id: string;
-  workflow_id?: string;
-  from_agent_id?: string;
-  to_agent_id?: string;
-  from_unit_id?: string;
-  to_unit_id?: string;
-  reason?: string;
-}): Promise<TaskItem> {
-  const raw = await apiFetch<RawTask>("/tasks", {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
-  return mapTask(raw);
-}
-
-export async function approveTask(id: string): Promise<TaskItem> {
-  const raw = await apiFetch<RawTask>(`/tasks/${id}/approve`, { method: "POST", body: "{}" });
-  return mapTask(raw);
-}
-
-export async function rejectTask(id: string, rejectionReason?: string): Promise<TaskItem> {
-  const qs = rejectionReason
-    ? `?rejection_reason=${encodeURIComponent(rejectionReason)}`
-    : "";
-  const raw = await apiFetch<RawTask>(`/tasks/${id}/reject${qs}`, { method: "POST", body: "{}" });
-  return mapTask(raw);
-}
-
-export async function cancelTask(id: string): Promise<TaskItem> {
-  const raw = await apiFetch<RawTask>(`/tasks/${id}/cancel`, { method: "POST", body: "{}" });
-  return mapTask(raw);
-}

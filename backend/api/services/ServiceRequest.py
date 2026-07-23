@@ -1,53 +1,48 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy import true as sql_true
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import noload
 
+from api.core.exceptions import ConflictException
 from api.core.error_codes import ErrorCode
 from api.core.event_bus import AppEvent, emit as emit_event
+from api.core.ticket_actions import (
+    BYPASS_TRANSITION_ROLES as _BYPASS_ROLES,
+    TERMINAL_STATUSES,
+    assert_assignment_allowed,
+    assert_action_allowed,
+    assert_role_specific_action_constraints,
+    assert_service_reassignment_allowed,
+    assert_ticket_scope,
+    assert_transition_allowed,
+    normalize_status,
+)
 from api.models.ModelAccount import Account
 from api.models.ModelPriorityDefinition import PriorityDefinition
 from api.models.ModelRequest import Request as RequestModel
 from api.models.ModelRequestCategory import RequestCategory
 from api.models.ModelRequestStatus import RequestStatus
+from api.models.ModelUnity import Unity
 from api.models.ModelWorkflow import Workflow
 from api.repositories import RequestRepository, WorkflowDetailRepository
-from api.schemas.SchemaRequest import RequestResponse
+from api.schemas.SchemaRequest import RequestResponse, RequestListItemResponse
 from api.services.base_service import BaseService
 from api.services.NotificationEmitter import emit as emit_notif
 from api.services.ServiceCrypto import decrypt_field
-
-# Transitions de statut autorisées (CDC §4.1)
-# Clé = statut cible, valeur = ensemble des statuts sources valides
-_ALLOWED_TRANSITIONS: dict[str, set[str]] = {
-    "qualifying":   {"new", "reopened"},
-    "qualified":    {"qualifying"},
-    "assigned":     {"qualified", "qualifying", "new", "reopened"},
-    "in_progress":  {"assigned", "qualifying", "qualified"},
-    "pending":      {"in_progress", "assigned"},
-    "waiting_user": {"in_progress", "assigned"},
-    "escalated":    {"in_progress", "assigned", "pending", "waiting_user", "qualifying"},
-    "resolved":     {"in_progress", "assigned", "escalated", "pending", "waiting_user"},
-    "closed":       {"resolved"},
-    "reopened":     {"resolved", "rejected"},
-    "rejected":     {"new", "qualifying", "qualified", "assigned", "in_progress", "pending"},
-    "cancelled":    {"new", "qualifying", "qualified", "assigned", "in_progress", "pending", "waiting_user"},
-}
-
-# Transitions libres pour admin/dg (bypass matrice)
-_BYPASS_ROLES = frozenset({"admin", "dg"})
 
 # Mapping statut → event_type spécifique (CDC §7 + §8)
 _STATUS_EVENT_MAP: dict[str, str] = {
     "qualifying":   "qualifying",
     "qualified":    "qualified",
+    "assigned":     "assigned",
     "in_progress":  "in_progress",
-    "waiting_user": "waiting_user",
     "rejected":     "rejected",
     "pending":      "pending",
     "escalated":    "escalated",
@@ -55,8 +50,8 @@ _STATUS_EVENT_MAP: dict[str, str] = {
 _STATUS_LABEL_MAP: dict[str, str] = {
     "qualifying":   "Ticket en cours de qualification",
     "qualified":    "Ticket qualifié",
+    "assigned":     "Ticket assigné à un agent",
     "in_progress":  "Prise en charge — traitement en cours",
-    "waiting_user": "En attente de retour utilisateur",
     "rejected":     "Ticket rejeté",
     "pending":      "Ticket en attente",
     "escalated":    "Ticket escaladé",
@@ -69,6 +64,33 @@ class RequestService(BaseService):
         self.repo = RequestRepository(session)
         self.detail_repo = WorkflowDetailRepository(session)
 
+    async def _guard_ticket_action(
+        self,
+        id: str,
+        action: str,
+        *,
+        target_status: Optional[str] = None,
+        actor=None,
+        actor_role: Optional[str] = None,
+    ):
+        obj = await self.get_by_id(id)
+        effective_role = str(getattr(actor, "role", actor_role or "") or "")
+        if effective_role:
+            assert_action_allowed(effective_role, action)
+        if actor is not None:
+            allowed_dir_unity_ids = None
+            if effective_role.strip().lower() in {"agent", "chief", "director"}:
+                allowed_dir_unity_ids = await self._direction_unity_ids(getattr(actor, "unity_id", None))
+            assert_ticket_scope(actor, obj, action=action, allowed_dir_unity_ids=allowed_dir_unity_ids)
+            assert_role_specific_action_constraints(actor, obj, action)
+        if target_status is not None:
+            assert_transition_allowed(
+                obj.request_status,
+                target_status,
+                actor_role=effective_role or None,
+            )
+        return obj
+
     # ── Helper : traduit codes string → IDs FK ────────────────────────────────
 
     async def _translate_codes(self, data: dict) -> dict:
@@ -76,6 +98,7 @@ class RequestService(BaseService):
         if "request_status" in out:
             code = out.pop("request_status")
             if code is not None:
+                code = normalize_status(code)
                 r = await self.session.execute(
                     select(RequestStatus.id)
                     .where(RequestStatus.code == code)
@@ -132,6 +155,15 @@ class RequestService(BaseService):
                     out["priority_definition_id"] = prio_id
         if "source" in out:
             out["request_source"] = out.pop("source")
+        if "direction_id" in out:
+            # direction_id n'est pas une vraie colonne (propriété calculée) — une direction
+            # est elle-même une Unity racine, donc on la retient comme unity_id UNIQUEMENT
+            # si aucun service plus précis n'a déjà été fourni. Le ticket reste orienté via
+            # le routage automatique (routing_rule) ou la file de triage (in_triage), cette
+            # traduction ne fait que conserver la suggestion de direction au lieu de la perdre.
+            dir_id = out.pop("direction_id")
+            if dir_id is not None and not out.get("unity_id"):
+                out["unity_id"] = dir_id
         return out
 
     # ── Helper : workflow ─────────────────────────────────────────────────────
@@ -153,35 +185,172 @@ class RequestService(BaseService):
         await self.session.flush()
         return wf.id
 
+    @staticmethod
+    def _account_display_name(account_or_name=None, firstname: Optional[str] = None) -> Optional[str]:
+        """Nom lisible stable pour la timeline, sans exposer de logique UI."""
+        if account_or_name is None and not firstname:
+            return None
+        if isinstance(account_or_name, str):
+            name = account_or_name
+        else:
+            name = getattr(account_or_name, "name", None)
+            firstname = getattr(account_or_name, "firstname", firstname)
+        parts = [p for p in (firstname, name) if p]
+        return " ".join(parts) if parts else None
+
+    @staticmethod
+    def _clean_infos(infos: dict[str, Any]) -> dict[str, Any]:
+        return {k: v for k, v in infos.items() if v is not None}
+
+    @staticmethod
+    def _reference_part(value: str | None, fallback: str) -> str:
+        raw = value or fallback
+        ascii_value = unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode("ascii")
+        compact = re.sub(r"[^A-Za-z0-9]", "", ascii_value).upper()
+        return (compact or fallback.upper()).ljust(3, "X")[:3]
+
+    @staticmethod
+    def _unity_ref_source(unity: Unity | None, *, prefer_tail: bool = False) -> str | None:
+        if unity is None:
+            return None
+        if unity.aleas:
+            return unity.aleas
+        if unity.codename:
+            if prefer_tail:
+                parts = [p for p in re.split(r"[-_\s]+", unity.codename) if p]
+                return parts[-1] if parts else unity.codename
+            return unity.codename
+        return unity.label
+
+    async def _ref_unity_by_id(self, unity_id: Any) -> Unity | None:
+        if unity_id is None:
+            return None
+        try:
+            normalized_id = int(unity_id)
+        except (TypeError, ValueError):
+            return None
+        row = await self.session.execute(
+            select(Unity)
+            .where(Unity.id == normalized_id)
+            .where(Unity.deleted_at.is_(None))
+            .limit(1)
+        )
+        return row.scalar_one_or_none()
+
+    async def _requester_ref_unities(self, data: dict) -> tuple[Unity | None, Unity | None]:
+        requester_unity: Unity | None = None
+        requester_id = data.get("requester_id")
+        if requester_id is not None:
+            try:
+                requester_id_int = int(requester_id)
+            except (TypeError, ValueError):
+                requester_id_int = 0
+            if requester_id_int:
+                row = await self.session.execute(
+                    select(Account.unity_id)
+                    .where(Account.id == requester_id_int)
+                    .where(Account.deleted_at.is_(None))
+                    .limit(1)
+                )
+                requester_unity = await self._ref_unity_by_id(row.scalar_one_or_none())
+
+        unit = (
+            requester_unity
+            or await self._ref_unity_by_id(data.get("on_behalf_unity_id"))
+            or await self._ref_unity_by_id(data.get("unity_id"))
+            or await self._ref_unity_by_id(data.get("direction_id"))
+        )
+        direction = await self._ref_unity_by_id(unit.parent_direction_id) if unit and unit.parent_direction_id else unit
+        return direction, unit
+
+    async def _build_reference_base(self, data: dict, submitted_at: datetime) -> str:
+        direction, unit = await self._requester_ref_unities(data)
+        direction_code = self._reference_part(self._unity_ref_source(direction), "GEN")
+        unit_code = self._reference_part(self._unity_ref_source(unit, prefer_tail=True), "UNK")
+        stamp = (
+            f"{submitted_at:%H%M%S}"
+            f"{submitted_at.year % 1000:03d}"
+            f"{submitted_at:%m%d}"
+        )
+        return f"{direction_code}-{unit_code}-{stamp}"
+
+    async def _direction_unity_ids(self, direction_id: int | str | None) -> set[int]:
+        """Retourne la direction et ses services via organigramme + parent_direction_id."""
+        if direction_id is None:
+            return set()
+        try:
+            root_id = int(direction_id)
+        except (TypeError, ValueError):
+            return set()
+
+        from api.models.ModelOrganigram import Organigram
+
+        ids: set[int] = {root_id}
+        org_row = await self.session.execute(
+            select(Organigram.id)
+            .where(Organigram.unity_id == root_id, Organigram.deleted_at.is_(None))
+            .limit(1)
+        )
+        org_id = org_row.scalar_one_or_none()
+        if org_id:
+            child_rows = await self.session.execute(
+                select(Organigram.unity_id)
+                .where(Organigram.parent_id == org_id, Organigram.deleted_at.is_(None))
+            )
+            ids.update(int(uid) for (uid,) in child_rows.all() if uid is not None)
+
+        unity_rows = await self.session.execute(
+            select(Unity.id)
+            .where(Unity.parent_direction_id == root_id, Unity.deleted_at.is_(None))
+        )
+        ids.update(int(uid) for (uid,) in unity_rows.all() if uid is not None)
+        return ids
+
     # ── Sérialisation ─────────────────────────────────────────────────────────
 
     @staticmethod
     def _decrypt_schema(schema: RequestResponse) -> RequestResponse:
+        updates: dict[str, Any] = {"request_status": normalize_status(schema.request_status)}
         if schema.description and schema.description.startswith("enc:"):
-            return schema.copy(update={"description": decrypt_field(schema.description)})
-        return schema
+            updates["description"] = decrypt_field(schema.description)
+        return schema.copy(update=updates)
 
     @staticmethod
     def _serialize(items: list) -> list:
-        """Convertit les ORM Request en RequestResponse et déchiffre les champs sensibles."""
+        """Convertit les ORM Request en RequestListItemResponse (schéma allégé liste) et déchiffre les champs sensibles."""
         result = []
         for item in items:
-            schema = RequestResponse.from_orm(item)
+            schema = RequestListItemResponse.from_orm(item)
+            updates = {"request_status": normalize_status(schema.request_status)}
             if schema.description and schema.description.startswith("enc:"):
-                schema = schema.copy(update={"description": decrypt_field(schema.description)})
-            result.append(schema)
+                updates["description"] = decrypt_field(schema.description)
+            result.append(schema.copy(update=updates))
         return result
 
     # ── Listes ────────────────────────────────────────────────────────────────
 
+    # RequestListItemResponse ne sérialise ni attachments/tasks (endpoints dédiés)
+    # ni timelines/appreciation (réservés à la page détail) — inutile de les
+    # charger sur les listes/dashboards (jusqu'à 500 tickets d'un coup).
+    _LIST_LOAD_OPTIONS = [
+        noload(RequestModel.attachments),
+        noload(RequestModel.tasks),
+        noload(RequestModel.workflows),
+        noload(RequestModel.appreciation),
+    ]
+
     async def list_all(self, *, page: int = 1, limit: int = 20):
-        items, total = await self.repo.list(order_by="-created_at", page=page, limit=limit)
+        items, total = await self.repo.list(
+            order_by="-created_at", page=page, limit=limit,
+            load_options=self._LIST_LOAD_OPTIONS,
+        )
         return self.paginate(self._serialize(items), total, page, limit)
 
     async def list_filtered(
         self,
         *,
         request_status: Optional[str] = None,
+        exclude_status: Optional[str] = None,
         is_external: Optional[bool] = None,
         direction_id: Optional[str] = None,
         unit_id: Optional[str] = None,
@@ -199,22 +368,7 @@ class RequestService(BaseService):
         if unit_id is not None:
             effective_unity_id = unit_id
         elif direction_id is not None:
-            from sqlalchemy import select as _sel
-            from api.models.ModelOrganigram import Organigram as _Org
-            _r1 = await self.session.execute(
-                _sel(_Org.id)
-                .where(_Org.unity_id == int(direction_id), _Org.deleted_at.is_(None))
-                .limit(1)
-            )
-            _org_id = _r1.scalar_one_or_none()
-            _ids: list[int] = [int(direction_id)]
-            if _org_id:
-                _r2 = await self.session.execute(
-                    _sel(_Org.unity_id)
-                    .where(_Org.parent_id == _org_id, _Org.deleted_at.is_(None))
-                )
-                _ids.extend(uid for (uid,) in _r2.all())
-            effective_unity_id = _ids  # list → repo utilise IN(...)
+            effective_unity_id = list(await self._direction_unity_ids(direction_id))
         else:
             effective_unity_id = None
 
@@ -224,6 +378,7 @@ class RequestService(BaseService):
                 filters={
                     k: v for k, v in {
                         "request_status": request_status,
+                        "exclude_request_status": exclude_status,
                         "is_external": is_external,
                         "unity_id": effective_unity_id,
                         "assignee_id": assignee_id,
@@ -237,6 +392,8 @@ class RequestService(BaseService):
             filters: dict[str, Any] = {}
             if request_status is not None:
                 filters["request_status"] = request_status
+            if exclude_status is not None:
+                filters["exclude_request_status"] = exclude_status
             if is_external is not None:
                 filters["is_external"] = is_external
             if effective_unity_id is not None:
@@ -270,6 +427,7 @@ class RequestService(BaseService):
                 order_by="-created_at",
                 page=page,
                 limit=limit,
+                load_options=self._LIST_LOAD_OPTIONS,
             )
         return self.paginate(self._serialize(items), total, page, limit)
 
@@ -282,8 +440,7 @@ class RequestService(BaseService):
         return self.paginate(self._serialize(items), total, page, limit)
 
     async def list_by_direction(self, direction_id: str, *, page: int = 1, limit: int = 20):
-        items, total = await self.repo.list_by_direction(direction_id, page=page, limit=limit)
-        return self.paginate(self._serialize(items), total, page, limit)
+        return await self.list_filtered(direction_id=direction_id, page=page, limit=limit)
 
     async def list_by_requester(self, requester_id: str, *, page: int = 1, limit: int = 20):
         items, total = await self.repo.list_by_requester(requester_id, page=page, limit=limit)
@@ -302,6 +459,7 @@ class RequestService(BaseService):
         *,
         direction_id: Optional[str] = None,
         assignee_id: Optional[str] = None,
+        unassigned_only: bool = False,
         priority: Optional[str] = None,
         request_status: Optional[str] = None,
         search: Optional[str] = None,
@@ -311,6 +469,7 @@ class RequestService(BaseService):
         items, total = await self.repo.list_queue(
             direction_id=direction_id,
             assignee_id=assignee_id,
+            unassigned_only=unassigned_only,
             priority=priority,
             request_status=request_status,
             search=search,
@@ -319,8 +478,20 @@ class RequestService(BaseService):
         )
         return self.paginate(self._serialize(items), total, page, limit)
 
-    async def qualify_triage(self, id: str, data: dict, *, actor_id: Optional[str] = None):
-        """Qualifie une demande de triage : fixe l'unité/catégorie/priorité, in_triage=False, status=qualifying."""
+    async def qualify_triage(
+        self,
+        id: str,
+        data: dict,
+        *,
+        actor_id: Optional[str] = None,
+        actor_name: Optional[str] = None,
+        actor_role: Optional[str] = None,
+        actor=None,
+    ):
+        """Qualifie une demande de triage : fixe l'unité/catégorie/priorité, in_triage=False.
+        Si assignee_id fourni → status=assigned directement (routage vers une personne précise).
+        Sinon → status=qualifying (la direction prend en charge).
+        """
         patch = {k: v for k, v in data.items() if k in {"category", "priority"}}
         # Map direction_id / unit_id → unity_id (compatibilité frontend)
         if "unit_id" in data:
@@ -328,13 +499,33 @@ class RequestService(BaseService):
         elif "direction_id" in data:
             patch["unity_id"] = data["direction_id"]
         patch["in_triage"] = False
-        patch["request_status"] = "qualifying"
-        return await self.update(id, patch, actor_id=actor_id)
+
+        assignee_id = data.get("assignee_id")
+        if assignee_id:
+            patch["assignee_id"] = int(assignee_id)
+            patch["request_status"] = "assigned"
+        else:
+            patch["request_status"] = "qualifying"
+
+        await self._guard_ticket_action(
+            id,
+            "qualify",
+            target_status=patch["request_status"],
+            actor=actor,
+            actor_role=actor_role,
+        )
+        return await self.update(
+            id,
+            patch,
+            actor_id=actor_id,
+            actor_name=actor_name,
+            actor_role=actor_role,
+        )
 
     # ── Lectures unitaires ────────────────────────────────────────────────────
 
-    async def get_by_id(self, id: str):
-        obj = await self.repo.get_by_id(id)
+    async def get_by_id(self, id: str, *, include_deleted: bool = False):
+        obj = await self.repo.get_by_id(id, include_deleted=include_deleted)
         if obj is None:
             raise self.not_found(
                 "Cette demande n'existe pas.",
@@ -401,17 +592,8 @@ class RequestService(BaseService):
 
     # ── Auto-affectation ──────────────────────────────────────────────────────
 
-    async def _auto_assign(
-        self,
-        request_id: int,
-        unity_id: int,
-        *,
-        actor_id: Optional[str] = None,
-    ) -> None:
-        """Affecte la demande à l'agent le moins chargé de l'unité.
-
-        Si aucun agent disponible, la demande reste non affectée sans erreur.
-        """
+    async def _select_auto_assignee(self, unity_id: int) -> Optional[int]:
+        """Retourne l'agent disponible le moins chargé dans l'unité cible."""
         # Statuts terminaux — exclus du comptage de charge active
         terminal_result = await self.session.execute(
             select(RequestStatus.id)
@@ -440,18 +622,40 @@ class RequestService(BaseService):
             select(Account.id)
             .outerjoin(load_sq, Account.id == load_sq.c.assignee_id)
             .where(Account.unity_id == unity_id)
-            .where(Account.role.in_(["agent", "chief"]))
+            .where(Account.role == "agent")
             .where(Account.account_status == "active")
+            .where(or_(Account.availability.is_(None), Account.availability == "available"))
             .where(Account.deleted_at.is_(None))
             .order_by(func.coalesce(load_sq.c.cnt, 0).asc())
             .limit(1)
         )
 
         result = await self.session.execute(stmt)
-        agent_id = result.scalar_one_or_none()
+        return result.scalar_one_or_none()
 
-        if agent_id is not None:
-            await self.assign(str(request_id), str(agent_id), actor_id=actor_id)
+    async def _auto_assign(
+        self,
+        request_id: int,
+        unity_id: int,
+        *,
+        actor_id: Optional[str] = None,
+    ) -> None:
+        """Affecte la demande à l'agent disponible le moins chargé de l'unité."""
+        agent_id = await self._select_auto_assignee(unity_id)
+        if agent_id is None:
+            return
+
+        current = await self.repo.get_by_id(str(request_id))
+        if current is not None:
+            assert_transition_allowed(current.request_status, "assigned")
+
+        translated = await self._translate_codes({"request_status": "assigned"})
+        await self.repo.update(str(request_id), {
+            "assignee_id": agent_id,
+            "unity_id": unity_id,
+            "in_triage": False,
+            **translated,
+        })
 
     # ── Routage automatique ───────────────────────────────────────────────────
 
@@ -518,38 +722,63 @@ class RequestService(BaseService):
                     )
                 # Fall-through au bloc triage ci-dessous
             else:
+                auto_assignee_id = (
+                    await self._select_auto_assignee(target_unity_id)
+                    if matched.auto_assign
+                    else None
+                )
+                assignee_id = auto_assignee_id or (chief.id if chief else None)
+                assignee_role = "agent" if auto_assignee_id else "chief"
+                event_label = f"Orientation automatique — {matched.name}"
+                if auto_assignee_id:
+                    event_label = f"{event_label} — auto-assignation agent"
+
                 await self.detail_repo.create_event({
                     "workflow_id": wf_id,
                     "event_type": "routed_to_service",
-                    "label": f"Orientation automatique — {matched.name}",
+                    "label": event_label,
                     "actor_name": actor_name,
                     "actor_id": actor_id,
-                    "dest_id": chief.id if chief else None,
+                    "dest_id": assignee_id,
                     "unity_id": target_unity_id,
                     "activated": True,
-                    "infos": {
+                    "infos": self._clean_infos({
                         "event_status": "pending_validation",
                         "rule_id": str(matched.id),
                         "rule_name": matched.name,
+                        "auto_assign": matched.auto_assign,
+                        "auto_assigned": auto_assignee_id is not None,
                         "source_role": actor_role,
-                        "dest_role": "chief",
-                    },
+                        "actor_role": actor_role,
+                        "dest_role": assignee_role,
+                        "target_role": assignee_role,
+                        "target_user_id": str(assignee_id) if assignee_id else None,
+                        "target_user_name": self._account_display_name(chief) if not auto_assignee_id else None,
+                        "old_status": getattr(obj, "request_status", None),
+                        "new_status": "assigned",
+                        "target_unity_id": target_unity_id,
+                    }),
                 })
 
+                assert_transition_allowed(obj.request_status, "assigned", actor_role=actor_role)
                 status_translated = await self._translate_codes({"request_status": "assigned"})
                 await self.repo.update(str(obj.id), {
-                    "assignee_id": chief.id if chief else None,
+                    "assignee_id": assignee_id,
                     "unity_id": target_unity_id,
                     "in_triage": False,
                     **status_translated,
                 })
 
-                if chief:
+                if assignee_id:
                     await emit_notif(
                         self.session,
-                        recipient_id=str(chief.id),
-                        title="Nouvelle demande à traiter",
-                        body=f"La demande {obj.ref} a été routée vers votre service.",
+                        recipient_id=str(assignee_id),
+                        title="Nouvelle demande assignée" if auto_assignee_id else "Nouvelle demande à traiter",
+                        body=(
+                            f"La demande {obj.ref} vous a été assignée automatiquement."
+                            if auto_assignee_id
+                            else f"La demande {obj.ref} a été routée vers votre service."
+                        ),
                         type="info",
                         request_id=str(obj.id),
                         action_label="Voir la demande",
@@ -575,13 +804,20 @@ class RequestService(BaseService):
             "actor_id": actor_id,
             "dest_id": support.id if support else None,
             "activated": True,
-            "infos": {
+            "infos": self._clean_infos({
                 "event_status": "to_qualify",
                 "source_role": actor_role,
+                "actor_role": actor_role,
                 "dest_role": "support",
-            },
+                "target_role": "support",
+                "target_user_id": str(support.id) if support else None,
+                "target_user_name": self._account_display_name(support) if support else None,
+                "old_status": getattr(obj, "request_status", None),
+                "new_status": "qualifying",
+            }),
         })
 
+        assert_transition_allowed(obj.request_status, "qualifying", actor_role=actor_role)
         status_qualifying = await self._translate_codes({"request_status": "qualifying"})
         await self.repo.update(str(obj.id), {
             "assignee_id": support.id if support else None,
@@ -598,11 +834,18 @@ class RequestService(BaseService):
                 type="warning",
                 request_id=str(obj.id),
                 action_label="Qualifier",
-                action_url="/app/triage",
+                action_url="/app/queue?tab=qualify",
             )
 
         self._logger.info(f"Demande {obj.ref} → triage (aucune règle matchée)")
         return False
+
+    @staticmethod
+    def _should_auto_route(data: dict) -> bool:
+        infos = data.get("infos")
+        if isinstance(infos, dict) and infos.get("auto_route") is True:
+            return True
+        return data.get("auto_route") is True
 
     # ── Créations ─────────────────────────────────────────────────────────────
 
@@ -629,15 +872,48 @@ class RequestService(BaseService):
                 ),
             )
 
-        year = datetime.now(timezone.utc).year
-        ref = await self.repo.next_ref(year)
-        data["ref"] = ref
+        submitted_at = datetime.now(timezone.utc)
+        ref_base = await self._build_reference_base(data, submitted_at)
         category_code = data.get("category")
         raw_description = data.get("description", "")
-        translated = await self._translate_codes(data)
-        workflow_steps: list[dict] = translated.pop("workflows", None) or []
 
-        obj = await self.repo.create(translated)
+        # SLA — résout sla_hours depuis la politique catégorie+priorité (sla_policy),
+        # sauf si déjà fourni explicitement par l'appelant.
+        if not data.get("sla_hours"):
+            from api.repositories.RepositorySlaPolicy import SlaPolicyRepository
+            sla_policy = await SlaPolicyRepository(self.session).find_policy(
+                (category_code or "").lower(), data.get("priority", "medium")
+            )
+            if sla_policy is not None:
+                data["sla_hours"] = sla_policy.resolution_h
+
+        obj = None
+        workflow_steps: list[dict] = []
+        ref = ""
+        for attempt in range(25):
+            ref = await self.repo.next_ref(ref_base)
+            data["ref"] = ref
+            translated = await self._translate_codes(data)
+            workflow_steps = translated.pop("workflows", None) or []
+            try:
+                obj = await self.repo.create(translated)
+                break
+            except ConflictException as exc:
+                if exc.error_code != "REF_ALREADY_EXISTS":
+                    raise
+                self._logger.warning(
+                    "Collision référence %s détectée, nouvelle tentative (%s/25)",
+                    ref,
+                    attempt + 1,
+                )
+        if obj is None:
+            raise self.conflict(
+                "Impossible de générer une référence unique pour cette demande.",
+                error_code=ErrorCode.REF_ALREADY_EXISTS,
+                field="ref",
+                value=ref_base,
+                hint="Réessayez dans quelques secondes.",
+            )
         wf_id = await self._get_or_create_workflow(obj.id)
 
         # Étape 1 — événement CREATED
@@ -648,7 +924,12 @@ class RequestService(BaseService):
             "actor_id": data.get("requester_id"),
             "actor_name": data.get("requester_name"),
             "activated": True,
-            "infos": {"event_status": "new", "source_role": "user"},
+            "infos": {
+                "event_status": "new",
+                "source_role": data.get("requester_role", "user"),
+                "actor_role": data.get("requester_role", "user"),
+                "new_status": "new",
+            },
         })
 
         # Circuit de validation optionnel (pattern edgrh)
@@ -663,20 +944,21 @@ class RequestService(BaseService):
         await emit_event(AppEvent(
             type="request.created",
             payload={"id": obj.id, "ref": ref, "category": category_code},
-            target={"roles": ["agent", "chief", "director", "dg", "admin"]},
+            target={"roles": ["agent", "chief", "director", "admin"]},
         ))
 
-        # Étape 2 — routage automatique (remplace _auto_assign)
-        try:
-            await self._apply_routing(
-                obj, wf_id,
-                actor_id=data.get("requester_id"),
-                actor_name=data.get("requester_name"),
-                raw_description=raw_description,
-                actor_role=data.get("requester_role", "user"),
-            )
-        except Exception as exc:
-            self._logger.warning(f"Routage échoué pour demande {ref}: {exc}")
+        # Étape 2 — routage automatique uniquement si explicitement demandé.
+        if self._should_auto_route(data):
+            try:
+                await self._apply_routing(
+                    obj, wf_id,
+                    actor_id=data.get("requester_id"),
+                    actor_name=data.get("requester_name"),
+                    raw_description=raw_description,
+                    actor_role=data.get("requester_role", "user"),
+                )
+            except Exception as exc:
+                self._logger.warning(f"Routage échoué pour demande {ref}: {exc}")
 
         # Re-fetch pour retourner l'état complet après routage
         fresh = await self.repo.get_by_id(obj.id)
@@ -695,20 +977,28 @@ class RequestService(BaseService):
 
     # ── Mises à jour ──────────────────────────────────────────────────────────
 
-    async def update(self, id: str, data: dict, *, actor_id: Optional[str] = None, actor_role: Optional[str] = None):
-        status_code = data.get("request_status")
+    async def update(
+        self,
+        id: str,
+        data: dict,
+        *,
+        actor_id: Optional[str] = None,
+        actor_name: Optional[str] = None,
+        actor_role: Optional[str] = None,
+    ):
+        raw_status = data.get("request_status")
+        status_code = normalize_status(raw_status) if raw_status else None
+        if raw_status and status_code != raw_status:
+            data = {**data, "request_status": status_code}
+        current = await self.repo.get_by_id(id)
 
-        # Validation de la matrice de transitions (sauf admin/dg)
-        if status_code and actor_role not in _BYPASS_ROLES:
-            current = await self.repo.get_by_id(id)
-            if current is not None:
-                current_status = (current.request_status or "new").lower()
-                allowed_sources = _ALLOWED_TRANSITIONS.get(status_code, set())
-                if allowed_sources and current_status not in allowed_sources:
-                    raise self.bad_request(
-                        f"Transition invalide : {current_status!r} → {status_code!r}.",
-                        error_code=ErrorCode.INVALID_STATUS_TRANSITION,
-                    )
+        # Validation stricte de la matrice : les routes dediees portent les exceptions metier.
+        if status_code and current is not None:
+            assert_transition_allowed(
+                current.request_status,
+                status_code,
+                actor_role=actor_role,
+            )
 
         translated = await self._translate_codes(data)
         obj = await self.repo.update(id, translated)
@@ -728,7 +1018,16 @@ class RequestService(BaseService):
                 "event_type": event_type,
                 "label": event_label,
                 "actor_id": actor_id,
+                "actor_name": actor_name,
                 "activated": True,
+                "infos": self._clean_infos({
+                    "event_status": status_code,
+                    "source_role": actor_role,
+                    "actor_role": actor_role,
+                    "old_status": getattr(current, "request_status", None),
+                    "new_status": status_code,
+                    "changed_fields": sorted(data.keys()),
+                }),
             })
             await emit_event(AppEvent(
                 type="request.status_changed",
@@ -739,9 +1038,9 @@ class RequestService(BaseService):
             _notif_map = {
                 "qualifying":   ("Demande en cours de qualification", "Votre demande {ref} est en cours de qualification.", "info"),
                 "qualified":    ("Demande qualifiée", "Votre demande {ref} a été qualifiée et sera traitée prochainement.", "info"),
+                "assigned":     ("Demande assignée", "Votre demande {ref} a été assignée à un agent qui va la traiter.", "info"),
                 "in_progress":  ("Demande prise en charge", "Votre demande {ref} est maintenant en cours de traitement.", "info"),
                 "pending":      ("Information complémentaire requise", "Un agent attend votre retour sur la demande {ref}.", "warning"),
-                "waiting_user": ("Information complémentaire requise", "Un agent attend votre retour sur la demande {ref}.", "warning"),
                 "escalated":    ("Demande escaladée", "Votre demande {ref} a été escaladée à un niveau supérieur.", "warning"),
             }
             if status_code in _notif_map and obj is not None and obj.requester_id:
@@ -758,6 +1057,22 @@ class RequestService(BaseService):
                     action_url=f"/app/requests/{id}",
                 )
         else:
+            if data:
+                wf_id = await self._get_or_create_workflow(int(id))
+                await self.detail_repo.create_event({
+                    "workflow_id": wf_id,
+                    "event_type": "request_updated",
+                    "label": "Demande mise à jour",
+                    "actor_id": actor_id,
+                    "actor_name": actor_name,
+                    "activated": True,
+                    "infos": self._clean_infos({
+                        "event_status": getattr(obj, "request_status", None),
+                        "source_role": actor_role,
+                        "actor_role": actor_role,
+                        "changed_fields": sorted(data.keys()),
+                    }),
+                })
             await emit_event(AppEvent(
                 type="request.updated",
                 payload={"id": id},
@@ -815,7 +1130,14 @@ class RequestService(BaseService):
             "actor_id": actor_id,
             "actor_name": req.requester_name,
             "activated": True,
-            "infos": {"event_status": "new", "source_role": actor_role},
+            "infos": {
+                "event_status": "new",
+                "source_role": actor_role,
+                "actor_role": actor_role,
+                "old_status": req.request_status,
+                "new_status": "new",
+                "changed_fields": sorted(patch.keys()),
+            },
         })
 
         fresh = await self.repo.get_by_id(id)
@@ -832,7 +1154,63 @@ class RequestService(BaseService):
 
         return await self.repo.get_by_id(id)
 
-    async def assign(self, id: str, assignee_id: str, *, actor_id: Optional[str] = None):
+    async def assign(
+        self, id: str, assignee_id: str, *,
+        actor_id: Optional[str] = None,
+        actor_name: Optional[str] = None,
+        actor_role: Optional[str] = None,
+        actor=None,
+    ):
+        current = await self._guard_ticket_action(
+            id,
+            "assign",
+            target_status="assigned",
+            actor=actor,
+            actor_role=actor_role,
+        )
+        row = await self.session.execute(
+            select(
+                Account.unity_id,
+                Unity.parent_direction_id,
+                Account.name,
+                Account.firstname,
+                Account.role,
+            )
+            .select_from(Account)
+            .outerjoin(Unity, Unity.id == Account.unity_id)
+            .where(Account.id == int(assignee_id))
+        )
+        assignee_row = row.first()
+        if assignee_row is None:
+            raise self.not_found("Cet agent n'existe pas.", error_code=ErrorCode.ACCOUNT_NOT_FOUND)
+
+        (
+            assignee_unity_id,
+            assignee_parent_dir_id,
+            assignee_name_raw,
+            assignee_firstname,
+            assignee_role,
+        ) = assignee_row
+        assignee_name = self._account_display_name(assignee_name_raw, assignee_firstname)
+
+        if actor is not None:
+            assert_assignment_allowed(
+                actor,
+                current,
+                assignee_id,
+                target_unity_id=assignee_unity_id,
+                target_role=assignee_role,
+            )
+
+        if actor_role not in _BYPASS_ROLES:
+            assignee_direction_id = assignee_parent_dir_id or assignee_unity_id
+
+            if current.direction_id is not None and assignee_direction_id != current.direction_id:
+                raise self.bad_request(
+                    "Cet agent n'appartient pas à la direction de ce ticket.",
+                    error_code=ErrorCode.INVALID_STATUS_TRANSITION,
+                )
+
         translated = await self._translate_codes({"request_status": "assigned"})
         obj = await self.repo.update(id, {
             "assignee_id": assignee_id,
@@ -845,9 +1223,25 @@ class RequestService(BaseService):
         await self.detail_repo.create_event({
             "workflow_id": wf_id_assign,
             "event_type": "assigned",
-            "label": "Demande assignée",
+            "label": f"Demande assignée à {assignee_name or assignee_id}",
             "actor_id": actor_id,
+            "actor_name": actor_name,
+            "dest_id": assignee_id,
             "activated": True,
+            "infos": self._clean_infos({
+                "event_status": "assigned",
+                "source_role": actor_role,
+                "actor_role": actor_role,
+                "dest_role": assignee_role,
+                "target_role": assignee_role,
+                "target_user_id": str(assignee_id),
+                "target_user_name": assignee_name,
+                "old_status": current.request_status,
+                "new_status": "assigned",
+                "old_assignee_id": current.assignee_id,
+                "new_assignee_id": assignee_id,
+                "target_unity_id": assignee_unity_id,
+            }),
         })
         await emit_notif(
             self.session,
@@ -866,7 +1260,22 @@ class RequestService(BaseService):
         ))
         return obj
 
-    async def close(self, id: str, *, actor_id: Optional[str] = None):
+    async def close(
+        self,
+        id: str,
+        *,
+        actor_id: Optional[str] = None,
+        actor_name: Optional[str] = None,
+        actor_role: Optional[str] = None,
+        actor=None,
+    ):
+        current = await self._guard_ticket_action(
+            id,
+            "close",
+            target_status="closed",
+            actor=actor,
+            actor_role=actor_role,
+        )
         translated = await self._translate_codes({"request_status": "closed"})
         obj = await self.repo.update(id, {
             **translated,
@@ -880,16 +1289,40 @@ class RequestService(BaseService):
             "event_type": "closed",
             "label": "Demande clôturée",
             "actor_id": actor_id,
+            "actor_name": actor_name,
             "activated": True,
+            "infos": self._clean_infos({
+                "event_status": "closed",
+                "source_role": actor_role,
+                "actor_role": actor_role,
+                "old_status": current.request_status,
+                "new_status": "closed",
+            }),
         })
         await emit_event(AppEvent(type="request.closed", payload={"id": id}, target={"roles": "all"}))
         return obj
 
-    async def resolve(self, id: str, *, actor_id: Optional[str] = None):
+    async def resolve(
+        self,
+        id: str,
+        *,
+        actor_id: Optional[str] = None,
+        actor_name: Optional[str] = None,
+        actor_role: Optional[str] = None,
+        actor=None,
+    ):
+        current = await self._guard_ticket_action(
+            id,
+            "resolve",
+            target_status="resolved",
+            actor=actor,
+            actor_role=actor_role,
+        )
         translated = await self._translate_codes({"request_status": "resolved"})
         obj = await self.repo.update(id, {
             **translated,
             "resolved_at": datetime.now(timezone.utc).replace(tzinfo=None),
+            "in_triage": False,
         })
         if obj is None:
             raise self.not_found("Cette demande n'existe pas.", error_code=ErrorCode.REQUEST_NOT_FOUND)
@@ -899,7 +1332,15 @@ class RequestService(BaseService):
             "event_type": "resolved",
             "label": "Demande résolue",
             "actor_id": actor_id,
+            "actor_name": actor_name,
             "activated": True,
+            "infos": self._clean_infos({
+                "event_status": "resolved",
+                "source_role": actor_role,
+                "actor_role": actor_role,
+                "old_status": current.request_status,
+                "new_status": "resolved",
+            }),
         })
         await emit_notif(
             self.session,
@@ -920,6 +1361,8 @@ class RequestService(BaseService):
         *,
         actor_id: Optional[str] = None,
         actor_name: Optional[str] = None,
+        actor_role: Optional[str] = None,
+        actor=None,
         reason: str,
     ):
         """
@@ -936,13 +1379,31 @@ class RequestService(BaseService):
           - Status inchangé : reste RESOLVED en attente de décision chef.
         """
         obj = await self.get_by_id(id)
+        effective_actor_role = actor_role or getattr(actor, "role", None) or "user"
+        if actor is not None:
+            await self._guard_ticket_action(
+                id,
+                "request_reopen",
+                actor=actor,
+                actor_role=effective_actor_role,
+            )
 
         translated_status = (obj.request_status or "").lower()
-        if translated_status not in ("resolved", "rejected"):
+        if translated_status not in ("resolved", "rejected", "closed"):
             raise self.bad_request(
-                "La réouverture n'est possible que sur un ticket à l'état RESOLVED ou REJECTED.",
+                "La réouverture n'est possible que sur un ticket à l'état RESOLVED, REJECTED ou CLOSED.",
                 error_code=ErrorCode.INVALID_STATUS_TRANSITION,
             )
+
+        # Fenêtre de 7 jours pour rouvrir un ticket fermé automatiquement
+        if translated_status == "closed" and obj.closed_at:
+            from datetime import timedelta
+            deadline = obj.closed_at + timedelta(days=7)
+            if datetime.now(timezone.utc).replace(tzinfo=None) > deadline:
+                raise self.bad_request(
+                    "La fenêtre de réouverture (7 jours après fermeture) est expirée. Créez une nouvelle demande.",
+                    error_code=ErrorCode.INVALID_STATUS_TRANSITION,
+                )
 
         if not reason or not reason.strip():
             raise self.bad_request(
@@ -972,11 +1433,18 @@ class RequestService(BaseService):
             "dest_id": chief.id if chief else None,
             "comment": reason.strip(),
             "activated": True,
-            "infos": {
+            "infos": self._clean_infos({
                 "event_status": "pending_validation",
-                "source_role": "user",
+                "source_role": effective_actor_role,
+                "actor_role": effective_actor_role,
                 "dest_role": "chief",
-            },
+                "target_role": "chief",
+                "target_user_id": str(chief.id) if chief else None,
+                "target_user_name": self._account_display_name(chief) if chief else None,
+                "old_status": translated_status,
+                "new_status": translated_status,
+                "reason": reason.strip(),
+            }),
         })
 
         # Marque le flag sur la demande (pas de changement de statut)
@@ -1005,16 +1473,39 @@ class RequestService(BaseService):
         fresh = await self.repo.get_by_id(int(id))
         return fresh if fresh else obj
 
-    async def reopen(self, id: str, *, actor_id: Optional[str] = None, actor_name: Optional[str] = None):
+    async def reopen(
+        self,
+        id: str,
+        *,
+        actor_id: Optional[str] = None,
+        actor_name: Optional[str] = None,
+        actor_role: Optional[str] = None,
+        actor=None,
+    ):
         """
-        Phase 2 — Le chef approuve la réouverture (ou l'agent/admin force la réouverture).
+        Phase 2 — Le chef approuve la réouverture.
 
         Efface le flag reopen_requested si présent, change le statut en REOPENED.
         """
+        await self._guard_ticket_action(
+            id,
+            "reopen",
+            target_status="reopened",
+            actor=actor,
+            actor_role=actor_role,
+        )
         obj = await self.get_by_id(id)
 
+        has_pending_reopen = isinstance(obj.infos, dict) and obj.infos.get("reopen_requested")
+        effective_role = str(getattr(actor, "role", actor_role or "") or "").strip().lower()
+        if not has_pending_reopen and effective_role not in _BYPASS_ROLES:
+            raise self.bad_request(
+                "Aucune demande de réouverture n'est en attente.",
+                error_code=ErrorCode.INVALID_STATUS_TRANSITION,
+            )
+
         # Efface le flag de demande de réouverture si présent
-        if isinstance(obj.infos, dict) and obj.infos.get("reopen_requested"):
+        if has_pending_reopen:
             current_infos = dict(obj.infos)
             current_infos.pop("reopen_requested", None)
             await self.repo.update(id, {"infos": current_infos})
@@ -1032,11 +1523,17 @@ class RequestService(BaseService):
             "actor_id": actor_id,
             "actor_name": actor_name,
             "activated": True,
-            "infos": {
+            "infos": self._clean_infos({
                 "event_status": "in_progress",
-                "source_role": "chief",
+                "source_role": actor_role,
+                "actor_role": actor_role,
                 "dest_role": "user",
-            },
+                "target_role": "user",
+                "target_user_id": str(obj.requester_id) if obj.requester_id else None,
+                "target_user_name": obj.requester_name,
+                "old_status": obj.request_status,
+                "new_status": "reopened",
+            }),
         })
 
         # Notifie le requérant
@@ -1056,13 +1553,115 @@ class RequestService(BaseService):
         fresh = await self.repo.get_by_id(int(id))
         return fresh if fresh else updated
 
-    async def cancel(self, id: str, *, actor_id: Optional[str] = None, reason: Optional[str] = None):
+    async def reject_reopen(
+        self,
+        id: str,
+        *,
+        actor_id: Optional[str] = None,
+        actor_name: Optional[str] = None,
+        actor_role: Optional[str] = None,
+        actor=None,
+        reason: Optional[str] = None,
+    ):
+        """
+        Refus d'une demande de réouverture.
+
+        Le statut du ticket ne change pas, mais le flag reopen_requested est retiré
+        et la décision est conservée dans la timeline.
+        """
+        clean_reason = reason.strip() if isinstance(reason, str) else ""
+        if not clean_reason:
+            raise self.bad_request(
+                "Un motif est obligatoire pour refuser une réouverture.",
+                field="reason",
+            )
+
+        obj = await self._guard_ticket_action(
+            id,
+            "reject_reopen",
+            actor=actor,
+            actor_role=actor_role,
+        )
+        if not (isinstance(obj.infos, dict) and obj.infos.get("reopen_requested")):
+            raise self.bad_request(
+                "Aucune demande de réouverture n'est en attente.",
+                error_code=ErrorCode.INVALID_STATUS_TRANSITION,
+            )
+
+        current_infos = dict(obj.infos)
+        current_infos.pop("reopen_requested", None)
+        current_infos["reopen_rejected_reason"] = clean_reason
+        current_infos["reopen_rejected_at"] = datetime.now(timezone.utc).isoformat()
+        await self.repo.update(id, {"infos": current_infos})
+
+        wf_id = await self._get_or_create_workflow(int(id))
+        await self.detail_repo.create_event({
+            "workflow_id": wf_id,
+            "event_type": "reopen_rejected",
+            "label": f"Réouverture refusée — {clean_reason}",
+            "actor_id": actor_id,
+            "actor_name": actor_name,
+            "comment": clean_reason,
+            "activated": True,
+            "infos": self._clean_infos({
+                "event_status": obj.request_status,
+                "source_role": actor_role,
+                "actor_role": actor_role,
+                "dest_role": "user",
+                "target_role": "user",
+                "target_user_id": str(obj.requester_id) if obj.requester_id else None,
+                "target_user_name": obj.requester_name,
+                "old_status": obj.request_status,
+                "new_status": obj.request_status,
+                "reason": clean_reason,
+            }),
+        })
+
+        if obj.requester_id:
+            await emit_notif(
+                self.session,
+                recipient_id=str(obj.requester_id),
+                title="Votre demande de réouverture a été refusée",
+                body=f"Le ticket {obj.ref} reste à l'état {obj.request_status} : {clean_reason[:100]}",
+                type="warning",
+                request_id=id,
+                action_label="Voir la demande",
+                action_url=f"/app/requests/{id}",
+            )
+
+        await emit_event(AppEvent(type="request.reopen_rejected", payload={"id": id}, target={"roles": "all"}))
+        fresh = await self.repo.get_by_id(int(id))
+        return fresh if fresh else obj
+
+    async def cancel(
+        self,
+        id: str,
+        *,
+        actor_id: Optional[str] = None,
+        actor_name: Optional[str] = None,
+        actor_role: Optional[str] = None,
+        actor=None,
+        reason: Optional[str] = None,
+    ):
+        clean_reason = reason.strip() if isinstance(reason, str) else ""
+        if not clean_reason:
+            raise self.bad_request(
+                "Un motif est obligatoire pour annuler une demande.",
+                field="reason",
+            )
+
+        current = await self._guard_ticket_action(
+            id,
+            "cancel",
+            target_status="cancelled",
+            actor=actor,
+            actor_role=actor_role,
+        )
         translated = await self._translate_codes({"request_status": "cancelled"})
         patch: dict[str, Any] = dict(translated)
-        if reason:
-            existing = await self.repo.get_by_id(int(id))
-            existing_infos = (existing.infos or {}) if existing else {}
-            patch["infos"] = {**existing_infos, "cancel_reason": reason}
+        existing = await self.repo.get_by_id(int(id))
+        existing_infos = (existing.infos or {}) if existing else {}
+        patch["infos"] = {**existing_infos, "cancel_reason": clean_reason}
         obj = await self.repo.update(id, patch)
         if obj is None:
             raise self.not_found("Cette demande n'existe pas.", error_code=ErrorCode.REQUEST_NOT_FOUND)
@@ -1070,9 +1669,19 @@ class RequestService(BaseService):
         await self.detail_repo.create_event({
             "workflow_id": wf_id_cancel,
             "event_type": "cancelled",
-            "label": f"Demande annulée{' — ' + reason if reason else ''}",
+            "label": f"Demande annulée — {clean_reason}",
             "actor_id": actor_id,
+            "actor_name": actor_name,
+            "comment": clean_reason,
             "activated": True,
+            "infos": self._clean_infos({
+                "event_status": "cancelled",
+                "source_role": actor_role,
+                "actor_role": actor_role,
+                "old_status": current.request_status,
+                "new_status": "cancelled",
+                "reason": clean_reason,
+            }),
         })
         await emit_event(AppEvent(type="request.cancelled", payload={"id": id}, target={"roles": "all"}))
         return obj
@@ -1084,6 +1693,8 @@ class RequestService(BaseService):
         *,
         actor_id: Optional[str] = None,
         actor_name: Optional[str] = None,
+        actor_role: Optional[str] = None,
+        actor=None,
         reason: Optional[str] = None,
     ):
         """
@@ -1094,7 +1705,50 @@ class RequestService(BaseService):
         """
         from api.repositories.RepositoryAccount import AccountRepository
 
-        obj = await self.get_by_id(id)
+        obj = await self._guard_ticket_action(
+            id,
+            "reassign",
+            target_status="assigned",
+            actor=actor,
+            actor_role=actor_role,
+        )
+        target_row = await self.session.execute(
+            select(Unity.id, Unity.parent_direction_id, Unity.label)
+            .where(Unity.id == int(target_unity_id), Unity.deleted_at.is_(None))
+        )
+        target_unity = target_row.first()
+        if target_unity is None:
+            raise self.not_found("Service cible introuvable.", error_code=ErrorCode.UNIT_NOT_FOUND)
+
+        target_unity_db_id, target_parent_direction_id, target_label = target_unity
+        target_direction_id = target_parent_direction_id or target_unity_db_id
+        actor_direction_id = None
+        effective_actor_role = str(getattr(actor, "role", actor_role or "") or "").strip().lower()
+        actor_unity_id = getattr(actor, "unity_id", None)
+        if actor is not None and effective_actor_role == "chief" and actor_unity_id is not None:
+            actor_unity_row = await self.session.execute(
+                select(Unity.id, Unity.parent_direction_id)
+                .where(Unity.id == int(actor_unity_id), Unity.deleted_at.is_(None))
+            )
+            actor_unity = actor_unity_row.first()
+            if actor_unity is not None:
+                actor_unity_db_id, actor_parent_direction_id = actor_unity
+                actor_direction_id = actor_parent_direction_id or actor_unity_db_id
+
+        if actor is not None:
+            assert_service_reassignment_allowed(
+                actor,
+                obj,
+                target_unity_id,
+                target_direction_id=target_direction_id,
+                actor_direction_id=actor_direction_id,
+            )
+
+        if obj.unity_id is not None and int(obj.unity_id) == int(target_unity_id):
+            raise self.bad_request(
+                "Ce ticket est déjà affecté à ce service.",
+                error_code=ErrorCode.INVALID_STATUS_TRANSITION,
+            )
         wf_id = await self._get_or_create_workflow(int(id))
         acc_repo = AccountRepository(self.session)
         chief = await acc_repo.find_chief_for_unity(target_unity_id)
@@ -1102,19 +1756,30 @@ class RequestService(BaseService):
         await self.detail_repo.create_event({
             "workflow_id": wf_id,
             "event_type": "reassigned_service",
-            "label": f"Réaffecté vers un autre service{' — ' + reason if reason else ''}",
+            "label": f"Réaffecté vers {target_label or 'un autre service'}{' — ' + reason if reason else ''}",
             "actor_id": actor_id,
             "actor_name": actor_name,
             "dest_id": chief.id if chief else None,
             "unity_id": target_unity_id,
             "comment": reason,
             "activated": True,
-            "infos": {
+            "infos": self._clean_infos({
                 "event_status": "pending_validation",
-                "source_role": "chief",
-                "dest_role": "chief",
+                "source_role": actor_role,
+                "actor_role": actor_role,
+                "dest_role": getattr(chief, "role", None) or "chief",
+                "target_role": getattr(chief, "role", None) or "chief",
+                "target_user_id": str(chief.id) if chief else None,
+                "target_user_name": self._account_display_name(chief) if chief else None,
                 "previous_unity_id": obj.unity_id,
-            },
+                "target_unity_id": target_unity_id,
+                "target_direction_id": target_direction_id,
+                "old_status": obj.request_status,
+                "new_status": "assigned",
+                "old_assignee_id": obj.assignee_id,
+                "new_assignee_id": chief.id if chief else None,
+                "reason": reason,
+            }),
         })
 
         status_translated = await self._translate_codes({"request_status": "assigned"})
@@ -1146,12 +1811,235 @@ class RequestService(BaseService):
         fresh = await self.repo.get_by_id(int(id))
         return fresh if fresh else obj
 
+    async def transfer_direction(
+        self,
+        id: str,
+        target_direction_id: int,
+        *,
+        actor_id: Optional[str] = None,
+        actor_name: Optional[str] = None,
+        actor_role: Optional[str] = None,
+        actor=None,
+        reason: Optional[str] = None,
+    ):
+        """
+        Transfert inter-direction.
+
+        Le directeur source sort le ticket de son périmètre quand aucun service
+        de sa direction ne peut le traiter. Le ticket entre alors dans la
+        direction cible comme une demande à qualifier, sans assignation directe.
+        """
+        from api.repositories.RepositoryAccount import AccountRepository
+
+        clean_reason = reason.strip() if isinstance(reason, str) else ""
+        if not clean_reason:
+            raise self.bad_request(
+                "Un motif est obligatoire pour transférer une demande vers une autre direction.",
+                field="reason",
+            )
+
+        obj = await self._guard_ticket_action(
+            id,
+            "transfer_direction",
+            actor=actor,
+            actor_role=actor_role,
+        )
+
+        if normalize_status(obj.request_status) in TERMINAL_STATUSES:
+            raise self.bad_request(
+                "Un ticket finalisé ne peut pas être transféré vers une autre direction.",
+                error_code=ErrorCode.INVALID_STATUS_TRANSITION,
+            )
+        assert_transition_allowed(obj.request_status, "qualifying", actor_role=actor_role)
+
+        try:
+            target_direction_int = int(target_direction_id)
+        except (TypeError, ValueError):
+            raise self.bad_request("Direction cible invalide.", field="target_direction_id")
+
+        target_row = await self.session.execute(
+            select(Unity.id, Unity.parent_direction_id, Unity.label)
+            .where(Unity.id == target_direction_int, Unity.deleted_at.is_(None))
+        )
+        target_direction = target_row.first()
+        if target_direction is None:
+            raise self.not_found("Direction cible introuvable.", error_code=ErrorCode.UNIT_NOT_FOUND)
+
+        target_direction_db_id, target_parent_direction_id, target_label = target_direction
+        if target_parent_direction_id is not None:
+            raise self.bad_request(
+                "La cible doit être une direction, pas un service.",
+                field="target_direction_id",
+            )
+
+        source_direction_id = obj.direction_id or obj.unity_id
+        if source_direction_id is not None and int(source_direction_id) == int(target_direction_db_id):
+            raise self.bad_request(
+                "Ce ticket est déjà dans cette direction.",
+                error_code=ErrorCode.INVALID_STATUS_TRANSITION,
+            )
+
+        wf_id = await self._get_or_create_workflow(int(id))
+        acc_repo = AccountRepository(self.session)
+        target_directors = await acc_repo.find_directors_by_direction(int(target_direction_db_id))
+        first_director = target_directors[0] if target_directors else None
+
+        await self.detail_repo.create_event({
+            "workflow_id": wf_id,
+            "event_type": "transferred_direction",
+            "label": f"Transféré vers {target_label or 'une autre direction'} — {clean_reason}",
+            "actor_id": actor_id,
+            "actor_name": actor_name,
+            "dest_id": first_director.id if first_director else None,
+            "unity_id": target_direction_db_id,
+            "comment": clean_reason,
+            "activated": True,
+            "infos": self._clean_infos({
+                "event_status": "qualifying",
+                "source_role": actor_role,
+                "actor_role": actor_role,
+                "dest_role": "director",
+                "target_role": "director",
+                "target_user_id": str(first_director.id) if first_director else None,
+                "target_user_name": self._account_display_name(first_director) if first_director else None,
+                "previous_direction_id": source_direction_id,
+                "target_direction_id": target_direction_db_id,
+                "target_direction_name": target_label,
+                "previous_unity_id": obj.unity_id,
+                "target_unity_id": target_direction_db_id,
+                "old_status": obj.request_status,
+                "new_status": "qualifying",
+                "old_assignee_id": obj.assignee_id,
+                "new_assignee_id": None,
+                "reason": clean_reason,
+            }),
+        })
+
+        status_translated = await self._translate_codes({"request_status": "qualifying"})
+        existing_infos = dict(obj.infos) if isinstance(obj.infos, dict) else {}
+        existing_infos.update({
+            "last_transfer_reason": clean_reason,
+            "last_transfer_from_direction_id": source_direction_id,
+            "last_transfer_to_direction_id": target_direction_db_id,
+        })
+        await self.repo.update(id, {
+            "unity_id": target_direction_db_id,
+            "assignee_id": None,
+            "in_triage": False,
+            "infos": existing_infos,
+            **status_translated,
+        })
+
+        if first_director:
+            await emit_notif(
+                self.session,
+                recipient_id=str(first_director.id),
+                title="Demande transférée vers votre direction",
+                body=f"La demande {obj.ref} a été transférée vers {target_label} : {clean_reason[:120]}",
+                type="info",
+                request_id=id,
+                action_label="Voir la demande",
+                action_url=f"/app/requests/{id}",
+            )
+
+        await emit_event(AppEvent(
+            type="request.transferred_direction",
+            payload={
+                "id": id,
+                "from_direction_id": source_direction_id,
+                "to_direction_id": target_direction_db_id,
+            },
+            target={"user_ids": [int(first_director.id)] if first_director else []},
+        ))
+
+        fresh = await self.repo.get_by_id(int(id))
+        return fresh if fresh else obj
+
+    async def change_priority(
+        self,
+        id: str,
+        priority: str,
+        *,
+        actor_id: Optional[str] = None,
+        actor_name: Optional[str] = None,
+        actor_role: Optional[str] = None,
+        actor=None,
+    ):
+        clean_priority = priority.strip().lower() if isinstance(priority, str) else ""
+        if not clean_priority:
+            raise self.bad_request("La priorité est obligatoire.", field="priority")
+
+        obj = await self._guard_ticket_action(
+            id,
+            "change_priority",
+            actor=actor,
+            actor_role=actor_role,
+        )
+        if normalize_status(obj.request_status) in TERMINAL_STATUSES:
+            raise self.bad_request(
+                "La priorité d'un ticket finalisé ne peut pas être modifiée.",
+                error_code=ErrorCode.INVALID_STATUS_TRANSITION,
+            )
+
+        priority_row = await self.session.execute(
+            select(PriorityDefinition.id)
+            .where(PriorityDefinition.slug == clean_priority)
+            .where(PriorityDefinition.deleted_at.is_(None))
+        )
+        priority_id = priority_row.scalar_one_or_none()
+        if priority_id is None:
+            raise self.bad_request(
+                "Priorité inconnue.",
+                field="priority",
+            )
+
+        old_priority = obj.priority
+        if old_priority == clean_priority:
+            return obj
+
+        updated = await self.repo.update(id, {"priority_definition_id": priority_id})
+        if updated is None:
+            raise self.not_found("Cette demande n'existe pas.", error_code=ErrorCode.REQUEST_NOT_FOUND)
+
+        wf_id = await self._get_or_create_workflow(int(id))
+        await self.detail_repo.create_event({
+            "workflow_id": wf_id,
+            "event_type": "priority_changed",
+            "label": f"Priorité modifiée — {old_priority} → {clean_priority}",
+            "actor_id": actor_id,
+            "actor_name": actor_name,
+            "activated": True,
+            "infos": self._clean_infos({
+                "event_status": obj.request_status,
+                "actor_id": actor_id,
+                "source_role": actor_role,
+                "actor_role": actor_role,
+                "target_user_id": "",
+                "target_role": "",
+                "old_status": obj.request_status,
+                "new_status": obj.request_status,
+                "reason": "Changement de priorité",
+                "old_priority": old_priority,
+                "new_priority": clean_priority,
+            }),
+        })
+        await emit_event(AppEvent(
+            type="request.priority_changed",
+            payload={"id": id, "priority": clean_priority},
+            target={"roles": "all"},
+        ))
+
+        fresh = await self.repo.get_by_id(int(id))
+        return fresh if fresh else updated
+
     async def reject(
         self,
         id: str,
         *,
         actor_id: Optional[str] = None,
         actor_name: Optional[str] = None,
+        actor_role: Optional[str] = None,
+        actor=None,
         reason: Optional[str] = None,
     ):
         """
@@ -1160,7 +2048,20 @@ class RequestService(BaseService):
         Crée l'événement rejected, passe le statut à 'rejected',
         notifie le requérant.
         """
-        obj = await self.get_by_id(id)
+        clean_reason = reason.strip() if isinstance(reason, str) else ""
+        if not clean_reason:
+            raise self.bad_request(
+                "Un motif est obligatoire pour rejeter une demande.",
+                field="reason",
+            )
+
+        obj = await self._guard_ticket_action(
+            id,
+            "reject",
+            target_status="rejected",
+            actor=actor,
+            actor_role=actor_role,
+        )
         wf_id = await self._get_or_create_workflow(int(id))
 
         status_translated = await self._translate_codes({"request_status": "rejected"})
@@ -1172,16 +2073,23 @@ class RequestService(BaseService):
         await self.detail_repo.create_event({
             "workflow_id": wf_id,
             "event_type": "rejected",
-            "label": f"Demande rejetée{' — ' + reason if reason else ''}",
+            "label": f"Demande rejetée — {clean_reason}",
             "actor_id": actor_id,
             "actor_name": actor_name,
-            "comment": reason,
+            "comment": clean_reason,
             "activated": True,
-            "infos": {
+            "infos": self._clean_infos({
                 "event_status": "rejected",
-                "source_role": "chief",
+                "source_role": actor_role,
+                "actor_role": actor_role,
                 "dest_role": "user",
-            },
+                "target_role": "user",
+                "target_user_id": str(obj.requester_id) if obj.requester_id else None,
+                "target_user_name": obj.requester_name,
+                "old_status": obj.request_status,
+                "new_status": "rejected",
+                "reason": clean_reason,
+            }),
         })
 
         if obj.requester_id:
@@ -1189,7 +2097,7 @@ class RequestService(BaseService):
                 self.session,
                 recipient_id=str(obj.requester_id),
                 title="Demande rejetée",
-                body=f"Votre demande {obj.ref} a été rejetée{' : ' + reason if reason else '.'}",
+                body=f"Votre demande {obj.ref} a été rejetée : {clean_reason}",
                 type="warning",
                 request_id=id,
                 action_label="Voir la demande",
@@ -1201,8 +2109,8 @@ class RequestService(BaseService):
         fresh = await self.repo.get_by_id(int(id))
         return fresh if fresh else obj
 
-    async def list_by_unit(self, unit_id: str, *, page: int = 1, limit: int = 20):
-        return await self.list_filtered(unit_id=unit_id, page=page, limit=limit)
+    async def list_by_unity(self, unity_id: str, *, page: int = 1, limit: int = 20):
+        return await self.list_filtered(unit_id=unity_id, page=page, limit=limit)
 
     async def delete(self, id: str) -> bool:
         await self.get_by_id(id)
@@ -1258,105 +2166,3 @@ class RequestService(BaseService):
     async def search(self, q: str, *, page: int = 1, limit: int = 20):
         items, total = await self.repo.search(q, page=page, limit=limit)
         return self.paginate(self._serialize(items), total, page, limit)
-
-    # ── Fusion de tickets ─────────────────────────────────────────────────────
-
-    async def merge(self, source_id: str, target_id: str, *, actor_id: Optional[str] = None):
-        """
-        Fusionne la demande source dans la demande cible.
-        - source : merged_into_id = target.id, statut → cancelled
-        - target : inchangé (reçoit une note dans la timeline)
-        """
-        source = await self.get_by_id(source_id)
-        target = await self.get_by_id(target_id)
-
-        if str(source.id) == str(target.id):
-            raise self.bad_request("Une demande ne peut pas être fusionnée avec elle-même.")
-
-        if source.merged_into_id is not None:
-            raise self.bad_request(f"La demande {source.ref} est déjà fusionnée.")
-
-        cancelled = await self._translate_codes({"request_status": "cancelled"})
-        await self.repo.update(source_id, {
-            **cancelled,
-            "merged_into_id": target.id,
-        })
-
-        wf_id_src = await self._get_or_create_workflow(int(source_id))
-        await self.detail_repo.create_event({
-            "workflow_id": wf_id_src,
-            "event_type": "merged",
-            "label": f"Demande fusionnée dans {target.ref}",
-            "actor_id": actor_id,
-            "activated": True,
-        })
-        wf_id_tgt = await self._get_or_create_workflow(int(target_id))
-        await self.detail_repo.create_event({
-            "workflow_id": wf_id_tgt,
-            "event_type": "merge_received",
-            "label": f"Demande {source.ref} fusionnée ici",
-            "actor_id": actor_id,
-            "activated": True,
-        })
-        await emit_event(AppEvent(
-            type="request.merged",
-            payload={"source_id": source_id, "target_id": target_id},
-            target={"roles": "all"},
-        ))
-        return await self.get_by_id(target_id)
-
-    # ── Duplication de ticket ─────────────────────────────────────────────────
-
-    async def duplicate(self, id: str, *, actor_id: Optional[str] = None):
-        """
-        Duplique une demande existante : crée une nouvelle demande avec les
-        mêmes champs métier mais une nouvelle référence, statut=new et
-        sans assignee ni merged_into_id.
-        """
-        source = await self.get_by_id(id)
-
-        year = datetime.now(timezone.utc).year
-        new_ref = await self.repo.next_ref(year)
-
-        new_data = {
-            "ref": new_ref,
-            "title": f"[Copie] {source.title}",
-            "description": source.description,
-            "request_status_id": source.request_status_id,
-            "priority_definition_id": source.priority_definition_id,
-            "request_category_id": source.request_category_id,
-            "request_source": source.request_source,
-            "unity_id": source.unity_id,
-            "is_external": source.is_external,
-            "requester_type": source.requester_type,
-            "submission_mode": source.submission_mode,
-            "requester_name": source.requester_name,
-            "requester_phone": source.requester_phone,
-            "requester_email": source.requester_email,
-            "requester_address": source.requester_address,
-            "meter_number": source.meter_number,
-            "client_ref": source.client_ref,
-            "sla_hours": source.sla_hours,
-            "in_triage": source.in_triage,
-            "requester_id": source.requester_id,
-        }
-
-        # Re-fixe statut → new
-        new_status = await self._translate_codes({"request_status": "new"})
-        new_data.update(new_status)
-
-        new_req = await self.repo.create(new_data)
-        wf_id_dup = await self._get_or_create_workflow(new_req.id)
-        await self.detail_repo.create_event({
-            "workflow_id": wf_id_dup,
-            "event_type": "created",
-            "label": f"Demande créée par duplication de {source.ref}",
-            "actor_id": actor_id,
-            "activated": True,
-        })
-        await emit_event(AppEvent(
-            type="request.created",
-            payload={"id": new_req.id, "ref": new_ref, "duplicated_from": source.ref},
-            target={"roles": ["agent", "chief", "director", "dg", "admin"]},
-        ))
-        return new_req

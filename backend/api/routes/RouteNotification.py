@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_db, get_current_user, require_roles
+from api.core.rbac import normalize_role
 from api.schemas.SchemaNotification import NotificationCreate, NotificationResponse
 from api.schemas.base import PaginatedResponse
 from api.services import NotificationService, RequestService
@@ -27,7 +28,7 @@ def _req_svc(db: AsyncSession = Depends(get_db)) -> RequestService:
 
 def _check_recipient_access(actor, recipient_id: str) -> None:
     """Vérifie que l'utilisateur accède uniquement à ses propres notifications."""
-    if str(actor.id) != recipient_id and actor.role not in ("admin", "dg"):
+    if str(actor.id) != recipient_id and normalize_role(actor.role) != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Accès refusé aux notifications d'un autre utilisateur.",
@@ -129,14 +130,15 @@ async def list_by_request(
     svc: NotificationService = Depends(_svc),
     req_svc: RequestService = Depends(_req_svc),
 ):
-    if actor.role == "user":
+    role = normalize_role(actor.role)
+    if role == "user":
         req = await req_svc.get_by_id(request_id)
         if str(req.requester_id) != str(actor.id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Accès refusé aux notifications de cette demande.",
             )
-    elif actor.role not in ("agent", "chief", "director", "dg", "admin"):
+    elif role not in ("agent", "chief", "director", "admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Accès refusé.")
     return await svc.list_by_request(request_id, page=page, limit=limit)
 
@@ -155,7 +157,7 @@ async def get_notification(
 @router.post("/", response_model=NotificationResponse, status_code=status.HTTP_201_CREATED)
 async def create_notification(
     body: NotificationCreate,
-    _=Depends(require_roles("admin", "dg")),
+    _=Depends(require_roles("admin")),
     svc: NotificationService = Depends(_svc),
 ):
     return await svc.create(body.dict())

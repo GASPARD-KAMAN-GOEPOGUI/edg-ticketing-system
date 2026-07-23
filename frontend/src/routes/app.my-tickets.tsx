@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { fetchQueue } from "@/lib/api/requests";
+import { fetchRequests } from "@/lib/api/requests";
 import { priorityLabels, statusLabels } from "@/lib/mock-data";
 import type { RequestStatus, Priority } from "@/lib/mock-data";
 import { toast } from "sonner";
@@ -72,7 +72,7 @@ function MyTicketsPage() {
   const [filterPriority, setFilterPriority] = useSessionState<string>("mt:priority", "all");
   const [search, setSearch] = useSessionState<string>("mt:q", "");
   const [debouncedSearch, setDebouncedSearch] = useState(search);
-  const [layout, setLayout] = useSessionState<LayoutMode>("mt:layout", "list");
+  const [layout, setLayout] = useState<LayoutMode>("grid");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
@@ -92,30 +92,15 @@ function MyTicketsPage() {
   // Requête principale : paginée pour l'affichage
   const { data, isLoading, isError } = useQuery({
     queryKey: ["my-tickets", baseFilters, page, pageSize],
-    queryFn: () => fetchQueue({ ...baseFilters, page, limit: pageSize }),
+    queryFn: () => fetchRequests({ ...baseFilters, page, limit: pageSize }),
     staleTime: 30_000,
     enabled: !!sessionUser?.id,
   });
 
-  // Requête stats : toute la workload (max 200) pour les KPI exacts
+  // Requête stats : workload affectée à l'agent connecté.
   const { data: statsData } = useQuery({
     queryKey: ["my-tickets-stats", sessionUser?.id],
-    queryFn: () => fetchQueue({ assignee_id: sessionUser!.id, limit: 200 }),
-    staleTime: 60_000,
-    enabled: !!sessionUser?.id,
-  });
-
-  // Stats personnelles depuis l'API dédiée
-  const { data: myStats } = useQuery<{
-    assigned_total: number;
-    resolved_total: number;
-    active_total: number;
-    sla_breached: number;
-    avg_resolution_hours: number | null;
-    sla_rate: number | null;
-  }>({
-    queryKey: ["my-stats", sessionUser?.id],
-    queryFn: () => apiFetch("/stats/my"),
+    queryFn: () => fetchRequests({ assignee_id: sessionUser!.id, limit: 1000 }),
     staleTime: 60_000,
     enabled: !!sessionUser?.id,
   });
@@ -126,10 +111,30 @@ function MyTicketsPage() {
   const total = data?.total ?? 0;
   const totalPages = data?.pages ?? 1;
 
-  const allStatItems = statsData?.items ?? [];
-  const kpiTotal    = statsData?.total ?? 0;
-  const kpiBreached = allStatItems.filter((r) => r.slaElapsed > r.slaHours).length;
-  const kpiCritical = allStatItems.filter((r) => r.priority === "critical").length;
+  const assignedTickets = statsData?.items ?? [];
+  const activeAssignedTickets = assignedTickets.filter((r) => ACTIVE_STATUSES.includes(r.status));
+  const resolvedTickets = assignedTickets.filter((r) => r.status === "resolved" || r.status === "closed");
+  const measuredSlaTickets = assignedTickets.filter((r) => r.slaHours > 0);
+  const resolutionDurations = resolvedTickets
+    .map((r) => {
+      const end = r.resolvedAt ?? r.closedAt ?? r.updatedAt;
+      const startMs = new Date(r.createdAt).getTime();
+      const endMs = end ? new Date(end).getTime() : Number.NaN;
+      return Number.isFinite(startMs) && Number.isFinite(endMs)
+        ? Math.max(0, (endMs - startMs) / 3_600_000)
+        : null;
+    })
+    .filter((value): value is number => value != null);
+  const kpiInProgress = assignedTickets.filter((r) => r.status === "in_progress").length;
+  const kpiBreached = activeAssignedTickets.filter((r) => r.slaHours > 0 && r.slaElapsed > r.slaHours).length;
+  const kpiCritical = activeAssignedTickets.filter((r) => r.priority === "critical").length;
+  const kpiResolved = resolvedTickets.length;
+  const kpiSlaRate = measuredSlaTickets.length > 0
+    ? Math.round((measuredSlaTickets.filter((r) => r.slaElapsed <= r.slaHours).length / measuredSlaTickets.length) * 100)
+    : null;
+  const kpiAvgResolution = resolutionDurations.length > 0
+    ? Math.round((resolutionDurations.reduce((sum, value) => sum + value, 0) / resolutionDurations.length) * 10) / 10
+    : null;
 
   const listState: "loading" | "empty" | "ready" = isLoading
     ? "loading"
@@ -212,7 +217,7 @@ function MyTicketsPage() {
             <Ticket className="h-4 w-4 text-primary" />
           </span>
           <div>
-            <div className="text-2xl font-bold leading-none">{kpiTotal}</div>
+            <div className="text-2xl font-bold leading-none">{kpiInProgress}</div>
             <div className="mt-0.5 text-xs text-muted-foreground">En cours</div>
           </div>
         </GlassCard>
@@ -250,7 +255,7 @@ function MyTicketsPage() {
             <CheckCircle2 className="h-4 w-4 text-green-500" />
           </span>
           <div>
-            <div className="text-2xl font-bold leading-none">{myStats?.resolved_total ?? "—"}</div>
+            <div className="text-2xl font-bold leading-none">{kpiResolved}</div>
             <div className="mt-0.5 text-xs text-muted-foreground">Total résolus</div>
           </div>
         </GlassCard>
@@ -261,7 +266,7 @@ function MyTicketsPage() {
           </span>
           <div>
             <div className="text-2xl font-bold leading-none">
-              {myStats?.sla_rate != null ? `${myStats.sla_rate}%` : "—"}
+              {kpiSlaRate != null ? `${kpiSlaRate}%` : "—"}
             </div>
             <div className="mt-0.5 text-xs text-muted-foreground">Taux SLA respecté</div>
           </div>
@@ -273,7 +278,7 @@ function MyTicketsPage() {
           </span>
           <div>
             <div className="text-2xl font-bold leading-none">
-              {myStats?.avg_resolution_hours != null ? `${myStats.avg_resolution_hours}h` : "—"}
+              {kpiAvgResolution != null ? `${kpiAvgResolution}h` : "—"}
             </div>
             <div className="mt-0.5 text-xs text-muted-foreground">Délai moyen résolution</div>
           </div>
@@ -381,7 +386,7 @@ function MyTicketsPage() {
                       <div className="min-w-0 flex-1 space-y-1.5">
                         <div className="flex flex-wrap items-center gap-2">
                           <Link
-                            to="/app/requests/$id"
+                            to="/app/my-tickets/tickets/$id"
                             params={{ id: r.id }}
                             className="font-mono text-[11px] text-primary hover:underline"
                           >
@@ -401,7 +406,7 @@ function MyTicketsPage() {
                           )}
                         </div>
                         <Link
-                          to="/app/requests/$id"
+                          to="/app/my-tickets/tickets/$id"
                           params={{ id: r.id }}
                           className="block font-semibold leading-snug hover:text-primary"
                         >
@@ -435,7 +440,7 @@ function MyTicketsPage() {
                             size="sm"
                             className="h-7 rounded-full px-3 text-xs gradient-primary"
                           >
-                            <Link to="/app/requests/$id" params={{ id: r.id }}>
+                            <Link to="/app/my-tickets/tickets/$id" params={{ id: r.id }}>
                               Traiter
                             </Link>
                           </Button>
@@ -483,7 +488,7 @@ function MyTicketsPage() {
                           </div>
                         </div>
 
-                        <Link to="/app/requests/$id" params={{ id: r.id }} className="hover:text-primary">
+                        <Link to="/app/my-tickets/tickets/$id" params={{ id: r.id }} className="hover:text-primary">
                           <p className="line-clamp-2 font-semibold leading-snug">{r.title}</p>
                         </Link>
                         <div className={cn("flex items-center gap-1.5 text-xs font-medium", priorityDotClass[r.priority])}>
@@ -514,7 +519,7 @@ function MyTicketsPage() {
                             Escalader
                           </Button>
                           <Button asChild size="sm" className="flex-1 rounded-full text-xs gradient-primary">
-                            <Link to="/app/requests/$id" params={{ id: r.id }}>Traiter</Link>
+                            <Link to="/app/my-tickets/tickets/$id" params={{ id: r.id }}>Traiter</Link>
                           </Button>
                         </div>
                       </GlassCard>

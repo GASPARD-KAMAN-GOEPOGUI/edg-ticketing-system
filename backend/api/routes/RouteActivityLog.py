@@ -11,7 +11,7 @@ from api.services import ActivityLogService
 router = APIRouter(
     prefix="/activity-logs",
     tags=["activity-logs"],
-    dependencies=[Depends(require_roles("admin", "dg"))],
+    dependencies=[Depends(require_roles("admin"))],
 )
 
 

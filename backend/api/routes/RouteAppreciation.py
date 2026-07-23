@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_db, get_current_user
+from api.core.rbac import normalize_role
 from api.schemas.SchemaAppreciation import (
     AppreciationCreate, AppreciationUpdate, AppreciationResponse,
 )
@@ -26,8 +27,8 @@ def _req_svc(db: AsyncSession = Depends(get_db)) -> RequestService:
 
 
 async def _check_appreciation_ownership(actor, appreciation, req_svc: RequestService) -> None:
-    """Seul le requérant ou admin/dg peut modifier/supprimer une appréciation."""
-    if actor.role in ("admin", "dg"):
+    """Seul le requérant ou admin peut modifier/supprimer une appréciation."""
+    if normalize_role(actor.role) == "admin":
         return
     req = await req_svc.get_by_id(str(appreciation.request_id))
     if str(req.requester_id) != str(actor.id):

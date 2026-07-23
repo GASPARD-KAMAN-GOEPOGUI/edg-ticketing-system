@@ -4,6 +4,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_db, get_current_user, require_roles
+from api.core.rbac import normalize_role
 from api.schemas.SchemaAnnouncement import (
     AnnouncementCreate, AnnouncementUpdate, AnnouncementResponse,
 )
@@ -17,9 +18,9 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)],
 )
 
-_editor = Depends(require_roles("admin", "dg"))
-_ADMIN_ROLES = {"admin", "dg"}
-_TEAM_MSG_ROLES = {"admin", "dg", "chief"}
+_editor = Depends(require_roles("admin"))
+_ADMIN_ROLES = {"admin"}
+_TEAM_MSG_ROLES = {"admin", "chief"}
 
 
 def _svc(db: AsyncSession = Depends(get_db)) -> AnnouncementService:
@@ -98,7 +99,7 @@ async def get_announcement(
     svc: AnnouncementService = Depends(_svc),
 ):
     ann = await svc.get_by_id(id)
-    if ann.visibility == "admin_only" and actor.role not in _ADMIN_ROLES:
+    if ann.visibility == "admin_only" and normalize_role(actor.role) not in _ADMIN_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Accès refusé à cette annonce.",
@@ -109,7 +110,7 @@ async def get_announcement(
 @router.post("/team-message", response_model=AnnouncementResponse, status_code=status.HTTP_201_CREATED)
 async def create_team_message(
     body: AnnouncementCreate,
-    actor=Depends(require_roles("admin", "dg", "chief")),
+    actor=Depends(require_roles("admin", "chief")),
     svc: AnnouncementService = Depends(_svc),
 ):
     """Chef : publie un message d'équipe visible uniquement par son service (audience=unit)."""
@@ -173,6 +174,5 @@ async def set_target_roles(
     svc: AnnouncementService = Depends(_svc),
 ):
     return await svc.set_target_roles(id, roles or [])
-
 
 

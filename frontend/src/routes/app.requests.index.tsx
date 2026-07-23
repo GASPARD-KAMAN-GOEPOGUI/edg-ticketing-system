@@ -14,24 +14,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { statusLabels, priorityLabels } from "@/lib/mock-data";
 import type { RequestStatus, Priority, RequestItem } from "@/lib/mock-data";
-import { fetchDirections } from "@/lib/api/directions-units";
+import { fetchDirections, fetchUnits } from "@/lib/api/directions-units";
 import { fetchRequests } from "@/lib/api/requests";
-import { exportXLSX, exportCSV } from "@/lib/export";
-import { toast } from "sonner";
 import {
-  Plus, Search, Inbox, MapPin, Calendar,
+  Plus, Search, Inbox, MapPin, Calendar, CheckCircle2,
   Wrench, Zap, FileText, Shield, Plug, CreditCard,
   HardHat, Briefcase, BarChart2, MessageCircle,
-  Download, X, ChevronDown,
+  X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { LayoutToggle, type LayoutMode } from "@/components/layout-toggle";
@@ -80,6 +71,21 @@ const priorityDotClass: Record<Priority, string> = {
   high: "text-warning-foreground dark:text-warning",
   critical: "text-destructive",
 };
+
+const PERSONAL_ACTIVE_STATUSES: RequestStatus[] = [
+  "new",
+  "qualifying",
+  "qualified",
+  "assigned",
+  "in_progress",
+  "pending",
+  "escalated",
+  "resolved",
+  "reopened",
+];
+const PERSONAL_TERMINAL_STATUSES: RequestStatus[] = ["closed", "cancelled", "rejected"];
+const PERSONAL_TERMINAL_STATUS_SET = new Set<RequestStatus>(PERSONAL_TERMINAL_STATUSES);
+const REQUEST_STATUS_OPTIONS = PERSONAL_ACTIVE_STATUSES;
 
 function RequestCard({ r }: { r: RequestItem }) {
   const CategoryIcon = getCategoryIcon(r.category);
@@ -154,19 +160,23 @@ function RequestsList() {
   const [q, setQ] = useSessionState<string>("req:q", "");
   const [status, setStatus] = useSessionState<string>("req:status", "all");
   const [origin, setOrigin] = useSessionState<string>("req:origin", "all");
-  const [layout, setLayout] = useSessionState<LayoutMode>("req:layout", "list");
+  const [layout, setLayout] = useState<LayoutMode>("grid");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [debouncedQ, setDebouncedQ] = useState(q);
   const [dateFrom, setDateFrom] = useSessionState<string>("req:dateFrom", "");
   const [dateTo, setDateTo] = useSessionState<string>("req:dateTo", "");
-  const [exporting, setExporting] = useState(false);
+  const [periodPreset, setPeriodPreset] = useSessionState<string>("req:period", "all");
   useScrollRestoration("req:list");
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(q), 400);
     return () => clearTimeout(t);
   }, [q]);
+
+  useEffect(() => {
+    if (PERSONAL_TERMINAL_STATUS_SET.has(status as RequestStatus)) setStatus("all");
+  }, [status, setStatus]);
 
   useEffect(() => { setPage(1); }, [status, origin, debouncedQ, dateFrom, dateTo]);
 
@@ -176,17 +186,28 @@ function RequestsList() {
     else if (preset === "week") { setDateFrom(isoDate(startOfWeek(now, { locale: fr }))); setDateTo(isoDate(endOfWeek(now, { locale: fr }))); }
     else if (preset === "month") { setDateFrom(isoDate(startOfMonth(now))); setDateTo(isoDate(endOfMonth(now))); }
     else if (preset === "year") { setDateFrom(isoDate(startOfYear(now))); setDateTo(isoDate(endOfYear(now))); }
+    setPeriodPreset(preset);
     setPage(1);
-  }, [setDateFrom, setDateTo]);
+  }, [setDateFrom, setDateTo, setPeriodPreset]);
 
-  const clearDates = useCallback(() => { setDateFrom(""); setDateTo(""); setPage(1); }, [setDateFrom, setDateTo]);
+  const clearDates = useCallback(() => {
+    setDateFrom(""); setDateTo(""); setPeriodPreset("all"); setPage(1);
+  }, [setDateFrom, setDateTo, setPeriodPreset]);
+
+  const handlePeriodChange = useCallback((val: string) => {
+    if (val === "all") { clearDates(); }
+    else if (val === "custom") { setPeriodPreset("custom"); }
+    else { applyQuickDate(val as "today" | "week" | "month" | "year"); }
+  }, [clearDates, applyQuickDate, setPeriodPreset]);
 
   const hasDateFilter = !!dateFrom || !!dateTo;
+  const visibleStatus = PERSONAL_TERMINAL_STATUS_SET.has(status as RequestStatus) ? "all" : status;
 
   const filters = {
     page,
     limit: pageSize,
-    ...(status !== "all" && { request_status: status }),
+    exclude_status: PERSONAL_TERMINAL_STATUSES.join(","),
+    ...(visibleStatus !== "all" && { request_status: visibleStatus }),
     ...(sessionUser?.id && { requester_id: sessionUser.id }),
     ...(!isUser && origin === "internal" && { is_external: false }),
     ...(!isUser && origin === "external" && { is_external: true }),
@@ -194,8 +215,6 @@ function RequestsList() {
     ...(dateFrom && { date_from: dateFrom }),
     ...(dateTo && { date_to: dateTo }),
   };
-
-  const exportFilters = { ...filters, page: 1, limit: 1000 };
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["requests", filters],
@@ -209,25 +228,37 @@ function RequestsList() {
     staleTime: 5 * 60_000,
   });
 
+  const { data: unitsData = [] } = useQuery({
+    queryKey: ["units-all"],
+    queryFn: () => fetchUnits(),
+    staleTime: 5 * 60_000,
+  });
+
   const directionMap = useMemo(
     () => new Map((directionsData ?? []).map((d) => [String(d.id), d.name])),
     [directionsData],
   );
 
-  const handleExport = useCallback(async (fmt: "xlsx" | "csv") => {
-    setExporting(true);
-    try {
-      const all = await fetchRequests(exportFilters);
-      if (all.items.length === 0) { toast.warning("Aucune demande à exporter."); return; }
-      if (fmt === "xlsx") exportXLSX(all.items, directionMap, { dateFrom: dateFrom || undefined, dateTo: dateTo || undefined });
-      else exportCSV(all.items, directionMap, { dateFrom: dateFrom || undefined, dateTo: dateTo || undefined });
-      toast.success(`Export ${fmt.toUpperCase()} — ${all.items.length} demande${all.items.length > 1 ? "s" : ""}`);
-    } catch {
-      toast.error("Impossible de générer l'export.");
-    } finally {
-      setExporting(false);
-    }
-  }, [exportFilters, directionMap, dateFrom, dateTo]);
+  // serviceId (unit) → direction_id, pour les requêtes où direction_id est null
+  const unitToDirectionId = useMemo(
+    () => new Map(unitsData.map((u) => [String(u.id), u.direction_id ? String(u.direction_id) : ""])),
+    [unitsData],
+  );
+
+  const resolveDirection = useCallback(
+    (r: { directionId?: string; serviceId?: string }): string => {
+      if (r.directionId) {
+        const name = directionMap.get(String(r.directionId));
+        if (name) return name;
+      }
+      if (r.serviceId) {
+        const dirId = unitToDirectionId.get(String(r.serviceId));
+        if (dirId) return directionMap.get(dirId) ?? "—";
+      }
+      return "—";
+    },
+    [directionMap, unitToDirectionId],
+  );
 
   const paged = data?.items ?? [];
   const total = data?.total ?? 0;
@@ -261,26 +292,6 @@ function RequestsList() {
         </div>
         <div className="flex items-center gap-2">
           <LayoutToggle layout={layout} onChange={setLayout} />
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="rounded-full" disabled={exporting}>
-                <Download className="mr-1.5 h-4 w-4" />
-                {exporting ? "Export…" : "Exporter"}
-                <ChevronDown className="ml-1 h-3.5 w-3.5 opacity-60" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => handleExport("xlsx")}>
-                <FileText className="mr-2 h-4 w-4 text-emerald-600" />
-                Excel (.xlsx)
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => handleExport("csv")}>
-                <FileText className="mr-2 h-4 w-4 text-muted-foreground" />
-                CSV (.csv)
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
           <Button asChild className="rounded-full gradient-primary shadow-lg shadow-primary/30">
             <Link to="/app/new">
               <Plus className="mr-1 h-4 w-4" /> Nouvelle demande
@@ -294,33 +305,36 @@ function RequestsList() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.05 }}
       >
-        <GlassCard className="space-y-3 p-4">
-          <div className={`grid gap-3 ${isUser ? "sm:grid-cols-[1fr_auto]" : "sm:grid-cols-[1fr_auto_auto]"}`}>
-            <div className="relative">
+        <GlassCard className="p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Recherche */}
+            <div className="relative min-w-0 flex-1">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={q}
                 onChange={handleQChange}
                 placeholder="Rechercher par numéro, titre…"
-                className="h-11 pl-9"
+                className="h-9 pl-9"
               />
             </div>
-            <Select value={status} onValueChange={setStatus}>
-              <SelectTrigger className="h-11 w-full sm:w-44">
+
+            {/* Statut */}
+            <Select value={visibleStatus} onValueChange={setStatus}>
+              <SelectTrigger className="h-9 w-40 shrink-0">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Tous les statuts</SelectItem>
-                {(Object.keys(statusLabels) as RequestStatus[]).map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {statusLabels[s]}
-                  </SelectItem>
+                {REQUEST_STATUS_OPTIONS.map((s) => (
+                  <SelectItem key={s} value={s}>{statusLabels[s]}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
+
+            {/* Origine (non-user) */}
             {!isUser && (
               <Select value={origin} onValueChange={setOrigin}>
-                <SelectTrigger className="h-11 w-full sm:w-36">
+                <SelectTrigger className="h-9 w-36 shrink-0">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -330,41 +344,49 @@ function RequestsList() {
                 </SelectContent>
               </Select>
             )}
-          </div>
 
-          {/* Filtres de date */}
-          <div className="flex flex-wrap items-center gap-2 border-t border-border/30 pt-3">
-            <Calendar className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <span className="text-xs font-medium text-muted-foreground">Période :</span>
-            {(["today", "week", "month", "year"] as const).map((p) => (
-              <button
-                key={p}
-                onClick={() => applyQuickDate(p)}
-                className="rounded-full border border-border/50 px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
-              >
-                {p === "today" ? "Aujourd'hui" : p === "week" ? "Cette semaine" : p === "month" ? "Ce mois" : "Cette année"}
-              </button>
-            ))}
-            <span className="text-xs text-muted-foreground">ou</span>
-            <div className="flex items-center gap-1.5">
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
-                className="h-8 rounded-lg border border-border/50 bg-background px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
-              />
-              <span className="text-xs text-muted-foreground">→</span>
-              <input
-                type="date"
-                value={dateTo}
-                onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
-                className="h-8 rounded-lg border border-border/50 bg-background px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
-              />
+            {/* Période */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+              <Select value={periodPreset} onValueChange={handlePeriodChange}>
+                <SelectTrigger className="h-9 w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Toutes les dates</SelectItem>
+                  <SelectItem value="today">Aujourd'hui</SelectItem>
+                  <SelectItem value="week">Cette semaine</SelectItem>
+                  <SelectItem value="month">Ce mois</SelectItem>
+                  <SelectItem value="year">Cette année</SelectItem>
+                  <SelectItem value="custom">Personnalisé…</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
+
+            {/* Dates custom */}
+            {periodPreset === "custom" && (
+              <div className="flex items-center gap-1.5 shrink-0">
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
+                  className="h-9 rounded-lg border border-border/50 bg-background px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+                />
+                <span className="text-xs text-muted-foreground">→</span>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
+                  className="h-9 rounded-lg border border-border/50 bg-background px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+                />
+              </div>
+            )}
+
+            {/* Effacer */}
             {hasDateFilter && (
               <button
                 onClick={clearDates}
-                className="flex items-center gap-1 rounded-full border border-destructive/30 px-2.5 py-1 text-xs text-destructive hover:bg-destructive/10 transition-colors"
+                className="flex shrink-0 items-center gap-1 rounded-full border border-destructive/30 px-2.5 py-1.5 text-xs text-destructive hover:bg-destructive/10 transition-colors"
               >
                 <X className="h-3 w-3" /> Effacer
               </button>
@@ -473,7 +495,7 @@ function RequestsList() {
                           </td>
                           <td className="px-5 py-4 font-medium">{r.title}</td>
                           <td className="px-5 py-4 text-muted-foreground">
-                            {directionMap.get(String(r.directionId)) ?? "—"}
+                            {resolveDirection(r)}
                           </td>
                           <td className="px-5 py-4">
                             {r.isExternal ? (
@@ -493,10 +515,14 @@ function RequestsList() {
                             <StatusBadge status={r.status} />
                           </td>
                           <td className="px-5 py-4 text-xs text-muted-foreground">
-                            <div>{formatDistanceToNow(new Date(r.createdAt), { addSuffix: true, locale: fr })}</div>
-                            {r.updatedAt && r.updatedAt !== r.createdAt && (
-                              <div className="mt-0.5 opacity-70">
-                                ↻ {formatDistanceToNow(new Date(r.updatedAt), { addSuffix: true, locale: fr })}
+                            <div className="flex items-center gap-1">
+                              <Calendar className="h-3 w-3 shrink-0" />
+                              {format(new Date(r.createdAt), "d MMM yyyy", { locale: fr })}
+                            </div>
+                            {["resolved", "closed", "rejected", "cancelled"].includes(r.status) && r.updatedAt && (
+                              <div className="mt-0.5 flex items-center gap-1 text-success">
+                                <CheckCircle2 className="h-3 w-3 shrink-0" />
+                                {format(new Date(r.updatedAt), "d MMM yyyy", { locale: fr })}
                               </div>
                             )}
                           </td>

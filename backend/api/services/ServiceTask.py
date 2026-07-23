@@ -5,7 +5,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.core.event_bus import AppEvent, emit as emit_event
 from api.repositories import TaskRepository, WorkflowDetailRepository, WorkflowRepository
 from api.services.base_service import BaseService
-from api.services.NotificationEmitter import emit as emit_notif
 
 
 class TaskService(BaseService):
@@ -60,23 +59,8 @@ class TaskService(BaseService):
 
     async def create(self, data: dict, *, actor_id: str | None = None):
         obj = await self.repo.create(data)
-        _labels = {
-            "reassignment": "Demande de réassignation créée",
-            "reopening": "Demande de réouverture créée",
-        }
-        label = _labels.get(obj.task_type, f"Tâche {obj.task_type} créée")
+        label = f"Tâche {obj.task_type} créée"
         await self._timeline(obj.request_id, f"task_{obj.task_type}", label, actor_id)
-        # Notification §6.4 — réassignation : notifier l'agent cible
-        if obj.task_type == "reassignment" and getattr(obj, "to_agent_id", None):
-            await emit_notif(
-                self.session,
-                recipient_id=obj.to_agent_id,
-                title="Demande de réassignation",
-                body=f"Une demande de réassignation vous a été soumise.",
-                type="info",
-                request_id=obj.request_id,
-                action_label="Voir la tâche",
-            )
         await emit_event(AppEvent(
             type="task.created",
             payload={"id": obj.id, "request_id": obj.request_id, "task_type": obj.task_type},
@@ -113,16 +97,6 @@ class TaskService(BaseService):
         if obj is None:
             raise self.not_found("Tâche introuvable")
         await self._timeline(task.request_id, "task_rejected", "Tâche rejetée", actor_id)
-        # Notification §6.4 — réassignation rejetée : notifier l'agent source
-        if getattr(task, "from_agent_id", None):
-            await emit_notif(
-                self.session,
-                recipient_id=task.from_agent_id,
-                title="Réassignation rejetée",
-                body="Votre demande de réassignation a été rejetée.",
-                type="warning",
-                request_id=task.request_id,
-            )
         return obj
 
     async def approve(self, id: str, *, actor_id: str | None = None):
@@ -131,16 +105,6 @@ class TaskService(BaseService):
         if obj is None:
             raise self.not_found("Tâche introuvable")
         await self._timeline(task.request_id, "task_approved", "Tâche approuvée", actor_id)
-        # Notification §6.4 — réassignation approuvée : notifier l'agent source
-        if getattr(task, "from_agent_id", None):
-            await emit_notif(
-                self.session,
-                recipient_id=task.from_agent_id,
-                title="Réassignation approuvée",
-                body="Votre demande de réassignation a été approuvée.",
-                type="success",
-                request_id=task.request_id,
-            )
         return obj
 
     async def cancel(self, id: str, *, actor_id: str | None = None):

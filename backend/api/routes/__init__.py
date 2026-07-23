@@ -7,7 +7,7 @@ from api.routes.RouteAuth import router as auth_router
 from api.routes.RouteReferences import router as references_router
 from api.routes.RouteUnity import router as unity_router
 from api.routes.RouteOrganigram import router as organigram_router
-from api.routes.RouteDirectionsUnits import directions_router, units_router, public_dirs_router
+from api.routes.RouteDirectionsUnits import directions_router, departments_router, units_router, public_dirs_router
 from api.routes.RouteAccount import router as account_router
 from api.routes.RouteRequest import router as request_router
 from api.routes.RouteRequest import public_router as public_request_router
@@ -32,6 +32,7 @@ from api.routes.RouteAdminConfig import router as admin_config_router
 from api.routes.RouteUsers import router as users_router
 from api.routes.RouteUsers import me_router as users_me_router
 from api.routes.RouteUsers import avatars_router as users_avatars_router
+from api.routes.RouteUsers import staff_router as users_staff_router
 from api.routes.RouteKnowledge import router as knowledge_router
 from api.routes.RouteKnowledge import public_router as knowledge_public_router
 from api.routes.RouteStats import router as stats_router
@@ -47,6 +48,7 @@ __all__ = [
     "unity_router",
     "organigram_router",
     "directions_router",
+    "departments_router",
     "units_router",
     "public_dirs_router",
     "account_router",
@@ -73,6 +75,7 @@ __all__ = [
     "users_router",
     "users_me_router",
     "users_avatars_router",
+    "users_staff_router",
     "knowledge_router",
     "knowledge_public_router",
     "stats_router",

@@ -32,6 +32,18 @@ me_router = APIRouter(
     dependencies=[Depends(get_current_user)],
 )
 
+# ── Routeur lecture annuaire (personnel — pour assignation/orientation) ──────
+# Lecture seule : liste + détail. Nécessaire pour que chief/agent voient les
+# collègues de leur direction (ex. dialogue "Assigner" dans la file d'attente).
+# Toute mutation (create/update/role/activate/delete) reste admin uniquement,
+# voir `router` ci-dessous.
+
+staff_router = APIRouter(
+    prefix="/users",
+    tags=["users-staff"],
+    dependencies=[Depends(require_roles("agent", "chief", "director", "admin"))],
+)
+
 # ── Routeur gestion admin des comptes (admin uniquement) ─────────────────────
 
 router = APIRouter(
@@ -130,17 +142,24 @@ async def get_avatar(filename: str):
 
 # ── Gestion admin des comptes (/users) ────────────────────────────────────────
 
-@router.get("/", response_model=PaginatedResponse[AccountResponse])
+@staff_router.get("/", response_model=PaginatedResponse[AccountResponse])
 async def list_users(
     role: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     direction_id: Optional[int] = Query(None),
+    unit_id: Optional[int] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=200),
     svc: AccountService = Depends(_svc),
 ):
     if search:
         return await svc.search(search, page=page, limit=limit)
+    if role and unit_id:
+        return await svc.list_by_role_and_unit(role, unit_id, page=page, limit=limit)
+    if role and direction_id:
+        return await svc.list_by_role_and_direction(role, direction_id, page=page, limit=limit)
+    if unit_id:
+        return await svc.list_by_unit(unit_id, page=page, limit=limit)
     if role:
         return await svc.list_by_role(role, page=page, limit=limit)
     if direction_id:
@@ -148,7 +167,7 @@ async def list_users(
     return await svc.list_all(page=page, limit=limit)
 
 
-@router.get("/{id}", response_model=AccountResponse)
+@staff_router.get("/{id}", response_model=AccountResponse)
 async def get_user(id: int, svc: AccountService = Depends(_svc)):
     return await svc.get_by_id(id)
 
@@ -159,7 +178,7 @@ async def update_user(
     body: AccountUpdate,
     svc: AccountService = Depends(_svc),
 ):
-    return await svc.update(id, body.dict(exclude_unset=True))
+    return await svc.update(id, body.dict(exclude_unset=True), validate_org_assignment=True)
 
 
 class RoleBody(BaseModel):
@@ -172,7 +191,7 @@ class PasswordBody(BaseModel):
 
 @router.post("/", response_model=AccountResponse, status_code=status.HTTP_201_CREATED)
 async def create_user(body: AccountCreate, svc: AccountService = Depends(_svc)):
-    return await svc.create(body.dict())
+    return await svc.create(body.dict(), validate_org_assignment=True)
 
 
 @router.patch("/{id}/role", response_model=AccountResponse)

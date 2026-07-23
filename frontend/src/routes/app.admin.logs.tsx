@@ -30,14 +30,11 @@ import {
   Search,
   XCircle,
   Filter,
-  Download,
   Lock,
   RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
 import { PaginationBar } from "@/components/pagination-bar";
-import { LayoutToggle, type LayoutMode } from "@/components/layout-toggle";
 import { useDebounce } from "@/lib/hooks/use-debounce";
 
 export const Route = createFileRoute("/app/admin/logs")({
@@ -78,7 +75,7 @@ const LOG_CATEGORIES = Object.keys(logCategoryLabels) as (keyof typeof logCatego
 
 function ActivityLogsPage() {
   const [role] = useRole();
-  const canSeeSensitive = role === "admin" || role === "dg";
+  const canSeeSensitive = role === "admin";
 
   const [q, setQ] = useState("");
   const debouncedQ = useDebounce(q, 400);
@@ -87,7 +84,6 @@ function ActivityLogsPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [selected, setSelected] = useState<ActivityLogEntry | null>(null);
-  const [layout, setLayout] = useState<LayoutMode>("list");
 
   // ── Queries ────────────────────────────────────────────────────────────────
   const fetchFn = debouncedQ.trim()
@@ -142,26 +138,16 @@ function ActivityLogsPage() {
             Toutes les actions effectuées sur la plateforme — utilisateurs, système, sécurité.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <LayoutToggle layout={layout} onChange={setLayout} />
-          <Button
-            variant="outline"
-            size="icon"
-            className="rounded-full"
-            title="Rafraîchir"
-            onClick={() => refetch()}
-            disabled={isFetching}
-          >
-            <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
-          </Button>
-          <Button
-            variant="outline"
-            className="rounded-full"
-            onClick={() => toast.success("Export CSV — fonctionnalité à venir.")}
-          >
-            <Download className="mr-1.5 h-4 w-4" /> Exporter CSV
-          </Button>
-        </div>
+        <Button
+          variant="outline"
+          size="icon"
+          className="rounded-full"
+          title="Rafraîchir"
+          onClick={() => refetch()}
+          disabled={isFetching}
+        >
+          <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
+        </Button>
       </header>
 
       {/* Stats */}
@@ -224,7 +210,7 @@ function ActivityLogsPage() {
         {/* List / Grid */}
         {isLoading ? (
           <div className="py-12 text-center text-sm text-muted-foreground">Chargement…</div>
-        ) : layout === "list" ? (
+        ) : (
           <ul className="divide-y divide-border/40">
             {filtered.map((l) => {
               const Icon = statusIcon[l.log_status] ?? CheckCircle2;
@@ -267,43 +253,6 @@ function ActivityLogsPage() {
               </li>
             )}
           </ul>
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {filtered.map((l) => {
-              const Icon = statusIcon[l.log_status] ?? CheckCircle2;
-              const tone = statusTone[l.log_status] ?? statusTone.success;
-              return (
-                <GlassCard
-                  key={l.id}
-                  className="cursor-pointer p-3 transition hover:border-primary/30"
-                  onClick={() => setSelected(l)}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className={cn("grid h-8 w-8 shrink-0 place-items-center rounded-lg", tone)}>
-                      <Icon className="h-4 w-4" />
-                    </span>
-                    <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                      {logCategoryLabels[l.category as keyof typeof logCategoryLabels] ?? l.category}
-                    </span>
-                  </div>
-                  <div className="mt-2 text-sm font-semibold leading-snug">{l.action}</div>
-                  <div className="mt-1 truncate text-xs text-muted-foreground">
-                    <span className="font-medium text-foreground/80">{l.actor}</span>
-                    {l.target !== "—" && <> · {l.target}</>}
-                  </div>
-                  <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-                    <span>{fmtTime(l.created_at)}</span>
-                    <span>{relative(l.created_at)}</span>
-                  </div>
-                </GlassCard>
-              );
-            })}
-            {filtered.length === 0 && (
-              <p className="col-span-full py-12 text-center text-sm text-muted-foreground">
-                Aucun événement ne correspond.
-              </p>
-            )}
-          </div>
         )}
 
         <PaginationBar

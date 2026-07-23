@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.core.rbac import normalize_role
 from api.models.ModelAccount import Account
+from api.models.ModelUnity import Unity
 from api.repositories.base_repository import BaseRepository
 
 
 class AccountRepository(BaseRepository[Account]):
     def __init__(self, session: AsyncSession) -> None:
         super().__init__(Account, session)
+
+    @staticmethod
+    def _role_filter(role: str) -> str | list[str]:
+        normalized = normalize_role(role)
+        return ["director", "dg"] if normalized == "director" else normalized
 
     async def find_by_email(self, email: str) -> Account | None:
         return await self.get_one({"email": email})
@@ -26,7 +34,7 @@ class AccountRepository(BaseRepository[Account]):
         self, role: str, *, page: int = 1, limit: int = 20
     ) -> tuple[list[Account], int]:
         return await self.list(
-            filters={"role": role},
+            filters={"role": self._role_filter(role)},
             only_active=True,
             order_by="name",
             page=page,
@@ -54,13 +62,74 @@ class AccountRepository(BaseRepository[Account]):
     async def list_by_direction(
         self, direction_id: int, *, page: int = 1, limit: int = 50
     ) -> tuple[list[Account], int]:
+        unity_ids = await self._direction_unity_ids(direction_id)
         return await self.list(
-            filters={"unity_id": direction_id},
+            filters={"unity_id": unity_ids},
             only_active=True,
             order_by="name",
             page=page,
             limit=limit,
         )
+
+    async def list_by_unit(
+        self, unit_id: int, *, page: int = 1, limit: int = 50
+    ) -> tuple[list[Account], int]:
+        return await self.list(
+            filters={"unity_id": unit_id},
+            only_active=True,
+            order_by="name",
+            page=page,
+            limit=limit,
+        )
+
+    async def list_by_role_and_direction(
+        self, role: str, direction_id: int, *, page: int = 1, limit: int = 50
+    ) -> tuple[list[Account], int]:
+        unity_ids = await self._direction_unity_ids(direction_id)
+        return await self.list(
+            filters={"role": self._role_filter(role), "unity_id": unity_ids},
+            only_active=True,
+            order_by="name",
+            page=page,
+            limit=limit,
+        )
+
+    async def list_by_role_and_unit(
+        self, role: str, unit_id: int, *, page: int = 1, limit: int = 50
+    ) -> tuple[list[Account], int]:
+        return await self.list(
+            filters={"role": self._role_filter(role), "unity_id": unit_id},
+            only_active=True,
+            order_by="name",
+            page=page,
+            limit=limit,
+        )
+
+    async def _direction_unity_ids(self, direction_id: int) -> list[int]:
+        root_id = int(direction_id)
+        ids: list[int] = [root_id]
+
+        from api.models.ModelOrganigram import Organigram as _Org
+
+        org_row = await self.session.execute(
+            select(_Org.id)
+            .where(_Org.unity_id == root_id, _Org.deleted_at.is_(None))
+            .limit(1)
+        )
+        org_id = org_row.scalar_one_or_none()
+        if org_id:
+            child_rows = await self.session.execute(
+                select(_Org.unity_id)
+                .where(_Org.parent_id == org_id, _Org.deleted_at.is_(None))
+            )
+            ids.extend(int(uid) for (uid,) in child_rows.all() if uid is not None)
+
+        unity_rows = await self.session.execute(
+            select(Unity.id)
+            .where(Unity.parent_direction_id == root_id, Unity.deleted_at.is_(None))
+        )
+        ids.extend(int(uid) for (uid,) in unity_rows.all() if uid is not None)
+        return sorted(set(ids))
 
     async def search(
         self, term: str, *, page: int = 1, limit: int = 20
@@ -97,7 +166,7 @@ class AccountRepository(BaseRepository[Account]):
     async def find_directors_by_direction(self, direction_id: int) -> list[Account]:
         """Retourne les directeurs (role='director') d'une direction."""
         items, _ = await self.list(
-            filters={"unity_id": direction_id, "role": "director"},
+            filters={"unity_id": direction_id, "role": ["director", "dg"]},
             only_active=True,
             order_by="name",
             limit=20,

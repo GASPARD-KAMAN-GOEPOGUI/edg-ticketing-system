@@ -21,6 +21,7 @@ export type RawEscalation = {
   sla_over_hours: number;
   priority: string;
   escalation_status: string;
+  decision_comment?: string | null;
   dg_comment?: string | null;
   status: boolean;
   infos?: unknown;
@@ -38,20 +39,22 @@ export type PaginatedEscalations = {
 // ── Mapper ────────────────────────────────────────────────────────────────────
 
 export function mapEscalation(raw: RawEscalation): EscalationItem {
+  const status = raw.escalation_status === "reviewed" ? "in_review" : raw.escalation_status;
+  const level = raw.level === "DG" ? "L3" : raw.level;
   return {
     id: raw.id,
     requestId: raw.request_id ?? undefined,
     requestRef: raw.request_ref,
     title: raw.title,
     fromAgent: raw.from_agent_name,
-    toAgent: raw.to_agent_name,
-    level: raw.level as EscalationItem["level"],
+    toAgent: raw.to_agent_name === "Direction Générale" ? "Directeur" : raw.to_agent_name,
+    level: level as EscalationItem["level"],
     reason: raw.reason,
     slaOverHours: raw.sla_over_hours,
     priority: raw.priority as EscalationItem["priority"],
     at: raw.created_at,
-    status: raw.escalation_status as EscalationItem["status"],
-    dgComment: raw.dg_comment ?? undefined,
+    status: status as EscalationItem["status"],
+    decisionComment: raw.decision_comment ?? raw.dg_comment ?? undefined,
   };
 }
 
@@ -64,7 +67,7 @@ export async function fetchEscalations(params?: {
   limit?: number;
 }): Promise<PaginatedEscalations> {
   const qs = new URLSearchParams();
-  if (params?.status) qs.set("status", params.status);
+  if (params?.status) qs.set("status", params.status === "in_review" ? "reviewed" : params.status);
   if (params?.level) qs.set("level", params.level);
   if (params?.page) qs.set("page", String(params.page));
   if (params?.limit) qs.set("limit", String(params.limit));
@@ -97,7 +100,7 @@ export async function resolveEscalation(
   const raw = await apiFetch<RawEscalation>(`/escalations/${id}/resolve`, {
     method: "PATCH",
     body: JSON.stringify({
-      dg_comment: options?.comment ?? null,
+      decision_comment: options?.comment ?? null,
       action: options?.action ?? "resolve",
     }),
   });

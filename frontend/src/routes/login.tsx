@@ -12,6 +12,11 @@ import { setUser, setTokens, clearSession, getDefaultRouteForRole, isAuthenticat
 import type { Role } from "@/lib/mock-data";
 
 export const Route = createFileRoute("/login")({
+  // SSR désactivé : isAuthenticated() lit localStorage, invisible côté serveur
+  // (voir app.tsx). Sans ce flag, un utilisateur déjà connecté qui rouvrait
+  // /login directement pouvait rester bloqué sur le formulaire au lieu d'être
+  // redirigé vers son espace.
+  ssr: false,
   head: () => ({ meta: [{ title: "Connexion — EDG Support" }] }),
   beforeLoad: () => {
     if (isAuthenticated()) {
@@ -42,14 +47,11 @@ function Login() {
     try {
       const result = await loginUser({ identifier: identifier.trim(), password });
 
-      // Nettoyer l'ancienne session avant d'en écrire une nouvelle
       clearSession();
-
-      // Stocke les tokens JWT
       setTokens(result.accessToken, result.refreshToken, result.expiresIn);
 
-      // Stocke le profil utilisateur
       const role = (result.user.role as Role) || "user";
+      const directionId = result.user.direction_id ?? (role === "director" ? result.user.unit_id : undefined);
       setUser({
         id: result.user.id,
         name: result.user.name,
@@ -58,11 +60,12 @@ function Login() {
         role,
         phone: result.user.phone,
         avatar: result.user.avatar,
-        direction_id: result.user.direction_id ?? undefined,
+        direction_id: directionId,
         unit_id: result.user.unit_id ?? undefined,
       });
 
-      // Redirection directe vers l'espace du rôle — replace évite le retour arrière vers le formulaire
+      // isLoading reste true pendant toute la navigation — le composant se démontera,
+      // donc pas besoin de le remettre à false sur le chemin succès.
       navigate({ to: getDefaultRouteForRole(role) as "/", replace: true });
     } catch (err) {
       if (err instanceof ApiError) {
@@ -80,7 +83,6 @@ function Login() {
       } else {
         setError("Impossible de contacter le serveur. Vérifiez votre connexion.");
       }
-    } finally {
       setIsLoading(false);
     }
   };

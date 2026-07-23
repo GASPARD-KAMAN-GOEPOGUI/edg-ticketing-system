@@ -29,13 +29,8 @@ class RoutingRuleRepository(BaseRepository[RoutingRule]):
     async def list_by_direction(
         self, direction_id: str
     ) -> list[RoutingRule]:
-        items, _ = await self.list(
-            filters={"target_direction_id": direction_id},
-            only_active=True,
-            order_by="sort_order",
-            limit=200,
-        )
-        return items
+        all_rules = await self.list_ordered()
+        return [r for r in all_rules if r.target_unity_direction_id == direction_id]
 
     async def list_auto_assign(self) -> list[RoutingRule]:
         items, _ = await self.list(

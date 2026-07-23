@@ -56,7 +56,6 @@ const ROLES_LIST: { value: Role; label: string }[] = [
   { value: "agent", label: "Agents" },
   { value: "chief", label: "Chefs de service" },
   { value: "director", label: "Directeurs" },
-  { value: "dg", label: "Direction Générale" },
   { value: "admin", label: "Administrateurs" },
 ];
 
@@ -104,7 +103,7 @@ const emptyForm = (): FormState => ({
   publishedAt: new Date().toISOString().slice(0, 16),
   expiresAt: "",
   audience: "internal",
-  selectedRoles: ["user", "agent", "chief", "director", "dg", "admin"],
+  selectedRoles: ["user", "agent", "chief", "director", "admin"],
   selectedDirections: [],
   channels: ["internal_notif", "email"],
 });

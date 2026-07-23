@@ -10,7 +10,6 @@ import {
   LogOut,
   Menu,
   Plus,
-  Search,
   Settings,
   BarChart3,
   Users2,
@@ -41,8 +40,9 @@ import {
   AlarmClock,
   GitBranch,
   Flag,
+  FolderTree,
 } from "lucide-react";
-import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
+import { useState, useRef, useCallback, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchNotifications } from "@/lib/api/notifications";
 import { Logo } from "./logo";
@@ -83,17 +83,36 @@ const HEADER_ROLE_LABEL: Record<Role, string> = {
   agent:    "AGENT",
   chief:    "CHEF DE SERVICE",
   director: "DIRECTION",
-  dg:       "DIRECTION GÉNÉRALE",
   admin:    "ADMINISTRATION",
 };
 
-const navItems: NavItem[] = [
-  // ── Principal ─────────────────────────────────────────────────────────────
-  { to: "/app", label: "Accueil", icon: LayoutDashboard, roles: ["user", "agent", "chief", "director", "dg", "admin"] },
+function resolveBackFallback(pathname: string, role: Role): string {
+  if (pathname.startsWith("/app/supervision/tickets/")) return "/app/supervision";
+  if (pathname.startsWith("/app/queue/tickets/")) return "/app/queue";
+  if (pathname.startsWith("/app/my-tickets/tickets/")) return "/app/my-tickets";
+  if (pathname.startsWith("/app/chief-inbox/tickets/")) return "/app/chief-inbox";
+  if (pathname.startsWith("/app/direction/tickets/")) return "/app/direction";
+  if (pathname.startsWith("/app/dg/tickets/")) return "/app/dg";
+  if (pathname.startsWith("/app/sla-center/tickets/")) return "/app/sla-center";
+  if (pathname.startsWith("/app/admin/tickets/")) return role === "admin" ? "/app/admin/users" : "/app";
+  if (pathname.startsWith("/app/requests/")) return "/app/requests";
+  if (pathname.startsWith("/app/requests")) return "/app";
+  if (pathname.startsWith("/app/my-tickets")) return "/app";
+  if (pathname.startsWith("/app/queue")) return "/app";
+  if (pathname.startsWith("/app/chief-inbox")) return "/app";
+  if (pathname.startsWith("/app/direction")) return "/app";
+  if (pathname.startsWith("/app/supervision")) return "/app";
+  if (pathname.startsWith("/app/reports")) return "/app";
+  if (pathname.startsWith("/app/dg")) return "/app";
+  if (pathname.startsWith("/app/admin")) return role === "admin" ? "/app/admin/users" : "/app";
+  return "/app";
+}
 
-  // ── Mon espace (tous les rôles — Algo 2 : tout employé peut soumettre/suivre ses demandes) ──
-  { to: "/app/requests",         label: "Mes demandes",      icon: Inbox,   roles: ["user", "agent", "chief", "director", "dg", "admin"], group: "Mon espace" },
-  { to: "/app/requests/history", label: "Historique",        icon: History, roles: ["user", "agent", "chief", "director", "dg", "admin"], group: "Mon espace" },
+const navItems: NavItem[] = [
+  // ── Mon espace personnel (tous les rôles — chaque acteur garde son espace propre) ──
+  { to: "/app",                  label: "Accueil",          icon: LayoutDashboard, roles: ["user", "agent", "chief", "director", "admin"], group: "Mon espace" },
+  { to: "/app/requests",         label: "Mes demandes",      icon: Inbox,   roles: ["user", "agent", "chief", "director", "admin"], group: "Mon espace" },
+  { to: "/app/requests/history", label: "Historique",        icon: History, roles: ["user", "agent", "chief", "director", "admin"], group: "Mon espace" },
 
   // ── Agent / Chef ─────────────────────────────────────────────────────────
   { to: "/app/chief-inbox", label: "Boîte de traitement", icon: ClipboardList,   roles: ["chief"],                   group: "Traitement" },
@@ -103,11 +122,11 @@ const navItems: NavItem[] = [
   // ── Chef de service ───────────────────────────────────────────────────────
   { to: "/app/supervision", label: "Supervision", icon: ShieldAlert, roles: ["chief", "director"], group: "Pilotage" },
 
-  // ── Direction / DG ────────────────────────────────────────────────────────
+  // ── Direction / pilotage global ───────────────────────────────────────────
   { to: "/app/direction",  label: "Vue direction", icon: Building2,  roles: ["director"],                          group: "Pilotage" },
-  { to: "/app/dg",         label: "Vue globale",   icon: TrendingUp, roles: ["dg", "admin"],                       group: "Pilotage" },
-  { to: "/app/sla-center", label: "Centre SLA",    icon: AlarmClock, roles: ["chief", "director", "dg", "admin"], group: "Pilotage" },
-  { to: "/app/reports",    label: "Rapports",      icon: BarChart3,  roles: ["chief", "director", "dg"],            group: "Pilotage" },
+  { to: "/app/dg",         label: "Vue globale",   icon: TrendingUp, roles: ["admin"],                             group: "Pilotage" },
+  { to: "/app/sla-center", label: "Centre SLA",    icon: AlarmClock, roles: ["chief", "director", "admin"],       group: "Pilotage" },
+  { to: "/app/reports",    label: "Rapports",      icon: BarChart3,  roles: ["chief", "director", "admin"],       group: "Pilotage" },
 
   // ── Admin — Utilisateurs ──────────────────────────────────────────────────
   { to: "/app/admin/users", label: "Utilisateurs & Rôles", icon: Users2, roles: ["admin"], group: "Utilisateurs" },
@@ -115,6 +134,7 @@ const navItems: NavItem[] = [
   // ── Admin — Organisation ──────────────────────────────────────────────────
   { to: "/app/admin/org",        label: "Organigramme",      icon: GitBranch, roles: ["admin"], group: "Organisation" },
   { to: "/app/admin/directions", label: "Directions",        icon: Network,   roles: ["admin"], group: "Organisation" },
+  { to: "/app/admin/departments", label: "Départements",      icon: FolderTree, roles: ["admin"], group: "Organisation" },
   { to: "/app/admin/units",      label: "Services & Unités", icon: Layers,    roles: ["admin"], group: "Organisation" },
 
   // ── Admin — Gestion tickets ───────────────────────────────────────────────
@@ -135,9 +155,9 @@ const navItems: NavItem[] = [
   { to: "/app/admin/knowledge",     label: "Base de connaissances", icon: Library,   roles: ["admin"], group: "Système" },
 
   // ── Ressources (tous) ─────────────────────────────────────────────────────
-  { to: "/app/knowledge",    label: "Base de connaissance", icon: BookOpen, roles: ["user", "agent", "chief", "director", "dg"], group: "Ressources" },
-  { to: "/app/notifications", label: "Notifications",       icon: Bell,     roles: ["user", "agent", "chief", "director", "dg", "admin"], group: "Ressources" },
-  { to: "/app/profile",       label: "Profil",              icon: Settings, roles: ["user", "agent", "chief", "director", "dg", "admin"], group: "Ressources" },
+  { to: "/app/knowledge",    label: "Base de connaissance", icon: BookOpen, roles: ["user", "agent", "chief", "director"], group: "Ressources" },
+  { to: "/app/notifications", label: "Notifications",       icon: Bell,     roles: ["user", "agent", "chief", "director", "admin"], group: "Ressources" },
+  { to: "/app/profile",       label: "Profil",              icon: Settings, roles: ["user", "agent", "chief", "director", "admin"], group: "Ressources" },
 ];
 
 export function AppLayout({ children }: { children: ReactNode }) {
@@ -173,6 +193,14 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const unreadCount = notifData?.total ?? 0;
 
   const canGoBack = pathname !== "/app";
+  const backFallback = resolveBackFallback(pathname, role);
+  const handleBack = useCallback(() => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.history.back();
+      return;
+    }
+    router.navigate({ to: backFallback as never, replace: true });
+  }, [backFallback, router]);
 
   const items = navItems.filter((i) => i.roles.includes(role));
   const grouped = items.reduce<Record<string, NavItem[]>>((acc, i) => {
@@ -199,7 +227,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         {/* ── Sidebar : icon-only on md–xl, expandable on xl+ ── */}
         <aside
           className={cn(
-            "fixed left-0 top-0 z-30 hidden md:flex h-dvh flex-col border-r border-border/40 bg-sidebar/80 backdrop-blur-lg transition-[width] duration-200",
+            "fixed left-0 top-0 z-30 hidden md:flex h-dvh flex-col border-r border-border/40 bg-sidebar transition-[width] duration-200",
             // md–xl : always 72 px (icon rail)
             "w-[72px]",
             // xl+ : 264 px when not collapsed
@@ -399,7 +427,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           )}
         >
           {/* Top header */}
-          <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center border-b border-border/60 bg-background/80 backdrop-blur-md">
+          <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center border-b border-border/60 bg-background/95">
             <div className="flex h-full w-full items-center justify-between px-3 md:px-5">
 
               {/* ── LEFT zone ── */}
@@ -422,54 +450,22 @@ export function AppLayout({ children }: { children: ReactNode }) {
                   <Logo size="sm" showText={false} />
                   <div className="flex items-center gap-1.5">
                     <span className="text-sm font-bold tracking-tight text-foreground">EDG-SUP</span>
-                    <span className="text-muted-foreground/40 text-xs">|</span>
-                    <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                      {HEADER_ROLE_LABEL[role]}
-                    </span>
                   </div>
                 </Link>
 
-                {/* Desktop: bouton retour + marque */}
-                <div className="hidden md:flex items-center gap-3">
-                  {canGoBack && (
-                    <>
-                      <button
-                        onClick={() => router.history.back()}
-                        className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                        aria-label="Retour"
-                      >
-                        <ArrowLeft className="h-4 w-4" />
-                        <span>Retour</span>
-                      </button>
-                      <span className="h-4 w-px bg-border" />
-                    </>
-                  )}
-                  <Link to="/app" className="flex items-center gap-2.5" aria-label="Accueil">
-                    <Logo size="sm" showText={false} />
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold tracking-tight text-foreground">EDG-SUP</span>
-                      <span className="text-muted-foreground/40">|</span>
-                      <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                        {HEADER_ROLE_LABEL[role]}
-                      </span>
-                    </div>
-                  </Link>
-                </div>
-              </div>
-
-              {/* ── CENTER : search bar on md+ ── */}
-
-              {/* Search bar — tablet/desktop only */}
-              <div className="relative mx-4 hidden min-w-0 flex-1 max-w-sm md:block lg:max-w-lg">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  placeholder="Rechercher une demande, un agent…"
-                  aria-label="Rechercher"
-                  className="h-9 w-full rounded-full border border-border bg-muted/60 pl-9 pr-16 text-sm text-foreground outline-none placeholder:text-muted-foreground transition-all focus:border-primary/50 focus:bg-muted focus:shadow-sm"
-                />
-                <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                  ⌘K
-                </kbd>
+                {/* Desktop: bouton retour uniquement (la marque est déjà dans la sidebar) */}
+                {canGoBack && (
+                  <div className="hidden md:flex items-center gap-3">
+                    <button
+                      onClick={handleBack}
+                      className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      aria-label="Retour"
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                      <span>Retour</span>
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* ── RIGHT zone ── */}
@@ -557,7 +553,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
                       <div className="text-sm font-semibold leading-none text-foreground">
                         {displayName || "Utilisateur EDG"}
                       </div>
-                      <div className="mt-0.5 text-[11px] text-muted-foreground">{roleLabels[role]}</div>
                     </div>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-56">
@@ -609,27 +604,17 @@ export function AppLayout({ children }: { children: ReactNode }) {
             {/* Bouton retour en haut */}
             <AnimatePresence>
               {showScrollTop && (
-                <motion.div
-                  className="fixed bottom-20 right-5 z-40 md:bottom-6 md:right-6"
+                <motion.button
+                  className="fixed bottom-20 right-5 z-40 md:bottom-6 md:right-6 grid h-11 w-11 place-items-center rounded-full gradient-primary text-primary-foreground shadow-lg shadow-primary/40 hover:scale-110 transition-transform duration-150"
                   initial={{ opacity: 0, scale: 0.3, y: 24 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.3, y: 24 }}
                   transition={{ type: "spring", stiffness: 380, damping: 18 }}
+                  onClick={() => mainRef.current?.scrollTo({ top: 0, behavior: "smooth" })}
+                  aria-label="Retour en haut"
                 >
-                  {/* Anneau pulsant */}
-                  <motion.span
-                    className="absolute inset-0 rounded-full gradient-primary"
-                    animate={{ scale: [1, 1.9], opacity: [0.45, 0] }}
-                    transition={{ duration: 1.3, repeat: Infinity, ease: "easeOut", repeatDelay: 0.3 }}
-                  />
-                  <button
-                    onClick={() => mainRef.current?.scrollTo({ top: 0, behavior: "smooth" })}
-                    aria-label="Retour en haut"
-                    className="relative grid h-11 w-11 place-items-center rounded-full gradient-primary text-primary-foreground shadow-lg shadow-primary/40 hover:scale-110 transition-transform duration-150"
-                  >
-                    <ArrowUp className="h-5 w-5" />
-                  </button>
-                </motion.div>
+                  <ArrowUp className="h-5 w-5" />
+                </motion.button>
               )}
             </AnimatePresence>
           </main>
@@ -637,15 +622,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           {/* ── Mobile bottom nav (< md only) ── */}
           <nav className="fixed bottom-3 left-3 right-3 z-30 md:hidden">
             <div className="glass-strong flex items-center justify-around rounded-2xl px-2 py-2">
-              {(role === "dg"
-                ? [
-                    { to: "/app",              icon: LayoutDashboard, label: "Accueil" },
-                    { to: "/app/dg",           icon: TrendingUp,      label: "Vue glob.", primary: true },
-                    { to: "/app/reports",      icon: BarChart3,       label: "Rapports" },
-                    { to: "/app/notifications", icon: Bell,           label: "Alertes" },
-                    { to: "/app/profile",      icon: Settings,        label: "Profil" },
-                  ]
-                : role === "director"
+              {(role === "director"
                   ? [
                       { to: "/app",              icon: LayoutDashboard, label: "Accueil" },
                       { to: "/app/direction",    icon: Building2,       label: "Direction", primary: true },
@@ -742,7 +719,7 @@ function RoleSwitcher({
   userName?: string;
   userAvatar?: string;
 }) {
-  const roles: Role[] = ["user", "agent", "chief", "director", "dg", "admin"];
+  const roles: Role[] = ["user", "agent", "chief", "director", "admin"];
   const initials = userName ? getInitials(userName) : role.slice(0, 2).toUpperCase();
 
   const avatar = (
@@ -757,7 +734,7 @@ function RoleSwitcher({
     <div className="hidden xl:flex min-w-0 flex-1 items-center gap-1">
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{userName || "Utilisateur"}</div>
-        <div className="text-[10px] text-muted-foreground/70">{roleLabels[role]}</div>
+        <div className="truncate text-[11px] text-muted-foreground">{roleLabels[role]}</div>
       </div>
     </div>
   );
@@ -793,8 +770,7 @@ function RoleSwitcher({
           <div className="hidden xl:flex min-w-0 flex-1 items-center gap-1">
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium">{userName || "Utilisateur"}</div>
-              <div className="text-[10px] text-muted-foreground/70">{roleLabels[role]}</div>
-            </div>
+                  </div>
             <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
           </div>
         )}

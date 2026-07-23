@@ -5,6 +5,7 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.core.event_bus import AppEvent, emit as emit_event
 from api.repositories.RepositoryNotification import NotificationRepository
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,7 @@ async def emit(
 
             if recipient_id_int:
                 repo = NotificationRepository(session)
-                await repo.create({
+                obj = await repo.create({
                     "recipient_id": recipient_id_int,
                     "type": type,
                     "channel": "in_app",
@@ -57,6 +58,16 @@ async def emit(
                     "action_url": action_url,
                     "visibility": visibility,
                 })
+                await emit_event(AppEvent(
+                    type="notification.created",
+                    payload={
+                        "id": obj.id,
+                        "request_id": request_id,
+                        "title": title,
+                        "type": type,
+                    },
+                    target={"user_ids": [recipient_id_int]},
+                ))
 
                 # Email automatique si email_on=True dans CommunicationSetting
                 try:

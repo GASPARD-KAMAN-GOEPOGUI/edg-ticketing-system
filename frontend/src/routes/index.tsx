@@ -270,7 +270,7 @@ function ForWhoSection() {
       icon: ShieldCheck,
       gradient: "gradient-primary",
       shadow: "shadow-primary/25",
-      title: "Directeur & DG",
+      title: "Directeur",
       subtitle: "Pilotage et reporting",
       desc: "KPIs en temps réel, performances par direction, rapports CSAT et SLA, règles de routage — tout ce qu'il faut pour piloter la qualité de service.",
       cta: "Tableau de bord",

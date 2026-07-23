@@ -26,7 +26,7 @@ from api.configs.Environment import get_environment
 from api.core.exceptions import UnauthorizedException, ForbiddenException
 from api.core.security import decode_token
 from api.core.token_blacklist import token_blacklist
-from api.core.rbac import Permission, ROLE_PERMISSIONS
+from api.core.rbac import Permission, ROLE_PERMISSIONS, normalize_role
 
 logger = logging.getLogger(__name__)
 _env = get_environment()
@@ -193,7 +193,9 @@ def require_roles(*roles: str) -> Callable:
         @router.get("/", dependencies=[Depends(require_roles("admin", "chief"))])
     """
     async def _guard(current_user=Depends(get_current_user)):
-        if current_user.role not in roles:
+        current_role = normalize_role(current_user.role)
+        allowed_roles = {normalize_role(role) for role in roles if role != "dg"}
+        if current_role not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=(
@@ -211,7 +213,7 @@ def require_permissions(*permissions: Permission) -> Callable:
     dispose de toutes les permissions listées.
     """
     async def _guard(current_user=Depends(get_current_user)):
-        user_perms = ROLE_PERMISSIONS.get(current_user.role, set())
+        user_perms = ROLE_PERMISSIONS.get(normalize_role(current_user.role), set())
         missing = [p.value for p in permissions if p not in user_perms]
         if missing:
             raise HTTPException(

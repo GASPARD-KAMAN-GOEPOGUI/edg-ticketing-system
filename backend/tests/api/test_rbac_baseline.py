@@ -69,28 +69,27 @@ class TestAppreciationRBACBaseline:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestByUnityRBACBaseline:
-    async def test_agent_peut_lire_direction_hors_perimetre(
+    async def test_agent_ne_peut_pas_lire_unity_hors_perimetre(
         self, auth_client, unity_id
     ):
         """
-        COMPORTEMENT ACTUEL — À DURCIR EN PHASE 1 :
-        Un agent (unity_id=1) peut appeler /requests/by-unity/{id} avec
-        n'importe quel unity_id. Après Phase 1 : devra retourner 403 si
-        la direction n'est pas la sienne.
+        Phase alignement : un agent ne peut appeler /requests/by-unity/{id}
+        que pour son unité.
         """
         autre_unity_id = unity_id + 99  # direction hors périmètre
         async with auth_client("agent") as c:
             r = await c.get(f"/api/v1/requests/by-unity/{autre_unity_id}")
-        # Comportement actuel : 200 (liste vide ou pas) — pas de 403
-        assert r.status_code in (200, 404), (
-            f"COMPORTEMENT ACTUEL : {r.status_code}. "
-            "À DURCIR EN PHASE 1 → attendu 403 pour direction hors périmètre."
-        )
+        assert r.status_code == 403
 
-    async def test_director_peut_lire_sa_direction(self, auth_client, unity_id):
+    async def test_agent_peut_lire_sa_propre_unity(self, auth_client):
+        async with auth_client("agent") as c:
+            r = await c.get("/api/v1/requests/by-unity/1")
+        assert r.status_code in (200, 404)
+
+    async def test_director_peut_lire_sa_direction(self, auth_client):
         """Un directeur doit toujours pouvoir lire sa direction (avant et après Phase 1)."""
         async with auth_client("director") as c:
-            r = await c.get(f"/api/v1/requests/by-unity/{unity_id}")
+            r = await c.get("/api/v1/requests/by-unity/1")
         assert r.status_code in (200, 404)
 
     async def test_admin_peut_lire_nimporte_quelle_direction(

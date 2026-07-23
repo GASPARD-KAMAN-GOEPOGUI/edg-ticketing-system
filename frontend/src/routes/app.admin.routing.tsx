@@ -35,7 +35,6 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { LayoutToggle, LayoutMode } from "@/components/layout-toggle";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   fetchRoutingRules,
@@ -77,7 +76,6 @@ function RoutingAdminPage() {
   const qc = useQueryClient();
   const [editing, setEditing] = useState<RoutingRule | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [layout, setLayout] = useState<LayoutMode>("list");
 
   const { data: list = [], isLoading, isError } = useQuery({
     queryKey: ["admin", "routing"],
@@ -183,12 +181,9 @@ function RoutingAdminPage() {
             Affectez automatiquement chaque demande à la bonne direction et au bon service.
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <LayoutToggle layout={layout} onChange={setLayout} />
-          <Button onClick={openCreate} className="rounded-full gradient-primary text-background shadow-lg shadow-primary/30">
-            <Plus className="mr-1 h-4 w-4" /> Nouvelle règle
-          </Button>
-        </div>
+        <Button onClick={openCreate} className="rounded-full gradient-primary text-background shadow-lg shadow-primary/30">
+          <Plus className="mr-1 h-4 w-4" /> Nouvelle règle
+        </Button>
       </header>
 
       <div className="grid gap-4 sm:grid-cols-3">
@@ -216,7 +211,7 @@ function RoutingAdminPage() {
           <p className="text-sm font-medium text-destructive">Impossible de charger les règles de routage.</p>
           <p className="text-xs text-muted-foreground">Vérifiez que le serveur backend est démarré et réessayez.</p>
         </div>
-      ) : layout === "list" ? (
+      ) : (
         <GlassCard className="space-y-2 p-3">
           <div className="px-3 pt-2 pb-1 text-xs text-muted-foreground">
             Les règles sont évaluées dans l'ordre. La première règle correspondante est appliquée.
@@ -275,46 +270,6 @@ function RoutingAdminPage() {
             </div>
           ))}
         </GlassCard>
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {sorted.map((r, i) => (
-            <GlassCard
-              key={r.id}
-              className={cn(
-                "flex flex-col gap-3 p-4",
-                !r.active && "opacity-55",
-              )}
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-primary/10 font-mono text-xs font-bold text-primary">
-                  {String(i + 1).padStart(2, "0")}
-                </span>
-                <span className="font-medium">{r.name}</span>
-                {r.autoAssign && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-medium text-accent-foreground dark:text-accent">
-                    <Zap className="h-2.5 w-2.5" /> Auto-assign
-                  </span>
-                )}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                Si <span className="font-semibold text-foreground/80">{fieldLabels[r.conditionField]}</span> = <span className="font-mono">{r.conditionValue}</span>
-                <span className="mx-1.5">→</span>
-                <span className="font-semibold text-foreground/80">{r.targetDirection}</span> · {r.targetService}
-              </div>
-              <div className="mt-auto flex items-center justify-between pt-1">
-                <Switch checked={r.active} onCheckedChange={() => toggleMut.mutate(r.id)} />
-                <div className="flex items-center gap-1">
-                  <Button size="sm" variant="ghost" className="rounded-full" onClick={() => openEdit(r)}>
-                    <Edit3 className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button size="sm" variant="ghost" className="rounded-full text-destructive hover:bg-destructive/10" onClick={() => deleteMut.mutate(r.id)}>
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </div>
-            </GlassCard>
-          ))}
-        </div>
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

@@ -30,7 +30,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { roleLabels } from "@/lib/mock-data";
 import type { Role } from "@/lib/mock-data";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   fetchUsers,
@@ -43,8 +43,8 @@ import {
   deleteUser,
 } from "@/lib/api/accounts";
 import type { AccountUser } from "@/lib/api/accounts";
-import { fetchDirections, fetchUnits } from "@/lib/api/directions-units";
-import type { Direction, Unit } from "@/lib/api/directions-units";
+import { fetchDepartments, fetchDirections, fetchUnits } from "@/lib/api/directions-units";
+import type { Department, Direction, Unit } from "@/lib/api/directions-units";
 import { toast } from "sonner";
 import {
   Search,
@@ -55,7 +55,6 @@ import {
   UserCheck,
   UserX,
   Trash2,
-  ChevronDown,
 } from "lucide-react";
 import { PaginationBar, usePagination } from "@/components/pagination-bar";
 import { cn } from "@/lib/utils";
@@ -65,7 +64,7 @@ export const Route = createFileRoute("/app/admin/users")({
   component: AdminUsers,
 });
 
-const ROLES: Role[] = ["user", "agent", "chief", "director", "dg", "admin"];
+const ROLES: Role[] = ["user", "agent", "chief", "director", "admin"];
 
 const statusBadge: Record<string, string> = {
   active: "bg-success/15 text-success",
@@ -85,6 +84,7 @@ type FormData = {
   matricule: string;
   job: string;
   direction_id: string;
+  department_id: string;
   unit_id: string;
   is_edg_employee: boolean;
   password: string;
@@ -97,10 +97,40 @@ const emptyForm = (): FormData => ({
   matricule: "",
   job: "",
   direction_id: "",
+  department_id: "",
   unit_id: "",
   is_edg_employee: true,
   password: "",
 });
+
+type RoleChoice = Role | "chief_department" | "chief_service";
+type OrgTarget = "direction" | "department" | "unit";
+
+const USER_FORM_ROLE_OPTIONS: Array<{ value: RoleChoice; label: string }> = [
+  { value: "user", label: roleLabels.user },
+  { value: "agent", label: roleLabels.agent },
+  { value: "chief_service", label: "Chef de service" },
+  { value: "chief_department", label: "Chef de département" },
+  { value: "director", label: roleLabels.director },
+  { value: "admin", label: roleLabels.admin },
+];
+
+function backendRole(role: string): Role {
+  return role === "chief_department" || role === "chief_service" ? "chief" : (role as Role);
+}
+
+function orgTargetForRole(role: string): OrgTarget {
+  if (role === "director") return "direction";
+  if (role === "chief_department") return "department";
+  return "unit";
+}
+
+function roleChoiceFromAssignment(role: string, orgKind: OrgTarget | "none"): RoleChoice {
+  if (role === "chief") {
+    return orgKind === "department" ? "chief_department" : "chief_service";
+  }
+  return (role as RoleChoice) || "user";
+}
 
 function initials(name: string) {
   return name.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase();
@@ -144,25 +174,55 @@ function AdminUsers() {
   const list: AccountUser[] = data?.items ?? [];
 
   const { data: directionsData } = useQuery({
-    queryKey: ["directions"],
-    queryFn: fetchDirections,
+    queryKey: ["directions", "all"],
+    queryFn: () => fetchDirections({ status: "all" }),
   });
-  const directions: Direction[] = directionsData ?? [];
+  const directions: Direction[] = useMemo(() => directionsData ?? [], [directionsData]);
+  const activeDirections = useMemo(
+    () => directions.filter((direction) => direction.status),
+    [directions],
+  );
+
+  const { data: allDepartmentsData } = useQuery({
+    queryKey: ["departments", "all"],
+    queryFn: () => fetchDepartments({ status: "all" }),
+  });
+  const allDepartments: Department[] = useMemo(() => allDepartmentsData ?? [], [allDepartmentsData]);
+
+  const { data: departmentsData } = useQuery({
+    queryKey: ["departments", "direction", form.direction_id],
+    queryFn: () => fetchDepartments({ directionId: form.direction_id, status: "active" }),
+    enabled: !!form.direction_id,
+  });
+  const departments: Department[] = useMemo(() => departmentsData ?? [], [departmentsData]);
 
   // Toutes les unités — pour dériver la direction depuis unit_id dans le tableau
   const { data: allUnitsData } = useQuery({
     queryKey: ["units", "all"],
-    queryFn: () => fetchUnits(),
+    queryFn: () => fetchUnits({ status: "all" }),
   });
-  const allUnits: Unit[] = allUnitsData ?? [];
+  const allUnits: Unit[] = useMemo(() => allUnitsData ?? [], [allUnitsData]);
 
-  // Unités filtrées par direction pour le formulaire d'édition/création
+  // Unités filtrées par département pour le formulaire d'édition/création
   const { data: unitsData } = useQuery({
-    queryKey: ["units", form.direction_id || editUser?.direction_id],
-    queryFn: () => fetchUnits(form.direction_id || editUser?.direction_id),
-    enabled: !!(form.direction_id || editUser?.direction_id),
+    queryKey: ["units", "department", form.department_id],
+    queryFn: () => fetchUnits({ departmentId: form.department_id, status: "active" }),
+    enabled: !!form.department_id,
   });
-  const units: Unit[] = unitsData ?? [];
+  const units: Unit[] = useMemo(() => unitsData ?? [], [unitsData]);
+
+  const directionsById = useMemo(
+    () => new Map(directions.map((direction) => [direction.id, direction])),
+    [directions],
+  );
+  const departmentsById = useMemo(
+    () => new Map(allDepartments.map((department) => [department.id, department])),
+    [allDepartments],
+  );
+  const unitsById = useMemo(
+    () => new Map(allUnits.map((unit) => [unit.id, unit])),
+    [allUnits],
+  );
 
   // ── Mutations ──────────────────────────────────────────────────────────────
   const invalidate = () => qc.invalidateQueries({ queryKey: ["admin", "users"], exact: false });
@@ -228,46 +288,131 @@ function AdminUsers() {
     usePagination(filtered, 12);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
+  function resolveAssignment(unityId?: string, fallbackDirectionId?: string) {
+    if (unityId) {
+      const unit = unitsById.get(unityId);
+      if (unit) {
+        return {
+          kind: "unit" as const,
+          direction_id: unit.direction_id ?? fallbackDirectionId ?? "",
+          department_id: unit.department_id ?? "",
+          unit_id: unit.id,
+        };
+      }
+
+      const department = departmentsById.get(unityId);
+      if (department) {
+        return {
+          kind: "department" as const,
+          direction_id: department.direction_id ?? fallbackDirectionId ?? "",
+          department_id: department.id,
+          unit_id: "",
+        };
+      }
+
+      const direction = directionsById.get(unityId);
+      if (direction) {
+        return {
+          kind: "direction" as const,
+          direction_id: direction.id,
+          department_id: "",
+          unit_id: "",
+        };
+      }
+    }
+
+    return {
+      kind: "none" as const,
+      direction_id: fallbackDirectionId ?? "",
+      department_id: "",
+      unit_id: "",
+    };
+  }
+
+  function buildOrgPayload(current: FormData) {
+    const target = orgTargetForRole(current.role);
+    if (target === "direction") {
+      return {
+        direction_id: current.direction_id || undefined,
+        department_id: undefined,
+        unit_id: undefined,
+      };
+    }
+    if (target === "department") {
+      return {
+        direction_id: current.direction_id || undefined,
+        department_id: current.department_id || undefined,
+        unit_id: undefined,
+      };
+    }
+    return {
+      direction_id: current.direction_id || undefined,
+      department_id: current.department_id || undefined,
+      unit_id: current.unit_id || undefined,
+    };
+  }
+
+  function validationMessage(current: FormData, requirePassword: boolean) {
+    if (!current.name.trim()) return "Le nom complet est obligatoire.";
+    if (requirePassword && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(current.email.trim())) {
+      return "L'adresse email est obligatoire et doit être valide.";
+    }
+    if (requirePassword && current.password.length < 8) {
+      return "Le mot de passe doit contenir au moins 8 caractères.";
+    }
+
+    const target = orgTargetForRole(current.role);
+    if (!current.direction_id) return "La direction est obligatoire pour ce rôle.";
+    if ((target === "department" || target === "unit") && !current.department_id) {
+      return "Le département est obligatoire pour ce rôle.";
+    }
+    if (target === "unit" && !current.unit_id) {
+      return "Le service ou l'unité est obligatoire pour ce rôle.";
+    }
+    return null;
+  }
+
   function openCreate() {
     setForm(emptyForm());
     setCreateOpen(true);
   }
 
   function openEdit(u: AccountUser) {
-    const userUnit = allUnits.find((un) => un.id === u.unit_id);
-    const derivedDirId = userUnit?.direction_id ?? u.direction_id ?? "";
+    const assignment = resolveAssignment(u.unit_id, u.direction_id);
     setForm({
       name: u.name,
       email: u.email,
-      role: u.role,
+      role: roleChoiceFromAssignment(u.role, assignment.kind),
       matricule: u.matricule ?? "",
       job: u.job ?? "",
-      direction_id: derivedDirId,
-      unit_id: u.unit_id ?? "",
+      direction_id: assignment.direction_id,
+      department_id: assignment.department_id,
+      unit_id: assignment.unit_id,
       password: "",
       is_edg_employee: true,
     });
     setEditUser(u);
   }
 
+  const createValidation = validationMessage(form, true);
+  const editValidation = validationMessage(form, false);
+  const isCreateValid = !createValidation;
+
   function submitCreate() {
-    if (!form.name.trim() || !form.email.trim()) {
-      toast.error("Nom et email sont requis.");
+    const error = validationMessage(form, true);
+    if (error) {
+      toast.error(error);
       return;
     }
-    if (!form.password || form.password.length < 8) {
-      toast.error("Le mot de passe doit contenir au moins 8 caractères.");
-      return;
-    }
+    if (createMut.isPending) return;
     createMut.mutate({
       data: {
         name: form.name.trim(),
         email: form.email.trim(),
-        role: form.role,
+        role: backendRole(form.role),
         matricule: form.matricule || undefined,
         job: form.job || undefined,
-        direction_id: form.direction_id || undefined,
-        unit_id: form.unit_id || undefined,
+        ...buildOrgPayload(form),
         is_edg_employee: form.is_edg_employee,
       },
       password: form.password,
@@ -276,19 +421,21 @@ function AdminUsers() {
 
   function submitEdit() {
     if (!editUser) return;
+    const error = validationMessage(form, false);
+    if (error) {
+      toast.error(error);
+      return;
+    }
     updateMut.mutate({
       id: editUser.id,
       data: {
         name: form.name.trim() || undefined,
+        role: backendRole(form.role),
         matricule: form.matricule || undefined,
         job: form.job || undefined,
-        direction_id: form.direction_id || undefined,
-        unit_id: form.unit_id || undefined,
+        ...buildOrgPayload(form),
       },
     });
-    if (form.role && form.role !== editUser.role) {
-      roleMut.mutate({ id: editUser.id, role: form.role });
-    }
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -320,7 +467,7 @@ function AdminUsers() {
           { label: "Total", value: list.length },
           { label: "Actifs", value: list.filter((u) => u.account_status === "active").length },
           { label: "Agents", value: list.filter((u) => u.role === "agent").length },
-          { label: "Admins", value: list.filter((u) => u.role === "admin" || u.role === "dg").length },
+          { label: "Admins", value: list.filter((u) => u.role === "admin").length },
         ].map((s) => (
           <GlassCard key={s.label} className="py-4">
             <div className="text-sm text-muted-foreground">{s.label}</div>
@@ -382,9 +529,10 @@ function AdminUsers() {
               </thead>
               <tbody>
                 {paged.map((u) => {
-                  const userUnit = allUnits.find((un) => un.id === u.unit_id);
-                  const derivedDirId = userUnit?.direction_id ?? u.direction_id;
-                  const dir = directions.find((d) => d.id === derivedDirId);
+                  const assignment = resolveAssignment(u.unit_id, u.direction_id);
+                  const dir = directionsById.get(assignment.direction_id);
+                  const department = departmentsById.get(assignment.department_id);
+                  const unit = unitsById.get(assignment.unit_id);
                   return (
                     <tr key={u.id} className="border-t border-border/40 transition hover:bg-background/50">
                       <td className="px-5 py-3.5">
@@ -403,8 +551,11 @@ function AdminUsers() {
                       </td>
                       <td className="px-5 py-3.5 text-sm text-muted-foreground">
                         <div>{dir?.name ?? "—"}</div>
-                        {userUnit && dir && userUnit.id !== dir.id && (
-                          <div className="text-xs">{userUnit.name}</div>
+                        {department && (
+                          <div className="text-xs">{department.name}</div>
+                        )}
+                        {unit && (
+                          <div className="text-xs">{unit.name}</div>
                         )}
                         {u.job && <div className="text-xs opacity-70">{u.job}</div>}
                       </td>
@@ -522,7 +673,8 @@ function AdminUsers() {
           <UserForm
             form={form}
             setForm={setForm}
-            directions={directions}
+            directions={activeDirections}
+            departments={departments}
             units={units}
             showEmail
           />
@@ -531,7 +683,8 @@ function AdminUsers() {
             <Button
               className="gradient-primary"
               onClick={submitCreate}
-              disabled={createMut.isPending}
+              disabled={!isCreateValid || createMut.isPending}
+              title={createValidation ?? undefined}
             >
               {createMut.isPending ? "Création…" : "Créer le compte"}
             </Button>
@@ -548,7 +701,8 @@ function AdminUsers() {
           <UserForm
             form={form}
             setForm={setForm}
-            directions={directions}
+            directions={activeDirections}
+            departments={departments}
             units={units}
             showEmail={false}
           />
@@ -557,7 +711,8 @@ function AdminUsers() {
             <Button
               className="gradient-primary"
               onClick={submitEdit}
-              disabled={updateMut.isPending}
+              disabled={!!editValidation || updateMut.isPending}
+              title={editValidation ?? undefined}
             >
               {updateMut.isPending ? "Enregistrement…" : "Enregistrer"}
             </Button>
@@ -629,17 +784,50 @@ function UserForm({
   form,
   setForm,
   directions,
+  departments,
   units,
   showEmail,
 }: {
   form: FormData;
   setForm: (f: FormData) => void;
   directions: Direction[];
+  departments: Department[];
   units: Unit[];
   showEmail: boolean;
 }) {
+  const target = orgTargetForRole(form.role);
+  const requiresDepartment = target === "department" || target === "unit";
+  const requiresUnit = target === "unit";
+
   function field(key: keyof FormData, value: string | boolean) {
     setForm({ ...form, [key]: value });
+  }
+
+  function onRoleChange(role: string) {
+    const nextTarget = orgTargetForRole(role);
+    setForm({
+      ...form,
+      role,
+      department_id: nextTarget === "department" || nextTarget === "unit" ? form.department_id : "",
+      unit_id: nextTarget === "unit" ? form.unit_id : "",
+    });
+  }
+
+  function onDirectionChange(value: string) {
+    setForm({
+      ...form,
+      direction_id: value === "__none__" ? "" : value,
+      department_id: "",
+      unit_id: "",
+    });
+  }
+
+  function onDepartmentChange(value: string) {
+    setForm({
+      ...form,
+      department_id: value === "__none__" ? "" : value,
+      unit_id: "",
+    });
   }
 
   return (
@@ -665,9 +853,15 @@ function UserForm({
               placeholder="Min. 8 caractères"
               autoComplete="new-password"
             />
-            <p className="text-[11px] text-muted-foreground">
-              L'utilisateur pourra le modifier après sa première connexion.
-            </p>
+            {form.password.length > 0 && form.password.length < 8 ? (
+              <p className="text-[11px] text-destructive">
+                Le mot de passe doit contenir au moins 8 caractères.
+              </p>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">
+                L'utilisateur pourra le modifier après sa première connexion.
+              </p>
+            )}
           </div>
         )}
         <div className="space-y-1.5">
@@ -682,49 +876,87 @@ function UserForm({
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <Label>Rôle</Label>
-          <Select value={form.role} onValueChange={(v) => field("role", v)}>
+          <Label>Rôle <span className="text-destructive">*</span></Label>
+          <Select value={form.role} onValueChange={onRoleChange}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
-              {(["user", "agent", "chief", "director", "dg", "admin"] as Role[]).map((r) => (
-                <SelectItem key={r} value={r}>{roleLabels[r]}</SelectItem>
+              {USER_FORM_ROLE_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
         <div className="space-y-1.5">
-          <Label>Direction</Label>
+          <Label>Direction <span className="text-destructive">*</span></Label>
           <Select
             value={form.direction_id || "__none__"}
-            onValueChange={(v) => setForm({ ...form, direction_id: v === "__none__" ? "" : v, unit_id: "" })}
+            onValueChange={onDirectionChange}
           >
-            <SelectTrigger><SelectValue placeholder="Aucune" /></SelectTrigger>
+            <SelectTrigger><SelectValue placeholder="Sélectionner une direction" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="__none__">— Aucune —</SelectItem>
+              <SelectItem value="__none__">Sélectionner une direction</SelectItem>
               {directions.map((d) => (
                 <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
+          {!form.direction_id && (
+            <p className="text-[11px] text-muted-foreground">
+              Obligatoire pour le rôle sélectionné.
+            </p>
+          )}
         </div>
-        {form.direction_id && (
-          <div className="space-y-1.5 sm:col-span-2">
-            <Label>Service / Unité</Label>
-            <Select value={form.unit_id || "__none__"} onValueChange={(v) => field("unit_id", v === "__none__" ? "" : v)}>
-              <SelectTrigger><SelectValue placeholder="Aucun" /></SelectTrigger>
+        {requiresDepartment && (
+          <div className="space-y-1.5">
+            <Label>Département <span className="text-destructive">*</span></Label>
+            <Select
+              value={form.department_id || "__none__"}
+              onValueChange={onDepartmentChange}
+              disabled={!form.direction_id}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={form.direction_id ? "Sélectionner un département" : "Choisissez d'abord une direction"} />
+              </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__none__">— Aucun —</SelectItem>
+                <SelectItem value="__none__">Sélectionner un département</SelectItem>
+                {departments.map((department) => (
+                  <SelectItem key={department.id} value={department.id}>{department.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {form.direction_id && !form.department_id && (
+              <p className="text-[11px] text-muted-foreground">
+                Le département doit appartenir à la direction sélectionnée.
+              </p>
+            )}
+          </div>
+        )}
+        {requiresUnit && (
+          <div className="space-y-1.5">
+            <Label>Service / Unité <span className="text-destructive">*</span></Label>
+            <Select
+              value={form.unit_id || "__none__"}
+              onValueChange={(v) => field("unit_id", v === "__none__" ? "" : v)}
+              disabled={!form.department_id}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={form.department_id ? "Sélectionner un service ou une unité" : "Choisissez d'abord un département"} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">Sélectionner un service ou une unité</SelectItem>
                 {units.map((u) => (
                   <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            {form.department_id && !form.unit_id && (
+              <p className="text-[11px] text-muted-foreground">
+                Le service ou l'unité doit appartenir au département sélectionné.
+              </p>
+            )}
           </div>
         )}
       </div>
     </div>
   );
 }
-
-// silence unused import warning
-const _ChevronDown = ChevronDown;

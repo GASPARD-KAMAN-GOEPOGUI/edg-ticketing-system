@@ -37,6 +37,15 @@ export type SessionUser = {
   unit_id?: string;
 };
 
+export function normalizeRole(role: string | null | undefined): Role {
+  const value = String(role ?? "user").trim().toLowerCase();
+  if (value === "dg") return "director";
+  if (["public", "user", "agent", "chief", "director", "admin"].includes(value)) {
+    return value as Role;
+  }
+  return "user";
+}
+
 // ── Bus d'événements interne ──────────────────────────────────────────────────
 
 const roleListeners = new Set<RoleListener>();
@@ -49,7 +58,7 @@ function decodeJwtRole(token: string): Role | null {
   try {
     const payload = token.split(".")[1];
     const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
-    return (JSON.parse(json).role as Role) ?? null;
+    return normalizeRole(JSON.parse(json).role);
   } catch {
     return null;
   }
@@ -67,17 +76,18 @@ export function getRole(): Role {
   // Fallback : rôle du profil utilisateur stocké au login
   try {
     const raw = localStorage.getItem(USER_KEY);
-    if (raw) return (JSON.parse(raw) as SessionUser).role || "user";
+    if (raw) return normalizeRole((JSON.parse(raw) as SessionUser).role);
   } catch { /* donnée corrompue */ }
   return "user";
 }
 
 export function setRole(role: Role) {
   if (typeof window === "undefined") return;
+  const nextRole = normalizeRole(role);
   // En prod, cette fonction n'a d'effet que via setUser() (login).
   // En dev (AUTH_DISABLED), elle permet de basculer de rôle librement.
-  if (AUTH_DISABLED) localStorage.setItem(ROLE_KEY, role);
-  roleListeners.forEach((l) => l(role));
+  if (AUTH_DISABLED) localStorage.setItem(ROLE_KEY, nextRole);
+  roleListeners.forEach((l) => l(nextRole));
 }
 
 export function useRole(): [Role, (r: Role) => void] {
@@ -105,7 +115,9 @@ export function getUser(): SessionUser | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem(USER_KEY);
-    return raw ? (JSON.parse(raw) as SessionUser) : null;
+    if (!raw) return null;
+    const user = JSON.parse(raw) as SessionUser;
+    return { ...user, role: normalizeRole(user.role) };
   } catch {
     return null;
   }
@@ -113,9 +125,10 @@ export function getUser(): SessionUser | null {
 
 export function setUser(user: SessionUser): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
-  setRole(user.role);
-  userListeners.forEach((l) => l(user));
+  const nextUser = { ...user, role: normalizeRole(user.role) };
+  localStorage.setItem(USER_KEY, JSON.stringify(nextUser));
+  setRole(nextUser.role);
+  userListeners.forEach((l) => l(nextUser));
 }
 
 export function clearUser(): void {
@@ -208,13 +221,12 @@ export { roleLabels };
 export const ROLE_DEFAULT_ROUTES: Record<Role, string> = {
   public:   "/app",
   user:     "/app",
-  agent:    "/app/queue",
-  chief:    "/app/supervision",
-  director: "/app/direction",
-  dg:       "/app/dg",
-  admin:    "/app/admin/users",
+  agent:    "/app",
+  chief:    "/app",
+  director: "/app",
+  admin:    "/app",
 };
 
 export function getDefaultRouteForRole(role: Role | string): string {
-  return ROLE_DEFAULT_ROUTES[role as Role] ?? "/app";
+  return ROLE_DEFAULT_ROUTES[normalizeRole(role)] ?? "/app";
 }

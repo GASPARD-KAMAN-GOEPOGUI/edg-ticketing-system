@@ -13,6 +13,7 @@ import type {
   CommunicationSettings,
 } from "@/lib/mock-data";
 import type { Role } from "@/lib/mock-data";
+import { normalizeRole } from "../session";
 
 // ── Types bruts backend ───────────────────────────────────────────────────────
 
@@ -72,6 +73,9 @@ export type RawCommunicationSettings = {
 
 export function mapAnnouncement(raw: RawAnnouncement): Announcement {
   const metric = raw.metric;
+  const targetRoles = Array.from(
+    new Set((raw.target_roles ?? []).map((r) => normalizeRole(r.role))),
+  ) as Role[];
   return {
     id: raw.id,
     title: raw.title,
@@ -84,7 +88,7 @@ export function mapAnnouncement(raw: RawAnnouncement): Announcement {
     attachmentName: raw.attachment_name ?? undefined,
     targets: {
       audience: raw.audience as AnnouncementAudience,
-      roles: (raw.target_roles ?? []).map((r) => r.role as Role),
+      roles: targetRoles,
       directions: (raw.target_directions ?? []).map((d) => d.direction_id),
       services: [],
     },

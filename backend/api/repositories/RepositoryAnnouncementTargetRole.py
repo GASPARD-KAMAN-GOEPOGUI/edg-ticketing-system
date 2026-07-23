@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.core.rbac import normalize_role
 from api.models.ModelAnnouncementTargetRole import AnnouncementTargetRole
 from api.repositories.base_repository import BaseRepository
 
@@ -22,8 +23,10 @@ class AnnouncementTargetRoleRepository(BaseRepository[AnnouncementTargetRole]):
     async def list_by_role(
         self, role: str, *, page: int = 1, limit: int = 50
     ) -> tuple[list[AnnouncementTargetRole], int]:
+        normalized = normalize_role(role)
+        role_filter: str | list[str] = ["director", "dg"] if normalized == "director" else normalized
         return await self.list(
-            filters={"role": role},
+            filters={"role": role_filter},
             order_by="-created_at",
             page=page,
             limit=limit,
@@ -36,6 +39,13 @@ class AnnouncementTargetRoleRepository(BaseRepository[AnnouncementTargetRole]):
         existing = await self.list_by_announcement(announcement_id)
         for obj in existing:
             await self.hard_delete(obj.id)
+        normalized_roles = []
+        seen = set()
+        for role in roles:
+            normalized = normalize_role(role)
+            if normalized not in seen:
+                normalized_roles.append(normalized)
+                seen.add(normalized)
         return await self.bulk_create(
-            [{"announcement_id": announcement_id, "role": r} for r in roles]
+            [{"announcement_id": announcement_id, "role": r} for r in normalized_roles]
         )

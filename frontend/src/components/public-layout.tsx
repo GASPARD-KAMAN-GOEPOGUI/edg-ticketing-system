@@ -19,6 +19,13 @@ export function PublicLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const [dark, toggleDark, mounted] = useTheme();
   const canGoBack = pathname !== "/";
+  const handleBack = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.history.back();
+      return;
+    }
+    router.navigate({ to: "/", replace: true });
+  };
 
   const [showScrollTop, setShowScrollTop] = useState(false);
   useEffect(() => {
@@ -39,7 +46,7 @@ export function PublicLayout({ children }: { children: ReactNode }) {
           <div className="flex shrink-0 items-center gap-2">
             {canGoBack && (
               <button
-                onClick={() => router.history.back()}
+                onClick={handleBack}
                 className="flex items-center gap-1 rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
                 aria-label="Retour"
               >

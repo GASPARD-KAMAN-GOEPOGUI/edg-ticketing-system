@@ -39,6 +39,11 @@ def _svc(db: AsyncSession = Depends(get_db)) -> WorkflowService:
     return WorkflowService(db)
 
 
+def _actor_display_name(actor) -> str | None:
+    parts = [getattr(actor, "firstname", None), getattr(actor, "name", None)]
+    return " ".join(part for part in parts if part) or None
+
+
 # ── Request-scoped workflow endpoints ─────────────────────────────────────────
 
 class WorkflowCreateBody(BaseModel):
@@ -53,6 +58,7 @@ class AutoCircuitBody(BaseModel):
 
 
 class WorkflowDetailBody(BaseModel):
+    unity_id: Optional[str] = None
     unit_id: Optional[str] = None
     agent_id: Optional[str] = None
     task_id: Optional[str] = None
@@ -69,7 +75,7 @@ class AcceptedDetailBody(BaseModel):
     comment: Optional[str] = None
 
 
-_staff = Depends(require_roles("agent", "chief", "director", "dg", "admin"))
+_staff = Depends(require_roles("agent", "chief", "director", "admin"))
 
 
 @request_workflow_router.get(
@@ -251,6 +257,9 @@ async def create_workflow_detail(
     svc: WorkflowService = Depends(_svc),
 ):
     data = body.dict(exclude_unset=True)
+    if data.get("unit_id") and not data.get("unity_id"):
+        data["unity_id"] = data["unit_id"]
+    data.pop("unit_id", None)
     data["workflow_id"] = id
     return await svc.create_detail(data)
 
@@ -281,12 +290,15 @@ async def accept_workflow_detail(
     id: str,
     detail_id: str,
     body: WorkflowDetailAcceptSchema,
-    actor=Depends(require_roles("agent", "chief", "director", "dg", "admin")),
+    actor=Depends(require_roles("agent", "chief", "director", "admin")),
     svc: WorkflowService = Depends(_svc),
 ):
     return await svc.accept_detail(
         detail_id,
         agent_id=str(actor.id),
+        actor_name=_actor_display_name(actor) or getattr(actor, "name", None),
+        actor_role=getattr(actor, "role", None),
+        actor=actor,
         accepted=body.accepted,
         comment=body.comment,
     )
@@ -417,12 +429,15 @@ async def search_all_workflow_details(
 )
 async def accepted_detail(
     body: AcceptedDetailBody,
-    actor=Depends(require_roles("agent", "chief", "director", "dg", "admin")),
+    actor=Depends(require_roles("agent", "chief", "director", "admin")),
     svc: WorkflowService = Depends(_svc),
 ):
     return await svc.accept_detail(
         str(body.id),
         agent_id=str(actor.id),
+        actor_name=_actor_display_name(actor) or getattr(actor, "name", None),
+        actor_role=getattr(actor, "role", None),
+        actor=actor,
         accepted=body.accepted,
         comment=body.comment,
     )

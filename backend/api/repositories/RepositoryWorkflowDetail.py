@@ -12,6 +12,16 @@ class WorkflowDetailRepository(BaseRepository[WorkflowDetail]):
     def __init__(self, session: AsyncSession) -> None:
         super().__init__(WorkflowDetail, session)
 
+    _AUDIT_INFO_KEYS = (
+        "actor_id",
+        "actor_role",
+        "target_user_id",
+        "target_role",
+        "old_status",
+        "new_status",
+        "reason",
+    )
+
     async def list_by_workflow(
         self, workflow_id: str, *, page: int = 1, limit: int = 100
     ) -> tuple[list[WorkflowDetail], int]:
@@ -153,6 +163,18 @@ class WorkflowDetailRepository(BaseRepository[WorkflowDetail]):
             limit=limit,
         )
 
+    async def _get_last_event_id(self, workflow_id: int) -> int | None:
+        """Retourne l'ID du dernier événement créé pour ce workflow (pour chaînage parent_id)."""
+        stmt = (
+            select(WorkflowDetail.id)
+            .where(WorkflowDetail.workflow_id == workflow_id)
+            .where(WorkflowDetail.deleted_at.is_(None))
+            .order_by(WorkflowDetail.id.desc())
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def create_event(self, data: dict) -> WorkflowDetail:
         """
         Insère un événement de timeline dans le journal du workflow.
@@ -169,30 +191,54 @@ class WorkflowDetailRepository(BaseRepository[WorkflowDetail]):
           comment      — commentaire libre
           infos        — métadonnées JSON additionnelles
           activated    — booléen (défaut False)
+
+        parent_id est résolu automatiquement : pointe vers le dernier événement
+        du même workflow (chaîne linéaire). NULL uniquement pour le premier événement.
         """
         infos: dict = dict(data.get("infos") or {})
         dest_id = data.get("dest_id")
         actor_id = data.get("actor_id")
+        comment = data.get("comment")
+
+        if actor_id:
+            infos.setdefault("actor_id", str(actor_id))
+        if infos.get("source_role") and not infos.get("actor_role"):
+            infos["actor_role"] = infos.get("source_role")
 
         if dest_id:
             # Routing event : dest_id = destinataire, actor_id conservé dans infos
             agent_id_val = dest_id
-            if actor_id:
-                infos["actor_id"] = actor_id
+            infos.setdefault("target_user_id", str(dest_id))
         else:
             # Événement standard : acteur = agent_id
             agent_id_val = actor_id
 
+        if infos.get("dest_role") and not infos.get("target_role"):
+            infos["target_role"] = infos.get("dest_role")
+        if comment and not infos.get("reason") and data.get("event_type") != "comment_added":
+            infos["reason"] = comment
+        for key in self._AUDIT_INFO_KEYS:
+            infos.setdefault(key, None)
+
+        # Chaînage automatique : parent_id = dernier événement du workflow
+        workflow_id = data.get("workflow_id")
+        if "parent_id" in data:
+            parent_id = data["parent_id"]
+        elif workflow_id:
+            parent_id = await self._get_last_event_id(int(workflow_id))
+        else:
+            parent_id = None
+
         return await self.create({
-            "workflow_id": data.get("workflow_id"),
+            "workflow_id": workflow_id,
             "event_type": data.get("event_type"),
             "label": data.get("label"),
             "agent_id": agent_id_val,
             "unity_id": data.get("unity_id"),
             "actor_name": data.get("actor_name"),
-            "comment": data.get("comment"),
-            "infos": infos if infos else None,
-            "parent_id": data.get("parent_id"),
+            "comment": comment,
+            "infos": infos,
+            "parent_id": parent_id,
             "activated": data.get("activated", False),
         })
 

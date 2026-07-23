@@ -71,6 +71,8 @@ export type RawAttachment = {
 
 export type RawRequest = {
   id: string;
+  deleted_at?: string | null;
+  status?: boolean;
   ref: string;
   title: string;
   description: string;
@@ -128,6 +130,7 @@ export type RequestFilters = {
   page?: number;
   limit?: number;
   request_status?: string;
+  exclude_status?: string;
   is_external?: boolean;
   direction_id?: string;
   unit_id?: string;
@@ -141,6 +144,15 @@ export type RequestFilters = {
 };
 
 // ── Mapper snake_case → camelCase (compatible RequestItem mock-data) ──────────
+
+function asString(value: unknown): string | undefined {
+  if (value === null || value === undefined || value === "") return undefined;
+  return String(value);
+}
+
+function asBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
 
 export function mapRequest(raw: RawRequest): RequestItem {
   return {
@@ -175,26 +187,43 @@ export function mapRequest(raw: RawRequest): RequestItem {
     isExternal: raw.is_external,
     createdAt: raw.created_at,
     updatedAt: raw.updated_at,
+    deletedAt: raw.deleted_at ?? undefined,
+    isArchived: Boolean(raw.deleted_at),
+    resolvedAt: raw.resolved_at ?? undefined,
+    closedAt: raw.closed_at ?? undefined,
     slaHours: raw.sla_hours,
     slaElapsed: raw.sla_elapsed,
     comments: (raw.timelines ?? [])
       .filter((t) => t.event_type === "comment_added")
       .map((t) => ({
         id: t.id,
-        authorId: t.agent_id ? String(t.agent_id) : "",
+        authorId: asString(t.infos?.actor_id) ?? (t.agent_id ? String(t.agent_id) : ""),
         author: t.actor_name ?? "Système",
         body: t.comment ?? t.label ?? "",
         isPublic: t.infos?.is_public === true,
         isEdited: false,
         createdAt: t.created_at,
       })),
-    timeline: (raw.timelines ?? []).map((t) => ({
-      id: t.id,
-      type: t.event_type,
-      label: t.label,
-      at: t.created_at,
-      by: t.actor_name ?? undefined,
-    })),
+    timeline: (raw.timelines ?? []).map((t) => {
+      const infos = t.infos ?? {};
+      return {
+        id: t.id,
+        type: t.event_type,
+        label: t.label,
+        at: t.created_at,
+        by: t.actor_name ?? undefined,
+        actorId: asString(infos.actor_id),
+        actorRole: asString(infos.actor_role ?? infos.source_role),
+        targetUserId: asString(infos.target_user_id ?? infos.to_user_id),
+        targetUserName: asString(infos.target_user_name ?? infos.to_agent_name),
+        targetRole: asString(infos.target_role ?? infos.dest_role),
+        oldStatus: asString(infos.old_status ?? infos.old_workflow_status),
+        newStatus: asString(infos.new_status ?? infos.new_workflow_status),
+        comment: t.comment ?? undefined,
+        isPublic: asBoolean(infos.is_public),
+        infos,
+      };
+    }),
     infos: raw.infos ?? undefined,
     appreciation: raw.appreciation
       ? ({
@@ -211,7 +240,7 @@ export function mapRequest(raw: RawRequest): RequestItem {
 export function mapComment(t: RawTimeline) {
   return {
     id: t.id,
-    authorId: t.agent_id ? String(t.agent_id) : "",
+    authorId: asString(t.infos?.actor_id) ?? (t.agent_id ? String(t.agent_id) : ""),
     author: t.actor_name ?? "Système",
     body: t.comment ?? t.label ?? "",
     isPublic: t.infos?.is_public === true,
@@ -234,8 +263,9 @@ export async function fetchRequests(
   const params = new URLSearchParams();
   if (filters) {
     for (const [k, v] of Object.entries(filters)) {
-      if (v !== undefined && v !== null && v !== "") {
-        params.set(k, String(v));
+      if (v !== undefined && v !== null) {
+        const value = String(v);
+        if (value !== "") params.set(k, value);
       }
     }
   }
@@ -251,8 +281,36 @@ export async function fetchRequests(
   };
 }
 
-export async function fetchRequest(id: string): Promise<RequestItem> {
-  const raw = await apiFetch<RawRequest>(`/requests/${id}`);
+export async function fetchTriage(
+  filters?: { page?: number; limit?: number },
+): Promise<{ items: RequestItem[]; total: number; page: number; pages: number; pageSize: number }> {
+  const params = new URLSearchParams();
+  if (filters) {
+    for (const [k, v] of Object.entries(filters)) {
+      if (v !== undefined && v !== null) {
+        const value = String(v);
+        if (value !== "") params.set(k, value);
+      }
+    }
+  }
+  const raw = await apiFetch<RawPaginated<RawRequest>>(
+    `/requests/triage?${params.toString()}`,
+  );
+  return {
+    items: raw.items.map(mapRequest),
+    total: raw.total,
+    page: raw.page,
+    pages: raw.pages,
+    pageSize: raw.page_size,
+  };
+}
+
+export async function fetchRequest(
+  id: string,
+  options?: { includeDeleted?: boolean },
+): Promise<RequestItem> {
+  const params = options?.includeDeleted ? "?include_deleted=true" : "";
+  const raw = await apiFetch<RawRequest>(`/requests/${id}${params}`);
   return mapRequest(raw);
 }
 
@@ -290,6 +348,7 @@ export type CreateInternalRequestData = {
   submission_mode?: string;
   on_behalf_direction_id?: string;
   on_behalf_unit_id?: string;
+  infos?: Record<string, unknown>;
   is_external: false;
 };
 
@@ -341,6 +400,17 @@ export async function updateRequest(
   return mapRequest(raw);
 }
 
+export async function changeRequestPriority(
+  id: string,
+  priority: string,
+): Promise<RequestItem> {
+  const raw = await apiFetch<RawRequest>(`/requests/${id}/priority`, {
+    method: "POST",
+    body: JSON.stringify({ priority }),
+  });
+  return mapRequest(raw);
+}
+
 export async function resolveRequest(
   id: string,
   actorId?: string,
@@ -373,6 +443,7 @@ export type QueueFilters = {
   direction_id?: string;
   unit_id?: string;
   assignee_id?: string;
+  unassigned_only?: boolean;
   priority?: string;
   request_status?: string;
   search?: string;
@@ -400,8 +471,9 @@ export async function fetchQueue(
 export type QualifyTriageData = {
   category: string;
   priority: string;
-  direction_id: string;
+  direction_id?: string;
   unit_id?: string;
+  assignee_id?: string;
 };
 
 export async function qualifyTriage(
@@ -419,12 +491,12 @@ export async function qualifyTriage(
 
 export async function cancelRequest(
   id: string,
-  reason?: string,
+  reason: string,
   actorId?: string,
 ): Promise<RequestItem> {
   const params = new URLSearchParams();
   if (actorId) params.set("actor_id", actorId);
-  if (reason) params.set("reason", reason);
+  params.set("reason", reason);
   const qs = params.toString() ? `?${params.toString()}` : "";
   const raw = await apiFetch<RawRequest>(`/requests/${id}/cancel${qs}`, {
     method: "POST",
@@ -445,7 +517,7 @@ export async function requestReopen(
   return mapRequest(raw);
 }
 
-/** Phase 2 — Le chef approuve la réouverture (réservé agent/chief/admin). */
+/** Phase 2 — Le chef approuve la réouverture (réservé chief/director/admin). */
 export async function reopenRequest(
   id: string,
   reason?: string,
@@ -457,6 +529,18 @@ export async function reopenRequest(
   const raw = await apiFetch<RawRequest>(`/requests/${id}/reopen${qs}`, {
     method: "POST",
     body: JSON.stringify(reason ? { reason } : {}),
+  });
+  return mapRequest(raw);
+}
+
+/** Phase 2 — Le chef refuse la réouverture avec motif obligatoire. */
+export async function rejectReopenRequest(
+  id: string,
+  reason: string,
+): Promise<RequestItem> {
+  const raw = await apiFetch<RawRequest>(`/requests/${id}/reject-reopen`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
   });
   return mapRequest(raw);
 }
@@ -560,6 +644,19 @@ export async function reassignService(
   return mapRequest(raw);
 }
 
+/** Transfert d'un ticket vers une autre direction. */
+export async function transferDirection(
+  id: string,
+  targetDirectionId: string,
+  reason: string,
+): Promise<RequestItem> {
+  const raw = await apiFetch<RawRequest>(`/requests/${id}/transfer-direction`, {
+    method: "POST",
+    body: JSON.stringify({ target_direction_id: targetDirectionId, reason }),
+  });
+  return mapRequest(raw);
+}
+
 export async function escalateRequest(
   id: string,
   data: { level: string; reason: string; from_agent_name?: string },
@@ -570,14 +667,6 @@ export async function escalateRequest(
     method: "POST",
     body: JSON.stringify(data),
   });
-}
-
-export async function mergeRequest(id: string, targetId: string): Promise<RequestItem> {
-  const raw = await apiFetch<RawRequest>(`/requests/${id}/merge`, {
-    method: "POST",
-    body: JSON.stringify({ target_id: targetId }),
-  });
-  return mapRequest(raw);
 }
 
 export async function requesterEditRequest(
@@ -595,14 +684,6 @@ export async function requesterEditRequest(
   const raw = await apiFetch<RawRequest>(`/requests/${id}/requester-edit`, {
     method: "PATCH",
     body: JSON.stringify(data),
-  });
-  return mapRequest(raw);
-}
-
-export async function duplicateRequest(id: string): Promise<RequestItem> {
-  const raw = await apiFetch<RawRequest>(`/requests/${id}/duplicate`, {
-    method: "POST",
-    body: "{}",
   });
   return mapRequest(raw);
 }

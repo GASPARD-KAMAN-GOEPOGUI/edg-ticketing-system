@@ -14,7 +14,7 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)],
 )
 
-_staff = Depends(require_roles("agent", "chief", "director", "dg", "admin"))
+_staff = Depends(require_roles("agent", "chief", "director", "admin"))
 
 
 def _svc(db: AsyncSession = Depends(get_db)) -> UnityService:

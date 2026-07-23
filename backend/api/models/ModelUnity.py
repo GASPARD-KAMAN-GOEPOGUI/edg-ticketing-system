@@ -45,6 +45,11 @@ class Unity(Base, BaseColumns):
         lazy="raise",
     )
 
+    @property
+    def direction_id(self) -> Optional[int]:
+        """Alias de compatibilité API — direction_id est le nom attendu côté frontend."""
+        return self.parent_direction_id
+
     __table_args__ = (
         Index("idx_unity_codename", "codename"),
         Index("idx_unity_status", "status", "deleted_at"),

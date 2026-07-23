@@ -81,7 +81,13 @@ class RequestUpdate(BaseModel):
     closed_at: Optional[datetime] = None
 
 
-class RequestResponse(BaseResponse):
+class _RequestCommonFields(BaseResponse):
+    """
+    Champs communs liste + détail. `timelines`/`appreciation` sont volontairement
+    exclus d'ici : ils ne sont utiles que sur la page détail d'un ticket, pas sur
+    les dashboards/listes (jusqu'à 500 tickets d'un coup pour chef/direction/DG) —
+    voir RequestListItemResponse vs RequestResponse ci-dessous.
+    """
     unity_id: Optional[int] = None
     unit_id: Optional[int] = None       # alias de unity_id — compatibilité frontend
     direction_id: Optional[int] = None  # réservé (pas de colonne direction séparée)
@@ -117,15 +123,23 @@ class RequestResponse(BaseResponse):
     resolved_at: Optional[datetime] = None
     closed_at: Optional[datetime] = None
 
-    timelines: list[WorkflowDetailResponse] = []
-    appreciation: Optional[AppreciationResponse] = None
-
     @validator("unit_id", always=True)
     def _fill_unit_id(cls, v, values):
         return v if v is not None else values.get("unity_id")
 
     class Config:
         orm_mode = True
+
+
+class RequestListItemResponse(_RequestCommonFields):
+    """Schéma allégé pour les listes/dashboards — sans historique de workflow ni CSAT."""
+    pass
+
+
+class RequestResponse(_RequestCommonFields):
+    """Schéma complet — page détail d'un ticket (historique + appréciation CSAT)."""
+    timelines: list[WorkflowDetailResponse] = []
+    appreciation: Optional[AppreciationResponse] = None
 
 
 class RequestSearch(BaseModel):

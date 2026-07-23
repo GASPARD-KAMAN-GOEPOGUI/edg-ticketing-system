@@ -18,6 +18,7 @@ from api.repositories import (
     AnnouncementPriorityRepository,
     AnnouncementStatusRepository,
     PriorityDefinitionRepository,
+    SlaPolicyRepository,
     UnityRepository,
     OrganigramRepository,
 )
@@ -33,7 +34,6 @@ _REQUEST_STATUSES = [
     {"code": "qualified",    "label": "Qualifiée",             "sort_order": 3,  "is_builtin": True},
     {"code": "assigned",     "label": "Assignée",              "sort_order": 4,  "is_builtin": True},
     {"code": "in_progress",  "label": "En cours",              "sort_order": 5,  "is_builtin": True},
-    {"code": "waiting_user", "label": "En attente utilisateur","sort_order": 6,  "is_builtin": True},
     {"code": "escalated",    "label": "Escaladée",             "sort_order": 7,  "is_builtin": True},
     {"code": "resolved",     "label": "Résolue",               "sort_order": 8,  "is_builtin": True},
     {"code": "closed",       "label": "Clôturée",              "sort_order": 9,  "is_builtin": True},
@@ -115,6 +115,17 @@ _PRIORITY_DEFINITIONS = [
     {"slug": "high",     "label": "Haute",    "description": "Demandes urgentes impactant plusieurs utilisateurs.",         "color": "orange", "sort_order": 3, "is_builtin": True, "status": True},
     {"slug": "critical", "label": "Critique", "description": "Incidents majeurs à traiter immédiatement.",                 "color": "red",    "sort_order": 4, "is_builtin": True, "status": True},
 ]
+
+# Politiques SLA par défaut — mêmes délais pour toutes les catégories, variant
+# uniquement par priorité. response_h = délai de première réponse, resolution_h =
+# délai de résolution (alimente request.sla_hours), escalate_after_h = seuil
+# d'escalade automatique (scheduler).
+_SLA_HOURS_BY_PRIORITY: dict[str, dict[str, int]] = {
+    "low":      {"response_h": 24, "resolution_h": 72, "escalate_after_h": 96},
+    "medium":   {"response_h": 8,  "resolution_h": 48, "escalate_after_h": 60},
+    "high":     {"response_h": 2,  "resolution_h": 24, "escalate_after_h": 30},
+    "critical": {"response_h": 1,  "resolution_h": 4,  "escalate_after_h": 6},
+}
 
 # ── Structure organisationnelle EDG (Unity + Organigram) ─────────────────────
 #
@@ -237,20 +248,35 @@ async def seed_references(session: AsyncSession) -> None:
     await _seed(AnnouncementStatusRepository(session),  _ANNOUNCEMENT_STATUSES)
     await _seed(PriorityDefinitionRepository(session),  _PRIORITY_DEFINITIONS, key="slug")
 
+    # ── Politiques SLA (catégorie × priorité) ────────────────────────────────
+    sla_repo = SlaPolicyRepository(session)
+    for cat in _REQUEST_CATEGORIES:
+        for prio_slug, hours in _SLA_HOURS_BY_PRIORITY.items():
+            _, created = await sla_repo.get_or_create(
+                filters={"category": cat["code"], "priority": prio_slug},
+                defaults={"category": cat["code"], "priority": prio_slug, **hours},
+            )
+            if created:
+                seeded += 1
+
     # ── Unity + Organigram (dépendance : organigram.unity_id = unity.id) ────
     unity_repo = UnityRepository(session)
     org_repo   = OrganigramRepository(session)
 
     codename_to_unity_id: dict[str, int] = {}
     for u in _UNITIES:
-        # include_deleted=True pour éviter un dup-key si l'entrée a été soft-deleted
+        # Respecter les suppressions admin : une unity soft-deleted ne doit jamais
+        # être restaurée automatiquement au démarrage.
         existing = await unity_repo.get_one({"codename": u["codename"]}, include_deleted=True)
         if existing is not None:
-            if existing.deleted_at is not None:
-                existing.deleted_at = None
-                await session.commit()
-                await session.refresh(existing)
-            codename_to_unity_id[u["codename"]] = existing.id
+            if existing.deleted_at is None:
+                codename_to_unity_id[u["codename"]] = existing.id
+            else:
+                logger.debug(
+                    "seed_references: unity %s ignoree car soft-deleted",
+                    u["codename"],
+                )
+            continue
         else:
             obj = (await unity_repo.get_or_create(
                 filters={"codename": u["codename"]},
@@ -267,15 +293,24 @@ async def seed_references(session: AsyncSession) -> None:
             continue
 
         parent_org_id = codename_to_org_id.get(parent_codename) if parent_codename else None
+        if parent_codename and parent_org_id is None:
+            logger.debug(
+                "seed_references: organigram %s ignore car parent %s absent ou supprime",
+                unity_codename,
+                parent_codename,
+            )
+            continue
 
         existing_org = await org_repo.get_one({"unity_id": unity_id}, include_deleted=True)
         if existing_org is not None:
-            if existing_org.deleted_at is not None:
-                existing_org.deleted_at = None
-                existing_org.parent_id = parent_org_id
-                await session.commit()
-                await session.refresh(existing_org)
-            codename_to_org_id[unity_codename] = existing_org.id
+            if existing_org.deleted_at is None:
+                codename_to_org_id[unity_codename] = existing_org.id
+            else:
+                logger.debug(
+                    "seed_references: organigram %s ignore car soft-deleted",
+                    unity_codename,
+                )
+            continue
         else:
             obj = (await org_repo.get_or_create(
                 filters={"unity_id": unity_id},

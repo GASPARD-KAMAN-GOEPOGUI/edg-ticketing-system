@@ -18,6 +18,14 @@ import { NewRequestForm } from "@/components/new-request-form";
 import { Sparkles } from "lucide-react";
 
 export const Route = createFileRoute("/app")({
+  // SSR désactivé : l'authentification vit dans localStorage, invisible côté
+  // serveur. Avec le SSR activé, requireAuth() s'exécutait aussi côté serveur,
+  // qui voit toujours "non authentifié" (pas de localStorage) et redirigeait
+  // à tort vers /login — y compris sur un simple F5 ou clic interne relançant
+  // un rendu serveur. En désactivant le SSR ici (hérité par toutes les routes
+  // /app/*), le serveur ne fait plus tourner beforeLoad du tout ; seule la
+  // vérification côté client (où localStorage est disponible) décide.
+  ssr: false,
   beforeLoad: () => requireAuth(),
   component: AppRoute,
 });

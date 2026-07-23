@@ -28,7 +28,6 @@ export const DEFAULT_LEVELS = [
   "Agent",
   "Chef de service",
   "Directeur",
-  "Direction Générale",
   "Résolution",
   "Clôture",
 ] as const;
@@ -43,12 +42,11 @@ export const REQUESTER_LEVELS = [
 
 export function buildStepsFromStatus(
   status: string,
-  meta?: { reopened?: boolean; rejected?: boolean; escalationLevel?: "L2" | "L3" | "DG" },
+  meta?: { reopened?: boolean; rejected?: boolean; escalationLevel?: "L2" | "L3" },
 ): EscalationStep[] {
-  // Index 0=Création 1=Qualification 2=Agent 3=Chef 4=Directeur 5=DG 6=Résolution 7=Clôture
+  // Index 0=Création 1=Qualification 2=Agent 3=Chef 4=Directeur 5=Résolution 6=Clôture
   const escalatedIndex =
-    meta?.escalationLevel === "DG" ? 5
-    : meta?.escalationLevel === "L3" ? 4
+    meta?.escalationLevel === "L3" ? 4
     : 3; // L2 par défaut → Chef de service
 
   const order: Record<string, number> = {
@@ -59,8 +57,8 @@ export function buildStepsFromStatus(
     in_progress: 2, // en traitement agent → niveau Agent
     pending: 2,     // en attente d'info → niveau Agent
     escalated: escalatedIndex,
-    resolved: 6,
-    closed: 7,
+    resolved: 5,
+    closed: 6,
     reopened: 1,
     rejected: 1,
   };

@@ -1,337 +1,432 @@
-# Cahier des Charges — EDG Connect
-## Plateforme de gestion des demandes internes — Électricité de Guinée (EDG)
+# Cahier Des Charges
+
+## Application De Ticketing / Support Informatique
+
+**Électricité de Guinée**
+
+**Direction des Systèmes d'Information**
+
+**EDG - DSI**
 
 ---
 
-## 1. Présentation générale
+## 1. Contexte
 
-**EDG Connect** est une application web de gestion des demandes de support interne pour Électricité de Guinée. Elle centralise la création, le suivi, le traitement et le reporting de toutes les demandes émises par les agents et employés de l'entreprise.
+Dans le cadre de l'amélioration de la gestion des incidents, demandes de services et interventions informatiques au sein de la Direction des Systèmes d'Information (DSI) de Électricité de Guinée, il est envisagé de mettre en place une application centralisée de Ticketing/Support.
 
-- **Type** : ITSM interne (80 % des demandes proviennent d'employés avec un compte)
-- **Public** : Employés internes principalement ; accès public limité à la consultation de statut par référence
-- **Langues** : Français
-- **Déploiement** : SPA (TanStack Start/React 19) + API REST (FastAPI / Python)
+Cette plateforme permettra :
 
----
+- la gestion complète des tickets informatiques ;
+- le suivi des incidents et demandes ;
+- la traçabilité des interventions ;
+- l'assignation des tâches aux services compétents ;
+- la supervision des délais de traitement ;
+- la production de statistiques et rapports.
 
-## 2. Objectifs
+L'application couvrira tout le cycle de vie d'un ticket :
 
-| # | Objectif |
-|---|----------|
-| O1 | Centraliser toutes les demandes internes en un seul outil |
-| O2 | Assurer la traçabilité complète du cycle de vie de chaque demande |
-| O3 | Automatiser le routage des demandes vers les bons services |
-| O4 | Gérer les SLA (délais de résolution) par priorité et par direction |
-| O5 | Permettre aux managers de superviser les performances de leur équipe |
-| O6 | Produire des rapports et statistiques exploitables (CSAT, SLA, volume) |
-| O7 | Garantir la sécurité des accès (RBAC, JWT, biométrie optionnelle) |
-| O8 | Diffuser des annonces et notifications en temps réel (SSE) |
+**Ouverture -> Qualification -> Affectation -> Traitement -> Validation -> Fermeture**
 
 ---
 
-## 3. Périmètre et acteurs
+## 2. Objectifs Du Projet
 
-### 3.1 Ce qui est dans le périmètre
-- Soumission de demandes par les employés internes connectés (compte EDG obligatoire)
-- Traitement par les agents EDG
-- Supervision par les chefs de service et directeurs
-- Pilotage global par le Directeur Général
-- Administration système (utilisateurs, SLA, référentiels, routing)
-- Base de connaissances (version connectée `/app/knowledge` + lecture publique `/knowledge`)
-- Notifications en temps réel
-- Suivi public de demande par référence (`/track`, lecture seule)
+### 2.1 Objectif Général
 
-### 3.2 Ce qui est HORS périmètre
-- **Demandes de citoyens/clients externes sans compte EDG** — décision confirmée : seuls les employés EDG peuvent soumettre des demandes. La route `/create-request` sert uniquement de passerelle vers la connexion employé.
-- Formulaire de soumission anonyme (supprimé)
-- Facturation / paiements
+Mettre en place une plateforme informatique centralisée de gestion des tickets de support pour la DSI d'EDG.
 
-### 3.3 Rôles et accès
+### 2.2 Objectifs Spécifiques
 
-| Rôle | Label | Accès racine |
-|------|-------|--------------|
-| `public` | Visiteur | `/` (landing + tracking public) |
-| `user` | Demandeur | `/app/` (dashboard + mes demandes) |
-| `agent` | Agent support | `/app/queue` (file d'attente) |
-| `chief` | Chef de service | `/app/supervision` (supervision équipe) |
-| `director` | Directeur | `/app/direction` (tableau de bord direction) |
-| `dg` | Directeur Général | `/app/dg` (tableau de bord global) |
-| `admin` | Administrateur | `/app/admin/users` (backoffice) |
+L'application devra permettre :
+
+- la création et le suivi des tickets ;
+- la gestion des incidents informatiques ;
+- la gestion des demandes de services ;
+- l'assignation automatique ou manuelle des tickets ;
+- la gestion des priorités et niveaux d'urgence ;
+- le suivi des interventions ;
+- la gestion des SLA, c'est-à-dire les délais de traitement ;
+- les notifications automatiques ;
+- la génération de statistiques et tableaux de bord ;
+- la traçabilité complète des actions ;
+- l'archivage des tickets clôturés.
 
 ---
 
-## 4. Cycle de vie d'une demande
+## 3. Présentation De La DSI
 
-### 4.1 Statuts et transitions
+### 3.1 Structure Organisationnelle
 
-```
-new → qualifying → qualified → assigned → in_progress
-                                              ↓         ↓         ↓
-                                           pending  escalated  rejected
-                                              ↓
-                                           (retour in_progress après réponse)
-                                              ↓
-                                           resolved → closed
-                                              ↓
-                                           reopened (si insatisfait)
-```
+- Direction
+- Secrétariat
+- Service d'Appui
 
-| Statut | Code | Signification |
-|--------|------|---------------|
-| Nouveau | `new` | Demande soumise, non encore prise en charge |
-| En qualification | `qualifying` | Agent qualifie la demande |
-| Qualifié | `qualified` | Demande qualifiée, prête à être assignée |
-| Assigné | `assigned` | Ticket assigné à un agent spécifique |
-| En cours | `in_progress` | Traitement actif |
-| En attente | `pending` | Agent attend retour du demandeur |
-| Escaladé | `escalated` | Escaladé au niveau supérieur |
-| Rejeté | `rejected` | Demande rejetée (hors périmètre, doublon…) |
-| Résolu | `resolved` | Problème résolu |
-| Fermé | `closed` | Résolution confirmée |
-| Réouvert | `reopened` | Demandeur insatisfait — réouverture |
+### 3.2 Départements
 
-### 4.2 Acteurs par transition
+#### 1. Département Étude Et Développement
 
-| Transition | Acteur autorisé |
-|-----------|-----------------|
-| Créer une demande | user, agent, admin |
-| Qualifier | agent, chief |
-| Assigner | agent (auto-assign ou chief) |
-| Prise en charge | agent assigné |
-| Demander infos (pending) | agent |
-| Répondre au pending | user demandeur |
-| Escalader | agent, chief |
-| Résoudre | agent assigné |
-| Fermer | user demandeur (confirmation) ou auto |
-| Rouvrir | user demandeur |
-| Rejeter | agent, chief |
+Service :
+
+- Étude & Digitalisation
+
+#### 2. Département Exploitation
+
+Services :
+
+- Maintenance
+- Support
+
+#### 3. Département Infrastructure Et Réseau
+
+Services :
+
+- Réseau & Cybersécurité
+- Système & Habilitation
 
 ---
 
-## 5. Fonctionnalités par rôle
+## 4. Périmètre Du Projet
 
-### 5.1 Rôle `user` (Demandeur)
+Le système devra couvrir :
 
-| # | Fonctionnalité | Vue |
-|---|---------------|-----|
-| U1 | Soumettre une nouvelle demande | `/app/new` |
-| U2 | Consulter la liste de ses demandes | `/app/requests` |
-| U3 | Voir le détail et historique d'une demande | `/app/requests/:id` |
-| U4 | Répondre à une demande d'info complémentaire (pending) | `/app/requests/:id` |
-| U5 | Fermer / noter sa satisfaction (CSAT 1-5) | `/app/requests/:id` |
-| U6 | Consulter la base de connaissances | `/app/knowledge` |
-| U7 | Recevoir des notifications en temps réel | Toutes vues |
-| U8 | Gérer son profil | `/app/profile` |
-| U9 | Dashboard personnel (KPIs mes demandes) | `/app/` |
-
-### 5.2 Rôle `agent` (Agent support)
-
-| # | Fonctionnalité | Vue |
-|---|---------------|-----|
-| A1 | Consulter la file d'attente des nouvelles demandes | `/app/queue` |
-| A2 | Triage : qualifier, prioriser, router une demande | `/app/triage` |
-| A3 | Consulter et gérer ses tickets assignés | `/app/my-tickets` |
-| A4 | Traiter un ticket (changer statut, commenter) | `/app/requests/:id` |
-| A5 | Demander des informations complémentaires (pending) | `/app/requests/:id` |
-| A6 | Escalader un ticket | `/app/requests/:id` |
-| A7 | Résoudre un ticket | `/app/requests/:id` |
-| A8 | Consulter la base de connaissances | `/app/knowledge` |
-| A9 | Voir ses stats personnelles (taux résolution, SLA, délai moyen) | `/app/my-tickets` |
-| A10 | Recevoir notifications (réponse demandeur sur pending) | Temps réel |
-
-### 5.3 Rôle `chief` (Chef de service)
-
-| # | Fonctionnalité | Vue |
-|---|---------------|-----|
-| C1 | Tableau de bord de son service | `/app/supervision` |
-| C2 | Consulter les tickets de son équipe | `/app/supervision` |
-| C3 | Gérer les escalades reçues | `/app/chief-inbox` |
-| C4 | Publier un message d'équipe | `/app/supervision` |
-| C5 | Consulter les historiques de demandes | `/app/requests/history` |
-| C6 | Accéder aux annonces | Via notifications |
-| C7 | Toutes les fonctionnalités agent (A1–A10) | Mêmes vues |
-
-### 5.4 Rôle `director` (Directeur de direction)
-
-| # | Fonctionnalité | Vue |
-|---|---------------|-----|
-| D1 | Tableau de bord direction (KPIs, SLA, volume) | `/app/direction` |
-| D2 | Vue des demandes de sa direction | `/app/direction` |
-| D3 | Vue des performances par service | `/app/direction` |
-| D4 | Gérer les règles de routage de sa direction | `/app/direction` |
-| D5 | Consulter les rapports | `/app/reports` |
-| D6 | Consulter le centre SLA | `/app/sla-center` |
-
-### 5.5 Rôle `dg` (Directeur Général)
-
-| # | Fonctionnalité | Vue |
-|---|---------------|-----|
-| DG1 | Tableau de bord global (toutes directions) | `/app/dg` |
-| DG2 | KPIs : volume, SLA global, CSAT global | `/app/dg` |
-| DG3 | Performance par direction | `/app/dg` |
-| DG4 | Rapports complets | `/app/reports` |
-| DG5 | Publier des annonces globales | Via admin ou DG panel |
-| DG6 | Consulter le centre SLA | `/app/sla-center` |
-
-### 5.6 Rôle `admin` (Administrateur système)
-
-| # | Fonctionnalité | Vue |
-|---|---------------|-----|
-| AD1 | Gestion des utilisateurs et rôles | `/app/admin/users` |
-| AD2 | Gestion de l'organigramme (directions + services) | `/app/admin/org` + `/app/admin/directions` + `/app/admin/units` |
-| AD3 | Configuration des SLA et priorités | `/app/admin/sla` + `/app/admin/priorities` |
-| AD4 | Configuration du routage automatique | `/app/admin/routing` |
-| AD5 | Gestion des workflows | `/app/admin/references` |
-| AD6 | Publication d'annonces | `/app/admin/homepage` |
-| AD7 | Consultation des journaux d'activité (audit trail) | `/app/admin/logs` |
-| AD8 | Consultation des journaux de sécurité | `/app/admin/security` |
-| AD9 | Configuration des canaux de communication | `/app/admin/communication` |
-| AD10 | Gestion de la base de connaissances | `/app/admin/knowledge` |
-| AD11 | Rapports et statistiques | `/app/reports` |
+- tous les utilisateurs EDG ;
+- tous les services de la DSI ;
+- les demandes informatiques internes ;
+- les incidents matériels et logiciels ;
+- les demandes réseau ;
+- les habilitations systèmes ;
+- les demandes d'assistance ;
+- les interventions terrain et à distance.
 
 ---
 
-## 6. Règles métier
+## 5. Types De Tickets
 
-### 6.1 SLA (Service Level Agreement)
-- Chaque priorité (`low`, `normal`, `high`, `critical`) a un délai de résolution cible exprimé en heures
-- Le délai est calculé depuis la création de la demande
-- Une demande est SLA-breached si `sla_elapsed > sla_hours`
-- Planificateur toutes les 10 minutes pour vérifier les SLA dépassés
+L'application devra permettre plusieurs catégories :
 
-### 6.2 Routage automatique
-- Des règles de routage associent une catégorie/mot-clé à une direction + unité cible
-- Le routage est déclenché à la soumission ou à la qualification
-- Chaque directeur peut gérer les règles de sa propre direction
-
-### 6.3 Notifications
-- Toute transition de statut déclenche une notification au demandeur
-- La réponse d'un demandeur à un `pending_info` notifie l'agent assigné
-- Les annonces publiées sont visibles dans l'espace de notifications
-
-### 6.4 Escalade
-- Un ticket peut être escaladé par l'agent ou le chef
-- L'escalade arrive dans la boîte du chef (`chief-inbox`)
-- Le chef peut traiter ou réassigner
-
-### 6.5 Satisfaction (CSAT)
-- Le demandeur peut noter sa satisfaction de 1 à 5 à la clôture
-- Le CSAT est agrégé par agent, par direction, et globalement
-- Visible pour le chief, director, dg, admin
-
-### 6.6 Base de connaissances
-- Articles consultables par tous les utilisateurs connectés
-- Gestion (CRUD) réservée à l'admin
-- Catégorisés par direction / thème
-
-### 6.7 Annonces
-- Publiées par admin/DG pour toute la plateforme
-- Publiées par chef de service pour son équipe uniquement (audience=unit)
-- Canaux : in_app (notifications), e-mail (optionnel)
+| Type | Description |
+| --- | --- |
+| Incident | Dysfonctionnement informatique |
+| Demande de service | Nouvelle demande utilisateur |
+| Maintenance | Intervention préventive/corrective |
+| Réseau | Problème réseau/internet |
+| Habilitation | Création/modification d'accès |
+| Sécurité | Incident cybersécurité |
+| Matériel | Panne matériel |
+| Logiciel | Installation/configuration logiciel |
 
 ---
 
-## 7. Sécurité et conformité
+## 6. Acteurs Du Système
 
-| Exigence | Détail |
-|---------|--------|
-| S1 | Authentification JWT (access + refresh tokens) |
-| S2 | Rotation automatique du token (pre-emptive + reactive 401) |
-| S3 | Authentification biométrique optionnelle (InsightFace ArcFace, seuil 40) |
-| S4 | RBAC strict : chaque endpoint vérifie le rôle via `require_roles` |
-| S5 | Rate limiting sur les routes auth (login 10/60s, register 5/60s, reset 3/60s) |
-| S6 | Chiffrement des champs sensibles (ServiceCrypto) |
-| S7 | Journaux d'activité (audit trail) pour toutes les actions critiques |
-| S8 | Journaux de sécurité (tentatives d'authentification biométrique) |
-| S9 | `DISABLE_AUTH=True` interdit en production |
-| S10 | CORS restreint aux origines configurées en production |
+| Acteur | Rôle |
+| --- | --- |
+| Utilisateur | Création et suivi des tickets |
+| Agent Support | Traitement des tickets |
+| Chef de Service | Supervision des tickets du service |
+| Chef Département | Validation et suivi départemental |
+| Administrateur | Paramétrage et administration |
+| Direction DSI | Consultation des statistiques globales |
 
 ---
 
-## 8. Architecture technique
+## 7. Workflow Général Du Ticket
 
-### 8.1 Frontend
-- **Framework** : React 19 + TanStack Router (file-based routing) + TanStack Query
-- **UI** : Tailwind CSS 4, shadcn/ui, Radix UI, Recharts
-- **Auth** : JWT dans localStorage, `isAuthenticated()`, `getRole()`, `useUser()`
-- **Temps réel** : SSE (Server-Sent Events) via `/api/v1/events` (préfixe du routeur backend : `/events`)
-- **Formulaires** : React Hook Form + Zod
+### 7.1 Étapes Du Ticket
 
-### 8.2 Backend
-- **Framework** : FastAPI (Python 3.10+)
-- **Base de données** : MySQL via SQLAlchemy async
-- **Auth** : JWT (python-jose), bcrypt passwords
-- **Biométrie** : InsightFace ArcFace (ONNX)
-- **Notifications temps réel** : SSE + asyncio event bus
-- **SLA scheduler** : APScheduler (intervalle 10 minutes)
-- **Rate limiting** : Redis (prod) ou mémoire (dev)
+#### 1. Ouverture Du Ticket
 
-### 8.3 Données de référence (seed)
-- Statuts de demande (14 statuts)
-- Priorités (4 niveaux)
-- Catégories de demande
-- Workflows et étapes
-- Canaux de communication
-- Un compte admin initial
+L'utilisateur :
+
+- crée un ticket ;
+- renseigne les informations ;
+- joint des fichiers si nécessaire.
+
+#### 2. Qualification
+
+Le support :
+
+- analyse le ticket ;
+- définit :
+  - la catégorie ;
+  - la priorité ;
+  - le niveau de criticité ;
+  - le service concerné.
+
+#### 3. Affectation
+
+Le ticket est :
+
+- affecté automatiquement ;
+- ou affecté manuellement à :
+  - un service ;
+  - un agent ;
+  - un département.
+
+#### 4. Traitement
+
+L'agent :
+
+- prend en charge le ticket ;
+- ajoute des commentaires ;
+- effectue les interventions ;
+- change le statut.
+
+#### 5. Validation
+
+Le demandeur :
+
+- confirme la résolution ;
+- ou demande une réouverture.
+
+#### 6. Fermeture
+
+Le ticket est :
+
+- clôturé ;
+- archivé ;
+- historisé.
 
 ---
 
-## 9. Interfaces et vues
+## 8. Gestion Des Statuts
 
-### 9.1 Vues publiques (sans authentification)
-| Route | Description |
-|-------|-------------|
-| `/` | Landing page + accès connexion |
-| `/login` | Connexion email/mot de passe |
-| `/register` | Inscription (employés) |
-| `/forgot-password` | Réinitialisation mot de passe |
-| `/create-request` | Passerelle employé → redirige vers `/login` (demandes internes uniquement) |
-| `/track` | Suivi d'une demande par référence (lecture seule) |
-| `/knowledge` | Base de connaissances publique (lecture seule) |
-| `/admin-login` | Connexion administrateur dédiée |
+| Statut | Description |
+| --- | --- |
+| Nouveau | Ticket créé |
+| En attente qualification | Analyse initiale |
+| Affecté | Assigné à un agent/service |
+| En cours | Traitement actif |
+| En attente utilisateur | Attente retour utilisateur |
+| Résolu | Incident résolu |
+| Fermé | Ticket clôturé |
+| Rejeté | Ticket invalidé |
+| Réouvert | Ticket rouvert |
 
-### 9.2 Vues authentifiées communes
-| Route | Rôles | Description |
-|-------|-------|-------------|
-| `/app/` | tous | Dashboard adapté au rôle |
-| `/app/notifications` | tous | Centre de notifications |
-| `/app/profile` | tous | Profil utilisateur |
-| `/app/knowledge` | tous | Base de connaissances |
-| `/app/requests` | tous | Liste des demandes (filtrée par rôle) |
-| `/app/requests/:id` | tous | Détail et historique d'une demande |
-| `/app/new` | user, admin | Créer une nouvelle demande |
+---
 
-### 9.3 Vues agents
-| Route | Rôles | Description |
-|-------|-------|-------------|
-| `/app/queue` | agent, chief, admin | File d'attente (non assignées) |
-| `/app/triage` | agent, chief, admin | Triage et qualification |
-| `/app/my-tickets` | agent, chief, admin | Mes tickets assignés + stats perso |
+## 9. Gestion Des Priorités
 
-### 9.4 Vues supervision
-| Route | Rôles | Description |
-|-------|-------|-------------|
-| `/app/supervision` | chief, director, admin | Tableau de bord équipe + message équipe |
-| `/app/chief-inbox` | chief | Escalades reçues |
-| `/app/sla-center` | chief, director, dg, admin | Centre de suivi SLA |
-| `/app/direction` | director | Tableau de bord direction + routing rules |
-| `/app/dg` | dg | Tableau de bord DG |
-| `/app/reports` | chief, director, dg, admin | Rapports et graphiques |
+| Priorité | Délai |
+| --- | --- |
+| Critique | Immédiat |
+| Haute | < 4h |
+| Moyenne | < 24h |
+| Faible | < 72h |
 
-### 9.5 Vues administration
-| Route | Rôles | Description |
-|-------|-------|-------------|
-| `/app/admin/users` | admin | Gestion utilisateurs et rôles |
-| `/app/admin/org` | admin | Organigramme graphique |
-| `/app/admin/directions` | admin | Liste directions (CRUD) |
-| `/app/admin/units` | admin | Liste services/unités (CRUD) |
-| `/app/admin/sla` | admin | Politiques SLA |
-| `/app/admin/priorities` | admin | Priorités et niveaux |
-| `/app/admin/routing` | admin | Règles de routage global |
-| `/app/admin/references` | admin | Référentiels (catégories, workflows) |
-| `/app/admin/knowledge` | admin | Gestion base de connaissances |
-| `/app/admin/homepage` | admin | Gestion annonces |
-| `/app/admin/communication` | admin | Paramètres communication (SMTP…) |
-| `/app/admin/logs` | admin | Journaux d'activité |
-| `/app/admin/security` | admin | Journaux de sécurité |
-| `/app/admin/audit` | admin | Audit trail |
+---
+
+## 10. Fonctionnalités Principales
+
+### 10.1 Gestion Des Tickets
+
+Le système doit permettre :
+
+- création ticket ;
+- modification ticket ;
+- suivi ticket ;
+- historique ticket ;
+- réouverture ticket ;
+- clôture ticket ;
+- affectation ticket ;
+- escalade ticket ;
+- fusion ticket ;
+- duplication ticket.
+
+### 10.2 Tableau De Bord
+
+Le tableau de bord devra afficher :
+
+- nombre total de tickets ;
+- tickets ouverts ;
+- tickets en retard ;
+- tickets résolus ;
+- tickets critiques ;
+- tickets par service ;
+- tickets par département ;
+- performance agents ;
+- statistiques SLA.
+
+### 10.3 Notifications
+
+Notifications par :
+
+- email ;
+- SMS, optionnel ;
+- notifications internes.
+
+Évènements :
+
+- création ticket ;
+- affectation ;
+- changement statut ;
+- résolution ;
+- fermeture ;
+- escalade.
+
+### 10.4 Gestion Des Utilisateurs
+
+Le système devra gérer :
+
+- authentification ;
+- gestion des rôles ;
+- gestion des permissions ;
+- réinitialisation mot de passe ;
+- gestion des profils.
+
+### 10.5 Historique & Traçabilité
+
+Le système doit journaliser :
+
+- toutes les actions ;
+- les changements de statut ;
+- les affectations ;
+- les connexions ;
+- les modifications.
+
+### 10.6 Gestion Documentaire
+
+Possibilité de :
+
+- joindre des fichiers ;
+- ajouter des captures d'écran ;
+- joindre des rapports PDF ;
+- stocker des documents techniques.
+
+---
+
+## 11. Fonctionnalités Avancées
+
+### 11.1 SLA (Service Level Agreement)
+
+Le système devra :
+
+- calculer automatiquement les délais ;
+- générer des alertes ;
+- détecter les dépassements.
+
+### 11.2 Escalade Automatique
+
+Si un ticket dépasse le délai :
+
+- notification automatique ;
+- escalade vers supérieur hiérarchique.
+
+### 11.3 Base De Connaissance
+
+Le système pourra intégrer :
+
+- FAQ ;
+- solutions fréquentes ;
+- guides techniques ;
+- procédures.
+
+---
+
+## 12. Exigences Techniques
+
+### 12.1 Architecture
+
+Architecture web :
+
+- front-end ;
+- back-end ;
+- API REST ;
+- base de données.
+
+### 12.2 Technologies Proposées
+
+| Couche | Technologies |
+| --- | --- |
+| Front-End | Angular / React |
+| Back-End | Django / Laravel / FastAPI |
+| Base de données | MySQL / PostgreSQL |
+| API | REST API |
+| Authentification | JWT / Active Directory |
+| Hébergement | Serveur EDG / Cloud |
+
+---
+
+## 13. Sécurité
+
+Le système devra garantir :
+
+- authentification sécurisée ;
+- gestion des habilitations ;
+- journalisation ;
+- chiffrement des mots de passe ;
+- protection contre les accès non autorisés ;
+- sauvegarde des données ;
+- gestion des sessions.
+
+---
+
+## 14. Rapports & Statistiques
+
+Le système devra produire :
+
+- rapport journalier ;
+- rapport mensuel ;
+- rapport par service ;
+- rapport par agent ;
+- temps moyen de résolution ;
+- taux de satisfaction ;
+- taux SLA.
+
+Formats :
+
+- PDF ;
+- Excel ;
+- CSV.
+
+---
+
+## 15. Contraintes
+
+- Interface simple et intuitive ;
+- application responsive ;
+- multi-utilisateurs ;
+- haute disponibilité ;
+- performances optimisées ;
+- compatible réseau interne EDG.
+
+---
+
+## 16. Livrables Attendus
+
+| Livrable | Description |
+| --- | --- |
+| Cahier des charges | Document fonctionnel |
+| Maquettes | Interfaces utilisateur |
+| Base de données | Schéma relationnel |
+| API | Documentation API |
+| Application Web | Plateforme complète |
+| Documentation technique | Guide technique |
+| Manuel utilisateur | Guide d'utilisation |
+| Formation | Formation utilisateurs |
+
+---
+
+## 17. Planning Prévisionnel
+
+| Phase | Durée |
+| --- | --- |
+| Analyse & conception | 2 semaines |
+| Maquettage | 1 semaine |
+| Développement | 6 semaines |
+| Tests | 2 semaines |
+| Déploiement | 1 semaine |
+| Formation | 1 semaine |
+
+---
+
+## 18. Conclusion
+
+La mise en place de cette application de Ticketing/Support permettra à la DSI d'EDG :
+
+- d'améliorer la gestion des incidents ;
+- d'optimiser le support informatique ;
+- de renforcer la traçabilité ;
+- d'améliorer la qualité de service ;
+- de réduire les délais de traitement ;
+- d'avoir une meilleure visibilité sur les activités informatiques.

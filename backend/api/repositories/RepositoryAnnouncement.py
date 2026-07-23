@@ -5,13 +5,18 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.core.rbac import normalize_role
 from api.models.ModelAnnouncement import Announcement
 from api.models.ModelAnnouncementCategory import AnnouncementCategory
 from api.models.ModelAnnouncementPriority import AnnouncementPriority
 from api.models.ModelAnnouncementStatus import AnnouncementStatus
 from api.repositories.base_repository import BaseRepository
 
-_ADMIN_ROLES: frozenset[str] = frozenset({"admin", "dg"})
+_ADMIN_ROLES: frozenset[str] = frozenset({"admin"})
+
+
+def _is_admin_role(actor_role: str) -> bool:
+    return normalize_role(actor_role) in _ADMIN_ROLES
 
 
 class AnnouncementRepository(BaseRepository[Announcement]):
@@ -80,7 +85,7 @@ class AnnouncementRepository(BaseRepository[Announcement]):
         filters: dict = {"announcement_status": "published"}
         if audience:
             filters["audience"] = audience
-        if actor_role not in _ADMIN_ROLES:
+        if not _is_admin_role(actor_role):
             filters["visibility"] = "public"
         return await self.list(
             filters=filters,
@@ -113,7 +118,7 @@ class AnnouncementRepository(BaseRepository[Announcement]):
         limit: int = 20,
     ) -> tuple[list[Announcement], int]:
         filters: dict = {"author_id": author_id}
-        if actor_role not in _ADMIN_ROLES:
+        if not _is_admin_role(actor_role):
             filters["visibility"] = "public"
         return await self.list(
             filters=filters,
@@ -148,7 +153,7 @@ class AnnouncementRepository(BaseRepository[Announcement]):
                 (Announcement.expires_at.is_(None)) | (Announcement.expires_at > now)
             )
         )
-        if actor_role not in _ADMIN_ROLES:
+        if not _is_admin_role(actor_role):
             stmt = stmt.where(Announcement.visibility == "public")
             count_stmt = count_stmt.where(Announcement.visibility == "public")
         total = (await self.session.execute(count_stmt)).scalar_one() or 0
@@ -183,7 +188,7 @@ class AnnouncementRepository(BaseRepository[Announcement]):
                 (Announcement.expires_at.is_(None)) | (Announcement.expires_at > now)
             )
         )
-        if actor_role not in _ADMIN_ROLES:
+        if not _is_admin_role(actor_role):
             stmt = stmt.where(Announcement.visibility == "public")
             count_stmt = count_stmt.where(Announcement.visibility == "public")
         total = (await self.session.execute(count_stmt)).scalar_one() or 0
@@ -218,7 +223,7 @@ class AnnouncementRepository(BaseRepository[Announcement]):
         self, term: str, *, actor_role: str = "user", page: int = 1, limit: int = 20
     ) -> tuple[list[Announcement], int]:
         filters: dict = {}
-        if actor_role not in _ADMIN_ROLES:
+        if not _is_admin_role(actor_role):
             filters["visibility"] = "public"
         return await self.list(
             search=(["title", "description"], term),

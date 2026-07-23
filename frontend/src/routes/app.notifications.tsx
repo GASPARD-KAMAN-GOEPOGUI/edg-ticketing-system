@@ -31,11 +31,13 @@ import { PaginationBar, usePagination } from "@/components/pagination-bar";
 import { LayoutToggle, type LayoutMode } from "@/components/layout-toggle";
 import { toast } from "sonner";
 import { announcementCategoryLabels } from "@/lib/mock-data";
+import type { Role } from "@/lib/mock-data";
 import {
   fetchPublishedAnnouncements,
   roleToAnnounceAudience,
 } from "@/lib/api/communication";
 import { useRole, useUser } from "@/lib/session";
+import { ticketDetailRouteForNotification } from "@/lib/ticket-navigation";
 
 export const Route = createFileRoute("/app/notifications")({
   head: () => ({ meta: [{ title: "Notifications — EDG Support" }] }),
@@ -52,6 +54,7 @@ type Notif = {
   at: string;
   read: boolean;
   requestId?: string;
+  actionUrl?: string;
   source: "request" | "announcement";
   announcementId?: string;
 };
@@ -124,6 +127,30 @@ function getActions(n: Notif): ActionDef[] {
   return [];
 }
 
+function isQualificationNotification(n: Notif): boolean {
+  const target = `${n.actionUrl ?? ""} ${n.title} ${n.body}`.toLowerCase();
+  return (
+    target.includes("/app/triage") ||
+    target.includes("/app/queue?tab=qualify") ||
+    target.includes("demande à qualifier") ||
+    target.includes("demande a qualifier") ||
+    target.includes("support général") ||
+    target.includes("support general")
+  );
+}
+
+function navigateNotification(n: Notif, navigate: ReturnType<typeof useNavigate>, role: Role): boolean {
+  if (isQualificationNotification(n)) {
+    navigate({ to: "/app/queue", search: { tab: "qualify" } });
+    return true;
+  }
+  if (n.requestId) {
+    navigate({ to: ticketDetailRouteForNotification(n.actionUrl, role), params: { id: n.requestId } });
+    return true;
+  }
+  return false;
+}
+
 // ── Composant carte — mode LISTE ───────────────────────────────────────────
 function NotifListCard({
   n,
@@ -131,6 +158,7 @@ function NotifListCard({
   onToggleRead,
   onRemove,
   navigate,
+  role,
   onActionToast,
   onClose,
   onReopen,
@@ -140,6 +168,7 @@ function NotifListCard({
   onToggleRead: (id: string) => void;
   onRemove: (id: string, title: string) => void;
   navigate: ReturnType<typeof useNavigate>;
+  role: Role;
   onActionToast: (msg: string) => void;
   onClose: (id: string) => void;
   onReopen: (id: string) => void;
@@ -201,9 +230,7 @@ function NotifListCard({
               onClick={() => {
                 onToggleRead(n.id);
                 if (a.action === "navigate") {
-                  if (n.requestId) {
-                    navigate({ to: "/app/requests/$id", params: { id: n.requestId } });
-                  } else {
+                  if (!navigateNotification(n, navigate, role)) {
                     toast.info("Aucune demande liée à cette notification.");
                   }
                 } else if (a.action === "close") {
@@ -253,6 +280,7 @@ function NotifGridCard({
   onToggleRead,
   onRemove,
   navigate,
+  role,
   onActionToast,
   onClose,
   onReopen,
@@ -262,6 +290,7 @@ function NotifGridCard({
   onToggleRead: (id: string) => void;
   onRemove: (id: string, title: string) => void;
   navigate: ReturnType<typeof useNavigate>;
+  role: Role;
   onActionToast: (msg: string) => void;
   onClose: (id: string) => void;
   onReopen: (id: string) => void;
@@ -346,9 +375,7 @@ function NotifGridCard({
               onClick={() => {
                 onToggleRead(n.id);
                 if (a.action === "navigate") {
-                  if (n.requestId) {
-                    navigate({ to: "/app/requests/$id", params: { id: n.requestId } });
-                  } else {
+                  if (!navigateNotification(n, navigate, role)) {
                     toast.info("Aucune demande liée à cette notification.");
                   }
                 } else if (a.action === "close") {
@@ -500,8 +527,7 @@ function Notifications() {
 
   const handleCardClick = (n: Notif) => {
     markRead(n.id);
-    if (n.requestId)
-      navigate({ to: "/app/requests/$id", params: { id: n.requestId } });
+    navigateNotification(n, navigate, role);
   };
 
   const handleActionToast = (msg: string) => toast.success(msg);
@@ -533,6 +559,7 @@ function Notifications() {
     onToggleRead: toggleRead,
     onRemove: remove,
     navigate,
+    role,
     onActionToast: handleActionToast,
     onClose: (id: string) => closeMut.mutate(id),
     onReopen: (id: string) => reopenMut.mutate(id),

@@ -10,12 +10,13 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_db, get_current_user, require_roles
+from api.core.rbac import normalize_role
 from api.services.ServiceStats import StatsService
 
 router = APIRouter(
     prefix="/stats",
     tags=["stats"],
-    dependencies=[Depends(require_roles("chief", "director", "dg", "admin"))],
+    dependencies=[Depends(require_roles("chief", "director", "admin"))],
 )
 
 # Router séparé sans guard de rôle restrictif — pour les agents
@@ -36,7 +37,7 @@ async def my_stats(
     svc: StatsService = Depends(_svc),
 ):
     """Stats personnelles de l'agent connecté (assigné, résolu, SLA, temps moyen)."""
-    if actor.role not in ("agent", "chief", "director", "dg", "admin"):
+    if normalize_role(actor.role) not in ("agent", "chief", "director", "admin"):
         from fastapi import HTTPException
         raise HTTPException(status_code=403, detail="Accès non autorisé.")
     return await svc.my_stats(int(actor.id))
@@ -46,10 +47,10 @@ async def my_stats(
 
 @router.get("/global")
 async def global_kpis(
-    _=Depends(require_roles("dg", "admin")),
+    _=Depends(require_roles("admin")),
     svc: StatsService = Depends(_svc),
 ):
-    """KPIs globaux — réservé DG et Admin."""
+    """KPIs globaux — réservé Admin."""
     return await svc.global_kpis()
 
 
@@ -64,16 +65,17 @@ async def dashboard_summary(
 ):
     """
     Résumé dashboard filtré selon le périmètre de l'utilisateur connecté.
-    chief → périmètre unité; director → périmètre direction; dg/admin → global.
+    chief → périmètre unité; director → périmètre direction; admin → global.
     """
     # Forçage RBAC — le paramètre client est ignoré (même correction que C-N°3)
-    if actor.role == "chief":
+    role = normalize_role(actor.role)
+    if role == "chief":
         unit_id = int(actor.unit_id) if actor.unit_id else None
         direction_id = None
-    elif actor.role == "director":
+    elif role == "director":
         direction_id = int(actor.direction_id) if actor.direction_id else None
         unit_id = None
-    # dg et admin voient tout sans restriction
+    # admin voit tout sans restriction
     return await svc.dashboard_summary(direction_id=direction_id, unit_id=unit_id)
 
 
@@ -83,13 +85,13 @@ async def dashboard_summary(
 async def stats_by_direction(svc: StatsService = Depends(_svc)):
     """
     Requêtes groupées par direction (total, résolus, actifs, SLA breach).
-    Utilisé par le dashboard DG et les vues de supervision.
+    Utilisé par la vue globale admin et les vues de supervision.
     """
     return await svc.requests_by_direction()
 
 
-@router.get("/by-unit")
-async def stats_by_unit(svc: StatsService = Depends(_svc)):
+@router.get("/by-unity")
+async def stats_by_unity(svc: StatsService = Depends(_svc)):
     """Requêtes groupées par unité (avec direction parent)."""
     return await svc.requests_by_unit()
 
@@ -130,15 +132,16 @@ async def stats_by_agent(
 ):
     """
     Performance par agent : assignées, résolues, temps moyen de résolution.
-    Scope RBAC forcé : chief → son unité, director → sa direction, dg/admin → global.
+    Scope RBAC forcé : chief → son unité, director → sa direction, admin → global.
     """
-    if actor.role == "chief":
+    role = normalize_role(actor.role)
+    if role == "chief":
         unit_id = int(actor.unit_id) if actor.unit_id else None
         direction_id = None
-    elif actor.role == "director":
+    elif role == "director":
         direction_id = int(actor.direction_id) if actor.direction_id else None
         unit_id = None
-    # dg et admin voient tout
+    # admin voit tout
     return await svc.agent_performance(direction_id=direction_id, unit_id=unit_id, limit=limit)
 
 

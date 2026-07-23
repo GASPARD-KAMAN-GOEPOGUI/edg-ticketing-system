@@ -155,8 +155,15 @@ class Request(Base, BaseColumns):
 
     @property
     def direction_id(self) -> Optional[int]:
-        """Direction parente déduite depuis l'unité de la demande."""
-        return self.unity.parent_direction_id if self.unity else None
+        """Direction parente déduite depuis l'unité de la demande.
+        - Si unity est un service (a un parent_direction_id) → retourne le parent
+        - Si unity EST une direction (pas de parent) → retourne son propre id
+        """
+        if not self.unity:
+            return None
+        if self.unity.parent_direction_id:
+            return self.unity.parent_direction_id
+        return self.unity.id
 
     @property
     def assignee_name(self) -> Optional[str]:

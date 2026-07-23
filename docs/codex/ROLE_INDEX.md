@@ -1,0 +1,66 @@
+# Role Index
+
+## Principe
+
+Chaque role a deux espaces:
+
+- espace personnel: ses demandes, son historique, son profil, ses notifications;
+- espace professionnel: donnees traitees, supervisees, validees ou administrees.
+
+Ne pas melanger ces deux contextes dans la navigation ni dans les permissions.
+
+## Roles
+
+| Role | Objectif | Espace personnel | Espace professionnel | Pages pro | Donnees visibles | Actions autorisees principales |
+| --- | --- | --- | --- | --- | --- | --- |
+| `public` | visiteur | suivi public, knowledge public | aucun | `/track`, `/knowledge` | demande par ref + justificatif | suivre, consulter KB publique |
+| `user` | demandeur/employe | `/app`, `/app/requests`, `/app/requests/history`, `/app/profile` | aucun traitement ticket | aucun | ses demandes | creer, modifier si `new`, annuler, demander reouverture, cloturer apres resolution |
+| `agent` | traitement quotidien | idem user | tickets assignes, file, qualification | `/app/my-tickets`, `/app/queue` | tickets personnellement assignes; tickets libres non assignes de son unite; triage selon regle | qualifier, s'auto-assigner, traiter, resoudre, escalader, changer son etat selon scope |
+| `chief` | responsable de service | idem user | service/equipe, file, supervision, SLA, rapports | `/app/chief-inbox`, `/app/queue`, `/app/supervision`, `/app/sla-center`, `/app/reports` | tickets de son service/unite | assigner a agent de son service, reassigner service dans direction, priorite, escalade, approuver/rejeter reouverture |
+| `director` | pilotage/arbitrage direction | idem user | supervision direction, vue direction, SLA, rapports | `/app/supervision`, `/app/direction`, `/app/sla-center`, `/app/reports` | tickets des services rattaches a sa direction | transfert direction/service selon regle, arbitrage, resoudre uniquement tickets escalades, priorite, reouverture |
+| `admin` | administration systeme | idem user | backoffice complet et vue globale | `/app/admin/*`, `/app/dg` | toutes donnees admin | config, users, refs, SLA, routing, logs, actions globales |
+
+Note compatibilite: l'ancien role technique `dg` est conserve uniquement comme alias legacy normalise vers `director` aux frontieres backend/frontend afin de ne pas casser les donnees existantes. Il ne doit plus etre propose, attribue ni utilise comme role metier.
+
+## Permissions backend
+
+Source: `backend/api/core/rbac.py`.
+
+Les permissions sont cumulatives dans la hierarchie:
+
+```text
+public < user < agent < chief < director < admin
+```
+
+Permissions importantes:
+
+- user: `CREATE_REQUEST`, `VIEW_OWN_REQUESTS`, `CANCEL_REQUEST`, `VIEW_NOTIFICATIONS`;
+- agent: `VIEW_ALL_REQUESTS`, `ASSIGN_REQUEST`, `CLOSE_REQUEST`, `REOPEN_REQUEST`, `ESCALATE_REQUEST`, `VIEW_WORKFLOWS`, `VIEW_TASKS`;
+- chief: `MANAGE_REQUESTS`, `MANAGE_ESCALATIONS`, `VIEW_REPORTS`, `VIEW_STATS`, `MANAGE_WORKFLOWS`;
+- director: `VIEW_GLOBAL_REPORTS`;
+- admin: toutes permissions.
+
+## Actions ticket backend
+
+Source: `backend/api/core/ticket_actions.py`.
+
+| Action | Roles backend | Note |
+| --- | --- | --- |
+| `qualify` | agent, chief, admin | qualification/orientation |
+| `assign` | agent, chief, admin | agent seulement auto-assignation; chef vers agent de son service |
+| `resolve` | agent, chief, director, admin | director seulement si ticket escalade/arbitrage |
+| `close` | user, agent, chief, director, admin | demandeur peut cloturer sa demande resolue |
+| `request_reopen` | user, agent, chief, director, admin | seul demandeur via scope |
+| `reopen`, `reject_reopen` | chief, director, admin | demande de reouverture requise |
+| `cancel` | user, agent, chief, director, admin | scope applique |
+| `reassign` | chief, director, admin | service selon perimetre |
+| `transfer_direction` | director, admin | transfert inter-direction |
+| `reject` | chief, admin | rejet demande/ticket |
+| `escalate` | agent, chief, director, admin | agent seulement ticket assigne |
+| `change_priority` | chief, director, admin | tous chefs inclus |
+
+## Regles de navigation
+
+- Ouverture depuis `Mes demandes`: detail personnel `/app/requests/$id`.
+- Ouverture depuis un espace pro: detail dans l'espace pro correspondant.
+- Le bouton retour doit revenir a la liste d'origine.

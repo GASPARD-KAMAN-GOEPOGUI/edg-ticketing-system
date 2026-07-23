@@ -10,6 +10,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   BarChart3,
   FileSpreadsheet,
   FileText,
@@ -18,9 +26,10 @@ import {
   CalendarRange,
   Filter,
   Loader2,
+  MoreHorizontal,
 } from "lucide-react";
 import { statusLabels } from "@/lib/mock-data";
-import { fetchDirections } from "@/lib/api/directions-units";
+import { fetchDirections, fetchUnits } from "@/lib/api/directions-units";
 import { useState, useMemo } from "react";
 import { useRole, useUser } from "@/lib/session";
 import { useQuery } from "@tanstack/react-query";
@@ -45,7 +54,7 @@ import {
 } from "recharts";
 
 export const Route = createFileRoute("/app/reports")({
-  beforeLoad: () => requireRole("chief", "director", "dg", "admin"),
+  beforeLoad: () => requireRole("chief", "director", "admin"),
   head: () => ({ meta: [{ title: "Rapports — EDG Support" }] }),
   component: ReportsPage,
 });
@@ -53,19 +62,26 @@ export const Route = createFileRoute("/app/reports")({
 const ACTIVE = new Set(["new", "qualifying", "qualified", "assigned", "in_progress", "pending", "reopened"]);
 const COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
 
+function isDirectionUnit(label?: string) {
+  return (label ?? "").trim().toLowerCase().startsWith("direction ");
+}
+
 function ReportsPage() {
   const [role] = useRole();
   const sessionUser = useUser();
+  const directorDirectionId = role === "director"
+    ? (sessionUser?.direction_id ?? sessionUser?.unit_id)
+    : undefined;
   const [period, setPeriod] = useState("year");
   const [direction, setDirection] = useState(
-    role === "director" ? (sessionUser?.direction_id ?? "all") : "all",
+    role === "director" ? (directorDirectionId ?? "all") : "all",
   );
   const [exportFormat, setExportFormat] = useState<ExportFormat>("excel");
   const [exportPending, setExportPending] = useState(false);
 
   const directionFilter =
     role === "director"
-      ? sessionUser?.direction_id
+      ? directorDirectionId
       : direction === "all"
         ? undefined
         : direction;
@@ -73,6 +89,7 @@ function ReportsPage() {
   const { data: reqData, isLoading: loadReq } = useQuery({
     queryKey: ["report-requests", directionFilter],
     queryFn: () => fetchRequests({ direction_id: directionFilter, limit: 500 }),
+    enabled: role !== "director" || !!directionFilter,
     staleTime: 60_000,
   });
 
@@ -95,8 +112,16 @@ function ReportsPage() {
   });
 
   const { data: unityReport = [], isLoading: loadUnity } = useQuery({
-    queryKey: ["report-unity"],
-    queryFn: () => fetchUnityReport(),
+    queryKey: ["report-unity", directionFilter],
+    queryFn: () => fetchUnityReport(undefined, undefined, directionFilter),
+    enabled: !!directionFilter,
+    staleTime: 60_000,
+  });
+
+  const { data: scopedUnits = [], isLoading: loadScopedUnits } = useQuery({
+    queryKey: ["report-service-units", directionFilter],
+    queryFn: () => fetchUnits(directionFilter),
+    enabled: !!directionFilter,
     staleTime: 60_000,
   });
 
@@ -176,7 +201,44 @@ function ReportsPage() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [csat]);
 
+  const visibleUnityReport = useMemo(() => {
+    if (!directionFilter) return [];
+    const serviceUnits = scopedUnits.filter((unit) => !isDirectionUnit(unit.name));
+    const byUnit = new Map(unityReport.map((row) => [String(row.unity_id), row]));
+    const merged = serviceUnits.map((unit) => byUnit.get(unit.id) ?? ({
+      unity_id: unit.id,
+      unity_label: unit.name,
+      unity_codename: unit.code,
+      total: 0,
+      resolved: 0,
+      active: 0,
+      sla_breached: 0,
+      assigned_total: 0,
+      resolved_total: 0,
+      pending_total: 0,
+      escalated_total: 0,
+      avg_resolution_hours: null,
+      resolution_rate: 0,
+    }));
+    const seen = new Set(merged.map((row) => String(row.unity_id)));
+    for (const row of unityReport) {
+      if (seen.has(String(row.unity_id)) || isDirectionUnit(row.unity_label)) continue;
+      merged.push(row);
+      seen.add(String(row.unity_id));
+    }
+    return merged.sort((a, b) => {
+      const aTotal = Number(a.assigned_total ?? a.total ?? 0);
+      const bTotal = Number(b.assigned_total ?? b.total ?? 0);
+      if (bTotal !== aTotal) return bTotal - aTotal;
+      return a.unity_label.localeCompare(b.unity_label);
+    });
+  }, [directionFilter, scopedUnits, unityReport]);
+
   const handleExport = async (type: Parameters<typeof downloadReport>[0], fmt?: ExportFormat) => {
+    if (type === "by-unity" && !directionFilter) {
+      toast.error("Sélectionnez une direction pour exporter ses services.");
+      return;
+    }
     setExportPending(true);
     try {
       const now = new Date();
@@ -216,8 +278,7 @@ function ReportsPage() {
   };
 
   const roleLabel =
-    role === "dg" ? "Direction Générale"
-    : role === "director" ? "Direction"
+    role === "director" ? "Direction"
     : role === "chief" ? "Service"
     : "Globaux";
 
@@ -273,6 +334,38 @@ function ReportsPage() {
               : <Download className="mr-1.5 h-4 w-4" />}
             Exporter rapport
           </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon" className="rounded-full" disabled={exportPending}>
+                <MoreHorizontal className="h-4 w-4" />
+                <span className="sr-only">Autres exports</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuLabel className="text-xs text-muted-foreground">
+                Autres exports
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => handleExport("daily")}>
+                <Download className="h-4 w-4" /> Journalier
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => handleExport("by-agent")}>
+                <Download className="h-4 w-4" /> Par agent
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={!directionFilter}
+                onSelect={() => handleExport("by-unity")}
+              >
+                <Download className="h-4 w-4" /> Par service
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => handleExport("sla")}>
+                <Download className="h-4 w-4" /> SLA
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => handleExport("csat")}>
+                <Download className="h-4 w-4" /> CSAT
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 
@@ -759,7 +852,7 @@ function ReportsPage() {
             size="sm"
             className="rounded-full"
             onClick={() => handleExport("by-unity")}
-            disabled={exportPending}
+            disabled={exportPending || !directionFilter}
           >
             {exportPending
               ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
@@ -767,13 +860,15 @@ function ReportsPage() {
             Exporter services
           </Button>
         </div>
-        {loadUnity ? (
+        {loadUnity || (!!directionFilter && loadScopedUnits) ? (
           <div className="flex h-32 items-center justify-center">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
-        ) : unityReport.length === 0 ? (
+        ) : visibleUnityReport.length === 0 ? (
           <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
-            Aucune donnée service disponible pour cette période.
+            {directionFilter
+              ? "Aucun service rattaché à cette direction pour cette période."
+              : "Sélectionnez une direction pour voir ses services."}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -790,54 +885,32 @@ function ReportsPage() {
                 </tr>
               </thead>
               <tbody>
-                {unityReport.map((row, i) => (
-                  <tr key={i} className="border-b border-border/20 last:border-0">
-                    <td className="py-2.5 pr-4 font-medium">{row.unity_label}</td>
-                    <td className="py-2.5 pr-4 text-right">{row.assigned_total}</td>
-                    <td className="py-2.5 pr-4 text-right text-success">{row.resolved_total}</td>
-                    <td className="py-2.5 pr-4 text-right text-warning">{row.pending_total}</td>
-                    <td className="py-2.5 pr-4 text-right text-destructive">{row.escalated_total}</td>
-                    <td className="py-2.5 pr-4 text-right">{row.avg_resolution_hours?.toFixed(1) ?? "—"}</td>
-                    <td className={`py-2.5 text-right font-semibold ${row.resolution_rate >= 80 ? "text-success" : row.resolution_rate >= 50 ? "text-warning" : "text-destructive"}`}>
-                      {row.resolution_rate}%
-                    </td>
-                  </tr>
-                ))}
+                {visibleUnityReport.map((row, i) => {
+                  const assigned = row.assigned_total ?? row.total ?? 0;
+                  const resolved = row.resolved_total ?? row.resolved ?? 0;
+                  const pending = row.pending_total ?? 0;
+                  const escalated = row.escalated_total ?? 0;
+                  const rate = Number(row.resolution_rate ?? 0);
+                  return (
+                    <tr key={i} className="border-b border-border/20 last:border-0">
+                      <td className="py-2.5 pr-4 font-medium">{row.unity_label}</td>
+                      <td className="py-2.5 pr-4 text-right">{assigned}</td>
+                      <td className="py-2.5 pr-4 text-right text-success">{resolved}</td>
+                      <td className="py-2.5 pr-4 text-right text-warning">{pending}</td>
+                      <td className="py-2.5 pr-4 text-right text-destructive">{escalated}</td>
+                      <td className="py-2.5 pr-4 text-right">{row.avg_resolution_hours?.toFixed(1) ?? "—"}</td>
+                      <td className={`py-2.5 text-right font-semibold ${rate >= 80 ? "text-success" : rate >= 50 ? "text-warning" : "text-destructive"}`}>
+                        {rate}%
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </GlassCard>
 
-      {/* Exports par type de rapport */}
-      <GlassCard>
-        <div className="mb-3">
-          <h3 className="font-semibold">Exports par type</h3>
-          <p className="text-xs text-muted-foreground">
-            Sélectionnez le format dans le menu en haut à droite puis cliquez sur le rapport souhaité.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" className="rounded-full" onClick={() => handleExport("daily")} disabled={exportPending}>
-            <Download className="mr-1.5 h-4 w-4" /> Journalier
-          </Button>
-          <Button variant="outline" className="rounded-full" onClick={() => handleExport("monthly")} disabled={exportPending}>
-            <Download className="mr-1.5 h-4 w-4" /> Mensuel
-          </Button>
-          <Button variant="outline" className="rounded-full" onClick={() => handleExport("by-agent")} disabled={exportPending}>
-            <Download className="mr-1.5 h-4 w-4" /> Par agent
-          </Button>
-          <Button variant="outline" className="rounded-full" onClick={() => handleExport("by-unity")} disabled={exportPending}>
-            <Download className="mr-1.5 h-4 w-4" /> Par service
-          </Button>
-          <Button variant="outline" className="rounded-full" onClick={() => handleExport("sla")} disabled={exportPending}>
-            <Download className="mr-1.5 h-4 w-4" /> SLA
-          </Button>
-          <Button variant="outline" className="rounded-full" onClick={() => handleExport("csat")} disabled={exportPending}>
-            <Download className="mr-1.5 h-4 w-4" /> CSAT
-          </Button>
-        </div>
-      </GlassCard>
     </div>
   );
 }

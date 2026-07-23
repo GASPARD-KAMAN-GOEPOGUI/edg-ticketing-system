@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from typing import Any
+
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.core.rbac import normalize_role
 from api.repositories import WorkflowRepository, WorkflowDetailRepository
 from api.services.base_service import BaseService
 
@@ -12,14 +16,120 @@ class WorkflowService(BaseService):
         self.repo = WorkflowRepository(session)
         self.detail_repo = WorkflowDetailRepository(session)
 
+    @staticmethod
+    def _clean_infos(infos: dict[str, Any] | None) -> dict[str, Any]:
+        return {key: value for key, value in (infos or {}).items() if value is not None}
+
+    @staticmethod
+    def _to_int(value) -> int | None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _same_id(left, right) -> bool:
+        return left is not None and right is not None and str(left) == str(right)
+
+    async def _direction_unity_ids(self, direction_id: int | str | None) -> set[int]:
+        root_id = self._to_int(direction_id)
+        if root_id is None:
+            return set()
+
+        from api.models.ModelOrganigram import Organigram
+        from api.models.ModelUnity import Unity
+
+        ids: set[int] = {root_id}
+        org_row = await self.session.execute(
+            select(Organigram.id)
+            .where(Organigram.unity_id == root_id, Organigram.deleted_at.is_(None))
+            .limit(1)
+        )
+        org_id = org_row.scalar_one_or_none()
+        if org_id:
+            child_rows = await self.session.execute(
+                select(Organigram.unity_id)
+                .where(Organigram.parent_id == org_id, Organigram.deleted_at.is_(None))
+            )
+            ids.update(int(uid) for (uid,) in child_rows.all() if uid is not None)
+
+        unity_rows = await self.session.execute(
+            select(Unity.id)
+            .where(Unity.parent_direction_id == root_id, Unity.deleted_at.is_(None))
+        )
+        ids.update(int(uid) for (uid,) in unity_rows.all() if uid is not None)
+        return ids
+
+    async def _workflow_request_unity_id(self, workflow_id) -> int | None:
+        wf_id = self._to_int(workflow_id)
+        if wf_id is None:
+            return None
+
+        from api.models.ModelRequest import Request as RequestModel
+        from api.models.ModelWorkflow import Workflow
+
+        row = await self.session.execute(
+            select(RequestModel.unity_id)
+            .join(Workflow, Workflow.request_id == RequestModel.id)
+            .where(Workflow.id == wf_id, Workflow.deleted_at.is_(None))
+            .limit(1)
+        )
+        return self._to_int(row.scalar_one_or_none())
+
+    async def _assert_detail_decision_allowed(self, detail, actor) -> None:
+        if actor is None:
+            return
+
+        role = normalize_role(getattr(actor, "role", ""))
+        if role == "admin":
+            return
+
+        actor_id = getattr(actor, "id", None)
+        if self._same_id(getattr(detail, "agent_id", None), actor_id):
+            return
+
+        actor_unity_id = getattr(actor, "unity_id", None)
+        detail_unity_id = self._to_int(getattr(detail, "unity_id", None))
+        request_unity_id = await self._workflow_request_unity_id(getattr(detail, "workflow_id", None))
+
+        if role == "chief":
+            if self._same_id(detail_unity_id, actor_unity_id) or self._same_id(request_unity_id, actor_unity_id):
+                return
+
+        if role == "director":
+            allowed_ids = await self._direction_unity_ids(actor_unity_id)
+            if detail_unity_id in allowed_ids or request_unity_id in allowed_ids:
+                return
+
+        raise self.forbidden("Vous ne pouvez décider que les étapes workflow dans votre périmètre.")
+
     async def _timeline(
-        self, workflow_id: str, event_type: str, label: str, actor_id: str | None = None
+        self,
+        workflow_id: str,
+        event_type: str,
+        label: str,
+        actor_id: str | None = None,
+        *,
+        actor_name: str | None = None,
+        actor_role: str | None = None,
+        comment: str | None = None,
+        infos: dict[str, Any] | None = None,
     ) -> None:
+        event_infos = self._clean_infos(infos)
+        if actor_id:
+            event_infos.setdefault("actor_id", str(actor_id))
+        if actor_role:
+            event_infos.setdefault("source_role", actor_role)
+            event_infos.setdefault("actor_role", actor_role)
         await self.detail_repo.create_event({
             "workflow_id": workflow_id,
             "event_type": event_type,
             "label": label,
             "actor_id": actor_id,
+            "actor_name": actor_name,
+            "comment": comment,
+            "activated": True,
+            "infos": event_infos,
         })
 
     async def list_all(self, *, page: int = 1, limit: int = 20):
@@ -132,6 +242,9 @@ class WorkflowService(BaseService):
         id: str,
         *,
         agent_id: str | None = None,
+        actor_name: str | None = None,
+        actor_role: str | None = None,
+        actor=None,
         accepted: bool = True,
         comment: str | None = None,
     ):
@@ -141,13 +254,30 @@ class WorkflowService(BaseService):
         - Acceptée → active l'étape suivante. Si dernière → workflow 'completed'.
         - Refusée  → workflow 'suspended', timeline journalisée.
         """
+        clean_comment = comment.strip() if isinstance(comment, str) else None
+        if not accepted and not clean_comment:
+            raise self.bad_request(
+                "Un motif est obligatoire pour refuser une étape workflow.",
+                field="comment",
+            )
+
+        current = await self.get_detail_by_id(id)
+        await self._assert_detail_decision_allowed(current, actor)
+
         obj = await self.detail_repo.accept(
-            id, agent_id=agent_id, accepted=accepted, comment=comment
+            id, agent_id=agent_id, accepted=accepted, comment=clean_comment
         )
         if obj is None:
             raise self.not_found("Détail de workflow introuvable")
 
         wf = await self.repo.get_by_id(str(obj.workflow_id))
+        old_workflow_status = getattr(wf, "workflow_status", None) if wf else None
+        base_infos = {
+            "workflow_detail_id": str(obj.id),
+            "step_id": str(obj.id),
+            "accepted": accepted,
+            "old_workflow_status": old_workflow_status,
+        }
 
         if accepted:
             next_step = await self.detail_repo.find_next_to_activate(
@@ -161,15 +291,43 @@ class WorkflowService(BaseService):
                         "workflow_step_accepted",
                         "Étape validée — passage à l'étape suivante",
                         agent_id,
+                        actor_name=actor_name,
+                        actor_role=actor_role,
+                        comment=clean_comment,
+                        infos={
+                            **base_infos,
+                            "new_workflow_status": old_workflow_status,
+                            "next_step_id": str(next_step.id),
+                        },
                     )
             else:
                 if wf:
                     await self.repo.complete(str(wf.id))
                     await self._timeline(
                         str(wf.id),
+                        "workflow_step_accepted",
+                        "Étape validée — dernière étape",
+                        agent_id,
+                        actor_name=actor_name,
+                        actor_role=actor_role,
+                        comment=clean_comment,
+                        infos={
+                            **base_infos,
+                            "new_workflow_status": "completed",
+                        },
+                    )
+                    await self._timeline(
+                        str(wf.id),
                         "workflow_completed",
                         "Toutes les étapes validées — workflow complété",
                         agent_id,
+                        actor_name=actor_name,
+                        actor_role=actor_role,
+                        infos={
+                            "workflow_detail_id": str(obj.id),
+                            "old_workflow_status": old_workflow_status,
+                            "new_workflow_status": "completed",
+                        },
                     )
         else:
             if wf:
@@ -177,8 +335,15 @@ class WorkflowService(BaseService):
                 await self._timeline(
                     str(wf.id),
                     "workflow_step_rejected",
-                    f"Étape refusée — workflow suspendu{f' : {comment}' if comment else ''}",
+                    "Étape refusée — workflow suspendu",
                     agent_id,
+                    actor_name=actor_name,
+                    actor_role=actor_role,
+                    comment=clean_comment,
+                    infos={
+                        **base_infos,
+                        "new_workflow_status": "suspended",
+                    },
                 )
 
         return obj
@@ -292,7 +457,7 @@ class WorkflowService(BaseService):
             steps_data.append({
                 "workflow_id": wf.id,
                 "agent_id": approver.id,
-                "unit_id": unit_id if approver.unit_id == unit_id else None,
+                "unity_id": unit_id if approver.unit_id == unit_id else None,
                 "activated": i == 0,
                 "accepted": None,
                 "label": f"Validation — {approver.name}",

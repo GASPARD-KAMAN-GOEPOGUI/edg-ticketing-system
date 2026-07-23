@@ -24,7 +24,6 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Plus, Timer, Trash2, Edit3, AlertTriangle, Clock, CheckCircle2, BarChart2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { LayoutToggle, type LayoutMode } from "@/components/layout-toggle";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   fetchSlaPolicies,
@@ -137,7 +136,6 @@ function SLAAdminPage() {
   const qc = useQueryClient();
   const [editing, setEditing] = useState<SLAPolicy | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [layout, setLayout] = useState<LayoutMode>("list");
 
   const { data: list = [], isLoading } = useQuery({
     queryKey: ["admin", "sla"],
@@ -216,12 +214,9 @@ function SLAAdminPage() {
             Définissez les délais de réponse, résolution et seuils d'escalade par catégorie.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <LayoutToggle layout={layout} onChange={setLayout} />
-          <Button onClick={openCreate} className="rounded-full gradient-primary text-background shadow-lg shadow-primary/30">
-            <Plus className="mr-1 h-4 w-4" /> Nouvelle politique
-          </Button>
-        </div>
+        <Button onClick={openCreate} className="rounded-full gradient-primary text-background shadow-lg shadow-primary/30">
+          <Plus className="mr-1 h-4 w-4" /> Nouvelle politique
+        </Button>
       </header>
 
       <div className="grid gap-4 sm:grid-cols-3">
@@ -258,7 +253,7 @@ function SLAAdminPage() {
         <div className="flex justify-center py-12">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
-      ) : layout === "list" ? (
+      ) : (
         <GlassCard className="overflow-hidden p-0">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -306,18 +301,6 @@ function SLAAdminPage() {
             </table>
           </div>
         </GlassCard>
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {list.map((p) => (
-            <SLACard
-              key={p.id}
-              p={p}
-              onEdit={openEdit}
-              onRemove={(id) => deleteMut.mutate(id)}
-              onToggle={(id) => toggleMut.mutate(id)}
-            />
-          ))}
-        </div>
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

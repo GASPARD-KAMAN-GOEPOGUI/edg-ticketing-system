@@ -6,7 +6,7 @@
  * Règle : le rôle détermine ce qu'on peut FAIRE — la propriété du ticket
  * détermine ce qu'on VOIT (voir iAmRequester dans les composants).
  */
-import type { Role } from "@/lib/mock-data";
+import type { RequestStatus, Role } from "@/lib/mock-data";
 
 // ── Rang hiérarchique ─────────────────────────────────────────────────────────
 
@@ -16,8 +16,7 @@ const ROLE_RANK: Record<Role, number> = {
   agent:    2,
   chief:    3,
   director: 4,
-  dg:       5,
-  admin:    6,
+  admin:    5,
 };
 
 // ── Plancher de capacité (rang minimum requis) ────────────────────────────────
@@ -31,10 +30,10 @@ const CAPABILITY_FLOOR: Record<string, number> = {
   supervise_team:   3,
   // Directeurs et au-dessus voient leur direction
   view_direction:   4,
-  // DG et au-dessus voient le tableau global
+  // Admin uniquement pour le tableau global consolidé
   view_global:      5,
   // Admin uniquement pour le backoffice système
-  admin_system:     6,
+  admin_system:     5,
 };
 
 // ── Fonction principale ───────────────────────────────────────────────────────
@@ -44,7 +43,7 @@ const CAPABILITY_FLOOR: Record<string, number> = {
  *
  * Usage :
  *   can(role, "submit_request")  → true pour TOUS les rôles
- *   can(role, "process_ticket")  → true pour agent, chief, director, dg, admin
+ *   can(role, "process_ticket")  → true pour agent, chief, director, admin
  *   can(role, "admin_system")    → true uniquement pour admin
  */
 export function can(role: Role, capability: string): boolean {
@@ -66,4 +65,116 @@ export function isRequester(
 ): boolean {
   if (!ticketRequesterId || !currentUserId) return false;
   return String(ticketRequesterId) === String(currentUserId);
+}
+
+export type TicketAction =
+  | "requester_edit"
+  | "self_assign"
+  | "take_ownership"
+  | "request_info"
+  | "resume"
+  | "assign"
+  | "resolve"
+  | "close"
+  | "request_reopen"
+  | "approve_reopen"
+  | "reject_reopen"
+  | "cancel"
+  | "reject"
+  | "escalate"
+  | "change_priority"
+  | "change_service"
+  | "transfer_direction"
+  | "create_circuit"
+  | "accept_workflow_step";
+
+type TicketActionOptions = {
+  isRequester?: boolean;
+  isAssignedToMe?: boolean;
+  hasAssignee?: boolean;
+  hasReopenRequest?: boolean;
+  canReopenClosed?: boolean;
+};
+
+const AUTHENTICATED_ROLES: Role[] = ["user", "agent", "chief", "director", "admin"];
+
+const TICKET_ACTION_ROLES: Record<TicketAction, Role[]> = {
+  requester_edit: AUTHENTICATED_ROLES,
+  self_assign: ["agent"],
+  take_ownership: ["agent", "chief", "director", "admin"],
+  request_info: ["agent", "chief", "director", "admin"],
+  resume: ["agent", "chief", "director", "admin"],
+  assign: ["chief", "admin"],
+  resolve: ["agent", "chief", "director", "admin"],
+  close: AUTHENTICATED_ROLES,
+  request_reopen: AUTHENTICATED_ROLES,
+  approve_reopen: ["chief", "director", "admin"],
+  reject_reopen: ["chief", "director", "admin"],
+  cancel: ["user", "agent", "chief", "director", "admin"],
+  reject: ["chief", "admin"],
+  escalate: ["agent", "chief", "director", "admin"],
+  change_priority: ["chief", "director", "admin"],
+  change_service: ["chief", "director", "admin"],
+  transfer_direction: ["director", "admin"],
+  create_circuit: ["agent", "chief", "admin"],
+  accept_workflow_step: ["agent", "chief", "director", "admin"],
+};
+
+const TICKET_ACTION_STATUSES: Record<TicketAction, RequestStatus[]> = {
+  requester_edit: ["new"],
+  self_assign: ["new", "qualifying", "qualified", "reopened"],
+  take_ownership: ["assigned", "qualifying", "qualified", "pending"],
+  request_info: ["in_progress", "assigned"],
+  resume: ["pending"],
+  assign: ["new", "qualifying", "qualified", "reopened"],
+  resolve: ["assigned", "in_progress", "pending", "escalated"],
+  close: ["resolved"],
+  request_reopen: ["resolved", "closed", "rejected"],
+  approve_reopen: ["resolved", "closed", "rejected"],
+  reject_reopen: ["resolved", "closed", "rejected"],
+  cancel: ["new", "qualifying", "qualified", "assigned", "in_progress", "pending"],
+  reject: ["new", "qualifying", "qualified", "assigned", "in_progress", "pending"],
+  escalate: ["qualifying", "assigned", "in_progress", "pending"],
+  change_priority: ["new", "qualifying", "qualified", "assigned", "in_progress", "pending", "escalated", "reopened"],
+  change_service: ["new", "qualifying", "qualified", "reopened"],
+  transfer_direction: ["new", "qualifying", "qualified", "assigned", "in_progress", "pending", "escalated", "reopened"],
+  create_circuit: ["new", "qualifying", "qualified", "assigned", "in_progress", "pending", "escalated", "reopened"],
+  accept_workflow_step: ["new", "qualifying", "qualified", "assigned", "in_progress", "pending", "escalated", "reopened"],
+};
+
+const OWN_REQUEST_ALLOWED_ACTIONS = new Set<TicketAction>([
+  "requester_edit",
+  "close",
+  "request_reopen",
+  "cancel",
+]);
+
+export function canTicketAction(
+  role: Role,
+  action: TicketAction,
+  status: RequestStatus | undefined | null,
+  options: TicketActionOptions = {},
+): boolean {
+  if (!status) return false;
+  if (!TICKET_ACTION_ROLES[action].includes(role)) return false;
+  if (!TICKET_ACTION_STATUSES[action].includes(status)) return false;
+  if (options.isRequester === true && !OWN_REQUEST_ALLOWED_ACTIONS.has(action)) return false;
+
+  if (action === "resolve" && role === "director") {
+    return status === "escalated";
+  }
+  if (action === "requester_edit") return options.isRequester === true;
+  if (action === "self_assign") return options.hasAssignee !== true;
+  if (action === "take_ownership" && role === "agent") {
+    return options.isAssignedToMe === true;
+  }
+  if (action === "request_reopen") {
+    if (options.isRequester !== true) return false;
+    if (status === "closed" && options.canReopenClosed === false) return false;
+  }
+  if (action === "approve_reopen" || action === "reject_reopen") {
+    return options.hasReopenRequest === true;
+  }
+
+  return true;
 }

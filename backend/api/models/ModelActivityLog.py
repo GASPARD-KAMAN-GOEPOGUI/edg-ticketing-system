@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 class ActivityLog(Base, BaseColumns):
     """
     Append-only — jamais de UPDATE ni DELETE.
-    ip_address et user_agent sont masqués pour tout rôle sauf admin et dg.
+    ip_address et user_agent sont masqués pour tout rôle sauf admin.
     actor est un snapshot du nom conservé pour l'audit.
     """
 

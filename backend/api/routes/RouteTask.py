@@ -25,14 +25,14 @@ def _svc(db: AsyncSession = Depends(get_db)) -> TaskService:
 async def list_tasks(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    _=Depends(require_roles("agent", "chief", "director", "dg", "admin")),
+    _=Depends(require_roles("agent", "chief", "director", "admin")),
     svc: TaskService = Depends(_svc),
 ):
     """M-02 — liste globale des tâches réservée au staff ; les citoyens n'ont pas accès."""
     return await svc.list_all(page=page, limit=limit)
 
 
-_staff = Depends(require_roles("agent", "chief", "director", "dg", "admin"))
+_staff = Depends(require_roles("agent", "chief", "director", "admin"))
 
 
 @router.get("/pending", response_model=PaginatedResponse)

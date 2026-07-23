@@ -21,20 +21,6 @@ export function LayoutToggle({ layout, onChange, className }: Props) {
     >
       <button
         type="button"
-        onClick={() => onChange("list")}
-        title="Vue liste"
-        aria-pressed={layout === "list"}
-        className={cn(
-          "rounded-lg p-1.5 transition-all",
-          layout === "list"
-            ? "bg-background text-foreground shadow-sm"
-            : "text-muted-foreground hover:text-foreground",
-        )}
-      >
-        <LayoutList className="h-4 w-4" />
-      </button>
-      <button
-        type="button"
         onClick={() => onChange("grid")}
         title="Vue grille"
         aria-pressed={layout === "grid"}
@@ -46,6 +32,20 @@ export function LayoutToggle({ layout, onChange, className }: Props) {
         )}
       >
         <LayoutGrid className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange("list")}
+        title="Vue liste"
+        aria-pressed={layout === "list"}
+        className={cn(
+          "rounded-lg p-1.5 transition-all",
+          layout === "list"
+            ? "bg-background text-foreground shadow-sm"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        <LayoutList className="h-4 w-4" />
       </button>
     </div>
   );

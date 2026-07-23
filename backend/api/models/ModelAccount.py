@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Optional
 from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from api.core.rbac import normalize_role
+
 from .base import Base, BaseColumns, MYSQL_ARGS
 
 if TYPE_CHECKING:
@@ -75,6 +77,16 @@ class Account(Base, BaseColumns):
         foreign_keys="Account.unity_id",
         lazy="raise",
     )
+
+    @property
+    def unit_id(self) -> Optional[int]:
+        """Alias API : le compte est rattaché à une unité organisationnelle."""
+        return self.unity_id
+
+    @property
+    def direction_id(self) -> Optional[int]:
+        """Pour un directeur, l'unité rattachée représente sa direction."""
+        return self.unity_id if normalize_role(self.role) == "director" else None
 
     __table_args__ = (
         Index("idx_account_role", "role"),

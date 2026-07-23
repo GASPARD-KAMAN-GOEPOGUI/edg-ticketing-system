@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_db, get_current_user, require_roles
+from api.core.rbac import normalize_role
 from api.schemas.SchemaAttachment import AttachmentCreate, AttachmentUpdate, AttachmentResponse
 from api.schemas.base import PaginatedResponse
 from api.services import AttachmentService, RequestService
@@ -25,8 +26,8 @@ def _req_svc(db: AsyncSession = Depends(get_db)) -> RequestService:
 
 def _check_attachment_access(actor, req) -> None:
     """Même politique d'accès que dans RouteRequest._check_request_access."""
-    role = actor.role
-    if role in ("dg", "admin"):
+    role = normalize_role(actor.role)
+    if role == "admin":
         return
     if role == "user":
         if str(req.requester_id) != str(actor.id):

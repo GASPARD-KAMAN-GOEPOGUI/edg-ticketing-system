@@ -25,12 +25,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { fetchQueue, fetchRequests, assignRequest, qualifyTriage } from "@/lib/api/requests";
+import { fetchQueue, fetchTriage, assignRequest, qualifyTriage } from "@/lib/api/requests";
 import { fetchUsers } from "@/lib/api/accounts";
 import { fetchDirections, fetchUnits } from "@/lib/api/directions-units";
 import { fetchRoutingRules, fetchRefTable, fetchRequestCategories } from "@/lib/api/admin-config";
-import { priorityLabels, statusLabels } from "@/lib/mock-data";
-import type { RequestStatus, Priority } from "@/lib/mock-data";
+import { priorityLabels } from "@/lib/mock-data";
+import type { Priority } from "@/lib/mock-data";
 import { toast } from "sonner";
 import {
   ArrowUpRight, CheckCircle2, ChevronDown, ChevronUp, Clock, Filter, Inbox,
@@ -57,7 +57,21 @@ type TriageForm = {
   priority: Priority;
   directionId: string;
   unitId: string;
+  personId: string;
 };
+
+const QUALIFIABLE_STATUSES = new Set(["new", "qualifying", "qualified", "reopened"]);
+const TERMINAL_STATUSES = new Set(["cancelled", "closed", "resolved", "rejected"]);
+const STATUS_ALIASES: Record<string, string> = {
+  cancalled: "cancelled",
+  canceled: "cancelled",
+  escaladed: "escalated",
+};
+
+function normalizeQueueStatus(status?: string) {
+  const clean = (status || "new").trim().toLowerCase();
+  return STATUS_ALIASES[clean] ?? clean;
+}
 
 const PRIORITIES: Priority[] = ["low", "medium", "high", "critical"];
 
@@ -69,10 +83,6 @@ export const Route = createFileRoute("/app/queue")({
   head: () => ({ meta: [{ title: "File d'attente — EDG Support" }] }),
   component: QueuePage,
 });
-
-const QUEUE_STATUSES: RequestStatus[] = [
-  "new", "qualifying", "qualified", "assigned", "in_progress", "pending", "escalated", "reopened",
-];
 
 const priorityDotClass: Record<Priority, string> = {
   low: "text-muted-foreground",
@@ -101,7 +111,7 @@ function QueuePage() {
           }
         >
           <Inbox className="h-4 w-4" />
-          File d'attente
+          À prendre
         </button>
         <button
           onClick={() => setTab("qualify")}
@@ -131,11 +141,9 @@ function QueueTab() {
   // ── Filtres ────────────────────────────────────────────────────────────────
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [filterStatus, setFilterStatus] = useState("all");
   const [filterPriority, setFilterPriority] = useState("all");
   const [filterDirection, setFilterDirection] = useState("all");
-  const [viewMode, setViewMode] = useState<"all" | "mine">("all");
-  const [layout, setLayout] = useState<LayoutMode>("list");
+  const [layout, setLayout] = useState<LayoutMode>("grid");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
@@ -143,7 +151,7 @@ function QueueTab() {
     const t = setTimeout(() => setDebouncedSearch(search), 400);
     return () => clearTimeout(t);
   }, [search]);
-  useEffect(() => { setPage(1); }, [filterStatus, filterPriority, filterDirection, debouncedSearch, viewMode]);
+  useEffect(() => { setPage(1); }, [filterPriority, filterDirection, debouncedSearch]);
   useEffect(() => {
     if (role === "chief" && sessionUser?.direction_id && filterDirection === "all") {
       setFilterDirection(sessionUser.direction_id);
@@ -156,11 +164,10 @@ function QueueTab() {
   const filters = {
     page,
     limit: pageSize,
+    unassigned_only: true,
     ...(filterDirection !== "all" && { direction_id: filterDirection }),
     ...(filterPriority !== "all" && { priority: filterPriority }),
-    ...(filterStatus !== "all" && { request_status: filterStatus }),
     ...(debouncedSearch && { search: debouncedSearch }),
-    ...(viewMode === "mine" && sessionUser?.id && { assignee_id: sessionUser.id }),
   };
 
   // ── Données ────────────────────────────────────────────────────────────────
@@ -168,12 +175,6 @@ function QueueTab() {
     queryKey: ["queue", filters],
     queryFn: () => fetchQueue(filters),
     staleTime: 30_000,
-  });
-
-  const { data: agentsData } = useQuery({
-    queryKey: ["agents"],
-    queryFn: () => fetchUsers({ role: "agent", limit: 100 }),
-    staleTime: 120_000,
   });
 
   // ── Dialog : Assigner — états déclarés avant les queries qui les utilisent ──
@@ -302,24 +303,6 @@ function QueueTab() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {/* C10 — Toggle vue */}
-          <div className="flex rounded-full border border-border/50 bg-muted/30 p-0.5">
-            <button
-              onClick={() => setViewMode("all")}
-              className={"rounded-full px-3 py-1.5 text-xs font-medium transition " +
-                (viewMode === "all" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
-            >
-              Tous les tickets
-            </button>
-            <button
-              onClick={() => setViewMode("mine")}
-              className={"rounded-full px-3 py-1.5 text-xs font-medium transition " +
-                (viewMode === "mine" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
-            >
-              <User className="mr-1 inline h-3 w-3" />
-              Mes tickets
-            </button>
-          </div>
           <LayoutToggle layout={layout} onChange={setLayout} />
           {selected.length > 0 && (
             <>
@@ -361,17 +344,6 @@ function QueueTab() {
                 className="h-11 pl-9"
               />
             </div>
-            <Select value={filterStatus} onValueChange={setFilterStatus}>
-              <SelectTrigger className="h-11 w-full sm:w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Tous les statuts</SelectItem>
-                {QUEUE_STATUSES.map((s) => (
-                  <SelectItem key={s} value={s}>{statusLabels[s]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
             <Select value={filterPriority} onValueChange={setFilterPriority}>
               <SelectTrigger className="h-11 w-full sm:w-36">
                 <SelectValue />
@@ -466,7 +438,7 @@ function QueueTab() {
                       <div className="min-w-0 flex-1 space-y-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <Link
-                            to="/app/requests/$id"
+                            to="/app/queue/tickets/$id"
                             params={{ id: r.id }}
                             className="font-mono text-[11px] text-primary hover:underline"
                           >
@@ -486,7 +458,7 @@ function QueueTab() {
                           )}
                         </div>
                         <Link
-                          to="/app/requests/$id"
+                          to="/app/queue/tickets/$id"
                           params={{ id: r.id }}
                           className="block font-semibold leading-snug hover:text-primary"
                         >
@@ -522,7 +494,7 @@ function QueueTab() {
                             size="sm"
                             className="h-7 rounded-full px-3 text-xs gradient-primary"
                           >
-                            <Link to="/app/requests/$id" params={{ id: r.id }}>
+                            <Link to="/app/queue/tickets/$id" params={{ id: r.id }}>
                               Traiter
                             </Link>
                           </Button>
@@ -579,7 +551,7 @@ function QueueTab() {
                         </div>
 
                         {/* Title + priority */}
-                        <Link to="/app/requests/$id" params={{ id: r.id }} className="hover:text-primary">
+                        <Link to="/app/queue/tickets/$id" params={{ id: r.id }} className="hover:text-primary">
                           <p className="line-clamp-2 font-semibold leading-snug">{r.title}</p>
                         </Link>
                         <div className={`flex items-center gap-1.5 text-xs font-medium ${priorityDotClass[r.priority]}`}>
@@ -623,7 +595,7 @@ function QueueTab() {
                             Assigner
                           </Button>
                           <Button asChild size="sm" className="flex-1 rounded-full text-xs gradient-primary">
-                            <Link to="/app/requests/$id" params={{ id: r.id }}>Traiter</Link>
+                            <Link to="/app/queue/tickets/$id" params={{ id: r.id }}>Traiter</Link>
                           </Button>
                         </div>
                       </GlassCard>
@@ -784,11 +756,14 @@ function QualifyTab() {
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["qualify"],
-    queryFn: () => fetchRequests({ in_triage: true, limit: 50 }),
+    queryFn: () => fetchTriage({ limit: 50 }),
     staleTime: 20_000,
   });
 
-  const queue = data?.items ?? [];
+  const queue = (data?.items ?? []).filter((req) => {
+    const status = normalizeQueueStatus(req.status);
+    return QUALIFIABLE_STATUSES.has(status) && !TERMINAL_STATUSES.has(status);
+  });
   const [expanded, setExpanded] = useState<string | null>(null);
   const [forms, setForms] = useState<Record<string, TriageForm>>({});
 
@@ -799,6 +774,7 @@ function QualifyTab() {
       priority: (req?.priority as Priority) ?? "medium",
       directionId: req?.directionId ?? "",
       unitId: req?.serviceId ?? "",
+      personId: "",
     };
   }
 
@@ -840,6 +816,17 @@ function QualifyTab() {
     staleTime: 5 * 60_000,
   });
 
+  // Personnes disponibles dans la direction sélectionnée (tous rôles sauf user)
+  const { data: directionPeopleData } = useQuery({
+    queryKey: ["people-by-direction", expandedDirectionId],
+    queryFn: () => fetchUsers({ direction_id: expandedDirectionId, limit: 100 }),
+    enabled: !!expandedDirectionId,
+    staleTime: 5 * 60_000,
+  });
+  const directionPeople = (directionPeopleData?.items ?? []).filter(
+    (u) => u.role !== "user",
+  );
+
   const qualifyMut = useMutation({
     mutationFn: ({ id, form }: { id: string; form: TriageForm }) =>
       qualifyTriage(
@@ -849,6 +836,7 @@ function QualifyTab() {
           priority: form.priority,
           direction_id: form.directionId,
           unit_id: form.unitId || undefined,
+          assignee_id: form.personId && form.personId !== "none" ? form.personId : undefined,
         },
         sessionUser?.id,
       ),
@@ -863,7 +851,37 @@ function QualifyTab() {
       queryClient.invalidateQueries({ queryKey: ["stats"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
     },
-    onError: () => toast.error("Erreur lors de la qualification."),
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Erreur lors de la qualification.");
+    },
+  });
+
+  const takeMut = useMutation({
+    mutationFn: ({ id, data }: {
+      id: string;
+      data: {
+        category: string;
+        priority: string;
+        direction_id?: string;
+        unit_id?: string;
+        assignee_id: string;
+      };
+    }) => qualifyTriage(id, data, sessionUser?.id),
+    onSuccess: (_, { id }) => {
+      const req = queue.find((r) => r.id === id);
+      toast.success(`Demande ${req?.ref ?? ""} prise en charge.`);
+      setExpanded(null);
+      queryClient.invalidateQueries({ queryKey: ["qualify"] });
+      queryClient.invalidateQueries({ queryKey: ["queue"] });
+      queryClient.invalidateQueries({ queryKey: ["requests"] });
+      queryClient.invalidateQueries({ queryKey: ["my-tickets"] });
+      queryClient.invalidateQueries({ queryKey: ["my-tickets-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["stats"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Erreur lors de la prise en charge.");
+    },
   });
 
   const listState: "loading" | "empty" | "ready" = isLoading
@@ -913,6 +931,21 @@ function QualifyTab() {
             const suggestion = form.category ? suggestDirection(form.category) : null;
             const services = isOpen ? expandedUnits : [];
             const isPending = qualifyMut.isPending && qualifyMut.variables?.id === req.id;
+            const takeDirectionId = form.directionId || req.directionId || sessionUser?.direction_id || undefined;
+            const takeUnitId = form.unitId || sessionUser?.unit_id || req.serviceId || undefined;
+            const takeCategory = form.category || req.category || "";
+            const status = normalizeQueueStatus(req.status);
+            const canTake = QUALIFIABLE_STATUSES.has(status) && !TERMINAL_STATUSES.has(status);
+            const takeData = canTake && sessionUser?.id && takeCategory && (takeDirectionId || takeUnitId)
+              ? {
+                  category: takeCategory,
+                  priority: form.priority || req.priority,
+                  ...(takeDirectionId ? { direction_id: takeDirectionId } : {}),
+                  ...(takeUnitId ? { unit_id: takeUnitId } : {}),
+                  assignee_id: sessionUser.id,
+                }
+              : null;
+            const isTaking = takeMut.isPending && takeMut.variables?.id === req.id;
 
             return (
               <GlassCard key={req.id} className="overflow-hidden p-0">
@@ -1037,7 +1070,7 @@ function QualifyTab() {
                         <Label>Direction cible <span className="text-destructive">*</span></Label>
                         <Select
                           value={form.directionId}
-                          onValueChange={(v) => patchForm(req.id, { directionId: v, unitId: "" })}
+                          onValueChange={(v) => patchForm(req.id, { directionId: v, unitId: "", personId: "" })}
                         >
                           <SelectTrigger className="mt-1.5 h-11">
                             <SelectValue placeholder="Sélectionner" />
@@ -1050,7 +1083,7 @@ function QualifyTab() {
                         </Select>
                       </div>
                       <div>
-                        <Label>Service</Label>
+                        <Label>Service <span className="text-xs text-muted-foreground">(optionnel)</span></Label>
                         <Select
                           value={form.unitId}
                           onValueChange={(v) => patchForm(req.id, { unitId: v })}
@@ -1068,6 +1101,37 @@ function QualifyTab() {
                       </div>
                     </div>
 
+                    {/* Personne cible (optionnel) */}
+                    <div>
+                      <Label>
+                        Personne cible{" "}
+                        <span className="text-xs text-muted-foreground">(optionnel — chef, directeur, agent…)</span>
+                      </Label>
+                      <Select
+                        value={form.personId}
+                        onValueChange={(v) => patchForm(req.id, { personId: v })}
+                        disabled={!form.directionId}
+                      >
+                        <SelectTrigger className="mt-1.5 h-11">
+                          <SelectValue placeholder={
+                            !form.directionId
+                              ? "Choisir d'abord une direction"
+                              : directionPeople.length === 0
+                              ? "Aucune personne trouvée"
+                              : "Assigner directement à une personne"
+                          } />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">— Aucune (laisser la direction gérer)</SelectItem>
+                          {directionPeople.map((p) => (
+                            <SelectItem key={p.id} value={String(p.id)}>
+                              {p.name}{p.role ? ` · ${p.role}` : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
                     {/* Actions */}
                     <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
                       <Button
@@ -1078,22 +1142,38 @@ function QualifyTab() {
                       >
                         Fermer
                       </Button>
-                      <Button
-                        size="sm"
-                        className={cn(
-                          "rounded-full px-5",
-                          form.directionId
-                            ? "gradient-primary text-background shadow-md shadow-primary/30"
-                            : "bg-muted text-muted-foreground",
-                        )}
-                        disabled={!form.directionId || isPending}
-                        onClick={() => qualifyMut.mutate({ id: req.id, form })}
-                      >
-                        {isPending
-                          ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Validation…</>
-                          : <><CheckCircle2 className="mr-1.5 h-4 w-4" /> Valider l'orientation</>
-                        }
-                      </Button>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="rounded-full border-success/40 text-success hover:bg-success/10"
+                          disabled={!canTake || !takeData || isTaking}
+                          onClick={() => takeData && takeMut.mutate({ id: req.id, data: takeData })}
+                        >
+                          {isTaking
+                            ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                            : <UserPlus className="mr-1.5 h-3.5 w-3.5" />}
+                          Prendre la demande
+                        </Button>
+
+                        {/* Valider l'orientation */}
+                        <Button
+                          size="sm"
+                          className={cn(
+                            "rounded-full px-5",
+                            form.directionId
+                              ? "gradient-primary text-background shadow-md shadow-primary/30"
+                              : "bg-muted text-muted-foreground",
+                          )}
+                          disabled={!form.directionId || isPending}
+                          onClick={() => qualifyMut.mutate({ id: req.id, form })}
+                        >
+                          {isPending
+                            ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Validation…</>
+                            : <><CheckCircle2 className="mr-1.5 h-4 w-4" /> Valider l'orientation</>
+                          }
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 )}

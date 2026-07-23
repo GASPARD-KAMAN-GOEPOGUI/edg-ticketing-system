@@ -25,6 +25,7 @@ import {
 import type { Announcement } from "@/lib/mock-data";
 import { announcementCategoryLabels } from "@/lib/mock-data";
 import type { Role } from "@/lib/mock-data";
+import { ticketDetailRouteForNotification } from "@/lib/ticket-navigation";
 import {
   Bell, BellOff, Mail, MailOpen, X, ArrowRight,
   AlertTriangle, CheckCircle2, MessageSquare,
@@ -36,6 +37,18 @@ type NotifType = "info" | "success" | "warning";
 type Source = "request" | "announcement";
 
 type PanelNotif = NotifItem & { source: Source };
+
+function isQualificationNotification(n: PanelNotif): boolean {
+  const target = `${n.actionUrl ?? ""} ${n.title} ${n.body}`.toLowerCase();
+  return (
+    target.includes("/app/triage") ||
+    target.includes("/app/queue?tab=qualify") ||
+    target.includes("demande à qualifier") ||
+    target.includes("demande a qualifier") ||
+    target.includes("support général") ||
+    target.includes("support general")
+  );
+}
 
 const iconFor = (t: NotifType, source?: Source) => {
   if (source === "announcement") return Megaphone;
@@ -220,11 +233,21 @@ export function NotificationPanel({
     markAllReadMut.mutate();
   };
 
+  const openTicketFromNotification = (n: PanelNotif) => {
+    if (!n.requestId) return;
+    onClose();
+    navigate({ to: ticketDetailRouteForNotification(n.actionUrl, role), params: { id: n.requestId } });
+  };
+
   const handleClick = (n: PanelNotif) => {
     markRead(n.id);
-    if (n.requestId) {
+    if (isQualificationNotification(n)) {
       onClose();
-      navigate({ to: "/app/requests/$id", params: { id: n.requestId } });
+      navigate({ to: "/app/queue", search: { tab: "qualify" } });
+      return;
+    }
+    if (n.requestId) {
+      openTicketFromNotification(n);
     }
   };
 
@@ -390,9 +413,11 @@ export function NotificationPanel({
                               className={cn("flex items-start gap-3", n.requestId && "cursor-pointer")}
                               onClick={() => {
                                 markRead(n.id);
-                                if (n.requestId) {
+                                if (isQualificationNotification(n)) {
                                   onClose();
-                                  navigate({ to: "/app/requests/$id", params: { id: n.requestId } });
+                                  navigate({ to: "/app/queue", search: { tab: "qualify" } });
+                                } else if (n.requestId) {
+                                  openTicketFromNotification(n);
                                 }
                               }}
                             >
@@ -438,8 +463,7 @@ export function NotificationPanel({
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         markRead(n.id);
-                                        onClose();
-                                        navigate({ to: "/app/requests/$id", params: { id: n.requestId! } });
+                                        openTicketFromNotification(n);
                                       }}
                                     >
                                       <ArrowRight className="mr-1 h-3 w-3" />
@@ -453,8 +477,7 @@ export function NotificationPanel({
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           markRead(n.id);
-                                          onClose();
-                                          navigate({ to: "/app/requests/$id", params: { id: n.requestId! } });
+                                          openTicketFromNotification(n);
                                         }}
                                       >
                                         <ShieldAlert className="mr-1 h-3 w-3" />

@@ -14,10 +14,10 @@ import type { RequestItem, Appreciation } from "@/lib/mock-data";
 import { AppreciationForm } from "@/components/appreciation-form";
 import {
   EscalationProgressBar,
-  buildStepsFromStatus,
   buildRequesterStepsFromStatus,
   DEFAULT_LEVELS,
 } from "@/components/escalation-progress-bar";
+import { cn } from "@/lib/utils";
 import { useRole, useUser } from "@/lib/session";
 import {
   Select,
@@ -41,14 +41,16 @@ import {
   createComment,
   requestReopen,
   reopenRequest,
+  rejectReopenRequest,
   closeRequest,
   updateRequest,
+  changeRequestPriority,
   cancelRequest,
   escalateRequest,
   uploadAttachment,
-  mergeRequest,
-  duplicateRequest,
   rejectTicket,
+  reassignService,
+  transferDirection,
   requesterEditRequest,
 } from "@/lib/api/requests";
 import { fetchRefTable, fetchRequestCategories } from "@/lib/api/admin-config";
@@ -58,17 +60,8 @@ import type { Direction, Unit } from "@/lib/api/directions-units";
 import { submitAppreciation, updateRequestAppreciation } from "@/lib/api/csat";
 import {
   fetchRequestWorkflows,
-  fetchWorkflowDetails,
-  fetchRequestTasks,
-  createTask,
-  approveTask,
-  rejectTask,
-  cancelTask,
-  acceptWorkflowDetailById,
   createAutoCircuit,
   type WorkflowItem,
-  type WorkflowDetailItem,
-  type TaskItem,
 } from "@/lib/api/workflow";
 
 import {
@@ -90,21 +83,18 @@ import {
   Lock,
   Loader2,
   GitBranch,
-  ListTodo,
   Plus,
-  X,
   XCircle,
   RotateCcw,
   Pencil,
   Ban,
+  MessageSquare,
   MessageSquareWarning,
-  GitMerge,
-  Copy,
 } from "lucide-react";
 import { toast } from "sonner";
-import { formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow, format, differenceInDays } from "date-fns";
 import { fr } from "date-fns/locale";
-import { isRequester } from "@/lib/capabilities";
+import { canTicketAction, isRequester } from "@/lib/capabilities";
 
 export const Route = createFileRoute("/app/requests/$id")({
   beforeLoad: () => requireAuth(),
@@ -120,37 +110,687 @@ export const Route = createFileRoute("/app/requests/$id")({
   ),
 });
 
+const DETAIL_CONTEXTS = {
+  requests: {
+    eyebrow: "Mon espace",
+    backLabel: "Toutes les demandes",
+    notFoundBackLabel: "Retour aux demandes",
+    backTo: "/app/requests",
+  },
+  supervision: {
+    eyebrow: "Supervision",
+    backLabel: "Retour à la supervision",
+    notFoundBackLabel: "Retour à la supervision",
+    backTo: "/app/supervision",
+  },
+  queue: {
+    eyebrow: "File d'attente",
+    backLabel: "Retour à la file d'attente",
+    notFoundBackLabel: "Retour à la file d'attente",
+    backTo: "/app/queue",
+  },
+  myTickets: {
+    eyebrow: "Traitement",
+    backLabel: "Retour à mes tickets",
+    notFoundBackLabel: "Retour à mes tickets",
+    backTo: "/app/my-tickets",
+  },
+  chiefInbox: {
+    eyebrow: "Boîte de traitement",
+    backLabel: "Retour à la boîte de traitement",
+    notFoundBackLabel: "Retour à la boîte de traitement",
+    backTo: "/app/chief-inbox",
+  },
+  direction: {
+    eyebrow: "Vue direction",
+    backLabel: "Retour à la vue direction",
+    notFoundBackLabel: "Retour à la vue direction",
+    backTo: "/app/direction",
+  },
+  dg: {
+    eyebrow: "Vue globale",
+    backLabel: "Retour à la vue globale",
+    notFoundBackLabel: "Retour à la vue globale",
+    backTo: "/app/dg",
+  },
+  slaCenter: {
+    eyebrow: "Centre SLA",
+    backLabel: "Retour au centre SLA",
+    notFoundBackLabel: "Retour au centre SLA",
+    backTo: "/app/sla-center",
+  },
+  admin: {
+    eyebrow: "Administration",
+    backLabel: "Retour à l'administration",
+    notFoundBackLabel: "Retour à l'administration",
+    backTo: "/app/admin/users",
+  },
+} as const;
+
+export type RequestDetailContext = keyof typeof DETAIL_CONTEXTS;
+
+type RequestDetailPageProps = {
+  id: string;
+  context?: RequestDetailContext;
+};
+
+type Participant = {
+  key: string;
+  name: string;
+  role?: string;
+  detail: string;
+  lastAt?: string;
+};
+
+const PARTICIPANT_ROLE_LABELS: Record<string, string> = {
+  user: "Demandeur",
+  agent: "Agent",
+  chief: "Chef",
+  director: "Directeur",
+  dg: "Directeur",
+  admin: "Admin",
+  support: "Support",
+};
+
+function participantRoleLabel(role?: string): string | undefined {
+  if (!role) return undefined;
+  return PARTICIPANT_ROLE_LABELS[role] ?? role;
+}
+
+function buildParticipants(
+  request: RequestItem,
+  visibleComments: RequestItem["comments"],
+  assigneeName?: string,
+): Participant[] {
+  const participants = new Map<string, Participant>();
+  const add = (candidate: Participant) => {
+    const normalized = candidate.key || `${candidate.name}-${candidate.role ?? ""}`;
+    const existing = participants.get(normalized);
+    if (!existing) {
+      participants.set(normalized, candidate);
+      return;
+    }
+    const shouldReplaceDate = candidate.lastAt && (!existing.lastAt || candidate.lastAt > existing.lastAt);
+    participants.set(normalized, {
+      ...existing,
+      role: existing.role ?? candidate.role,
+      detail: shouldReplaceDate ? candidate.detail : existing.detail,
+      lastAt: shouldReplaceDate ? candidate.lastAt : existing.lastAt,
+    });
+  };
+
+  if (request.requesterName) {
+    add({
+      key: request.requesterId || `requester-${request.requesterName}`,
+      name: request.requesterName,
+      role: "user",
+      detail: "Créateur",
+      lastAt: request.createdAt,
+    });
+  }
+
+  if (request.assigneeId || request.assigneeName || assigneeName) {
+    const name = assigneeName ?? request.assigneeName ?? request.assigneeId ?? "Agent assigné";
+    add({
+      key: request.assigneeId || `assignee-${name}`,
+      name,
+      role: "agent",
+      detail: "Assigné",
+      lastAt: request.updatedAt,
+    });
+  }
+
+  for (const event of request.timeline) {
+    if (event.by) {
+      add({
+        key: event.actorId || `actor-${event.by}`,
+        name: event.by,
+        role: event.actorRole,
+        detail: event.label,
+        lastAt: event.at,
+      });
+    }
+    if (event.targetUserName) {
+      add({
+        key: event.targetUserId || `target-${event.targetUserName}`,
+        name: event.targetUserName,
+        role: event.targetRole,
+        detail: "Destinataire",
+        lastAt: event.at,
+      });
+    }
+  }
+
+  for (const comment of visibleComments) {
+    add({
+      key: comment.authorId || `comment-${comment.author}`,
+      name: comment.author,
+      detail: "Commentaire",
+      lastAt: comment.createdAt,
+    });
+  }
+
+  return Array.from(participants.values()).sort((a, b) => {
+    const aTime = a.lastAt ? new Date(a.lastAt).getTime() : 0;
+    const bTime = b.lastAt ? new Date(b.lastAt).getTime() : 0;
+    return bTime - aTime;
+  });
+}
+
+type TimelineItem = RequestItem["timeline"][number];
+type ComplianceStepState = "done" | "active" | "pending" | "warning" | "muted";
+type EscalationRoleLevel = "chief" | "director";
+
+type ComplianceStep = {
+  key: string;
+  label: string;
+  state: ComplianceStepState;
+  actor?: string;
+  date?: string;
+  detail?: string;
+};
+
+const DETAIL_STATUS_LABELS: Record<string, string> = {
+  new: "Création",
+  qualifying: "Qualification",
+  qualified: "Orienté",
+  assigned: "Assigné",
+  in_progress: "En traitement",
+  pending: "En attente",
+  escalated: "Escaladé",
+  resolved: "Résolu",
+  closed: "Clôturé",
+  reopened: "Réouvert",
+  rejected: "Rejeté",
+  cancelled: "Annulé",
+};
+
+const STATUS_RANK: Record<string, number> = {
+  new: 0,
+  qualifying: 1,
+  qualified: 2,
+  assigned: 3,
+  in_progress: 4,
+  pending: 4,
+  escalated: 5,
+  reopened: 4,
+  resolved: 6,
+  closed: 7,
+  rejected: 7,
+  cancelled: 7,
+};
+
+function normalizeTraceValue(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  const raw = typeof value === "string" ? value : JSON.stringify(value);
+  return raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function traceEventText(event: TimelineItem): string {
+  return [
+    event.type,
+    event.label,
+    event.comment,
+    event.by,
+    event.actorRole,
+    event.targetRole,
+    event.oldStatus,
+    event.newStatus,
+    event.infos,
+  ].map(normalizeTraceValue).join(" ");
+}
+
+function traceTime(value?: string): number {
+  if (!value) return 0;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+function formatTraceDate(value?: string): string | undefined {
+  if (!value || !traceTime(value)) return undefined;
+  return format(new Date(value), "dd MMM HH:mm", { locale: fr });
+}
+
+function findLatestTraceEvent(
+  events: TimelineItem[],
+  predicate: (event: TimelineItem) => boolean,
+): TimelineItem | undefined {
+  return [...events].sort((a, b) => traceTime(b.at) - traceTime(a.at)).find(predicate);
+}
+
+function findFirstTraceEvent(
+  events: TimelineItem[],
+  predicate: (event: TimelineItem) => boolean,
+): TimelineItem | undefined {
+  return [...events].sort((a, b) => traceTime(a.at) - traceTime(b.at)).find(predicate);
+}
+
+function isEscalationTraceEvent(event: TimelineItem): boolean {
+  const text = traceEventText(event);
+  const type = normalizeTraceValue(event.type);
+  return type.includes("escal") || text.includes("escalad") || /\bl[23]\b/.test(text);
+}
+
+function isFormalTraceAction(event: TimelineItem): boolean {
+  const text = traceEventText(event);
+  const type = normalizeTraceValue(event.type);
+  return (
+    isEscalationTraceEvent(event) ||
+    [
+      "assign",
+      "reassign",
+      "transfer",
+      "transfere",
+      "orient",
+      "route",
+      "resolve",
+      "resolu",
+      "resolution",
+      "closed",
+      "cloture",
+      "reopen",
+      "reouvert",
+      "reouverture",
+      "rouvert",
+      "reject",
+      "rejete",
+      "arbitr",
+      "validation",
+    ].some((term) => type.includes(term) || text.includes(term))
+  );
+}
+
+function escalationRoleLevel(event: TimelineItem): EscalationRoleLevel | undefined {
+  const roleText = normalizeTraceValue([event.actorRole, event.targetRole].filter(Boolean).join(" "));
+  if (/\bdg\b/.test(roleText)) return "director";
+  if (roleText.includes("director") || roleText.includes("directeur")) return "director";
+  if (roleText.includes("chief") || roleText.includes("chef") || roleText.includes("responsable")) {
+    return "chief";
+  }
+
+  if (!isEscalationTraceEvent(event)) return undefined;
+
+  const text = traceEventText(event);
+  if (/\bdg\b/.test(text) || text.includes("direction generale")) return "director";
+  if (text.includes("directeur") || text.includes("director") || text.includes("l3")) return "director";
+  if (text.includes("chef") || text.includes("chief") || text.includes("responsable") || text.includes("l2")) {
+    return "chief";
+  }
+  return undefined;
+}
+
+function latestFormalRoleEvent(
+  events: TimelineItem[],
+  level: EscalationRoleLevel,
+): TimelineItem | undefined {
+  return findLatestTraceEvent(events, (event) => (
+    isFormalTraceAction(event) && escalationRoleLevel(event) === level
+  ));
+}
+
+function complianceStepClass(state: ComplianceStepState): string {
+  if (state === "done") return "border-emerald-500 bg-emerald-500 text-white shadow-[0_0_18px_rgba(16,185,129,0.35)]";
+  if (state === "active") return "border-primary bg-primary text-primary-foreground shadow-[0_0_18px_rgba(34,197,94,0.28)]";
+  if (state === "warning") return "border-amber-500 bg-amber-500 text-white shadow-[0_0_18px_rgba(245,158,11,0.25)]";
+  if (state === "muted") return "border-border bg-muted text-muted-foreground";
+  return "border-border bg-background text-muted-foreground";
+}
+
+function buildTicketComplianceTrace(
+  request: RequestItem,
+  assigneeName?: string,
+) {
+  const events = request.timeline ?? [];
+  const statusRank = STATUS_RANK[request.status] ?? 0;
+  const isRejectedOrCancelled = request.status === "rejected" || request.status === "cancelled";
+
+  const creationEvent = findFirstTraceEvent(events, (event) => normalizeTraceValue(event.type).includes("created"));
+  const qualificationEvent = findLatestTraceEvent(events, (event) => {
+    const text = traceEventText(event);
+    const type = normalizeTraceValue(event.type);
+    return type.includes("qualif") || type.includes("routed") || text.includes("qualif") || text.includes("orient");
+  });
+  const assignmentEvent = findLatestTraceEvent(events, (event) => {
+    const text = traceEventText(event);
+    const type = normalizeTraceValue(event.type);
+    return (
+      type.includes("assign") ||
+      type.includes("in_progress") ||
+      text.includes("prise en charge") ||
+      event.actorRole === "agent" ||
+      event.targetRole === "agent"
+    );
+  });
+  const resolvedEvent = findLatestTraceEvent(events, (event) => {
+    const text = traceEventText(event);
+    const type = normalizeTraceValue(event.type);
+    return type.includes("resolved") || text.includes("resolu") || text.includes("resolution");
+  });
+  const closedEvent = findLatestTraceEvent(events, (event) => {
+    const text = traceEventText(event);
+    const type = normalizeTraceValue(event.type);
+    return type.includes("closed") || text.includes("cloture") || text.includes("cloturer");
+  });
+  const reopenEvent = findLatestTraceEvent(events, (event) => {
+    const text = traceEventText(event);
+    const type = normalizeTraceValue(event.type);
+    return (
+      type.includes("reopen") ||
+      text.includes("rouvert") ||
+      text.includes("reouvert") ||
+      text.includes("reouverture")
+    );
+  });
+  const finalEvent = closedEvent ?? resolvedEvent;
+  const reopenTime = traceTime(reopenEvent?.at);
+  const cycleEvents = reopenEvent
+    ? events.filter((event) => traceTime(event.at) >= reopenTime)
+    : events;
+  const isClosed = request.status === "closed";
+  const isResolved = request.status === "resolved" || request.status === "closed";
+
+  const chiefEvent = latestFormalRoleEvent(cycleEvents, "chief");
+  const directorEvent = latestFormalRoleEvent(cycleEvents, "director");
+
+  if (reopenEvent) {
+    const cycleQualificationEvent = findLatestTraceEvent(cycleEvents, (event) => {
+      const text = traceEventText(event);
+      const type = normalizeTraceValue(event.type);
+      return type.includes("qualif") || type.includes("routed") || text.includes("qualif") || text.includes("orient");
+    });
+    const cycleAssignmentEvent = findLatestTraceEvent(cycleEvents, (event) => {
+      const text = traceEventText(event);
+      const type = normalizeTraceValue(event.type);
+      return (
+        type.includes("assign") ||
+        type.includes("in_progress") ||
+        text.includes("prise en charge") ||
+        event.actorRole === "agent" ||
+        event.targetRole === "agent"
+      );
+    });
+    const cycleResolvedEvent = findLatestTraceEvent(cycleEvents, (event) => {
+      const text = traceEventText(event);
+      const type = normalizeTraceValue(event.type);
+      return type.includes("resolved") || text.includes("resolu") || text.includes("resolution");
+    });
+    const cycleClosedEvent = findLatestTraceEvent(cycleEvents, (event) => {
+      const text = traceEventText(event);
+      const type = normalizeTraceValue(event.type);
+      return type.includes("closed") || text.includes("cloture") || text.includes("cloturer");
+    });
+    const cycleResolvedAt = request.resolvedAt && traceTime(request.resolvedAt) >= reopenTime
+      ? request.resolvedAt
+      : undefined;
+    const cycleClosedAt = request.closedAt && traceTime(request.closedAt) >= reopenTime
+      ? request.closedAt
+      : undefined;
+    const cycleHasResolutionTrace = Boolean(cycleResolvedEvent || cycleResolvedAt || request.status === "resolved");
+    const cycleClosedWithoutResolutionTrace = isClosed && !cycleHasResolutionTrace;
+    const cycleFinalActor =
+      cycleClosedEvent?.by ??
+      cycleResolvedEvent?.by ??
+      (isResolved ? (request.assigneeName ?? assigneeName) : undefined) ??
+      request.assigneeName ??
+      assigneeName ??
+      "Non renseigné";
+
+    const cycleSteps: ComplianceStep[] = [
+      {
+        key: "reopen",
+        label: "Réouverture",
+        state: "done",
+        actor: reopenEvent.by,
+        date: reopenEvent.at,
+        detail: reopenEvent.label ?? "Ticket rouvert",
+      },
+    ];
+
+    if (cycleQualificationEvent || request.status === "qualifying") {
+      cycleSteps.push({
+        key: "requalification",
+        label: "Réorientation",
+        state: cycleQualificationEvent || statusRank >= 2 || request.serviceId ? "done" : "active",
+        actor: cycleQualificationEvent?.by,
+        date: cycleQualificationEvent?.at,
+        detail: cycleQualificationEvent?.label ?? "Réorientation après réouverture",
+      });
+    }
+
+    cycleSteps.push({
+      key: "reopened-treatment",
+      label: "Traitement repris",
+      state:
+        isResolved || request.status === "escalated" ? "done"
+        : ["assigned", "in_progress", "pending", "reopened"].includes(request.status) ? "active"
+        : request.assigneeId || request.assigneeName || assigneeName ? "done"
+        : "pending",
+      actor: cycleAssignmentEvent?.targetUserName ?? cycleAssignmentEvent?.by ?? request.assigneeName ?? assigneeName,
+      date: cycleAssignmentEvent?.at,
+      detail: cycleAssignmentEvent?.label ?? "Cycle repris après réouverture",
+    });
+
+    [
+      { key: "chief", label: "Chef de service", event: chiefEvent },
+      { key: "director", label: "Directeur", event: directorEvent },
+    ].forEach((level) => {
+      if (!level.event) return;
+      cycleSteps.push({
+        key: `${level.key}-after-reopen`,
+        label: level.label,
+        state: "done",
+        actor: level.event.by ?? level.event.targetUserName,
+        date: level.event.at,
+        detail: level.event.label,
+      });
+    });
+
+    if (isRejectedOrCancelled) {
+      const finalLabel = DETAIL_STATUS_LABELS[request.status] ?? request.status;
+      cycleSteps.push({
+        key: "final-after-reopen",
+        label: finalLabel,
+        state: "warning",
+        actor: cycleFinalActor,
+        date: request.updatedAt,
+        detail: `Sortie du cycle rouvert : ${finalLabel}`,
+      });
+    } else {
+      cycleSteps.push({
+        key: "resolution-after-reopen",
+        label: "Nouvelle résolution",
+        state: isResolved ? (cycleHasResolutionTrace ? "done" : "warning") : "pending",
+        actor: cycleResolvedEvent?.by ?? (isResolved ? cycleFinalActor : undefined),
+        date: cycleResolvedEvent?.at ?? cycleResolvedAt,
+        detail: cycleHasResolutionTrace ? (cycleResolvedEvent?.label ?? "Résolution après réouverture") : "Résolution en attente",
+      });
+      cycleSteps.push({
+        key: "closure-after-reopen",
+        label: "Nouvelle clôture",
+        state: isClosed ? (cycleClosedWithoutResolutionTrace ? "warning" : "done") : request.status === "resolved" ? "active" : "pending",
+        actor: cycleClosedEvent?.by,
+        date: cycleClosedEvent?.at ?? cycleClosedAt,
+        detail: isClosed ? (cycleClosedEvent?.label ?? "Clôture après réouverture") : "Clôture en attente",
+      });
+    }
+
+    return { steps: cycleSteps };
+  }
+
+  const hasResolutionTrace = Boolean(resolvedEvent || request.resolvedAt || request.status === "resolved");
+  const closedWithoutResolutionTrace = isClosed && !hasResolutionTrace;
+
+  const finalActor =
+    finalEvent?.by ??
+    (isResolved ? (request.assigneeName ?? assigneeName) : undefined) ??
+    request.assigneeName ??
+    assigneeName ??
+    "Non renseigné";
+
+  const steps: ComplianceStep[] = [
+    {
+      key: "creation",
+      label: "Création",
+      state: "done",
+      actor: creationEvent?.by ?? request.requesterName,
+      date: creationEvent?.at ?? request.createdAt,
+      detail: creationEvent?.label ?? "Demande enregistrée",
+    },
+    {
+      key: "qualification",
+      label: "Qualification",
+      state: qualificationEvent || statusRank >= 2 || request.serviceId ? "done" : request.status === "qualifying" ? "active" : "pending",
+      actor: qualificationEvent?.by,
+      date: qualificationEvent?.at,
+      detail: qualificationEvent?.label ?? (request.serviceId ? "Service orienté" : "Orientation attendue"),
+    },
+    {
+      key: "agent",
+      label: "Agent",
+      state:
+        isResolved || request.status === "escalated" ? "done"
+        : ["assigned", "in_progress", "pending", "reopened"].includes(request.status) ? "active"
+        : request.assigneeId || request.assigneeName || assigneeName ? "done"
+        : "pending",
+      actor: assignmentEvent?.targetUserName ?? assignmentEvent?.by ?? request.assigneeName ?? assigneeName,
+      date: assignmentEvent?.at,
+      detail: assignmentEvent?.label ?? (request.assigneeId || request.assigneeName || assigneeName ? "Agent assigné" : "Aucun agent assigné"),
+    },
+  ];
+
+  [
+    { key: "chief", label: "Chef de service", event: chiefEvent },
+    { key: "director", label: "Directeur", event: directorEvent },
+  ].forEach((level) => {
+    if (!level.event) return;
+    steps.push({
+      key: level.key,
+      label: level.label,
+      state: "done",
+      actor: level.event.by ?? level.event.targetUserName,
+      date: level.event.at,
+      detail: level.event.label,
+    });
+  });
+
+  if (isRejectedOrCancelled) {
+    const finalLabel = DETAIL_STATUS_LABELS[request.status] ?? request.status;
+    steps.push({
+      key: "final",
+      label: finalLabel,
+      state: "warning",
+      actor: finalEvent?.by,
+      date: finalEvent?.at ?? request.updatedAt,
+      detail: `Sortie du workflow : ${finalLabel}`,
+    });
+  } else {
+    steps.push({
+      key: "resolution",
+      label: "Résolution",
+      state: isResolved ? (hasResolutionTrace ? "done" : "warning") : "pending",
+      actor: resolvedEvent?.by ?? (isResolved ? finalActor : undefined),
+      date: resolvedEvent?.at ?? request.resolvedAt,
+      detail: hasResolutionTrace ? (resolvedEvent?.label ?? "Résolution tracée") : "Résolution non encore tracée",
+    });
+    steps.push({
+      key: "closure",
+      label: "Clôture",
+      state: isClosed ? (closedWithoutResolutionTrace ? "warning" : "done") : request.status === "resolved" ? "active" : "pending",
+      actor: closedEvent?.by,
+      date: closedEvent?.at ?? request.closedAt,
+      detail: isClosed ? (closedEvent?.label ?? "Clôture enregistrée") : "Clôture en attente",
+    });
+  }
+
+  return { steps };
+}
+
+function TicketComplianceTrace({
+  request,
+  assigneeName,
+}: {
+  request: RequestItem;
+  assigneeName?: string;
+}) {
+  const trace = buildTicketComplianceTrace(request, assigneeName);
+
+  return (
+    <section className="border-t border-border/40 bg-muted/10 px-5 py-4 sm:px-6">
+      <div className="overflow-x-auto rounded-2xl border border-border/60 bg-background/35 px-4 py-4">
+        <ol className="flex min-w-max items-start">
+          {trace.steps.map((step, index) => {
+            const isLast = index === trace.steps.length - 1;
+            const StepIcon =
+              step.state === "warning" ? AlertTriangle
+              : step.state === "active" || step.state === "pending" ? Clock
+              : CheckCircle2;
+            return (
+              <li key={step.key} className="flex items-start">
+                <div className="flex w-28 flex-col items-center text-center">
+                  <span className={cn("grid h-9 w-9 place-items-center rounded-full border text-sm", complianceStepClass(step.state))}>
+                    <StepIcon className="h-4 w-4" />
+                  </span>
+                  <span className="mt-2 text-xs font-semibold">{step.label}</span>
+                  {step.actor && (
+                    <span className="mt-1 max-w-24 truncate text-[11px] text-muted-foreground">
+                      {step.actor}
+                    </span>
+                  )}
+                  {(step.date || step.detail) && (
+                    <span className="mt-0.5 max-w-24 truncate text-[10px] text-muted-foreground">
+                      {formatTraceDate(step.date) ?? step.detail}
+                    </span>
+                  )}
+                </div>
+                {!isLast && (
+                  <span className={cn(
+                    "mt-4 h-0.5 w-12 shrink-0 rounded-full",
+                    step.state === "done" ? "bg-emerald-500" : step.state === "warning" ? "bg-amber-500" : "bg-border",
+                  )} />
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      </div>
+    </section>
+  );
+}
+
 function RequestDetail() {
   const { id } = Route.useParams();
+  return <RequestDetailPage id={id} context="requests" />;
+}
+
+export function RequestDetailPage({ id, context = "requests" }: RequestDetailPageProps) {
+  const detailContext = DETAIL_CONTEXTS[context];
+  const isPersonalContext = context === "requests";
   const qc = useQueryClient();
   const sessionUser = useUser();
   const authorId = Number(sessionUser?.id ?? 0);
   const authorName = [sessionUser?.firstname, sessionUser?.name].filter(Boolean).join(" ") || "Agent";
+  const includeDeleted = context === "admin";
+  const requestQueryKey = ["request", id, includeDeleted ? "with-deleted" : "active"] as const;
 
   const { data: r, isLoading, isError } = useQuery({
-    queryKey: ["request", id],
-    queryFn: () => fetchRequest(id),
+    queryKey: requestQueryKey,
+    queryFn: () => fetchRequest(id, { includeDeleted }),
     staleTime: 15_000,
   });
 
   const [comment, setComment] = useState("");
   const [isPublic, setIsPublic] = useState(false);
   const [role] = useRole();
-  // Algo 1 — ownership-based perspective: le rôle détermine ce qu'on peut FAIRE,
-  // mais si l'utilisateur est le demandeur du ticket (quel que soit son rôle),
-  // il voit la vue requester (suivi de sa demande, pas les outils de traitement).
+  // Dans "Mes demandes", le propriétaire garde la vue demandeur. Dans les espaces
+  // métier, le contexte fonctionnel prime sur la propriété personnelle du ticket.
   const iAmRequester = isRequester(r?.requesterId, sessionUser?.id);
-  const isRequesterView = role === "user" || iAmRequester;
-  const isChief = role === "chief";
-  const isDirector = role === "director";
+  const isRequesterView = role === "user" || (isPersonalContext && iAmRequester);
   const isAgentOnly = role === "agent" && !iAmRequester;
-  const canManageStatus = !iAmRequester && (role === "agent" || role === "chief" || role === "director" || role === "admin");
-  const canAssign = !iAmRequester && (role === "agent" || role === "chief" || role === "admin");
   const [localAppreciation, setLocalAppreciation] = useState<Appreciation | undefined>(undefined);
   const [showReassign, setShowReassign] = useState(false);
-  const [showTaskForm, setShowTaskForm] = useState(false);
-  const [taskType, setTaskType] = useState<"reassignment" | "reopening">("reassignment");
-  const [taskReason, setTaskReason] = useState("");
   const [reopenReason, setReopenReason] = useState("");
   const [showReopenForm, setShowReopenForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
@@ -174,19 +814,19 @@ function RequestDetail() {
   const [showPriorityPicker, setShowPriorityPicker] = useState(false);
   const [showRejectConfirm, setShowRejectConfirm] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
+  const [showRejectReopenConfirm, setShowRejectReopenConfirm] = useState(false);
+  const [rejectReopenNote, setRejectReopenNote] = useState("");
   const [showServicePicker, setShowServicePicker] = useState(false);
-  const [showMergeDialog, setShowMergeDialog] = useState(false);
-  const [mergeTargetId, setMergeTargetId] = useState("");
-  const [acceptingStepId, setAcceptingStepId] = useState<string | null>(null);
-  const [acceptDialogMode, setAcceptDialogMode] = useState<"accept" | "refuse">("accept");
-  const [acceptComment, setAcceptComment] = useState("");
+  const [showDirectionTransfer, setShowDirectionTransfer] = useState(false);
+  const [transferDirectionId, setTransferDirectionId] = useState("");
+  const [transferReason, setTransferReason] = useState("");
   const [showCircuitDialog, setShowCircuitDialog] = useState(false);
   const [circuitDirectionId, setCircuitDirectionId] = useState("");
   const [circuitUnitId, setCircuitUnitId] = useState("");
 
   const invalidate = () => {
     // Détail du ticket (et sous-queries via préfixe)
-    qc.invalidateQueries({ queryKey: ["request", id] });
+    qc.invalidateQueries({ queryKey: requestQueryKey });
     // Toutes les listes/vues qui peuvent contenir ce ticket
     qc.invalidateQueries({ queryKey: ["requests"] });
     qc.invalidateQueries({ queryKey: ["queue"] });
@@ -198,7 +838,6 @@ function RequestDetail() {
     qc.invalidateQueries({ queryKey: ["dashboard-stats"] });
     qc.invalidateQueries({ queryKey: ["sla-center"] });
   };
-  const invalidateTasks = () => qc.invalidateQueries({ queryKey: ["request", id, "tasks"] });
   const invalidateWorkflows = () => {
     qc.invalidateQueries({ queryKey: ["request", id, "workflows"] });
     qc.invalidateQueries({ queryKey: ["workflow"] });
@@ -217,9 +856,9 @@ function RequestDetail() {
       return resolveRequest(id);
     },
     onMutate: async () => {
-      await qc.cancelQueries({ queryKey: ["request", id] });
-      const previous = qc.getQueryData<RequestItem>(["request", id]);
-      qc.setQueryData<RequestItem>(["request", id], (old) =>
+      await qc.cancelQueries({ queryKey: requestQueryKey });
+      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
+      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
         old ? { ...old, status: "resolved" } : old,
       );
       return { previous };
@@ -230,7 +869,7 @@ function RequestDetail() {
       setResolutionNote("");
     },
     onError: (_err, _vars, context) => {
-      if (context?.previous) qc.setQueryData(["request", id], context.previous);
+      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
       toast.error("Impossible de résoudre la demande.");
     },
     onSettled: () => invalidate(),
@@ -239,10 +878,10 @@ function RequestDetail() {
   const assignMut = useMutation({
     mutationFn: (assigneeId: string) => assignRequest(id, assigneeId),
     onMutate: async (assigneeId) => {
-      await qc.cancelQueries({ queryKey: ["request", id] });
-      const previous = qc.getQueryData<RequestItem>(["request", id]);
-      qc.setQueryData<RequestItem>(["request", id], (old) =>
-        old ? { ...old, assigneeId, status: "in_progress" } : old,
+      await qc.cancelQueries({ queryKey: requestQueryKey });
+      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
+      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
+        old ? { ...old, assigneeId, status: "assigned" } : old,
       );
       return { previous };
     },
@@ -252,8 +891,35 @@ function RequestDetail() {
       setShowReassign(false);
     },
     onError: (_err, _vars, context) => {
-      if (context?.previous) qc.setQueryData(["request", id], context.previous);
+      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
       toast.error("Impossible de réassigner la demande.");
+    },
+    onSettled: () => invalidate(),
+  });
+
+  const selfAssignMut = useMutation({
+    mutationFn: () => assignRequest(id, String(sessionUser?.id ?? "")),
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: requestQueryKey });
+      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
+      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
+        old
+          ? {
+              ...old,
+              assigneeId: String(sessionUser?.id ?? ""),
+              assigneeName: authorName,
+              status: "assigned",
+            }
+          : old,
+      );
+      return { previous };
+    },
+    onSuccess: () => {
+      toast.success("Ticket assigné à vous.");
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
+      toast.error("Impossible de vous assigner ce ticket.");
     },
     onSettled: () => invalidate(),
   });
@@ -267,58 +933,13 @@ function RequestDetail() {
 
   const activeWorkflow = workflows.find((w) => w.workflowStatus === "active") ?? workflows[0];
 
-  const { data: workflowDetails = [] } = useQuery({
-    queryKey: ["workflow", activeWorkflow?.id, "details"],
-    queryFn: () => fetchWorkflowDetails(activeWorkflow!.id),
-    enabled: !isRequesterView && !!activeWorkflow,
-    staleTime: 30_000,
-  });
-
-  const { data: tasksData } = useQuery({
-    queryKey: ["request", id, "tasks"],
-    queryFn: () => fetchRequestTasks(id),
-    enabled: !isRequesterView,
-    staleTime: 30_000,
-  });
-  const tasks = tasksData?.items ?? [];
-
-  const createTaskMut = useMutation({
-    mutationFn: (data: { task_type: "reassignment" | "reopening"; reason: string }) =>
-      createTask({ task_type: data.task_type, request_id: id, reason: data.reason }),
-    onSuccess: () => {
-      toast.success("Tâche créée");
-      setShowTaskForm(false);
-      setTaskReason("");
-      invalidateTasks();
-    },
-    onError: () => toast.error("Impossible de créer la tâche"),
-  });
-
-  const approveTaskMut = useMutation({
-    mutationFn: (taskId: string) => approveTask(taskId),
-    onSuccess: () => { toast.success("Tâche approuvée"); invalidateTasks(); },
-    onError: () => toast.error("Impossible d'approuver la tâche"),
-  });
-
-  const rejectTaskMut = useMutation({
-    mutationFn: (taskId: string) => rejectTask(taskId),
-    onSuccess: () => { toast.success("Tâche rejetée"); invalidateTasks(); },
-    onError: () => toast.error("Impossible de rejeter la tâche"),
-  });
-
-  const cancelTaskMut = useMutation({
-    mutationFn: (taskId: string) => cancelTask(taskId),
-    onSuccess: () => { toast.success("Tâche annulée"); invalidateTasks(); },
-    onError: () => toast.error("Impossible d'annuler la tâche"),
-  });
-
   // Phase 1 : utilisateur demande la réouverture (motif obligatoire)
   const requestReopenMut = useMutation({
     mutationFn: (reason: string) => requestReopen(id, reason),
     onMutate: async () => {
-      await qc.cancelQueries({ queryKey: ["request", id] });
-      const previous = qc.getQueryData<RequestItem>(["request", id]);
-      qc.setQueryData<RequestItem>(["request", id], (old) =>
+      await qc.cancelQueries({ queryKey: requestQueryKey });
+      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
+      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
         old ? { ...old, infos: { ...(old.infos ?? {}), reopen_requested: true } } : old,
       );
       return { previous };
@@ -329,9 +950,54 @@ function RequestDetail() {
       setReopenReason("");
     },
     onError: (err: unknown, _vars, context) => {
-      if (context?.previous) qc.setQueryData(["request", id], context.previous);
+      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
       const msg = (err as { message?: string })?.message;
       toast.error(msg ?? "Impossible d'envoyer la demande de réouverture.");
+    },
+    onSettled: () => invalidate(),
+  });
+
+  const approveReopenMut = useMutation({
+    mutationFn: () => reopenRequest(id),
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: requestQueryKey });
+      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
+      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
+        old ? { ...old, status: "reopened", infos: { ...(old.infos ?? {}), reopen_requested: false } } : old,
+      );
+      return { previous };
+    },
+    onSuccess: () => {
+      toast.success("Réouverture approuvée — le ticket retourne en traitement.");
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
+      toast.error("Impossible d'approuver la réouverture.");
+    },
+    onSettled: () => invalidate(),
+  });
+
+  const rejectReopenMut = useMutation({
+    mutationFn: () => rejectReopenRequest(id, rejectReopenNote.trim()),
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: requestQueryKey });
+      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
+      qc.setQueryData<RequestItem>(requestQueryKey, (old) => {
+        if (!old) return old;
+        const infos = { ...(old.infos ?? {}) };
+        delete infos.reopen_requested;
+        return { ...old, infos };
+      });
+      return { previous };
+    },
+    onSuccess: () => {
+      toast.success("Réouverture refusée avec motif.");
+      setShowRejectReopenConfirm(false);
+      setRejectReopenNote("");
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
+      toast.error("Impossible de refuser la réouverture.");
     },
     onSettled: () => invalidate(),
   });
@@ -339,9 +1005,9 @@ function RequestDetail() {
   const closeMut = useMutation({
     mutationFn: () => closeRequest(id),
     onMutate: async () => {
-      await qc.cancelQueries({ queryKey: ["request", id] });
-      const previous = qc.getQueryData<RequestItem>(["request", id]);
-      qc.setQueryData<RequestItem>(["request", id], (old) =>
+      await qc.cancelQueries({ queryKey: requestQueryKey });
+      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
+      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
         old ? { ...old, status: "closed" } : old,
       );
       return { previous };
@@ -350,7 +1016,7 @@ function RequestDetail() {
       toast.success("Demande clôturée — merci pour votre retour.");
     },
     onError: (_err, _vars, context) => {
-      if (context?.previous) qc.setQueryData(["request", id], context.previous);
+      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
       toast.error("Impossible de clôturer la demande.");
     },
     onSettled: () => invalidate(),
@@ -363,7 +1029,7 @@ function RequestDetail() {
       category: editCategory || undefined,
       priority: editPriority || undefined,
       direction_id: editDirectionId || undefined,
-      unit_id: editServiceId || undefined,
+      unity_id: editServiceId || undefined,
     }),
     onSuccess: () => {
       toast.success("Demande modifiée — re-routage effectué.");
@@ -377,11 +1043,11 @@ function RequestDetail() {
   });
 
   const cancelMut = useMutation({
-    mutationFn: () => cancelRequest(id, cancelReason.trim() || undefined),
+    mutationFn: () => cancelRequest(id, cancelReason.trim()),
     onMutate: async () => {
-      await qc.cancelQueries({ queryKey: ["request", id] });
-      const previous = qc.getQueryData<RequestItem>(["request", id]);
-      qc.setQueryData<RequestItem>(["request", id], (old) =>
+      await qc.cancelQueries({ queryKey: requestQueryKey });
+      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
+      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
         old ? { ...old, status: "cancelled" } : old,
       );
       return { previous };
@@ -392,7 +1058,7 @@ function RequestDetail() {
       setCancelReason("");
     },
     onError: (_err, _vars, context) => {
-      if (context?.previous) qc.setQueryData(["request", id], context.previous);
+      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
       toast.error("Impossible d'annuler la demande.");
     },
     onSettled: () => invalidate(),
@@ -401,16 +1067,16 @@ function RequestDetail() {
   const takeOwnershipMut = useMutation({
     mutationFn: () => updateRequest(id, { request_status: "in_progress" }),
     onMutate: async () => {
-      await qc.cancelQueries({ queryKey: ["request", id] });
-      const previous = qc.getQueryData<RequestItem>(["request", id]);
-      qc.setQueryData<RequestItem>(["request", id], (old) =>
+      await qc.cancelQueries({ queryKey: requestQueryKey });
+      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
+      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
         old ? { ...old, status: "in_progress" } : old,
       );
       return { previous };
     },
     onSuccess: () => { toast.success("Ticket pris en charge — traitement en cours."); },
     onError: (_err, _vars, context) => {
-      if (context?.previous) qc.setQueryData(["request", id], context.previous);
+      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
       toast.error("Impossible de prendre en charge la demande.");
     },
     onSettled: () => invalidate(),
@@ -427,9 +1093,9 @@ function RequestDetail() {
       return updateRequest(id, { request_status: "pending" });
     },
     onMutate: async () => {
-      await qc.cancelQueries({ queryKey: ["request", id] });
-      const previous = qc.getQueryData<RequestItem>(["request", id]);
-      qc.setQueryData<RequestItem>(["request", id], (old) =>
+      await qc.cancelQueries({ queryKey: requestQueryKey });
+      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
+      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
         old ? { ...old, status: "pending" } : old,
       );
       return { previous };
@@ -440,7 +1106,7 @@ function RequestDetail() {
       setInfoQuestion("");
     },
     onError: (_err, _vars, context) => {
-      if (context?.previous) qc.setQueryData(["request", id], context.previous);
+      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
       toast.error("Impossible d'envoyer la demande d'informations.");
     },
     onSettled: () => invalidate(),
@@ -449,93 +1115,94 @@ function RequestDetail() {
   const resumeMut = useMutation({
     mutationFn: () => updateRequest(id, { request_status: "in_progress" }),
     onMutate: async () => {
-      await qc.cancelQueries({ queryKey: ["request", id] });
-      const previous = qc.getQueryData<RequestItem>(["request", id]);
-      qc.setQueryData<RequestItem>(["request", id], (old) =>
+      await qc.cancelQueries({ queryKey: requestQueryKey });
+      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
+      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
         old ? { ...old, status: "in_progress" } : old,
       );
       return { previous };
     },
     onSuccess: () => { toast.success("Traitement repris."); },
     onError: (_err, _vars, context) => {
-      if (context?.previous) qc.setQueryData(["request", id], context.previous);
+      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
       toast.error("Impossible de reprendre le traitement.");
     },
     onSettled: () => invalidate(),
   });
 
   const changePriorityMut = useMutation({
-    mutationFn: (priority: string) => updateRequest(id, { priority }),
+    mutationFn: (priority: string) => changeRequestPriority(id, priority),
     onMutate: async (priority) => {
-      await qc.cancelQueries({ queryKey: ["request", id] });
-      const previous = qc.getQueryData<RequestItem>(["request", id]);
-      qc.setQueryData<RequestItem>(["request", id], (old) =>
+      await qc.cancelQueries({ queryKey: requestQueryKey });
+      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
+      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
         old ? { ...old, priority: priority as RequestItem["priority"] } : old,
       );
       return { previous };
     },
     onSuccess: (_, p) => { toast.success(`Priorité changée → ${p}.`); setShowPriorityPicker(false); },
     onError: (_err, _vars, context) => {
-      if (context?.previous) qc.setQueryData(["request", id], context.previous);
+      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
       toast.error("Impossible de changer la priorité.");
     },
     onSettled: () => invalidate(),
   });
 
   const rejectMut = useMutation({
-    mutationFn: () => rejectTicket(id, rejectNote.trim() || "Rejetée par le responsable"),
+    mutationFn: () => rejectTicket(id, rejectNote.trim()),
     onMutate: async () => {
-      await qc.cancelQueries({ queryKey: ["request", id] });
-      const previous = qc.getQueryData<RequestItem>(["request", id]);
-      qc.setQueryData<RequestItem>(["request", id], (old) =>
+      await qc.cancelQueries({ queryKey: requestQueryKey });
+      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
+      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
         old ? { ...old, status: "rejected" } : old,
       );
       return { previous };
     },
     onSuccess: () => { toast.success("Demande rejetée."); setShowRejectConfirm(false); setRejectNote(""); },
     onError: (_err, _vars, context) => {
-      if (context?.previous) qc.setQueryData(["request", id], context.previous);
+      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
       toast.error("Impossible de rejeter la demande.");
     },
     onSettled: () => invalidate(),
   });
 
   const changeServiceMut = useMutation({
-    mutationFn: (unit_id: string) => updateRequest(id, { unity_id: Number(unit_id) }),
+    mutationFn: (unit_id: string) => reassignService(id, unit_id, "Réaffectation depuis le détail ticket"),
     onSuccess: (_, s) => { toast.success(`Service changé → ${s}.`); setShowServicePicker(false); invalidate(); },
     onError: () => toast.error("Impossible de changer le service."),
   });
 
-  const mergeMut = useMutation({
-    mutationFn: () => mergeRequest(id, mergeTargetId.trim()),
+  const transferDirectionMut = useMutation({
+    mutationFn: () => transferDirection(id, transferDirectionId, transferReason.trim()),
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: requestQueryKey });
+      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
+      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
+        old
+          ? {
+              ...old,
+              status: "qualifying",
+              directionId: transferDirectionId,
+              serviceId: transferDirectionId,
+              assigneeId: undefined,
+              assigneeName: undefined,
+            }
+          : old,
+      );
+      return { previous };
+    },
     onSuccess: () => {
-      toast.success("Demande fusionnée — la source est annulée.");
-      setShowMergeDialog(false);
-      setMergeTargetId("");
-      invalidate();
+      const target = directions.find((d) => d.id === transferDirectionId);
+      toast.success(`Demande transférée vers ${target?.name ?? "la direction cible"}.`);
+      setShowDirectionTransfer(false);
+      setTransferDirectionId("");
+      setTransferReason("");
     },
-    onError: () => toast.error("Impossible de fusionner les demandes."),
-  });
-
-  const duplicateMut = useMutation({
-    mutationFn: () => duplicateRequest(id),
-    onSuccess: (newReq) => {
-      toast.success(`Demande dupliquée — nouvelle référence : ${newReq.ref}`);
-      invalidate();
+    onError: (_err, _vars, context) => {
+      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
+      toast.error("Impossible de transférer la demande.");
     },
-    onError: () => toast.error("Impossible de dupliquer la demande."),
-  });
-
-  const acceptStepMut = useMutation({
-    mutationFn: ({ stepId, accepted, comment }: { stepId: string; accepted: boolean; comment?: string }) =>
-      acceptWorkflowDetailById({ id: Number(stepId), accepted, comment }),
-    onSuccess: (_, { accepted }) => {
-      toast.success(accepted ? "Étape acceptée" : "Étape refusée");
-      setAcceptingStepId(null);
-      setAcceptComment("");
-      invalidateWorkflows();
-    },
-    onError: () => toast.error("Impossible de mettre à jour l'étape workflow"),
+    onSettled: () => invalidate(),
   });
 
   const createCircuitMut = useMutation({
@@ -559,9 +1226,9 @@ function RequestDetail() {
       reason: escalateReason.trim() || "Escalade manuelle",
     }),
     onMutate: async () => {
-      await qc.cancelQueries({ queryKey: ["request", id] });
-      const previous = qc.getQueryData<RequestItem>(["request", id]);
-      qc.setQueryData<RequestItem>(["request", id], (old) =>
+      await qc.cancelQueries({ queryKey: requestQueryKey });
+      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
+      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
         old ? { ...old, status: "escalated" } : old,
       );
       return { previous };
@@ -572,7 +1239,7 @@ function RequestDetail() {
       setEscalateReason("");
     },
     onError: (_err, _vars, context) => {
-      if (context?.previous) qc.setQueryData(["request", id], context.previous);
+      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
       toast.error("Impossible d'escalader la demande.");
     },
     onSettled: () => invalidate(),
@@ -597,8 +1264,8 @@ function RequestDetail() {
         is_public: isRequesterView ? true : isPublic,
       }),
     onMutate: async () => {
-      await qc.cancelQueries({ queryKey: ["request", id] });
-      const previous = qc.getQueryData<RequestItem>(["request", id]);
+      await qc.cancelQueries({ queryKey: requestQueryKey });
+      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
       const optimisticComment = {
         id: `temp-${Date.now()}`,
         authorId: String(authorId),
@@ -608,7 +1275,7 @@ function RequestDetail() {
         isEdited: false,
         createdAt: new Date().toISOString(),
       };
-      qc.setQueryData<RequestItem>(["request", id], (old) =>
+      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
         old ? { ...old, comments: [...(old.comments ?? []), optimisticComment] } : old,
       );
       return { previous };
@@ -618,7 +1285,7 @@ function RequestDetail() {
       setComment("");
     },
     onError: (_err, _vars, context) => {
-      if (context?.previous) qc.setQueryData(["request", id], context.previous);
+      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
       toast.error("Impossible d'ajouter le commentaire.");
     },
     onSettled: () => invalidate(),
@@ -681,7 +1348,7 @@ function RequestDetail() {
       <div className="mx-auto max-w-md py-20 text-center">
         <h2 className="text-lg font-semibold">Demande introuvable</h2>
         <Button asChild variant="outline" className="mt-4 rounded-full">
-          <Link to="/app/requests">Retour aux demandes</Link>
+          <Link to={detailContext.backTo}>{detailContext.notFoundBackLabel}</Link>
         </Button>
       </div>
     );
@@ -693,34 +1360,94 @@ function RequestDetail() {
   const slaOver = r.slaHours > 0 && r.slaElapsed > r.slaHours;
   const assignedUnit = units.find((u) => String(u.id) === String(r.serviceId));
   const unitName = assignedUnit?.name ?? "—";
+  const currentDirectionId = assignedUnit?.direction_id ?? r.directionId ?? r.serviceId;
   const directionName = directions.find(
-    (d) => String(d.id) === (assignedUnit?.direction_id ?? r.directionId),
+    (d) => String(d.id) === currentDirectionId,
   )?.name ?? "—";
+  const transferDirectionOptions = directions.filter(
+    (d) => String(d.id) !== String(currentDirectionId),
+  );
 
-  const isFinal = (["resolved", "closed", "rejected"] as const).includes(
-    r.status as "resolved" | "closed" | "rejected",
+  const isArchived = Boolean(r.deletedAt || r.isArchived);
+  const isFinal = isArchived || (["resolved", "closed", "rejected", "cancelled"] as const).includes(
+    r.status as "resolved" | "closed" | "rejected" | "cancelled",
   );
 
   const agentPool = agentsData?.items ?? [];
   const availableServices = [...new Set(agentPool.map((a) => a.unit_id).filter((u): u is string => !!u))];
 
-  const canEdit = isRequesterView && r.status === "new";
-  const canCancel = isRequesterView && (r.status === "new" || r.status === "qualified");
   const visibleComments = isRequesterView ? r.comments.filter((c) => c.isPublic) : r.comments;
+  const participants = buildParticipants(r, visibleComments, assigneeUser?.name);
   const needsUserResponse = isRequesterView && r.status === "pending";
+  const isAssignedToMe = isRequester(r.assigneeId, sessionUser?.id);
+  const hasAssignee = Boolean(r.assigneeId);
+  const hasReopenRequest = (r.infos as Record<string, unknown> | undefined)?.reopen_requested === true;
+
+  // Compteur fermeture auto (4 jours après résolution)
+  const daysUntilAutoClose = r.resolvedAt
+    ? Math.max(0, 4 - differenceInDays(new Date(), new Date(r.resolvedAt)))
+    : 4;
+
+  // Fenêtre réouverture ticket fermé (7 jours après fermeture)
+  const canReopenClosed = r.closedAt
+    ? differenceInDays(new Date(), new Date(r.closedAt)) <= 7
+    : false;
+  const ownershipOptions = { isRequester: iAmRequester };
+  const canEdit = !isArchived && iAmRequester && canTicketAction(role, "requester_edit", r.status, ownershipOptions);
+  const canCancel = !isArchived && iAmRequester && canTicketAction(role, "cancel", r.status, ownershipOptions);
+  const canClose = !isArchived && iAmRequester && canTicketAction(role, "close", r.status, ownershipOptions);
+  const canRequestReopen = !isArchived && iAmRequester && canTicketAction(role, "request_reopen", r.status, {
+    ...ownershipOptions,
+    canReopenClosed,
+  });
+  const canSelfAssign = !isArchived && isAgentOnly && canTicketAction(role, "self_assign", r.status, {
+    ...ownershipOptions,
+    hasAssignee,
+    isAssignedToMe,
+  });
+  const canTakeOwnership = !isArchived && isAgentOnly && canTicketAction(role, "take_ownership", r.status, {
+    ...ownershipOptions,
+    isAssignedToMe,
+  });
+  const canRequestInfo = !isArchived && isAgentOnly && canTicketAction(role, "request_info", r.status, ownershipOptions);
+  const canResumeTreatment = !isArchived && isAgentOnly && canTicketAction(role, "resume", r.status, ownershipOptions);
+  const canEscalateTicket = !isArchived
+    && !iAmRequester
+    && canTicketAction(role, "escalate", r.status, ownershipOptions)
+    && (role !== "agent" || isAssignedToMe);
+  const canAssignTicket = !isArchived && !iAmRequester && canTicketAction(role, "assign", r.status, ownershipOptions);
+  const canResolveTicket = !isArchived && !iAmRequester && canTicketAction(role, "resolve", r.status, ownershipOptions);
+  const canCreateCircuit = !isArchived && !iAmRequester && canTicketAction(role, "create_circuit", r.status, ownershipOptions);
+  const canChangePriority = !isArchived && !iAmRequester && canTicketAction(role, "change_priority", r.status, ownershipOptions);
+  const canChangeService = !isArchived && !iAmRequester && canTicketAction(role, "change_service", r.status, ownershipOptions);
+  const canTransferDirection = !isArchived && !iAmRequester && canTicketAction(role, "transfer_direction", r.status, ownershipOptions);
+  const canRejectTicket = !isArchived && !iAmRequester && canTicketAction(role, "reject", r.status, ownershipOptions);
+  const canApproveReopen = !isArchived && !iAmRequester && canTicketAction(role, "approve_reopen", r.status, {
+    ...ownershipOptions,
+    hasReopenRequest,
+  });
+  const canRejectReopen = !isArchived && !iAmRequester && canTicketAction(role, "reject_reopen", r.status, {
+    ...ownershipOptions,
+    hasReopenRequest,
+  });
+  const canDecideReopen = canApproveReopen || canRejectReopen;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <div className="mx-auto max-w-7xl space-y-4">
       <div>
         <Button asChild variant="ghost" size="sm" className="-ml-2 rounded-full">
-          <Link to="/app/requests">
-            <ArrowLeft className="mr-1 h-4 w-4" /> Toutes les demandes
+          <Link to={detailContext.backTo}>
+            <ArrowLeft className="mr-1 h-4 w-4" /> {detailContext.backLabel}
           </Link>
         </Button>
       </div>
 
-      <header className="flex flex-wrap items-start justify-between gap-4">
+      <div className="overflow-hidden rounded-[28px] border border-border/50 bg-card/70 shadow-sm backdrop-blur">
+      <header className="flex flex-wrap items-start justify-between gap-4 p-5 sm:p-6">
         <div className="min-w-0">
+          <div className="mb-2 inline-flex items-center rounded-full border border-border/60 bg-background/60 px-3 py-1 text-xs font-semibold text-muted-foreground">
+            {detailContext.eyebrow}
+          </div>
           <motion.div
             layoutId={`req-ref-${r.id}`}
             className="font-mono text-xs text-muted-foreground"
@@ -746,6 +1473,20 @@ function RequestDetail() {
               </p>
               <p className="mt-0.5 text-sm text-amber-600/80 dark:text-amber-400/70">
                 Répondez via la section commentaires ci-dessous pour que le traitement de votre demande puisse reprendre.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {isArchived && (
+          <div className="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">
+                Ticket archivé
+              </p>
+              <p className="mt-0.5 text-sm text-amber-600/80 dark:text-amber-400/70">
+                Consultation admin en lecture seule. Les actions métier sont désactivées.
               </p>
             </div>
           </div>
@@ -783,15 +1524,51 @@ function RequestDetail() {
         )}
 
         {!isRequesterView && (
-          isFinal ? (
+          (isFinal && !canDecideReopen) ? (
             <div className="flex items-center gap-2 rounded-full border border-border/40 bg-muted/30 px-4 py-2 text-sm text-muted-foreground">
               <Lock className="h-3.5 w-3.5" />
-              Ticket {r.status === "closed" ? "clôturé" : r.status === "rejected" ? "rejeté" : "résolu"} — aucune action disponible
+              Ticket {isArchived ? "archivé" : r.status === "closed" ? "clôturé" : r.status === "rejected" ? "rejeté" : "résolu"} — aucune action disponible
             </div>
           ) : (
             <div className="flex flex-wrap gap-2">
+              {canApproveReopen && (
+                <Button
+                  className="rounded-full"
+                  onClick={() => approveReopenMut.mutate()}
+                  disabled={approveReopenMut.isPending}
+                >
+                  {approveReopenMut.isPending
+                    ? <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                    : <RotateCcw className="mr-1 h-4 w-4" />}
+                  Approuver réouverture
+                </Button>
+              )}
+              {canRejectReopen && (
+                <Button
+                  variant="outline"
+                  className="rounded-full border-destructive/40 text-destructive hover:bg-destructive/10"
+                  onClick={() => setShowRejectReopenConfirm(true)}
+                >
+                  <XCircle className="mr-1 h-4 w-4" />
+                  Refuser réouverture
+                </Button>
+              )}
+              {/* Agent — auto-assignation d'un ticket libre de son périmètre */}
+              {canSelfAssign && (
+                <Button
+                  variant="outline"
+                  className="rounded-full"
+                  onClick={() => selfAssignMut.mutate()}
+                  disabled={selfAssignMut.isPending || !sessionUser?.id}
+                >
+                  {selfAssignMut.isPending
+                    ? <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                    : <UserCheck className="mr-1 h-4 w-4" />}
+                  M'assigner
+                </Button>
+              )}
               {/* C1/C9 — Prendre en charge : ASSIGNED, agent seulement */}
-              {r.status === "assigned" && isAgentOnly && (
+              {canTakeOwnership && (
                 <Button
                   variant="outline"
                   className="rounded-full"
@@ -801,11 +1578,11 @@ function RequestDetail() {
                   {takeOwnershipMut.isPending
                     ? <Loader2 className="mr-1 h-4 w-4 animate-spin" />
                     : <UserCheck className="mr-1 h-4 w-4" />}
-                  Prendre en charge
+                  Démarrer traitement
                 </Button>
               )}
               {/* C2 — Demander des informations : IN_PROGRESS, agent seulement */}
-              {r.status === "in_progress" && isAgentOnly && (
+              {canRequestInfo && (
                 <Button
                   variant="outline"
                   className="rounded-full"
@@ -816,7 +1593,7 @@ function RequestDetail() {
                 </Button>
               )}
               {/* C3 — Reprendre le traitement : PENDING, agent seulement */}
-              {r.status === "pending" && isAgentOnly && (
+              {canResumeTreatment && (
                 <Button
                   variant="outline"
                   className="rounded-full"
@@ -829,8 +1606,8 @@ function RequestDetail() {
                   Reprendre le traitement
                 </Button>
               )}
-              {/* C5 — Escalader : agent, chef, directeur, admin seulement (pas DG) */}
-              {canManageStatus && (
+              {/* C5 — Escalader : agent, chef, directeur, admin seulement */}
+              {canEscalateTicket && (
                 <Button
                   variant="outline"
                   className="rounded-full"
@@ -839,8 +1616,8 @@ function RequestDetail() {
                   <ArrowUpRight className="mr-1 h-4 w-4" /> Escalader
                 </Button>
               )}
-              {/* C6 — Réassigner : agent, chef, admin seulement (pas directeur ni DG) */}
-              {canAssign && (
+              {/* C6 — Assigner / réassigner : chef et admin seulement */}
+              {canAssignTicket && (
               <div className="relative">
                 <Button
                   variant="outline"
@@ -879,40 +1656,18 @@ function RequestDetail() {
                 )}
               </div>
               )}
-              {/* Fusionner + Dupliquer + Créer circuit : agent, chef, admin */}
-              {canAssign && (
-                <>
-                  <Button
-                    variant="outline"
-                    className="rounded-full"
-                    onClick={() => setShowMergeDialog(true)}
-                  >
-                    <GitMerge className="mr-1 h-4 w-4" /> Fusionner
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="rounded-full"
-                    onClick={() => duplicateMut.mutate()}
-                    disabled={duplicateMut.isPending}
-                  >
-                    {duplicateMut.isPending
-                      ? <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                      : <Copy className="mr-1 h-4 w-4" />}
-                    Dupliquer
-                  </Button>
-                  {workflows.length === 0 && (
-                    <Button
-                      variant="outline"
-                      className="rounded-full"
-                      onClick={() => setShowCircuitDialog(true)}
-                    >
-                      <GitBranch className="mr-1 h-4 w-4" /> Créer circuit
-                    </Button>
-                  )}
-                </>
+              {/* Créer circuit : agent, chef, admin */}
+              {canCreateCircuit && workflows.length === 0 && (
+                <Button
+                  variant="outline"
+                  className="rounded-full"
+                  onClick={() => setShowCircuitDialog(true)}
+                >
+                  <GitBranch className="mr-1 h-4 w-4" /> Créer circuit
+                </Button>
               )}
               {/* Chef + Director: Changer priorité */}
-              {(isDirector || isChief) && (
+              {canChangePriority && (
                 <div className="relative">
                   <Button variant="outline" className="rounded-full" onClick={() => setShowPriorityPicker((v) => !v)} disabled={changePriorityMut.isPending}>
                     <ChevronDown className="mr-1 h-4 w-4" /> Priorité
@@ -928,43 +1683,72 @@ function RequestDetail() {
                   )}
                 </div>
               )}
-              {/* Director: Rejeter + Changer service */}
-              {isDirector && (
+              {/* Responsables: Rejeter + Changer service + Transfert direction */}
+              {(canRejectTicket || canChangeService || canTransferDirection) && (
                 <>
-                  <Button variant="outline" className="rounded-full border-destructive/40 text-destructive hover:bg-destructive/10 hover:border-destructive/60" onClick={() => setShowRejectConfirm((v) => !v)}>
-                    <Ban className="mr-1 h-4 w-4" /> Rejeter
-                  </Button>
-                  <div className="relative">
-                    <Button variant="outline" className="rounded-full" onClick={() => setShowServicePicker((v) => !v)} disabled={changeServiceMut.isPending}>
-                      <Building2 className="mr-1 h-4 w-4" /> Service
+                  {canRejectTicket && (
+                    <Button variant="outline" className="rounded-full border-destructive/40 text-destructive hover:bg-destructive/10 hover:border-destructive/60" onClick={() => setShowRejectConfirm((v) => !v)}>
+                      <Ban className="mr-1 h-4 w-4" /> Rejeter
                     </Button>
-                    {showServicePicker && (
-                      <div className="absolute right-0 top-10 z-30 min-w-52 rounded-xl border border-border/50 bg-card shadow-xl p-1.5">
-                        <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Choisir un service</p>
-                        {availableServices.length === 0 ? (
-                          <p className="px-3 py-2 text-xs text-muted-foreground">Aucun service disponible</p>
-                        ) : availableServices.map((svc) => (
-                          <button key={svc} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs hover:bg-foreground/5" onClick={() => changeServiceMut.mutate(svc)}>
-                            {svc}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  )}
+                  {canChangeService && (
+                    <div className="relative">
+                      <Button variant="outline" className="rounded-full" onClick={() => setShowServicePicker((v) => !v)} disabled={changeServiceMut.isPending}>
+                        <Building2 className="mr-1 h-4 w-4" /> Service
+                      </Button>
+                      {showServicePicker && (
+                        <div className="absolute right-0 top-10 z-30 min-w-52 rounded-xl border border-border/50 bg-card shadow-xl p-1.5">
+                          <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Choisir un service</p>
+                          {availableServices.length === 0 ? (
+                            <p className="px-3 py-2 text-xs text-muted-foreground">Aucun service disponible</p>
+                          ) : availableServices.map((svc) => (
+                            <button key={svc} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs hover:bg-foreground/5" onClick={() => changeServiceMut.mutate(svc)}>
+                              {svc}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {canTransferDirection && (
+                    <Button
+                      variant="outline"
+                      className="rounded-full"
+                      onClick={() => {
+                        setTransferDirectionId("");
+                        setTransferReason("");
+                        setShowDirectionTransfer(true);
+                      }}
+                      disabled={transferDirectionMut.isPending}
+                    >
+                      <Building2 className="mr-1 h-4 w-4" /> Transférer direction
+                    </Button>
+                  )}
                 </>
               )}
-              {/* C4 — Marquer résolue : 1 clic direct */}
-              {canManageStatus && (r.status === "in_progress" || r.status === "assigned") && (
-                <Button
-                  className="rounded-full gradient-primary"
-                  disabled={resolveMut.isPending}
-                  onClick={() => resolveMut.mutate()}
-                >
-                  {resolveMut.isPending
-                    ? <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                    : <CheckCircle2 className="mr-1 h-4 w-4" />}
-                  Marquer résolue
-                </Button>
+              {/* C4 — Marquer résolue : 1 clic direct, ou avec note optionnelle */}
+              {canResolveTicket && (
+                <>
+                  <Button
+                    variant="outline"
+                    className="rounded-full"
+                    disabled={resolveMut.isPending}
+                    onClick={() => setShowResolveForm((v) => !v)}
+                  >
+                    <MessageSquare className="mr-1 h-4 w-4" />
+                    Ajouter une note
+                  </Button>
+                  <Button
+                    className="rounded-full gradient-primary"
+                    disabled={resolveMut.isPending}
+                    onClick={() => resolveMut.mutate()}
+                  >
+                    {resolveMut.isPending
+                      ? <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                      : <CheckCircle2 className="mr-1 h-4 w-4" />}
+                    Marquer résolue
+                  </Button>
+                </>
               )}
             </div>
           )
@@ -972,38 +1756,25 @@ function RequestDetail() {
       </header>
 
       {!isRequesterView && (
-        <div>
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              Parcours d'escalade
-            </h3>
-          </div>
-          <EscalationProgressBar
-            steps={buildStepsFromStatus(r.status, {
-              reopened: r.status === "in_progress" && r.timeline.length > 4,
-            }).map((s, i) => ({
-              ...s,
-              date: r.timeline[i]?.at,
-              actor: r.timeline[i]?.by,
-              comment: r.timeline[i]?.label,
-            }))}
-          />
-        </div>
+        <TicketComplianceTrace
+          request={r}
+          assigneeName={assigneeUser?.name}
+        />
       )}
 
       {isRequesterView && (
-        <div>
+        <section className="border-t border-border/40 bg-muted/10 px-5 py-4 sm:px-6">
           <h3 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
             Avancement de votre demande
           </h3>
           <EscalationProgressBar
             steps={buildRequesterStepsFromStatus(r.status, { rejected: r.status === "rejected" })}
           />
-        </div>
+        </section>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
-        <div className="space-y-6">
+      <div className="grid border-t border-border/40 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="min-w-0 space-y-5 p-4 sm:p-5 lg:p-6">
 
           {/* P10 — Bandeau PENDING */}
           {isRequesterView && r.status === "pending" && (
@@ -1034,7 +1805,7 @@ function RequestDetail() {
           )}
 
           {/* P7 — Formulaire de modification (demandeur, status=new uniquement) */}
-          {showEditForm && (
+          {showEditForm && canEdit && (
             <GlassCard className="border-primary/30 bg-primary/5">
               <h3 className="mb-1 font-semibold">Modifier la demande</h3>
               <p className="mb-4 text-xs text-muted-foreground">
@@ -1171,7 +1942,7 @@ function RequestDetail() {
                   <textarea
                     value={cancelReason}
                     onChange={(e) => setCancelReason(e.target.value)}
-                    placeholder="Motif de l'annulation (optionnel)…"
+                    placeholder="Motif de l'annulation…"
                     rows={2}
                     className="w-full resize-none rounded-xl border border-border/50 bg-background/60 px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-destructive/40"
                   />
@@ -1184,7 +1955,7 @@ function RequestDetail() {
                       size="sm"
                       variant="destructive"
                       className="rounded-full"
-                      disabled={cancelMut.isPending}
+                      disabled={!cancelReason.trim() || cancelMut.isPending}
                       onClick={() => cancelMut.mutate()}
                     >
                       {cancelMut.isPending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Ban className="mr-1.5 h-4 w-4" />}
@@ -1313,94 +2084,142 @@ function RequestDetail() {
             </Dialog>
           )}
 
-          {/* Fusion ticket — Dialog */}
-          {!isRequesterView && (
+          {/* C4 — Note de résolution optionnelle */}
+          {showResolveForm && (
+            <div className="space-y-2 rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3">
+              <Label htmlFor="resolution-note" className="text-sm font-medium">
+                Note de résolution (optionnelle)
+              </Label>
+              <Textarea
+                id="resolution-note"
+                value={resolutionNote}
+                onChange={(e) => setResolutionNote(e.target.value)}
+                placeholder="Décrivez comment la demande a été résolue…"
+                className="min-h-20 bg-background"
+              />
+              <p className="text-xs text-muted-foreground">
+                Cette note sera ajoutée à l'historique des commentaires (visible en interne uniquement).
+              </p>
+              <div className="flex justify-end gap-2">
+                <Button size="sm" variant="ghost" className="h-8 rounded-full px-3 text-xs"
+                  onClick={() => { setShowResolveForm(false); setResolutionNote(""); }}>
+                  Annuler
+                </Button>
+                <Button size="sm" className="h-8 rounded-full gradient-primary px-4 text-xs"
+                  disabled={resolveMut.isPending} onClick={() => resolveMut.mutate()}>
+                  {resolveMut.isPending
+                    ? <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                    : <CheckCircle2 className="mr-1 h-3 w-3" />}
+                  Confirmer la résolution
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Director — Confirmation rejet inline (1 clic) */}
+          {canRejectTicket && showRejectConfirm && (
+            <div className="space-y-3 rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
+              <div className="flex items-center gap-2">
+                <Ban className="h-4 w-4 shrink-0 text-destructive" />
+                <span className="font-medium text-destructive">Motif du rejet de cette demande</span>
+              </div>
+              <Textarea
+                value={rejectNote}
+                onChange={(e) => setRejectNote(e.target.value)}
+                placeholder="Expliquez clairement pourquoi cette demande est rejetée…"
+                className="min-h-20 bg-background"
+              />
+              <div className="flex justify-end gap-2">
+                <Button size="sm" variant="ghost" className="h-8 rounded-full px-3 text-xs"
+                  onClick={() => { setShowRejectConfirm(false); setRejectNote(""); }}>
+                  Annuler
+                </Button>
+                <Button size="sm" variant="destructive" className="h-8 rounded-full px-3 text-xs"
+                  disabled={!rejectNote.trim() || rejectMut.isPending} onClick={() => rejectMut.mutate()}>
+                  {rejectMut.isPending ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                  Rejeter
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {canRejectReopen && (
             <Dialog
-              open={showMergeDialog}
+              open={showRejectReopenConfirm}
               onOpenChange={(open) => {
-                if (!open) { setShowMergeDialog(false); setMergeTargetId(""); }
+                if (!open) {
+                  setShowRejectReopenConfirm(false);
+                  setRejectReopenNote("");
+                }
               }}
             >
               <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
                 <DialogHeader>
-                  <DialogTitle className="flex items-center gap-2">
-                    <GitMerge className="h-5 w-5 text-primary" />
-                    Fusionner la demande
+                  <DialogTitle className="flex items-center gap-2 text-destructive">
+                    <XCircle className="h-5 w-5" />
+                    Refuser la réouverture
                   </DialogTitle>
                   <DialogDescription>
-                    Cette demande (<span className="font-mono font-medium">{r?.ref}</span>) sera fusionnée dans la demande cible.
-                    Elle sera marquée annulée et liée à la cible. Cette action est irréversible.
+                    Le ticket restera dans son état actuel. Le motif sera visible dans l'historique.
                   </DialogDescription>
                 </DialogHeader>
-
-                <div className="space-y-3 py-2">
-                  <label className="text-sm font-medium">
-                    ID de la demande cible <span className="text-destructive">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={mergeTargetId}
-                    onChange={(e) => setMergeTargetId(e.target.value)}
-                    placeholder="Ex : 42"
-                    className="w-full rounded-xl border border-border/50 bg-background/60 px-3 py-2.5 text-sm font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                <div className="space-y-2 py-2">
+                  <Label htmlFor="reject-reopen-note" className="text-sm font-medium">
+                    Motif du refus <span className="text-destructive">*</span>
+                  </Label>
+                  <Textarea
+                    id="reject-reopen-note"
+                    value={rejectReopenNote}
+                    onChange={(e) => setRejectReopenNote(e.target.value)}
+                    placeholder="Expliquez pourquoi la réouverture est refusée…"
+                    className="min-h-24 bg-background"
                   />
-                  <p className="text-xs text-muted-foreground">
-                    Entrez l'identifiant numérique de la demande qui absorbe cette demande.
-                  </p>
                 </div>
-
                 <DialogFooter className="gap-2">
                   <Button
                     variant="ghost"
                     className="rounded-full"
-                    onClick={() => { setShowMergeDialog(false); setMergeTargetId(""); }}
+                    onClick={() => {
+                      setShowRejectReopenConfirm(false);
+                      setRejectReopenNote("");
+                    }}
                   >
                     Annuler
                   </Button>
                   <Button
-                    className="rounded-full gradient-primary"
-                    disabled={!mergeTargetId.trim() || mergeMut.isPending}
-                    onClick={() => mergeMut.mutate()}
+                    variant="destructive"
+                    className="rounded-full"
+                    disabled={!rejectReopenNote.trim() || rejectReopenMut.isPending}
+                    onClick={() => rejectReopenMut.mutate()}
                   >
-                    {mergeMut.isPending
+                    {rejectReopenMut.isPending
                       ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                      : <GitMerge className="mr-1.5 h-4 w-4" />}
-                    Confirmer la fusion
+                      : <XCircle className="mr-1.5 h-4 w-4" />}
+                    Refuser la réouverture
                   </Button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
           )}
 
-          {/* Director — Confirmation rejet inline (1 clic) */}
-          {isDirector && showRejectConfirm && (
-            <div className="flex items-center gap-2 rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
-              <Ban className="h-4 w-4 shrink-0 text-destructive" />
-              <span className="flex-1 font-medium text-destructive">Confirmer le rejet de cette demande ?</span>
-              <Button size="sm" variant="ghost" className="h-7 rounded-full px-3 text-xs"
-                onClick={() => setShowRejectConfirm(false)}>
-                Annuler
-              </Button>
-              <Button size="sm" variant="destructive" className="h-7 rounded-full px-3 text-xs"
-                disabled={rejectMut.isPending} onClick={() => rejectMut.mutate()}>
-                {rejectMut.isPending ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
-                Rejeter
-              </Button>
-            </div>
-          )}
 
+          <div className="overflow-hidden rounded-2xl border border-border/40 bg-background/35">
+            <section className="p-5">
+              <h3 className="mb-2 font-semibold">Description</h3>
+              <p className="text-sm leading-6 text-muted-foreground">{r.description}</p>
+            </section>
 
-          <GlassCard>
-            <h3 className="mb-2 font-semibold">Description</h3>
-            <p className="text-sm text-muted-foreground">{r.description}</p>
-          </GlassCard>
+            <section className="border-t border-border/40 p-5">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                <h3 className="font-semibold">Journal complet</h3>
+                <span className="rounded-full bg-muted px-2.5 py-1 text-[10px] font-medium text-muted-foreground">
+                  Actions · commentaires · statuts
+                </span>
+              </div>
+              <WorkflowTimeline events={r.timeline} />
+            </section>
 
-          <GlassCard>
-            <h3 className="mb-4 font-semibold">Historique</h3>
-            <WorkflowTimeline events={r.timeline} />
-          </GlassCard>
-
-          <GlassCard>
+            <section className="border-t border-border/40 p-5">
             <h3 className="mb-4 font-semibold">Commentaires</h3>
             {visibleComments.length === 0 && (
               <p className="text-sm text-muted-foreground">Aucun commentaire pour l'instant.</p>
@@ -1431,10 +2250,10 @@ function RequestDetail() {
               ))}
             </ul>
 
-            {r.status === "closed" || r.status === "rejected" ? (
+            {isArchived || r.status === "closed" || r.status === "rejected" ? (
               <div className="mt-5 flex items-center gap-2 rounded-xl border border-border/30 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
                 <Lock className="h-3.5 w-3.5 shrink-0" />
-                Les commentaires sont désactivés — ticket {r.status === "closed" ? "clôturé" : "rejeté"}.
+                Les commentaires sont désactivés — ticket {isArchived ? "archivé" : r.status === "closed" ? "clôturé" : "rejeté"}.
               </div>
             ) : (
               <div className="mt-5 space-y-3 rounded-2xl border border-border/40 bg-background/40 p-4">
@@ -1489,11 +2308,12 @@ function RequestDetail() {
                 </div>
               </div>
             )}
-          </GlassCard>
+            </section>
+          </div>
 
 
           {/* ── Panneau rejet (demandeur uniquement) ── */}
-          {isRequesterView && r.status === "rejected" && (
+          {iAmRequester && r.status === "rejected" && (
             <GlassCard className="space-y-4 border-destructive/30 bg-destructive/5">
               <div className="flex items-start gap-3">
                 <XCircle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
@@ -1572,7 +2392,7 @@ function RequestDetail() {
             </GlassCard>
           )}
 
-          {isRequesterView && r.status === "resolved" && (
+          {iAmRequester && r.status === "resolved" && (
             <GlassCard className={
               (r.infos as Record<string, unknown>)?.reopen_requested
                 ? "border-warning/30 bg-warning/5"
@@ -1601,29 +2421,43 @@ function RequestDetail() {
                           L'agent a marqué votre demande comme résolue. Confirmez si le problème est
                           bien réglé, ou contestez la résolution en précisant le motif.
                         </p>
+                        <div className={`mt-2 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${
+                          daysUntilAutoClose <= 1
+                            ? "bg-destructive/10 text-destructive"
+                            : "bg-warning/10 text-warning-foreground"
+                        }`}>
+                          <Clock className="h-3 w-3" />
+                          {daysUntilAutoClose === 0
+                            ? "Fermeture automatique aujourd'hui"
+                            : `Fermeture automatique dans ${daysUntilAutoClose} jour${daysUntilAutoClose > 1 ? "s" : ""}`}
+                        </div>
                       </div>
                       {!showReopenForm ? (
                         <div className="flex flex-wrap gap-2">
-                          <Button
-                            size="sm"
-                            className="rounded-full"
-                            disabled={closeMut.isPending}
-                            onClick={() => closeMut.mutate()}
-                          >
-                            {closeMut.isPending
-                              ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                              : <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />}
-                            Confirmer la résolution
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="rounded-full border-destructive/40 text-destructive hover:bg-destructive/10"
-                            onClick={() => setShowReopenForm(true)}
-                          >
-                            <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-                            Le problème persiste — contester
-                          </Button>
+                          {canClose && (
+                            <Button
+                              size="sm"
+                              className="rounded-full"
+                              disabled={closeMut.isPending}
+                              onClick={() => closeMut.mutate()}
+                            >
+                              {closeMut.isPending
+                                ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                                : <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />}
+                              Confirmer la résolution
+                            </Button>
+                          )}
+                          {canRequestReopen && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="rounded-full border-destructive/40 text-destructive hover:bg-destructive/10"
+                              onClick={() => setShowReopenForm(true)}
+                            >
+                              <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                              Le problème persiste — contester
+                            </Button>
+                          )}
                         </div>
                       ) : (
                         <div className="space-y-3 rounded-2xl border border-border/40 bg-background/40 p-4">
@@ -1668,6 +2502,68 @@ function RequestDetail() {
             </GlassCard>
           )}
 
+          {/* ── Carte fermeture (demandeur uniquement) ── */}
+          {iAmRequester && r.status === "closed" && (
+            <GlassCard className="border-muted/40 bg-muted/5">
+              <div className="flex items-start gap-3">
+                <Lock className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+                <div className="min-w-0 flex-1 space-y-3">
+                  <div>
+                    <h3 className="font-semibold">Demande clôturée</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {canReopenClosed
+                        ? "Cette demande a été fermée. Si votre problème persiste, vous pouvez encore la rouvrir."
+                        : "Cette demande est archivée. La fenêtre de réouverture (7 jours) est expirée — créez une nouvelle demande si nécessaire."}
+                    </p>
+                  </div>
+                  {canRequestReopen && (
+                    !showReopenForm ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="rounded-full"
+                        onClick={() => setShowReopenForm(true)}
+                      >
+                        <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                        Rouvrir la demande
+                      </Button>
+                    ) : (
+                      <div className="space-y-3 rounded-2xl border border-border/40 bg-background/40 p-4">
+                        <p className="text-sm font-medium">
+                          Motif de réouverture <span className="text-destructive">*</span>
+                        </p>
+                        <textarea
+                          value={reopenReason}
+                          onChange={(e) => setReopenReason(e.target.value)}
+                          placeholder="Décrivez précisément ce qui n'a pas été résolu…"
+                          rows={3}
+                          className="w-full resize-none rounded-xl border border-border/50 bg-background/60 px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                        />
+                        <div className="flex justify-end gap-2">
+                          <Button size="sm" variant="ghost" className="rounded-full"
+                            onClick={() => { setShowReopenForm(false); setReopenReason(""); }}>
+                            Annuler
+                          </Button>
+                          <Button
+                            size="sm"
+                            className="rounded-full gradient-primary"
+                            disabled={requestReopenMut.isPending || !reopenReason.trim()}
+                            onClick={() => requestReopenMut.mutate(reopenReason.trim())}
+                          >
+                            {requestReopenMut.isPending
+                              ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                              : <RotateCcw className="mr-1.5 h-3.5 w-3.5" />}
+                            Demander la réouverture
+                          </Button>
+                        </div>
+                      </div>
+                    )
+                  )}
+                </div>
+              </div>
+            </GlassCard>
+          )}
+
           {isRequesterView && (r.status === "resolved" || r.status === "closed") && (
             <div>
               <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
@@ -1698,163 +2594,77 @@ function RequestDetail() {
             </div>
           )}
 
-          {!isRequesterView && workflowDetails.length > 0 && (
-            <GlassCard>
-              <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                <ListTodo className="h-4 w-4" />
-                Étapes du workflow
-              </h3>
-              <div className="space-y-2">
-                {workflowDetails.map((step: WorkflowDetailItem) => {
-                  const isChild = !!step.parentId;
-                  return (
-                    <div
-                      key={step.id}
-                      className={
-                        "rounded-xl border border-border/40 bg-background/40 px-3 py-2.5 text-sm " +
-                        (isChild ? "ml-6" : "")
-                      }
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="mt-0.5 flex shrink-0 flex-col gap-1">
-                          <span
-                            className={
-                              "inline-block h-2 w-2 rounded-full " +
-                              (step.activated
-                                ? "bg-primary"
-                                : step.accepted
-                                ? "bg-success"
-                                : "bg-muted-foreground/40")
-                            }
-                          />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="rounded-full bg-muted/60 px-2 py-0.5 text-xs font-mono text-muted-foreground">
-                              {step.workflowStatus}
-                            </span>
-                            {step.accepted && (
-                              <span className="rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success">
-                                Accepté
-                              </span>
-                            )}
-                            {step.activated && (
-                              <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">
-                                Actif
-                              </span>
-                            )}
-                          </div>
-                          {(step.unitId || step.agentId) && (
-                            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-                              {step.unitId && (
-                                <span className="flex items-center gap-1">
-                                  <Building2 className="h-3 w-3" />
-                                  Unité {step.unitId}
-                                </span>
-                              )}
-                              {step.agentId && (
-                                <span className="flex items-center gap-1">
-                                  <User className="h-3 w-3" />
-                                  Agent {step.agentId}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        {/* Accepter / Refuser : uniquement sur les étapes actives non encore acceptées */}
-                        {step.activated && !step.accepted && canAssign && (
-                          <div className="flex shrink-0 gap-1.5">
-                            <Button
-                              size="sm"
-                              className="h-7 rounded-full px-3 text-xs"
-                              onClick={() => {
-                                setAcceptingStepId(step.id);
-                                setAcceptDialogMode("accept");
-                                setAcceptComment("");
-                              }}
-                            >
-                              <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
-                              Accepter
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 rounded-full px-3 text-xs text-destructive hover:bg-destructive/10 border-destructive/40"
-                              onClick={() => {
-                                setAcceptingStepId(step.id);
-                                setAcceptDialogMode("refuse");
-                                setAcceptComment("");
-                              }}
-                            >
-                              <X className="mr-1 h-3.5 w-3.5" />
-                              Refuser
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </GlassCard>
-          )}
-
-          {/* Dialog — Accepter / Refuser une étape workflow */}
-          {acceptingStepId && (
+          {/* Dialog — Transfert inter-direction */}
+          {!isRequesterView && (
             <Dialog
-              open
-              onOpenChange={(open) => { if (!open) { setAcceptingStepId(null); setAcceptComment(""); } }}
+              open={showDirectionTransfer}
+              onOpenChange={(open) => {
+                setShowDirectionTransfer(open);
+                if (!open) {
+                  setTransferDirectionId("");
+                  setTransferReason("");
+                }
+              }}
             >
               <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
                 <DialogHeader>
-                  <DialogTitle className={`flex items-center gap-2 ${acceptDialogMode === "accept" ? "text-success" : "text-destructive"}`}>
-                    {acceptDialogMode === "accept"
-                      ? <><CheckCircle2 className="h-5 w-5" /> Accepter l'étape</>
-                      : <><X className="h-5 w-5" /> Refuser l'étape</>
-                    }
+                  <DialogTitle className="flex items-center gap-2">
+                    <Building2 className="h-5 w-5 text-primary" />
+                    Transférer vers une direction
                   </DialogTitle>
                   <DialogDescription>
-                    {acceptDialogMode === "accept"
-                      ? "Confirmez l'acceptation de cette étape du circuit de validation."
-                      : "Cette étape sera marquée comme refusée. Un commentaire est recommandé."}
+                    La demande entrera dans la direction cible comme un ticket à qualifier.
                   </DialogDescription>
                 </DialogHeader>
-                <div className="space-y-3 py-2">
-                  <label className="text-sm font-medium">
-                    Commentaire {acceptDialogMode === "refuse" && <span className="text-destructive">*</span>}
-                    {acceptDialogMode === "accept" && <span className="text-muted-foreground"> (optionnel)</span>}
-                  </label>
-                  <textarea
-                    value={acceptComment}
-                    onChange={(e) => setAcceptComment(e.target.value)}
-                    placeholder={acceptDialogMode === "accept" ? "Note sur la validation…" : "Motif du refus…"}
-                    rows={3}
-                    className="w-full resize-none rounded-xl border border-border/50 bg-background/60 px-3 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
-                  />
+                <div className="space-y-4 py-2">
+                  <div className="space-y-1.5">
+                    <Label>Direction cible</Label>
+                    <select
+                      value={transferDirectionId}
+                      onChange={(e) => setTransferDirectionId(e.target.value)}
+                      className="w-full rounded-xl border border-border/50 bg-background/60 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    >
+                      <option value="">Choisir une direction</option>
+                      {transferDirectionOptions.map((direction) => (
+                        <option key={direction.id} value={direction.id}>
+                          {direction.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>
+                      Motif <span className="text-destructive">*</span>
+                    </Label>
+                    <Textarea
+                      value={transferReason}
+                      onChange={(e) => setTransferReason(e.target.value)}
+                      placeholder="Expliquez pourquoi la demande sort de votre direction…"
+                      rows={4}
+                    />
+                  </div>
                 </div>
                 <DialogFooter className="gap-2">
                   <Button
                     variant="ghost"
                     className="rounded-full"
-                    onClick={() => { setAcceptingStepId(null); setAcceptComment(""); }}
+                    onClick={() => setShowDirectionTransfer(false)}
                   >
                     Annuler
                   </Button>
                   <Button
-                    className={`rounded-full ${acceptDialogMode === "accept" ? "gradient-primary" : "bg-destructive text-destructive-foreground hover:bg-destructive/90"}`}
-                    disabled={(acceptDialogMode === "refuse" && !acceptComment.trim()) || acceptStepMut.isPending}
-                    onClick={() => acceptStepMut.mutate({
-                      stepId: acceptingStepId,
-                      accepted: acceptDialogMode === "accept",
-                      comment: acceptComment.trim() || undefined,
-                    })}
-                  >
-                    {acceptStepMut.isPending
-                      ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                      : acceptDialogMode === "accept"
-                        ? <><CheckCircle2 className="mr-1.5 h-4 w-4" /> Confirmer l'acceptation</>
-                        : <><X className="mr-1.5 h-4 w-4" /> Confirmer le refus</>
+                    className="rounded-full gradient-primary"
+                    disabled={
+                      !transferDirectionId ||
+                      !transferReason.trim() ||
+                      transferDirectionMut.isPending
                     }
+                    onClick={() => transferDirectionMut.mutate()}
+                  >
+                    {transferDirectionMut.isPending
+                      ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                      : <Building2 className="mr-1.5 h-4 w-4" />}
+                    Transférer
                   </Button>
                 </DialogFooter>
               </DialogContent>
@@ -1936,13 +2746,22 @@ function RequestDetail() {
           )}
         </div>
 
-        <aside className="space-y-4">
-          <GlassCard>
+        <aside className="border-t border-border/40 bg-muted/10 lg:border-l lg:border-t-0">
+          <div className="divide-y divide-border/40">
+          <section className="p-5">
             <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
               Suivi SLA
             </h3>
-            <div className="flex items-end justify-between">
-              <div className="text-3xl font-bold">{slaPct}%</div>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-2xl font-bold">{slaPct}%</div>
+                <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
+                  <Clock className="h-3.5 w-3.5" />
+                  {r.slaHours > 0
+                    ? `${r.slaElapsed}h / ${r.slaHours}h`
+                    : "SLA non configuré"}
+                </div>
+              </div>
               <span
                 className={
                   "rounded-full px-2.5 py-0.5 text-xs font-medium " +
@@ -1960,53 +2779,142 @@ function RequestDetail() {
                 style={{ width: slaPct + "%" }}
               />
             </div>
-            <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-              <Clock className="h-3.5 w-3.5" />
-              {r.slaHours > 0
-                ? `${r.slaElapsed}h écoulées / ${r.slaHours}h`
-                : "SLA non configuré"}
-            </div>
-          </GlassCard>
+          </section>
 
           {!isRequesterView && <RequesterCard r={r} directions={directions} />}
 
-          <GlassCard>
+          <section className="p-5">
+            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+              Intervenants
+            </h3>
+            {participants.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Aucun intervenant enregistré.</p>
+            ) : (
+              <ul className="space-y-3">
+                {participants.map((participant) => (
+                  <li key={participant.key} className="flex items-start gap-3">
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                      {participant.name
+                        .split(" ")
+                        .map((part) => part[0])
+                        .join("")
+                        .slice(0, 2)
+                        .toUpperCase()}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium" title={participant.name}>
+                        {participant.name}
+                      </div>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                        {participant.role && (
+                          <span className="rounded-full bg-muted px-2 py-0.5">
+                            {participantRoleLabel(participant.role)}
+                          </span>
+                        )}
+                        <span className="truncate" title={participant.detail}>
+                          {participant.detail}
+                        </span>
+                      </div>
+                      {participant.lastAt && (
+                        <div className="mt-0.5 text-[10px] text-muted-foreground">
+                          {formatDistanceToNow(new Date(participant.lastAt), { addSuffix: true, locale: fr })}
+                        </div>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="p-5">
             <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
               Traitement
             </h3>
             <dl className="space-y-3 text-sm">
-              <div>
-                <dt className="text-xs text-muted-foreground">Direction</dt>
-                <dd className="mt-0.5">{directionName}</dd>
+
+              {/* Direction + Service côte à côte */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <dt className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Building2 className="h-3 w-3" /> Direction
+                  </dt>
+                  <dd className="mt-0.5 font-medium truncate" title={directionName}>{directionName}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Service</dt>
+                  <dd className="mt-0.5 font-medium truncate" title={unitName}>{unitName}</dd>
+                </div>
               </div>
-              <div>
-                <dt className="text-xs text-muted-foreground">Service</dt>
-                <dd className="mt-0.5">{unitName}</dd>
-              </div>
+
+              <div className="border-t border-border/30" />
+
+              {/* Catégorie */}
               <div>
                 <dt className="text-xs text-muted-foreground">Catégorie</dt>
                 <dd className="mt-0.5">{r.category}</dd>
               </div>
-              {isRequesterView && r.assigneeId && (
+
+              {/* Agent en charge */}
+              {isRequesterView && (
                 <div>
                   <dt className="text-xs text-muted-foreground">Agent en charge</dt>
                   <dd className="mt-0.5 flex items-center gap-1.5">
                     <UserCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    {assigneeUser?.name ?? "En cours d'assignation"}
+                    {r.assigneeId
+                      ? (assigneeUser?.name ?? "En cours d'assignation")
+                      : <span className="italic text-muted-foreground">En attente d'assignation</span>}
                   </dd>
                 </div>
               )}
-              {isRequesterView && !r.assigneeId && !isFinal && (
+
+              <div className="border-t border-border/30" />
+
+              {/* Dates : création + fin */}
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <dt className="text-xs text-muted-foreground">Agent en charge</dt>
-                  <dd className="mt-0.5 text-muted-foreground italic">En attente d'assignation</dd>
+                  <dt className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Clock className="h-3 w-3" /> Créé le
+                  </dt>
+                  <dd className="mt-0.5 text-xs font-medium">
+                    {format(new Date(r.createdAt), "d MMM yyyy", { locale: fr })}
+                  </dd>
+                  <dd className="text-[10px] text-muted-foreground">
+                    {format(new Date(r.createdAt), "HH:mm", { locale: fr })}
+                  </dd>
                 </div>
-              )}
+                {["resolved", "closed", "rejected", "cancelled"].includes(r.status) ? (
+                  <div>
+                    <dt className="text-xs text-muted-foreground flex items-center gap-1">
+                      <CheckCircle2 className="h-3 w-3 text-success" />
+                      {r.status === "rejected" ? "Rejeté le" : r.status === "cancelled" ? "Annulé le" : "Résolu le"}
+                    </dt>
+                    <dd className="mt-0.5 text-xs font-medium text-success">
+                      {format(new Date(r.updatedAt), "d MMM yyyy", { locale: fr })}
+                    </dd>
+                    <dd className="text-[10px] text-muted-foreground">
+                      {format(new Date(r.updatedAt), "HH:mm", { locale: fr })}
+                    </dd>
+                  </div>
+                ) : (
+                  <div>
+                    <dt className="text-xs text-muted-foreground flex items-center gap-1">
+                      <Clock className="h-3 w-3" /> Mis à jour
+                    </dt>
+                    <dd className="mt-0.5 text-xs font-medium">
+                      {format(new Date(r.updatedAt), "d MMM yyyy", { locale: fr })}
+                    </dd>
+                    <dd className="text-[10px] text-muted-foreground">
+                      {format(new Date(r.updatedAt), "HH:mm", { locale: fr })}
+                    </dd>
+                  </div>
+                )}
+              </div>
             </dl>
-          </GlassCard>
+          </section>
 
           {slaOver && (
-            <GlassCard className="border-destructive/40 bg-destructive/5">
+            <section className="bg-destructive/5 p-5">
               <div className="flex items-start gap-3">
                 <AlertTriangle className="mt-0.5 h-5 w-5 text-destructive" />
                 <div>
@@ -2016,9 +2924,11 @@ function RequestDetail() {
                   </p>
                 </div>
               </div>
-            </GlassCard>
+            </section>
           )}
+          </div>
         </aside>
+      </div>
       </div>
     </div>
   );
@@ -2031,7 +2941,7 @@ function RequesterCard({ r: req, directions }: { r: RequestItem; directions: Dir
   const isExternal = req.requesterType === "external" || req.isExternal;
 
   return (
-    <GlassCard>
+    <section className="p-5">
       <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
         Fiche demandeur
       </h3>
@@ -2136,6 +3046,7 @@ function RequesterCard({ r: req, directions }: { r: RequestItem; directions: Dir
           </div>
         )}
       </dl>
-    </GlassCard>
+    </section>
   );
 }
+

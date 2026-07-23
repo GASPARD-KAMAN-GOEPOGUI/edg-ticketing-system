@@ -107,12 +107,6 @@ const _DIRECTOR: Permission[] = [
   "view_global_reports",
 ];
 
-const _DG: Permission[] = [
-  ..._DIRECTOR,
-  "view_global_reports",
-  "view_sms_logs",
-];
-
 const _ADMIN: Permission[] = [
   // Toutes les permissions
   "view_own_profile", "edit_own_profile",
@@ -138,7 +132,6 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   agent:    _AGENT,
   chief:    _CHIEF,
   director: _DIRECTOR,
-  dg:       _DG,
   admin:    _ADMIN,
 };
 
@@ -150,8 +143,7 @@ const ROLE_HIERARCHY: Record<Role, number> = {
   agent:    2,
   chief:    3,
   director: 4,
-  dg:       5,
-  admin:    6,
+  admin:    5,
 };
 
 // ── Fonctions utilitaires ─────────────────────────────────────────────────────

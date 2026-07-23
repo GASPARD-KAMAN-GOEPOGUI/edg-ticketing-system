@@ -8,11 +8,11 @@ from api.schemas.SchemaSlaPolicy import SlaPolicyCreate, SlaPolicyUpdate, SlaPol
 from api.schemas.base import PaginatedResponse
 from api.services import SlaPolicyService
 
-# Lecture : agent, chief, director, dg, admin (CDC §6.1 — affichage SLA sur les tickets)
+# Lecture : agent, chief, director, admin (CDC §6.1 — affichage SLA sur les tickets)
 read_router = APIRouter(
     prefix="/sla-policies",
     tags=["sla-policies"],
-    dependencies=[Depends(require_roles("agent", "chief", "director", "dg", "admin"))],
+    dependencies=[Depends(require_roles("agent", "chief", "director", "admin"))],
 )
 
 # Écriture : admin uniquement

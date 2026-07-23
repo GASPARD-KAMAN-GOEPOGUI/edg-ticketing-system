@@ -30,7 +30,7 @@ import {
   publishArticle,
   deleteArticle,
 } from "@/lib/api/knowledge";
-import { fetchRefTable } from "@/lib/api/admin-config";
+import { fetchKnowledgeCategories } from "@/lib/api/admin-config";
 import { useRole } from "@/lib/session";
 import { LayoutToggle, type LayoutMode } from "@/components/layout-toggle";
 import {
@@ -81,7 +81,7 @@ function KnowledgePage() {
 
   const { data: categoriesRef = [] } = useQuery({
     queryKey: ["ref", "knowledge_categories"],
-    queryFn: () => fetchRefTable("knowledge_categories"),
+    queryFn: fetchKnowledgeCategories,
     staleTime: 10 * 60_000,
   });
   const categories = categoriesRef.length > 0

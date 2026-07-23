@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.models.ModelAnnouncementCategory import AnnouncementCategory
 from api.models.ModelAnnouncementPriority import AnnouncementPriority
 from api.models.ModelAnnouncementStatus import AnnouncementStatus
+from api.core.rbac import normalize_role
 from api.repositories import (
     AnnouncementRepository,
     AnnouncementTargetRoleRepository,
@@ -14,7 +15,22 @@ from api.core.event_bus import AppEvent, emit as emit_event
 from api.services.base_service import BaseService
 from api.services.NotificationEmitter import emit as emit_notif
 
-_ADMIN_ROLES: frozenset[str] = frozenset({"admin", "dg"})
+_ADMIN_ROLES: frozenset[str] = frozenset({"admin"})
+
+
+def _is_admin_role(actor_role: str) -> bool:
+    return normalize_role(actor_role) in _ADMIN_ROLES
+
+
+def _normalize_target_roles(roles: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for role in roles:
+        value = normalize_role(role)
+        if value not in seen:
+            normalized.append(value)
+            seen.add(value)
+    return normalized
 
 
 class AnnouncementService(BaseService):
@@ -56,7 +72,7 @@ class AnnouncementService(BaseService):
     # ── Listes ────────────────────────────────────────────────────────────────
 
     async def list_all(self, *, actor_role: str = "user", page: int = 1, limit: int = 20):
-        filters = None if actor_role in _ADMIN_ROLES else {"visibility": "public"}
+        filters = None if _is_admin_role(actor_role) else {"visibility": "public"}
         items, total = await self.repo.list(
             filters=filters,
             order_by="-created_at",
@@ -91,7 +107,7 @@ class AnnouncementService(BaseService):
         data.pop("channel_names", None)
         data.pop("unity_ids", None)
         data.pop("direction_ids", None)
-        role_names = data.pop("role_names", [])
+        role_names = _normalize_target_roles(data.pop("role_names", []))
         translated = await self._translate_codes(data)
         obj = await self.repo.create(translated)
         if role_names:
@@ -108,6 +124,8 @@ class AnnouncementService(BaseService):
         data.pop("unity_ids", None)
         data.pop("direction_ids", None)
         role_names = data.pop("role_names", None)
+        if role_names is not None:
+            role_names = _normalize_target_roles(role_names)
         if data:
             translated = await self._translate_codes(data)
             obj = await self.repo.update(id, translated)
@@ -193,5 +211,7 @@ class AnnouncementService(BaseService):
         return await self.role_repo.list_by_announcement(announcement_id)
 
     async def set_target_roles(self, announcement_id: str, roles: list[str]):
-        return await self.role_repo.bulk_set_roles(announcement_id, roles)
-
+        return await self.role_repo.bulk_set_roles(
+            announcement_id,
+            _normalize_target_roles(roles),
+        )

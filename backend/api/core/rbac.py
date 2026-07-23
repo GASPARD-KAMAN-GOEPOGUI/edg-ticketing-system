@@ -2,7 +2,7 @@
 RBAC — Rôles et permissions EDG Connect.
 
 Hiérarchie des rôles (du moins au plus privilégié) :
-  public < user < agent < chief < director < dg < admin
+  public < user < agent < chief < director < admin
 
 Chaque rôle hérite des permissions des rôles inférieurs.
 Les permissions sont cumulatives : un chief a toutes les permissions d'un agent.
@@ -127,12 +127,17 @@ _DIRECTOR: set[Permission] = _CHIEF | {
     _P.VIEW_GLOBAL_REPORTS,
 }
 
-_DG: set[Permission] = _DIRECTOR | {
-    _P.VIEW_GLOBAL_REPORTS,
-    _P.VIEW_SMS_LOGS,
+_ADMIN: set[Permission] = {p for p in _P}  # toutes les permissions
+
+LEGACY_ROLE_ALIASES: dict[str, str] = {
+    "dg": "director",
 }
 
-_ADMIN: set[Permission] = {p for p in _P}  # toutes les permissions
+
+def normalize_role(role: str | None) -> str:
+    """Normalise les anciens libelles de role vers la nomenclature CDC."""
+    value = (role or "user").strip().lower()
+    return LEGACY_ROLE_ALIASES.get(value, value)
 
 
 ROLE_PERMISSIONS: dict[str, set[Permission]] = {
@@ -141,7 +146,6 @@ ROLE_PERMISSIONS: dict[str, set[Permission]] = {
     "agent":    _AGENT,
     "chief":    _CHIEF,
     "director": _DIRECTOR,
-    "dg":       _DG,
     "admin":    _ADMIN,
 }
 
@@ -152,21 +156,21 @@ ROLE_HIERARCHY: dict[str, int] = {
     "agent":    2,
     "chief":    3,
     "director": 4,
-    "dg":       5,
-    "admin":    6,
+    "admin":    5,
 }
 
 
 def has_permission(role: str, permission: Permission) -> bool:
     """Vérifie si un rôle dispose d'une permission donnée."""
-    return permission in ROLE_PERMISSIONS.get(role, set())
+    return permission in ROLE_PERMISSIONS.get(normalize_role(role), set())
 
 
 def has_role(current_role: str, *required_roles: str) -> bool:
     """Vérifie si le rôle actuel est dans la liste des rôles requis."""
-    return current_role in required_roles
+    allowed = {normalize_role(role) for role in required_roles if role != "dg"}
+    return normalize_role(current_role) in allowed
 
 
 def role_at_least(current_role: str, min_role: str) -> bool:
     """Vérifie si le rôle actuel est au moins aussi élevé que min_role."""
-    return ROLE_HIERARCHY.get(current_role, -1) >= ROLE_HIERARCHY.get(min_role, 99)
+    return ROLE_HIERARCHY.get(normalize_role(current_role), -1) >= ROLE_HIERARCHY.get(normalize_role(min_role), 99)

@@ -100,7 +100,8 @@ def _svc(db: AsyncSession = Depends(get_db)) -> AccountService:
     return AccountService(db)
 
 
-# ── Helper — log d'activité (fire-and-forget, ne bloque pas la réponse) ────────
+# ── Helper — log d'activité (best-effort : échec avalé, ne bloque pas la réponse
+#    en cas d'erreur, mais reste awaited — profilage a mesuré <0.05s en pratique) ─
 
 async def _log_auth_event(
     db: AsyncSession,

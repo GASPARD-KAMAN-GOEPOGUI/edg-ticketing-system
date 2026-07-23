@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.core.error_codes import ErrorCode
 from api.core.phone import normalize_phone
+from api.core.rbac import normalize_role
 from api.core.ref_validation import check_ref_code
 from api.core.security import hash_password, verify_password
+from api.models.ModelOrganigram import Organigram
+from api.models.ModelUnity import Unity
 from api.repositories import AccountRepository, AccountStatusRepository
 from api.services.base_service import BaseService
 
@@ -49,6 +53,88 @@ class AccountService(BaseService):
                 hint="Chaque matricule doit être unique. Vérifiez la valeur saisie.",
             )
 
+    @staticmethod
+    def _org_kind_from(unity: Unity, org: Organigram) -> str:
+        infos = unity.infos if isinstance(unity.infos, dict) else {}
+        raw_kind = str(infos.get("org_type") or "").strip().lower()
+        if raw_kind in {"direction", "department", "unit"}:
+            return raw_kind
+
+        label = (unity.label or "").strip().lower()
+        if label.startswith("direction"):
+            return "direction"
+        if label.startswith(("département", "departement")):
+            return "department"
+        if label.startswith(("service", "unité", "unite", "secrétariat", "secretariat", "cabinet")):
+            return "unit"
+        return "direction" if org.parent_id is None else "unit"
+
+    async def _active_org_kind(self, unity_id: int) -> str:
+        row = await self.session.execute(
+            select(Organigram, Unity)
+            .join(Unity, Organigram.unity_id == Unity.id)
+            .where(
+                Organigram.unity_id == unity_id,
+                Organigram.deleted_at.is_(None),
+                Unity.deleted_at.is_(None),
+                Organigram.status.is_(True),
+                Unity.status.is_(True),
+            )
+            .limit(1)
+        )
+        match = row.first()
+        if not match:
+            raise self.bad_request(
+                "L'affectation organisationnelle sélectionnée est introuvable ou inactive.",
+                error_code="INVALID_ORG_ASSIGNMENT",
+                field="unity_id",
+                hint="Sélectionnez une direction, un département ou une unité active.",
+            )
+        org, unity = match
+        return self._org_kind_from(unity, org)
+
+    async def _validate_role_org_assignment(
+        self,
+        *,
+        role: str,
+        unity_id: int | None,
+    ) -> None:
+        role = normalize_role(role)
+        if role == "public":
+            return
+
+        if role == "director":
+            allowed = {"direction"}
+            message = "La direction est obligatoire pour ce rôle."
+            hint = "Affectez ce compte à une direction active."
+        elif role == "chief":
+            allowed = {"department", "unit"}
+            message = "Le chef doit être affecté à un département ou à un service actif."
+            hint = "Sélectionnez Chef de département ou Chef de service dans le formulaire admin."
+        elif role in {"user", "agent", "admin"}:
+            allowed = {"unit"}
+            message = "Le service ou l'unité est obligatoire pour ce rôle."
+            hint = "Affectez ce compte à une unité active appartenant à un département."
+        else:
+            return
+
+        if unity_id is None:
+            raise self.bad_request(
+                message,
+                error_code="ORG_ASSIGNMENT_REQUIRED",
+                field="unity_id",
+                hint=hint,
+            )
+
+        kind = await self._active_org_kind(int(unity_id))
+        if kind not in allowed:
+            raise self.bad_request(
+                "L'affectation organisationnelle ne correspond pas au rôle sélectionné.",
+                error_code="INVALID_ORG_ASSIGNMENT_FOR_ROLE",
+                field="unity_id",
+                hint=hint,
+            )
+
     # ── Listes ────────────────────────────────────────────────────────────────
 
     async def list_all(self, *, page: int = 1, limit: int = 20):
@@ -56,6 +142,7 @@ class AccountService(BaseService):
         return self.paginate(items, total, page, limit)
 
     async def list_by_role(self, role: str, *, page: int = 1, limit: int = 50):
+        role = normalize_role(role)
         items, total = await self.repo.list_by_role(role, page=page, limit=limit)
         return self.paginate(items, total, page, limit)
 
@@ -65,6 +152,20 @@ class AccountService(BaseService):
 
     async def list_by_direction(self, direction_id: int, *, page: int = 1, limit: int = 50):
         items, total = await self.repo.list_by_direction(direction_id, page=page, limit=limit)
+        return self.paginate(items, total, page, limit)
+
+    async def list_by_unit(self, unit_id: int, *, page: int = 1, limit: int = 50):
+        items, total = await self.repo.list_by_unit(unit_id, page=page, limit=limit)
+        return self.paginate(items, total, page, limit)
+
+    async def list_by_role_and_direction(self, role: str, direction_id: int, *, page: int = 1, limit: int = 50):
+        role = normalize_role(role)
+        items, total = await self.repo.list_by_role_and_direction(role, direction_id, page=page, limit=limit)
+        return self.paginate(items, total, page, limit)
+
+    async def list_by_role_and_unit(self, role: str, unit_id: int, *, page: int = 1, limit: int = 50):
+        role = normalize_role(role)
+        items, total = await self.repo.list_by_role_and_unit(role, unit_id, page=page, limit=limit)
         return self.paginate(items, total, page, limit)
 
     # ── Lecture ───────────────────────────────────────────────────────────────
@@ -127,8 +228,21 @@ class AccountService(BaseService):
 
     # ── Écriture ──────────────────────────────────────────────────────────────
 
-    async def create(self, data: dict):
+    async def create(self, data: dict, *, validate_org_assignment: bool = False):
         self._logger.info(f"Création d'un compte — email={data.get('email')!r}")
+
+        unit_id = data.pop("unit_id", None)
+        department_id = data.pop("department_id", None)
+        direction_id = data.pop("direction_id", None)
+        if not data.get("unity_id"):
+            if unit_id is not None:
+                data["unity_id"] = unit_id
+            elif department_id is not None:
+                data["unity_id"] = department_id
+            elif direction_id is not None:
+                data["unity_id"] = direction_id
+        if data.get("role"):
+            data["role"] = normalize_role(data["role"])
 
         # Unicité e-mail
         existing = await self.repo.find_by_email(data.get("email", ""))
@@ -157,12 +271,43 @@ class AccountService(BaseService):
         # Auto is_edg_employee
         data = self._auto_edg_employee(data)
 
+        if validate_org_assignment:
+            await self._validate_role_org_assignment(
+                role=data.get("role", "user"),
+                unity_id=data.get("unity_id"),
+            )
+
         obj = await self.repo.create(data)
         self._logger.info(f"✅ Compte créé — id={obj.id}")
         return obj
 
-    async def update(self, id: int, data: dict):
+    async def update(self, id: int, data: dict, *, validate_org_assignment: bool = False):
         self._logger.info(f"Mise à jour du compte — id={id}")
+
+        current = await self.repo.get_by_id(id)
+        if current is None:
+            raise self.not_found(
+                "Ce compte utilisateur n'existe pas.",
+                error_code=ErrorCode.ACCOUNT_NOT_FOUND,
+                field="id",
+                value=id,
+            )
+
+        # unit_id/direction_id ne sont pas de vraies colonnes (alias frontend) —
+        # seul unity_id l'est. Sans cette traduction, ces valeurs étaient
+        # silencieusement ignorées par le filtrage de colonnes du repository.
+        unit_id = data.pop("unit_id", None)
+        department_id = data.pop("department_id", None)
+        direction_id = data.pop("direction_id", None)
+        if not data.get("unity_id"):
+            if unit_id is not None:
+                data["unity_id"] = unit_id
+            elif department_id is not None:
+                data["unity_id"] = department_id
+            elif direction_id is not None:
+                data["unity_id"] = direction_id
+        if data.get("role"):
+            data["role"] = normalize_role(data["role"])
 
         # Unicité e-mail
         if data.get("email"):
@@ -192,14 +337,13 @@ class AccountService(BaseService):
         # Auto is_edg_employee
         data = self._auto_edg_employee(data)
 
-        obj = await self.repo.update(id, data)
-        if obj is None:
-            raise self.not_found(
-                "Ce compte utilisateur n'existe pas.",
-                error_code=ErrorCode.ACCOUNT_NOT_FOUND,
-                field="id",
-                value=id,
+        if validate_org_assignment and ("role" in data or "unity_id" in data):
+            await self._validate_role_org_assignment(
+                role=data.get("role", current.role),
+                unity_id=data.get("unity_id", current.unity_id),
             )
+
+        obj = await self.repo.update(id, data)
         return obj
 
     async def delete(self, id: int) -> bool:
@@ -241,7 +385,7 @@ class AccountService(BaseService):
         return self.paginate(items, total, page, limit)
 
     async def set_role(self, id: int, role: str):
-        return await self.update(id, {"role": role})
+        return await self.update(id, {"role": normalize_role(role)}, validate_org_assignment=True)
 
     # ── Auth ──────────────────────────────────────────────────────────────────
 

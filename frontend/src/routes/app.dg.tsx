@@ -45,6 +45,7 @@ import { fetchRequests } from "@/lib/api/requests";
 import { fetchDirections } from "@/lib/api/directions-units";
 import { fetchEscalations, reviewEscalation, resolveEscalation } from "@/lib/api/escalations";
 import { fetchCsatByDirection } from "@/lib/api/csat";
+import { downloadReport, type ExportFormat } from "@/lib/api/reports";
 import { formatDistanceToNow } from "date-fns";
 import { fr } from "date-fns/locale";
 import {
@@ -57,15 +58,17 @@ import {
   XCircle,
   Megaphone,
   Send,
+  Building2,
+  Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api/client";
 
 export const Route = createFileRoute("/app/dg")({
-  beforeLoad: () => requireRole("dg", "admin"),
+  beforeLoad: () => requireRole("admin"),
   head: () => ({ meta: [{ title: "Vue globale — EDG Support" }] }),
-  component: DGView,
+  component: GlobalView,
 });
 
 const PIE_COLORS = [
@@ -80,11 +83,23 @@ const ACTIVE_STATUSES = new Set([
   "new", "qualifying", "qualified", "assigned", "in_progress", "pending", "reopened",
 ]);
 
+const ALL_DIRECTIONS_VALUE = "all";
+
+const STATUS_BUCKETS = [
+  { key: "new", label: "Nouveaux", hint: "Créés hors qualification", tone: "border-info/30 bg-info/10 text-info" },
+  { key: "qualifying", label: "À qualifier", hint: "Dans la file d'orientation", tone: "border-warning/40 bg-warning/15 text-warning-foreground dark:text-warning" },
+  { key: "assigned", label: "Affectés", hint: "Orientés ou assignés", tone: "border-primary/30 bg-primary/10 text-primary" },
+  { key: "inProgress", label: "En traitement", hint: "Traitement actif ou rouvert", tone: "border-accent/30 bg-accent/10 text-accent-foreground" },
+  { key: "pending", label: "En validation", hint: "Attente de validation", tone: "border-muted-foreground/30 bg-muted/20 text-muted-foreground" },
+  { key: "resolved", label: "Résolus", hint: "Résolution proposée", tone: "border-success/30 bg-success/10 text-success" },
+  { key: "closed", label: "Fermés", hint: "Clôture confirmée", tone: "border-success/40 bg-success/15 text-success" },
+  { key: "escalated", label: "Escaladés", hint: "Escalade active", tone: "border-destructive/30 bg-destructive/10 text-destructive" },
+] as const;
+
 const levelTone: Record<EscalationItem["level"], string> = {
   L1: "bg-info/15 text-info",
   L2: "bg-warning/20 text-warning-foreground dark:text-warning",
   L3: "bg-destructive/15 text-destructive",
-  DG: "bg-gradient-to-r from-primary to-accent text-background",
 };
 
 function slaColorClass(pct: number) {
@@ -93,7 +108,7 @@ function slaColorClass(pct: number) {
   return "border-destructive/30 bg-destructive/15 text-destructive";
 }
 
-function DGView() {
+function GlobalView() {
   const qc = useQueryClient();
   const sessionUser = useUser();
 
@@ -134,19 +149,25 @@ function DGView() {
   const [arbitrageEsc, setArbitrageEsc] = useState<EscalationItem | null>(null);
   const [arbitrageComment, setArbitrageComment] = useState("");
   const [arbitrageAction, setArbitrageAction] = useState<"resolve" | "reject">("resolve");
+  const [selectedDirectionId, setSelectedDirectionId] = useState(ALL_DIRECTIONS_VALUE);
+  const [reportFormat, setReportFormat] = useState<ExportFormat>("excel");
+  const [isExporting, setIsExporting] = useState(false);
+
+  const directionFilter =
+    selectedDirectionId === ALL_DIRECTIONS_VALUE ? undefined : selectedDirectionId;
 
   // ── Queries ───────────────────────────────────────────────────────────────────
   const { data: reqData, isLoading: loadReq } = useQuery({
-    queryKey: ["dg-requests"],
-    queryFn: () => fetchRequests({ limit: 500 }),
+    queryKey: ["global-requests", directionFilter ?? ALL_DIRECTIONS_VALUE],
+    queryFn: () => fetchRequests({ limit: 1000, direction_id: directionFilter }),
     staleTime: 30_000,
   });
   const items = reqData?.items ?? [];
   const total = reqData?.total ?? items.length;
 
   const { data: escData, isLoading: loadEsc } = useQuery({
-    queryKey: ["dg-escalations"],
-    queryFn: () => fetchEscalations({ level: "DG", limit: 100 }),
+    queryKey: ["global-escalations"],
+    queryFn: () => fetchEscalations({ limit: 100 }),
     staleTime: 30_000,
   });
   const escalations: EscalationItem[] = escData?.items ?? [];
@@ -157,6 +178,13 @@ function DGView() {
     staleTime: 5 * 60_000,
   });
   const directionLookup = Object.fromEntries(directionsData.map((d) => [d.id, d.name]));
+  const selectedDirection = directionsData.find((d) => d.id === selectedDirectionId);
+  const scopeLabel = directionFilter
+    ? selectedDirection?.name ?? "Direction sélectionnée"
+    : "Toutes les directions";
+  const scopeDetail = directionFilter
+    ? "Données limitées à la direction sélectionnée"
+    : "Vue consolidée de toutes les directions EDG";
 
   const { data: csatByDir } = useQuery({
     queryKey: ["csat-by-direction"],
@@ -165,13 +193,22 @@ function DGView() {
   });
 
   const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ["dg-escalations"] });
-    qc.invalidateQueries({ queryKey: ["dg-requests"] });
+    qc.invalidateQueries({ queryKey: ["global-escalations"] });
+    qc.invalidateQueries({ queryKey: ["global-requests"] });
     qc.invalidateQueries({ queryKey: ["escalations"] });
     qc.invalidateQueries({ queryKey: ["requests"] });
     qc.invalidateQueries({ queryKey: ["stats"] });
     qc.invalidateQueries({ queryKey: ["dashboard-stats"] });
   };
+
+  const requestIdsInScope = useMemo(() => new Set(items.map((r) => r.id)), [items]);
+  const scopedEscalations = useMemo(
+    () =>
+      directionFilter
+        ? escalations.filter((e) => e.requestId && requestIdsInScope.has(e.requestId))
+        : escalations,
+    [directionFilter, escalations, requestIdsInScope],
+  );
 
   // ── KPIs ─────────────────────────────────────────────────────────────────────
   const resolvedCount = items.filter((r) => ["resolved", "closed"].includes(r.status)).length;
@@ -182,13 +219,53 @@ function DGView() {
     slaActive.length > 0
       ? Math.round((slaActive.filter((r) => r.slaElapsed <= r.slaHours).length / slaActive.length) * 100)
       : 100;
-  const pendingEsc = escalations.filter((e) => e.status !== "resolved");
+  const pendingEsc = scopedEscalations.filter((e) => e.status !== "resolved");
   const closedEsc = useMemo(
-    () => escalations.filter((e) => e.status === "resolved").sort(
+    () => scopedEscalations.filter((e) => e.status === "resolved").sort(
       (a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()
     ),
-    [escalations],
+    [scopedEscalations],
   );
+
+  const statusSummary = useMemo(() => {
+    const activeEscalatedRequestIds = new Set(
+      scopedEscalations
+        .filter((e) => e.status !== "resolved" && e.requestId)
+        .map((e) => e.requestId as string),
+    );
+    const summary = {
+      total,
+      new: 0,
+      qualifying: 0,
+      assigned: 0,
+      inProgress: 0,
+      pending: 0,
+      resolved: 0,
+      closed: 0,
+      escalated: 0,
+    };
+
+    items.forEach((r) => {
+      if (r.status === "closed") summary.closed += 1;
+      else if (r.status === "resolved") summary.resolved += 1;
+      else if (r.status === "pending") summary.pending += 1;
+      else if (r.status === "in_progress" || r.status === "reopened") summary.inProgress += 1;
+      else if (r.status === "assigned" || r.status === "qualified") summary.assigned += 1;
+      else if (r.inTriage || r.status === "qualifying") summary.qualifying += 1;
+      else if (r.status === "new") summary.new += 1;
+
+      if (r.status === "escalated" || activeEscalatedRequestIds.has(r.id)) {
+        summary.escalated += 1;
+      }
+    });
+
+    return summary;
+  }, [items, scopedEscalations, total]);
+
+  const statusChartData = STATUS_BUCKETS.map((bucket) => ({
+    name: bucket.label,
+    value: statusSummary[bucket.key],
+  }));
 
   // ── Stats par direction (computed from real requests) ─────────────────────────
   const dirStats = useMemo(() => {
@@ -225,9 +302,20 @@ function DGView() {
 
   // ── Escalations sorted by urgency ─────────────────────────────────────────────
   const sortedEsc = useMemo(
-    () => [...escalations].sort((a, b) => b.slaOverHours - a.slaOverHours),
-    [escalations],
+    () => [...scopedEscalations].sort((a, b) => b.slaOverHours - a.slaOverHours),
+    [scopedEscalations],
   );
+
+  const scopedCsatByDir = useMemo(() => {
+    if (!csatByDir) return [];
+    if (!directionFilter) return csatByDir;
+    return csatByDir.filter(
+      (c) =>
+        String(c.entity_id) === directionFilter ||
+        c.label === selectedDirection?.name ||
+        c.label === selectedDirection?.code,
+    );
+  }, [csatByDir, directionFilter, selectedDirection]);
 
   // ── Mutations ─────────────────────────────────────────────────────────────────
   const reviewMut = useMutation({
@@ -247,7 +335,7 @@ function DGView() {
     onSuccess: () => {
       const msg =
         arbitrageAction === "resolve"
-          ? "Décision DG validée — escalade clôturée"
+          ? "Décision validée — escalade clôturée"
           : "Escalade rejetée — dossier retourné";
       toast.success(msg);
       setArbitrageOpen(false);
@@ -258,6 +346,26 @@ function DGView() {
     onError: () => toast.error("Erreur lors de l'arbitrage"),
   });
 
+  const handleDirectionReportExport = async () => {
+    setIsExporting(true);
+    try {
+      await downloadReport(
+        "by-unity",
+        reportFormat,
+        directionFilter ? { direction_id: directionFilter } : {},
+      );
+      toast.success(
+        directionFilter
+          ? `Rapport généré pour ${scopeLabel}.`
+          : "Rapport consolidé généré pour toutes les directions.",
+      );
+    } catch {
+      toast.error("Impossible de générer le rapport demandé.");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <div className="mx-auto max-w-7xl space-y-6 animate-fade-in">
       {/* Bandeau supervision */}
@@ -266,7 +374,7 @@ function DGView() {
         <p className="text-sm">
           <span className="font-semibold text-info">Mode supervision</span>
           <span className="text-muted-foreground">
-            {" "}— Vue globale en lecture seule. Arbitrage des escalades DG uniquement.
+            {" "}— Vue globale en lecture seule. Arbitrage des escalades de direction uniquement.
           </span>
         </p>
       </div>
@@ -274,12 +382,77 @@ function DGView() {
       <header>
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Vue globale</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Tableau de bord Direction Générale —{" "}
-          {loadReq ? "chargement…" : `${total} demandes, toutes directions confondues`}.
+          Tableau de bord global —{" "}
+          {loadReq ? "chargement…" : `${total} demandes · ${scopeLabel}`}.
         </p>
       </header>
 
-      {/* Panneau annonce globale DG */}
+      {/* Périmètre de pilotage administratif */}
+      <GlassCard className="p-4">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Building2 className="h-4 w-4 text-primary" />
+              <span className="text-sm font-semibold">Périmètre supervisé</span>
+            </div>
+            <p className="max-w-2xl text-xs text-muted-foreground">
+              {scopeDetail}. Ce filtre pilote les tickets, les statuts, les escalades visibles et le rapport.
+            </p>
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <div className="min-w-[240px] space-y-1.5">
+              <Label className="text-xs">Direction</Label>
+              <Select value={selectedDirectionId} onValueChange={setSelectedDirectionId}>
+                <SelectTrigger className="rounded-xl">
+                  <SelectValue placeholder="Toutes les directions" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL_DIRECTIONS_VALUE}>Toutes les directions</SelectItem>
+                  {directionsData
+                    .filter((direction) => direction.status)
+                    .map((direction) => (
+                      <SelectItem key={direction.id} value={direction.id}>
+                        {direction.name}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex gap-2">
+              <div className="w-[130px] space-y-1.5">
+                <Label className="text-xs">Format</Label>
+                <Select value={reportFormat} onValueChange={(v) => setReportFormat(v as ExportFormat)}>
+                  <SelectTrigger className="rounded-xl">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="excel">Excel</SelectItem>
+                    <SelectItem value="csv">CSV</SelectItem>
+                    <SelectItem value="pdf">PDF</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-end">
+                <Button
+                  variant="outline"
+                  className="rounded-xl"
+                  disabled={isExporting}
+                  onClick={handleDirectionReportExport}
+                >
+                  {isExporting ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="mr-2 h-4 w-4" />
+                  )}
+                  Rapport
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </GlassCard>
+
+      {/* Panneau annonce globale */}
       <GlassCard className="p-4">
         <div className="mb-3 flex items-center gap-2">
           <Megaphone className="h-4 w-4 text-primary" />
@@ -399,7 +572,7 @@ function DGView() {
         </GlassCard>
         <GlassCard className="space-y-1">
           <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-            <ArrowUpRight className="h-3.5 w-3.5 text-warning" /> Escalades DG
+            <ArrowUpRight className="h-3.5 w-3.5 text-warning" /> Escalades direction
           </div>
           {loadEsc ? <Loader2 className="h-7 w-7 animate-spin text-muted-foreground/40" /> : (
             <>
@@ -410,11 +583,58 @@ function DGView() {
         </GlassCard>
       </div>
 
-      {/* Section Escalades DG */}
+      {/* Tickets regroupés par statut */}
+      <GlassCard className="space-y-5 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-semibold">Tickets par statut</h2>
+            <p className="text-xs text-muted-foreground">
+              {loadReq ? "Chargement…" : `${statusSummary.total} ticket${statusSummary.total !== 1 ? "s" : ""} · ${scopeLabel}`}
+            </p>
+          </div>
+          <Badge variant="outline" className="rounded-full px-3 py-1 text-xs">
+            {scopeLabel}
+          </Badge>
+        </div>
+
+        {loadReq ? (
+          <div className="flex h-28 items-center justify-center">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground/40" />
+          </div>
+        ) : (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {STATUS_BUCKETS.map((bucket) => (
+                <div
+                  key={bucket.key}
+                  className={cn("rounded-2xl border px-4 py-3", bucket.tone)}
+                >
+                  <div className="text-[11px] font-semibold uppercase tracking-wide opacity-80">
+                    {bucket.label}
+                  </div>
+                  <div className="mt-1 text-2xl font-bold">{statusSummary[bucket.key]}</div>
+                  <div className="mt-0.5 text-[11px] opacity-75">{bucket.hint}</div>
+                </div>
+              ))}
+            </div>
+            <ResponsiveContainer width="100%" height={230}>
+              <BarChart data={statusChartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" className="opacity-20" />
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} />
+                <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                <Tooltip contentStyle={{ borderRadius: 12, fontSize: 12 }} />
+                <Bar dataKey="value" name="Tickets" fill="var(--color-chart-1)" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </>
+        )}
+      </GlassCard>
+
+      {/* Section escalades direction */}
       <GlassCard className="space-y-4 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="font-semibold">Escalades DG</h2>
+            <h2 className="font-semibold">Escalades direction</h2>
             <p className="text-xs text-muted-foreground">
               {loadEsc
                 ? "Chargement…"
@@ -428,7 +648,7 @@ function DGView() {
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground/40" />
           </div>
         ) : sortedEsc.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">Aucune escalade DG en cours.</p>
+          <p className="py-8 text-center text-sm text-muted-foreground">Aucune escalade de direction en cours.</p>
         ) : (
           <ul className="space-y-2">
             {sortedEsc.map((e) => (
@@ -448,7 +668,7 @@ function DGView() {
                   <div className="flex flex-wrap items-center gap-2">
                     {e.requestId ? (
                       <Link
-                        to="/app/requests/$id"
+                        to="/app/dg/tickets/$id"
                         params={{ id: e.requestId }}
                         className="font-mono text-[11px] text-primary hover:underline"
                       >
@@ -523,7 +743,7 @@ function DGView() {
         )}
       </GlassCard>
 
-      {/* Historique des arbitrages DG */}
+      {/* Historique des arbitrages */}
       <GlassCard className="space-y-4 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -557,7 +777,7 @@ function DGView() {
                   <div className="flex flex-wrap items-center gap-2">
                     {e.requestId ? (
                       <Link
-                        to="/app/requests/$id"
+                        to="/app/dg/tickets/$id"
                         params={{ id: e.requestId }}
                         className="font-mono text-[11px] text-primary hover:underline"
                       >
@@ -574,9 +794,9 @@ function DGView() {
                     {e.fromAgent} → <span className="font-medium text-foreground/80">{e.toAgent}</span>
                     {" · "}{formatDistanceToNow(new Date(e.at), { addSuffix: true, locale: fr })}
                   </div>
-                  {e.dgComment && (
+                  {e.decisionComment && (
                     <div className="mt-1.5 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-foreground/80">
-                      <span className="font-semibold text-primary">Décision DG :</span>{" "}{e.dgComment}
+                      <span className="font-semibold text-primary">Décision :</span>{" "}{e.decisionComment}
                     </div>
                   )}
                 </div>
@@ -617,11 +837,11 @@ function DGView() {
       </GlassCard>
 
       {/* CSAT par direction */}
-      {csatByDir && csatByDir.length > 0 && (
+      {scopedCsatByDir.length > 0 && (
         <GlassCard>
           <h2 className="mb-4 font-semibold">CSAT par direction</h2>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {csatByDir.map((c) => (
+            {scopedCsatByDir.map((c) => (
               <div
                 key={c.entity_id}
                 className="rounded-2xl border border-border/40 bg-card/50 px-4 py-3"
@@ -667,7 +887,7 @@ function DGView() {
           <div className="p-5 pb-0">
             <h2 className="font-semibold">Vue détaillée par direction</h2>
           </div>
-          <Tabs defaultValue={directionIds[0]} className="p-5 pt-4">
+          <Tabs key={directionIds.join("|")} defaultValue={directionIds[0]} className="p-5 pt-4">
             <TabsList className="h-auto flex-wrap gap-1 bg-transparent">
               {directionIds.map((did) => (
                 <TabsTrigger key={did} value={did} className="rounded-full text-xs">
@@ -733,7 +953,7 @@ function DGView() {
                           dirReqs.slice(0, 8).map((r) => (
                             <Link
                               key={r.id}
-                              to="/app/requests/$id"
+                              to="/app/dg/tickets/$id"
                               params={{ id: r.id }}
                               className="flex items-center gap-3 rounded-xl border border-border/40 bg-background/40 p-2.5 text-sm transition hover:border-primary/40 hover:bg-primary/5"
                             >
@@ -758,12 +978,12 @@ function DGView() {
         </GlassCard>
       )}
 
-      {/* Dialog arbitrage DG */}
+      {/* Dialog arbitrage */}
       <Dialog open={arbitrageOpen} onOpenChange={setArbitrageOpen}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
-              {arbitrageAction === "resolve" ? "Arbitrage DG — Valider" : "Arbitrage DG — Rejeter"}
+              {arbitrageAction === "resolve" ? "Arbitrage — Valider" : "Arbitrage — Rejeter"}
             </DialogTitle>
             <DialogDescription>
               Escalade {arbitrageEsc?.requestRef}. Un commentaire d'arbitrage est obligatoire.
@@ -778,7 +998,7 @@ function DGView() {
               onChange={(e) => setArbitrageComment(e.target.value)}
               placeholder={
                 arbitrageAction === "resolve"
-                  ? "Décision DG : validation et motif…"
+                  ? "Décision : validation et motif…"
                   : "Motif du rejet et instructions de retour…"
               }
               className="resize-none"

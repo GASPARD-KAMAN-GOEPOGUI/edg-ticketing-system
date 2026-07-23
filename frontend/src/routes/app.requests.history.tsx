@@ -8,28 +8,37 @@ import { StatusBadge, PriorityBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { fetchRequests } from "@/lib/api/requests";
-import { fetchDirections } from "@/lib/api/directions-units";
-import { exportXLSX, exportCSV } from "@/lib/export";
-import { toast } from "sonner";
 import { useUser } from "@/lib/session";
-import { cn } from "@/lib/utils";
 import {
-  Search, History, CheckCircle2, XCircle, Lock,
-  Calendar, ChevronRight, ArrowLeft,
-  Download, X, ChevronDown, FileText,
+  Search,
+  History,
+  CheckCircle2,
+  XCircle,
+  Lock,
+  Calendar,
+  ChevronRight,
+  ArrowLeft,
+  X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
-  format, formatDistanceToNow,
-  startOfDay, endOfDay, startOfWeek, endOfWeek,
-  startOfMonth, endOfMonth, startOfYear, endOfYear,
+  format,
+  formatDistanceToNow,
+  startOfDay,
+  endOfDay,
+  startOfWeek,
+  endOfWeek,
+  startOfMonth,
+  endOfMonth,
+  startOfYear,
+  endOfYear,
 } from "date-fns";
 import { fr } from "date-fns/locale";
 import { PaginationBar } from "@/components/pagination-bar";
@@ -47,26 +56,23 @@ export const Route = createFileRoute("/app/requests/history")({
   component: RequestHistory,
 });
 
-type TerminalStatus = "resolved" | "closed" | "rejected";
+type TerminalStatus = "closed" | "cancelled" | "rejected";
 
-const TABS: { key: TerminalStatus; label: string; icon: LucideIcon; activeClass: string }[] = [
-  {
-    key: "resolved",
-    label: "Résolues",
-    icon: CheckCircle2,
-    activeClass: "border-emerald-500 text-emerald-600 dark:text-emerald-400 bg-emerald-500/8",
-  },
+const TABS: { key: TerminalStatus; label: string; icon: LucideIcon }[] = [
   {
     key: "closed",
     label: "Clôturées",
     icon: Lock,
-    activeClass: "border-border text-foreground bg-foreground/6",
+  },
+  {
+    key: "cancelled",
+    label: "Annulées",
+    icon: XCircle,
   },
   {
     key: "rejected",
     label: "Rejetées",
     icon: XCircle,
-    activeClass: "border-destructive text-destructive bg-destructive/8",
   },
 ];
 
@@ -85,7 +91,9 @@ function HistoryCard({ r }: { r: RequestItem }) {
         <span className="font-mono text-[11px] text-muted-foreground/60 shrink-0">{r.ref}</span>
       </div>
       <p className="line-clamp-2 font-semibold leading-snug">{r.title}</p>
-      <div className={`flex items-center gap-1.5 text-xs font-medium ${priorityDotClass[r.priority]}`}>
+      <div
+        className={`flex items-center gap-1.5 text-xs font-medium ${priorityDotClass[r.priority]}`}
+      >
         <span className="h-2 w-2 shrink-0 rounded-full bg-current" />
         {priorityLabels[r.priority]}
       </div>
@@ -116,15 +124,15 @@ function RequestHistory() {
   const sessionUser = useUser();
   const navigate = useNavigate();
 
-  const [tab, setTab]       = useSessionState<TerminalStatus>("hist:tab", "resolved");
-  const [q, setQ]           = useSessionState<string>("hist:q", "");
-  const [layout, setLayout] = useSessionState<LayoutMode>("hist:layout", "list");
+  const [tab, setTab] = useSessionState<TerminalStatus>("hist:tab", "closed");
+  const [q, setQ] = useSessionState<string>("hist:q", "");
+  const [layout, setLayout] = useState<LayoutMode>("grid");
   const [dateFrom, setDateFrom] = useSessionState<string>("hist:dateFrom", "");
-  const [dateTo, setDateTo]     = useSessionState<string>("hist:dateTo", "");
-  const [page, setPage]     = useState(1);
+  const [dateTo, setDateTo] = useSessionState<string>("hist:dateTo", "");
+  const [periodPreset, setPeriodPreset] = useSessionState<string>("hist:period", "all");
+  const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [debouncedQ, setDebouncedQ] = useState(q);
-  const [exporting, setExporting] = useState(false);
   useScrollRestoration("hist:list");
 
   useEffect(() => {
@@ -132,64 +140,77 @@ function RequestHistory() {
     return () => clearTimeout(t);
   }, [q]);
 
-  useEffect(() => { setPage(1); }, [tab, debouncedQ, dateFrom, dateTo]);
-
-  const applyQuickDate = useCallback((preset: "today" | "week" | "month" | "year") => {
-    const now = new Date();
-    if (preset === "today")  { setDateFrom(isoDate(startOfDay(now)));  setDateTo(isoDate(endOfDay(now)));  }
-    else if (preset === "week")  { setDateFrom(isoDate(startOfWeek(now, { locale: fr }))); setDateTo(isoDate(endOfWeek(now, { locale: fr }))); }
-    else if (preset === "month") { setDateFrom(isoDate(startOfMonth(now))); setDateTo(isoDate(endOfMonth(now))); }
-    else if (preset === "year")  { setDateFrom(isoDate(startOfYear(now))); setDateTo(isoDate(endOfYear(now))); }
+  useEffect(() => {
     setPage(1);
-  }, [setDateFrom, setDateTo]);
+  }, [tab, debouncedQ, dateFrom, dateTo]);
 
-  const clearDates = useCallback(() => { setDateFrom(""); setDateTo(""); setPage(1); }, [setDateFrom, setDateTo]);
+  useEffect(() => {
+    if (!TABS.some((t) => t.key === tab)) setTab("closed");
+  }, [tab, setTab]);
+
+  const applyQuickDate = useCallback(
+    (preset: "today" | "week" | "month" | "year") => {
+      const now = new Date();
+      if (preset === "today") {
+        setDateFrom(isoDate(startOfDay(now)));
+        setDateTo(isoDate(endOfDay(now)));
+      } else if (preset === "week") {
+        setDateFrom(isoDate(startOfWeek(now, { locale: fr })));
+        setDateTo(isoDate(endOfWeek(now, { locale: fr })));
+      } else if (preset === "month") {
+        setDateFrom(isoDate(startOfMonth(now)));
+        setDateTo(isoDate(endOfMonth(now)));
+      } else if (preset === "year") {
+        setDateFrom(isoDate(startOfYear(now)));
+        setDateTo(isoDate(endOfYear(now)));
+      }
+      setPeriodPreset(preset);
+      setPage(1);
+    },
+    [setDateFrom, setDateTo, setPeriodPreset],
+  );
+
+  const clearDates = useCallback(() => {
+    setDateFrom("");
+    setDateTo("");
+    setPeriodPreset("all");
+    setPage(1);
+  }, [setDateFrom, setDateTo, setPeriodPreset]);
+
+  const handlePeriodChange = useCallback(
+    (val: string) => {
+      if (val === "all") {
+        clearDates();
+      } else if (val === "custom") {
+        setPeriodPreset("custom");
+      } else {
+        applyQuickDate(val as "today" | "week" | "month" | "year");
+      }
+    },
+    [clearDates, applyQuickDate, setPeriodPreset],
+  );
 
   const hasDateFilter = !!dateFrom || !!dateTo;
+  const safeTab: TerminalStatus = TABS.some((t) => t.key === tab) ? tab : "closed";
 
-  const filters = {
-    page,
-    limit: pageSize,
-    request_status: tab,
-    ...(sessionUser?.id && { requester_id: sessionUser.id }),
-    ...(debouncedQ && { search: debouncedQ }),
-    ...(dateFrom && { date_from: dateFrom }),
-    ...(dateTo && { date_to: dateTo }),
-  };
-
-  const exportFilters = { ...filters, page: 1, limit: 1000 };
+  const filters = useMemo(
+    () => ({
+      page,
+      limit: pageSize,
+      request_status: safeTab,
+      ...(sessionUser?.id && { requester_id: sessionUser.id }),
+      ...(debouncedQ && { search: debouncedQ }),
+      ...(dateFrom && { date_from: dateFrom }),
+      ...(dateTo && { date_to: dateTo }),
+    }),
+    [dateFrom, dateTo, debouncedQ, page, pageSize, sessionUser?.id, safeTab],
+  );
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["requests-history", filters],
     queryFn: () => fetchRequests(filters),
     staleTime: 60_000,
   });
-
-  const { data: directionsData } = useQuery({
-    queryKey: ["directions"],
-    queryFn: fetchDirections,
-    staleTime: 5 * 60_000,
-  });
-
-  const directionMap = useMemo(
-    () => new Map((directionsData ?? []).map((d) => [String(d.id), d.name])),
-    [directionsData],
-  );
-
-  const handleExport = useCallback(async (fmt: "xlsx" | "csv") => {
-    setExporting(true);
-    try {
-      const all = await fetchRequests(exportFilters);
-      if (all.items.length === 0) { toast.warning("Aucune demande à exporter."); return; }
-      if (fmt === "xlsx") exportXLSX(all.items, directionMap, { dateFrom: dateFrom || undefined, dateTo: dateTo || undefined, sheetName: "Historique EDG" });
-      else exportCSV(all.items, directionMap, { dateFrom: dateFrom || undefined, dateTo: dateTo || undefined });
-      toast.success(`Export ${fmt.toUpperCase()} — ${all.items.length} demande${all.items.length > 1 ? "s" : ""}`);
-    } catch {
-      toast.error("Impossible de générer l'export.");
-    } finally {
-      setExporting(false);
-    }
-  }, [exportFilters, directionMap, dateFrom, dateTo]);
 
   const paged = data?.items ?? [];
   const total = data?.total ?? 0;
@@ -198,19 +219,19 @@ function RequestHistory() {
   const listState: "loading" | "empty" | "ready" = isLoading
     ? "loading"
     : isError || paged.length === 0
-    ? "empty"
-    : "ready";
+      ? "empty"
+      : "ready";
 
   const handleQChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => setQ(e.target.value),
     [setQ],
   );
 
-  const currentTab = TABS.find((t) => t.key === tab)!;
+  const currentTab = TABS.find((t) => t.key === safeTab)!;
 
   const emptyMessage: Record<TerminalStatus, string> = {
-    resolved: "Aucune demande résolue dans l'historique.",
-    closed:   "Aucune demande clôturée dans l'historique.",
+    closed: "Aucune demande clôturée dans l'historique.",
+    cancelled: "Aucune demande annulée dans l'historique.",
     rejected: "Aucune demande rejetée dans l'historique.",
   };
 
@@ -225,7 +246,10 @@ function RequestHistory() {
       >
         <div>
           <div className="mb-1 flex items-center gap-2 text-sm text-muted-foreground">
-            <Link to="/app/requests" className="flex items-center gap-1 hover:text-foreground transition-colors">
+            <Link
+              to="/app/requests"
+              className="flex items-center gap-1 hover:text-foreground transition-colors"
+            >
               <ArrowLeft className="h-3.5 w-3.5" />
               Mes demandes
             </Link>
@@ -235,112 +259,91 @@ function RequestHistory() {
             <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Historique</h1>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            {total} demande{total > 1 ? "s" : ""} {statusLabels[tab].toLowerCase()}{total > 1 ? "s" : ""}.
+            {total} demande{total > 1 ? "s" : ""} {statusLabels[safeTab].toLowerCase()}
+            {total > 1 ? "s" : ""}.
           </p>
         </div>
         <div className="flex items-center gap-2">
           <LayoutToggle layout={layout} onChange={setLayout} />
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="rounded-full" disabled={exporting}>
-                <Download className="mr-1.5 h-4 w-4" />
-                {exporting ? "Export…" : "Exporter"}
-                <ChevronDown className="ml-1 h-3.5 w-3.5 opacity-60" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => handleExport("xlsx")}>
-                <FileText className="mr-2 h-4 w-4 text-emerald-600" />
-                Excel (.xlsx)
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => handleExport("csv")}>
-                <FileText className="mr-2 h-4 w-4 text-muted-foreground" />
-                CSV (.csv)
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
       </motion.header>
 
-      {/* Onglets de statut */}
+      {/* Barre de recherche + filtres */}
       <motion.div
         initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.04 }}
-        className="flex flex-wrap items-center gap-2"
+        transition={{ duration: 0.4, delay: 0.05 }}
       >
-        {TABS.map((t) => {
-          const Icon = t.icon;
-          const active = tab === t.key;
-          return (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={cn(
-                "flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition-all",
-                active
-                  ? t.activeClass
-                  : "border-border/50 text-muted-foreground hover:border-border hover:text-foreground",
-              )}
-            >
-              <Icon className="h-4 w-4" />
-              {t.label}
-            </button>
-          );
-        })}
-      </motion.div>
-
-      {/* Barre de recherche + filtres de date */}
-      <motion.div
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.08 }}
-      >
-        <GlassCard className="space-y-3 p-4">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={q}
-              onChange={handleQChange}
-              placeholder="Rechercher par référence, titre…"
-              className="h-11 pl-9"
-            />
-          </div>
-
-          {/* Filtres de date */}
-          <div className="flex flex-wrap items-center gap-2 border-t border-border/30 pt-3">
-            <Calendar className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <span className="text-xs font-medium text-muted-foreground">Période :</span>
-            {(["today", "week", "month", "year"] as const).map((p) => (
-              <button
-                key={p}
-                onClick={() => applyQuickDate(p)}
-                className="rounded-full border border-border/50 px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
-              >
-                {p === "today" ? "Aujourd'hui" : p === "week" ? "Cette semaine" : p === "month" ? "Ce mois" : "Cette année"}
-              </button>
-            ))}
-            <span className="text-xs text-muted-foreground">ou</span>
-            <div className="flex items-center gap-1.5">
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
-                className="h-8 rounded-lg border border-border/50 bg-background px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
-              />
-              <span className="text-xs text-muted-foreground">→</span>
-              <input
-                type="date"
-                value={dateTo}
-                onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
-                className="h-8 rounded-lg border border-border/50 bg-background px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+        <GlassCard className="p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={q}
+                onChange={handleQChange}
+                placeholder="Rechercher par numéro, titre…"
+                className="h-9 pl-9"
               />
             </div>
+
+            <Select value={safeTab} onValueChange={(value) => setTab(value as TerminalStatus)}>
+              <SelectTrigger className="h-9 w-40 shrink-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TABS.map((t) => (
+                  <SelectItem key={t.key} value={t.key}>
+                    {t.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+              <Select value={periodPreset} onValueChange={handlePeriodChange}>
+                <SelectTrigger className="h-9 w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Toutes les dates</SelectItem>
+                  <SelectItem value="today">Aujourd'hui</SelectItem>
+                  <SelectItem value="week">Cette semaine</SelectItem>
+                  <SelectItem value="month">Ce mois</SelectItem>
+                  <SelectItem value="year">Cette année</SelectItem>
+                  <SelectItem value="custom">Personnalisé…</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {periodPreset === "custom" && (
+              <div className="flex items-center gap-1.5 shrink-0">
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => {
+                    setDateFrom(e.target.value);
+                    setPage(1);
+                  }}
+                  className="h-9 rounded-lg border border-border/50 bg-background px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+                />
+                <span className="text-xs text-muted-foreground">→</span>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => {
+                    setDateTo(e.target.value);
+                    setPage(1);
+                  }}
+                  className="h-9 rounded-lg border border-border/50 bg-background px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+                />
+              </div>
+            )}
+
             {hasDateFilter && (
               <button
                 onClick={clearDates}
-                className="flex items-center gap-1 rounded-full border border-destructive/30 px-2.5 py-1 text-xs text-destructive hover:bg-destructive/10 transition-colors"
+                className="flex shrink-0 items-center gap-1 rounded-full border border-destructive/30 px-2.5 py-1.5 text-xs text-destructive hover:bg-destructive/10 transition-colors"
               >
                 <X className="h-3 w-3" /> Effacer
               </button>
@@ -364,7 +367,7 @@ function RequestHistory() {
             </motion.div>
             <h3 className="font-semibold">Aucun historique</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              {isError ? "Impossible de charger l'historique." : emptyMessage[tab]}
+              {isError ? "Impossible de charger l'historique." : emptyMessage[safeTab]}
             </p>
           </GlassCard>
         }
@@ -417,7 +420,9 @@ function RequestHistory() {
                           exit={{ opacity: 0, y: -6 }}
                           transition={{ duration: 0.3, delay: i * 0.03 }}
                           className="border-t border-border/40 transition-colors hover:bg-background/50 cursor-pointer"
-                          onClick={() => navigate({ to: "/app/requests/$id", params: { id: r.id } })}
+                          onClick={() =>
+                            navigate({ to: "/app/requests/$id", params: { id: r.id } })
+                          }
                         >
                           <td className="px-5 py-4">
                             <span className="font-mono text-xs text-primary">{r.ref}</span>
@@ -436,7 +441,10 @@ function RequestHistory() {
                           </td>
                           <td className="px-5 py-4 text-xs text-muted-foreground">
                             {r.updatedAt && r.updatedAt !== r.createdAt
-                              ? formatDistanceToNow(new Date(r.updatedAt), { addSuffix: true, locale: fr })
+                              ? formatDistanceToNow(new Date(r.updatedAt), {
+                                  addSuffix: true,
+                                  locale: fr,
+                                })
                               : "—"}
                           </td>
                         </motion.tr>
@@ -474,7 +482,10 @@ function RequestHistory() {
             total={total}
             pageSize={pageSize}
             onChange={setPage}
-            onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
+            onPageSizeChange={(s) => {
+              setPageSize(s);
+              setPage(1);
+            }}
           />
         </>
       </AsyncSwap>

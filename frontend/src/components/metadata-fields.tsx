@@ -31,7 +31,7 @@ function isSensitiveKey(key: string): boolean {
 
 /** Roles that may see sensitive metadata fields. */
 function canViewSensitive(role: Role | undefined): boolean {
-  return role === "admin" || role === "dg";
+  return role === "admin";
 }
 
 // ── Key / value helpers ───────────────────────────────────────────────────────

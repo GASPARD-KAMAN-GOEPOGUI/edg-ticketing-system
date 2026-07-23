@@ -42,6 +42,15 @@ backups/
 backend/logs/
 nginx/logs/
 
+# ─── Artefacts locaux Codex ───────────────────────────────────────────────────
+/.codex/
+/.codex-*.log
+/.codex-build-*.err
+/.codex-build-*.out
+/.codex-chrome-profile*/
+/.codex-edge-supervision-profile*/
+/.codex-visual-tests/
+
 # ─── Certificats SSL ──────────────────────────────────────────────────────────
 nginx/certs/
 *.pem

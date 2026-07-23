@@ -46,10 +46,15 @@ class StatsService(BaseService):
         """))
         row = dict(req.mappings().one())
 
+        # Les escalades ne sont pas une table dédiée (supprimée lors d'un refactor) :
+        # elles vivent comme des événements workflow_detail (event_type='escalation_manual'),
+        # avec statut/niveau dans le JSON `infos` (cf. RouteEscalation.py / SchemaEscalation.py).
         esc = await self.session.execute(text("""
             SELECT COUNT(*) AS open_escalations
-            FROM escalation
-            WHERE escalation_status = 'open' AND deleted_at IS NULL
+            FROM workflow_detail
+            WHERE event_type = 'escalation_manual'
+              AND deleted_at IS NULL
+              AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(infos, '$.status')), 'open') = 'open'
         """))
         esc_row = dict(esc.mappings().one())
 
@@ -267,8 +272,8 @@ class StatsService(BaseService):
                          THEN 1 ELSE 0 END)                                        AS active_total,
                 SUM(CASE WHEN rs.code IN ('pending','qualifying','qualified',
                          'assigned','in_progress','escalated','reopened')
-                         AND r.sla_deadline IS NOT NULL
-                         AND r.sla_deadline < NOW()
+                         AND r.sla_hours > 0
+                         AND TIMESTAMPDIFF(HOUR, r.created_at, NOW()) > r.sla_hours
                          THEN 1 ELSE 0 END)                                        AS sla_breached,
                 ROUND(AVG(
                     CASE WHEN r.resolved_at IS NOT NULL
@@ -277,7 +282,8 @@ class StatsService(BaseService):
                 ), 1)                                                              AS avg_resolution_hours,
                 ROUND(
                     100.0 * SUM(CASE WHEN rs.code IN ('resolved','closed')
-                                          AND (r.resolved_at IS NULL OR r.resolved_at <= r.sla_deadline)
+                                          AND (r.resolved_at IS NULL
+                                               OR r.resolved_at <= DATE_ADD(r.created_at, INTERVAL r.sla_hours HOUR))
                                      THEN 1 ELSE 0 END)
                     / NULLIF(SUM(CASE WHEN rs.code IN ('resolved','closed') THEN 1 ELSE 0 END), 0)
                 , 1)                                                               AS sla_rate
@@ -295,20 +301,20 @@ class StatsService(BaseService):
     # ── Escalades ─────────────────────────────────────────────────────────────
 
     async def escalation_stats(self) -> dict:
-        """Stats des escalades par statut et niveau."""
+        """Stats des escalades par statut et niveau (workflow_detail, event_type='escalation_manual')."""
         result = await self.session.execute(text("""
             SELECT
-                COUNT(*)                                                                   AS total,
-                SUM(CASE WHEN escalation_status = 'open'         THEN 1 ELSE 0 END)       AS open,
-                SUM(CASE WHEN escalation_status = 'acknowledged' THEN 1 ELSE 0 END)       AS acknowledged,
-                SUM(CASE WHEN escalation_status = 'resolved'     THEN 1 ELSE 0 END)       AS resolved,
-                SUM(CASE WHEN escalation_status = 'cancelled'    THEN 1 ELSE 0 END)       AS cancelled,
-                SUM(CASE WHEN level = 'L1'                       THEN 1 ELSE 0 END)       AS level_l1,
-                SUM(CASE WHEN level = 'L2'                       THEN 1 ELSE 0 END)       AS level_l2,
-                SUM(CASE WHEN level = 'L3'                       THEN 1 ELSE 0 END)       AS level_l3,
-                SUM(CASE WHEN DATE(created_at) = CURDATE()       THEN 1 ELSE 0 END)       AS created_today
-            FROM escalation
-            WHERE deleted_at IS NULL
+                COUNT(*)                                                                                              AS total,
+                SUM(CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(infos, '$.status')), 'open') = 'open'     THEN 1 ELSE 0 END) AS open,
+                SUM(CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(infos, '$.status')) = 'reviewed'                   THEN 1 ELSE 0 END) AS reviewed,
+                SUM(CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(infos, '$.status')) = 'resolved'                   THEN 1 ELSE 0 END) AS resolved,
+                SUM(CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(infos, '$.status')) = 'rejected'                   THEN 1 ELSE 0 END) AS rejected,
+                SUM(CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(infos, '$.level')) = 'L1'                           THEN 1 ELSE 0 END) AS level_l1,
+                SUM(CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(infos, '$.level')) = 'L2'                           THEN 1 ELSE 0 END) AS level_l2,
+                SUM(CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(infos, '$.level')) = 'L3'                           THEN 1 ELSE 0 END) AS level_l3,
+                SUM(CASE WHEN DATE(created_at) = CURDATE()                                                  THEN 1 ELSE 0 END) AS created_today
+            FROM workflow_detail
+            WHERE event_type = 'escalation_manual' AND deleted_at IS NULL
         """))
         return dict(result.mappings().one())
 

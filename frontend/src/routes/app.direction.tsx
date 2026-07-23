@@ -18,12 +18,12 @@ import {
 } from "recharts";
 import { statusLabels } from "@/lib/mock-data";
 import { useUser } from "@/lib/session";
-import { fetchRequests, updateRequest } from "@/lib/api/requests";
+import { fetchRequests, updateRequest, resolveRequest, reassignService } from "@/lib/api/requests";
+import type { RequestItem } from "@/lib/mock-data";
 import {
   fetchEscalations,
   reviewEscalation,
   resolveEscalation,
-  escalateRequest,
 } from "@/lib/api/escalations";
 import { fetchUsers } from "@/lib/api/accounts";
 import { fetchDirections, fetchUnits } from "@/lib/api/directions-units";
@@ -37,7 +37,6 @@ import {
   CheckCircle2,
   Building2,
   Loader2,
-  ArrowUpRight,
   ArrowRight,
   Clock,
   Inbox,
@@ -49,30 +48,43 @@ import {
   Pencil,
   ToggleLeft,
   ToggleRight,
+  XCircle,
 } from "lucide-react";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 
 export const Route = createFileRoute("/app/direction")({
   beforeLoad: () => requireRole("director", "admin"),
-  head: () => ({ meta: [{ title: "Demandes direction — EDG Support" }] }),
+  head: () => ({ meta: [{ title: "Demandes à arbitrer / orienter — EDG Support" }] }),
   component: DirectionView,
 });
 
 const ACTIVE_STATUSES = new Set([
-  "new", "qualifying", "qualified", "assigned", "in_progress", "pending", "reopened",
+  "new", "qualifying", "qualified", "assigned", "in_progress", "pending", "escalated", "reopened",
 ]);
 
 function DirectionView() {
   const sessionUser = useUser();
   const qc = useQueryClient();
-  const directionId = sessionUser?.direction_id;
+  const isDirectorRole = sessionUser?.role === "director";
+  const directionId = sessionUser?.direction_id ?? (
+    sessionUser?.role === "director" ? sessionUser?.unit_id : undefined
+  );
 
-  const [escalatingId, setEscalatingId] = useState<string | null>(null);
-  const [escalateReason, setEscalateReason] = useState("");
+  type TicketModalType = "resolve" | "transfer" | null;
+  const [ticketModal, setTicketModal] = useState<{ type: TicketModalType; ticket: RequestItem | null }>({ type: null, ticket: null });
+  const [transferUnitId, setTransferUnitId]   = useState("");
+  const [transferReason, setTransferReason]   = useState("");
+
+  const closeTicketModal = () => {
+    setTicketModal({ type: null, ticket: null });
+    setTransferUnitId("");
+    setTransferReason("");
+  };
 
   /* ── Queries ─────────────────────────────────────────────────────────── */
 
@@ -201,26 +213,38 @@ function DirectionView() {
     onError: () => toast.error("Erreur lors du renvoi."),
   });
 
-  const escalateToDGMut = useMutation({
-    mutationFn: async ({ escId, requestId, reason }: { escId: string; requestId: string; reason: string }) => {
-      await escalateRequest(requestId, {
-        level: "DG",
-        reason,
-        from_agent_name: sessionUser?.name ?? "Directeur",
-        to_agent_name: "Direction Générale",
-      });
-      await resolveEscalation(escId);
+  /* ── Mutations — actions sur tickets (5a, 5b, 5c) ───────────────────── */
+
+  const invalidateTickets = () => {
+    qc.invalidateQueries({ queryKey: ["director-dir-requests", directionId] });
+    qc.invalidateQueries({ queryKey: ["requests"] });
+    qc.invalidateQueries({ queryKey: ["queue"] });
+    qc.invalidateQueries({ queryKey: ["stats"] });
+    qc.invalidateQueries({ queryKey: ["dashboard-stats"] });
+  };
+
+  const dirResolveMut = useMutation({
+    mutationFn: () => {
+      if (isDirectorRole && ticketModal.ticket?.status !== "escalated") {
+        throw new Error("DIRECTOR_RESOLVE_REQUIRES_ESCALATED");
+      }
+      return resolveRequest(ticketModal.ticket!.id, sessionUser?.id);
     },
-    onSuccess: () => {
-      toast.success("Escalade transmise à la Direction Générale.");
-      qc.invalidateQueries({ queryKey: ["director-l3-escalations"] });
-      qc.invalidateQueries({ queryKey: ["escalations"] });
-      qc.invalidateQueries({ queryKey: ["requests"] });
-      qc.invalidateQueries({ queryKey: ["stats"] });
-      setEscalatingId(null);
-      setEscalateReason("");
+    onSuccess: () => { toast.success("Ticket résolu."); invalidateTickets(); closeTicketModal(); },
+    onError: (err: unknown) => {
+      const message = (err as { message?: string })?.message;
+      toast.error(
+        message === "DIRECTOR_RESOLVE_REQUIRES_ESCALATED"
+          ? "Le directeur peut résoudre uniquement un ticket escaladé/arbitrage."
+          : "Erreur lors de la résolution.",
+      );
     },
-    onError: () => toast.error("Erreur lors de l'escalade DG."),
+  });
+
+  const transferMut = useMutation({
+    mutationFn: () => reassignService(ticketModal.ticket!.id, transferUnitId, transferReason || undefined),
+    onSuccess: () => { toast.success("Ticket orienté vers le service sélectionné."); invalidateTickets(); closeTicketModal(); },
+    onError: () => toast.error("Erreur lors du transfert."),
   });
 
   /* ── Règles de routage de la direction ──────────────────────────────── */
@@ -330,7 +354,7 @@ function DirectionView() {
             {directionName}
           </div>
           <h1 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">
-            Demandes de la direction
+            Demandes à arbitrer / orienter
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Vue consolidée multi-services · {sessionUser?.name}
@@ -480,7 +504,7 @@ function DirectionView() {
                     <div className="flex flex-wrap items-center gap-2">
                       {esc.requestId ? (
                         <Link
-                          to="/app/requests/$id"
+                          to="/app/direction/tickets/$id"
                           params={{ id: esc.requestId }}
                           className="font-mono text-xs font-medium text-primary hover:underline"
                         >
@@ -528,53 +552,9 @@ function DirectionView() {
                       >
                         <RotateCcw className="mr-1 h-3 w-3" /> Renvoyer Chef
                       </Button>
-                      {esc.requestId && (
-                        <Button
-                          size="sm" variant="outline"
-                          className="h-8 rounded-full text-xs border-warning/40 text-warning hover:bg-warning/10"
-                          disabled={escalateToDGMut.isPending}
-                          onClick={() => setEscalatingId(esc.id)}
-                        >
-                          <ArrowUpRight className="mr-1 h-3 w-3" /> Escalader DG
-                        </Button>
-                      )}
                     </div>
                   )}
                 </div>
-
-                {/* DG escalation form */}
-                {escalatingId === esc.id && esc.requestId && (
-                  <div className="space-y-2 border-t border-border/30 pt-3">
-                    <textarea
-                      value={escalateReason}
-                      onChange={(e) => setEscalateReason(e.target.value)}
-                      placeholder="Motif de l'escalade à la Direction Générale…"
-                      rows={2}
-                      className="w-full resize-none rounded-xl border border-border/50 bg-background/60 px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-warning/40"
-                    />
-                    <div className="flex justify-end gap-2">
-                      <Button size="sm" variant="ghost" className="rounded-full"
-                        onClick={() => { setEscalatingId(null); setEscalateReason(""); }}>
-                        Annuler
-                      </Button>
-                      <Button
-                        size="sm"
-                        className="rounded-full bg-warning text-warning-foreground hover:bg-warning/90"
-                        disabled={!escalateReason.trim() || escalateToDGMut.isPending}
-                        onClick={() => escalateToDGMut.mutate({
-                          escId: esc.id,
-                          requestId: esc.requestId!,
-                          reason: escalateReason,
-                        })}
-                      >
-                        {escalateToDGMut.isPending
-                          ? <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                          : <ArrowUpRight className="mr-1 h-3 w-3" />}
-                        Confirmer escalade DG
-                      </Button>
-                    </div>
-                  </div>
-                )}
               </div>
             ))}
           </div>
@@ -633,14 +613,14 @@ function DirectionView() {
       {/* Ticket list — C6 */}
       <GlassCard>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-semibold">Demandes de la direction ({total})</h2>
+          <h2 className="font-semibold">Demandes à arbitrer / orienter ({total})</h2>
         </div>
         {isLoading ? (
           <div className="flex h-20 items-center justify-center">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground/40" />
           </div>
         ) : allItems.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Aucune demande pour cette direction.</p>
+          <p className="text-sm text-muted-foreground">Aucune demande à arbitrer ou orienter pour cette direction.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -651,14 +631,20 @@ function DirectionView() {
                   <th className="hidden pb-2.5 text-left font-semibold sm:table-cell">Service</th>
                   <th className="pb-2.5 text-left font-semibold">Statut</th>
                   <th className="hidden pb-2.5 text-left font-semibold sm:table-cell">Priorité</th>
+                  <th className="pb-2.5 text-right font-semibold">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {pagedItems.map((r) => (
+                {pagedItems.map((r) => {
+                  const isActive = ACTIVE_STATUSES.has(r.status);
+                  const canResolveFromDirection = isDirectorRole
+                    ? r.status === "escalated"
+                    : isActive;
+                  return (
                   <tr key={r.id} className="border-t border-border/40 transition hover:bg-foreground/[0.02]">
                     <td className="py-2.5">
                       <Link
-                        to="/app/requests/$id"
+                        to="/app/direction/tickets/$id"
                         params={{ id: r.id }}
                         className="font-mono text-xs font-medium text-primary hover:underline"
                       >
@@ -675,8 +661,32 @@ function DirectionView() {
                     <td className="hidden py-2.5 sm:table-cell">
                       <PriorityBadge priority={r.priority} />
                     </td>
+                    <td className="py-2 text-right">
+                      {isActive && (
+                        <div className="flex justify-end gap-1 flex-wrap">
+                          {canResolveFromDirection && (
+                            <Button
+                              size="sm"
+                              className="h-7 rounded-full px-2.5 text-xs bg-success text-success-foreground hover:bg-success/90"
+                              onClick={() => setTicketModal({ type: "resolve", ticket: r })}
+                            >
+                              <CheckCircle2 className="mr-1 h-3 w-3" /> Résoudre
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 rounded-full px-2.5 text-xs border-warning/40 text-warning hover:bg-warning/10"
+                            onClick={() => setTicketModal({ type: "transfer", ticket: r })}
+                          >
+                            <ArrowRight className="mr-1 h-3 w-3" /> Orienter
+                          </Button>
+                        </div>
+                      )}
+                    </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -796,6 +806,102 @@ function DirectionView() {
               onClick={() => saveRuleMut.mutate()}
             >
               {saveRuleMut.isPending ? "Enregistrement…" : (editingRule ? "Mettre à jour" : "Créer")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── 5a — Résoudre (directeur) ───────────────────────────────────────── */}
+      <Dialog open={ticketModal.type === "resolve"} onOpenChange={(o) => !o && closeTicketModal()}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-success">
+              <CheckCircle2 className="h-4 w-4" /> Résoudre le ticket
+            </DialogTitle>
+            <DialogDescription>
+              Le directeur confirme uniquement la résolution d'un ticket escaladé/arbitrage.
+              Le demandeur sera notifié et pourra confirmer ou demander une réouverture.
+            </DialogDescription>
+          </DialogHeader>
+          {ticketModal.ticket && (
+            <div className="rounded-xl bg-muted/40 px-4 py-3 text-sm">
+              <p className="font-semibold line-clamp-1">{ticketModal.ticket.title}</p>
+              <p className="mt-0.5 font-mono text-xs text-muted-foreground">{ticketModal.ticket.ref}</p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="ghost" className="rounded-full" onClick={closeTicketModal}>Annuler</Button>
+            <Button
+              className="rounded-full bg-success text-success-foreground hover:bg-success/90"
+              disabled={dirResolveMut.isPending || (isDirectorRole && ticketModal.ticket?.status !== "escalated")}
+              onClick={() => dirResolveMut.mutate()}
+            >
+              {dirResolveMut.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+              Confirmer la résolution
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── 5b — Orienter vers un service de la direction ───────────────────── */}
+      <Dialog open={ticketModal.type === "transfer"} onOpenChange={(o) => !o && closeTicketModal()}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowRight className="h-4 w-4 text-primary" /> Orienter vers un service de la direction
+            </DialogTitle>
+            <DialogDescription>
+              Le ticket sera confié au chef du service cible dans votre direction.
+            </DialogDescription>
+          </DialogHeader>
+          {ticketModal.ticket && (
+            <div className="rounded-xl bg-muted/40 px-4 py-3 text-sm">
+              <p className="font-semibold line-clamp-1">{ticketModal.ticket.title}</p>
+              <p className="mt-0.5 font-mono text-xs text-muted-foreground">{ticketModal.ticket.ref}</p>
+            </div>
+          )}
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Service cible <span className="text-destructive">*</span></Label>
+              <Select value={transferUnitId} onValueChange={setTransferUnitId}>
+                <SelectTrigger className="h-11">
+                  <SelectValue placeholder="Choisir un service de ma direction" />
+                </SelectTrigger>
+                <SelectContent>
+                  {unitsData
+                    .filter((u) =>
+                      u.status
+                      && String(u.direction_id) === String(directionId)
+                      && String(u.id) !== String(ticketModal.ticket?.serviceId ?? ""),
+                    )
+                    .map((u) => (
+                      <SelectItem key={u.id} value={u.id}>
+                        {u.name}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Motif</Label>
+              <Textarea
+                className="resize-none"
+                rows={3}
+                placeholder="Expliquez pourquoi ce ticket change de service…"
+                value={transferReason}
+                onChange={(e) => setTransferReason(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" className="rounded-full" onClick={closeTicketModal}>Annuler</Button>
+            <Button
+              className="rounded-full gradient-primary"
+              disabled={!transferUnitId || transferMut.isPending}
+              onClick={() => transferMut.mutate()}
+            >
+              {transferMut.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+              Orienter
             </Button>
           </DialogFooter>
         </DialogContent>

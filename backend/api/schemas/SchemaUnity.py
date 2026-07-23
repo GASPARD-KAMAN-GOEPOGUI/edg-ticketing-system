@@ -12,6 +12,8 @@ class UnityBase(BaseModel):
     codename: str
     aleas: Optional[str] = None
     description: Optional[str] = None
+    direction_id: Optional[int] = None
+    parent_direction_id: Optional[int] = None
 
 
 class UnityCreate(UnityBase):
@@ -23,6 +25,8 @@ class UnityUpdate(BaseModel):
     codename: Optional[str] = None
     aleas: Optional[str] = None
     description: Optional[str] = None
+    direction_id: Optional[int] = None
+    parent_direction_id: Optional[int] = None
     status: Optional[bool] = None
     infos: Optional[Any] = None
 
@@ -32,6 +36,8 @@ class UnityResponse(BaseResponse):
     codename: str
     aleas: Optional[str] = None
     description: Optional[str] = None
+    direction_id: Optional[int] = None
+    parent_direction_id: Optional[int] = None
 
     class Config:
         orm_mode = True

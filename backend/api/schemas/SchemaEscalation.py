@@ -24,6 +24,7 @@ class EscalationResponse(BaseModel):
     sla_over_hours: int
     priority: str
     escalation_status: str  # open | reviewed | resolved
+    decision_comment: Optional[str] = None
     dg_comment: Optional[str] = None
     status: bool
     infos: Optional[Any] = None
@@ -55,6 +56,7 @@ class EscalationResponse(BaseModel):
             sla_over_hours=int(infos.get("sla_over_hours", 0)),
             priority=infos.get("priority", ""),
             escalation_status=infos.get("status", "open"),
+            decision_comment=infos.get("decision_comment") or infos.get("dg_comment"),
             dg_comment=infos.get("dg_comment"),
             status=bool(wd.status),
             infos=infos,

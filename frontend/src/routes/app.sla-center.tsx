@@ -18,7 +18,7 @@ import { useRole, useUser } from "@/lib/session";
 import { fetchDirections, fetchUnits } from "@/lib/api/directions-units";
 
 export const Route = createFileRoute("/app/sla-center")({
-  beforeLoad: () => requireRole("chief", "director", "dg", "admin"),
+  beforeLoad: () => requireRole("chief", "director", "admin"),
   head: () => ({ meta: [{ title: "Centre SLA — EDG Support" }] }),
   component: SlaCenterPage,
 });
@@ -381,7 +381,7 @@ function SlaCenterPage() {
                     </td>
                     <td className="py-2.5 pl-3">
                       <Link
-                        to="/app/requests/$id"
+                        to="/app/sla-center/tickets/$id"
                         params={{ id: r.id }}
                         className="inline-flex items-center gap-0.5 text-xs text-primary hover:underline"
                       >

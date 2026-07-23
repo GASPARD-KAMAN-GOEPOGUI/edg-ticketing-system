@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { createRouter } from "@tanstack/react-router";
 import { routeTree } from "./routeTree.gen";
+import { RoutePendingFallback } from "@/components/route-pending";
 
 export const getRouter = () => {
   const queryClient = new QueryClient({
@@ -24,6 +25,8 @@ export const getRouter = () => {
     scrollRestoration: true,
     defaultPreloadStaleTime: 0,
     defaultPreload: "intent",    // précharge au survol des liens
+    defaultPendingComponent: RoutePendingFallback,
+    defaultPendingMs: 0,         // affiche immédiatement (pas de délai artificiel)
   });
 
   return router;

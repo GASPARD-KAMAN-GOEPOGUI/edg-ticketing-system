@@ -2,12 +2,27 @@ from __future__ import annotations
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import noload
 
+from api.core.ticket_actions import STATUS_ALIASES, normalize_status
 from api.models.ModelPriorityDefinition import PriorityDefinition
 from api.models.ModelRequest import Request
 from api.models.ModelRequestCategory import RequestCategory
 from api.models.ModelRequestStatus import RequestStatus
+from api.models.ModelUnity import Unity
 from api.repositories.base_repository import BaseRepository
+
+# RequestListItemResponse (schéma de liste) ne sérialise ni attachments/tasks
+# (endpoints dédiés) ni timelines/appreciation (réservés à la page détail d'un
+# ticket). Ces relations sont marquées lazy="selectin" au niveau du modèle pour
+# les endpoints qui en ont besoin (détail), mais les charger sur CHAQUE requête
+# de liste est un aller-retour DB (et un poids JSON) pur gaspillage.
+_SKIP_UNUSED_RELS = [
+    noload(Request.attachments),
+    noload(Request.tasks),
+    noload(Request.workflows),
+    noload(Request.appreciation),
+]
 
 
 class RequestRepository(BaseRepository[Request]):
@@ -16,11 +31,12 @@ class RequestRepository(BaseRepository[Request]):
 
     # ── Statuts par code ──────────────────────────────────────────────────────
 
-    _INACTIVE_STATUSES: list[str] = ["resolved", "closed", "cancelled"]
+    _INACTIVE_STATUSES: list[str] = ["resolved", "closed", "cancelled", "rejected"]
     _ACTIVE_STATUSES: list[str] = [
         "new", "qualifying", "qualified", "assigned",
         "in_progress", "pending", "escalated", "reopened",
     ]
+    _QUALIFIABLE_STATUSES: list[str] = ["new", "qualifying", "qualified", "reopened"]
 
     # ── Surcharge _apply_filters : traduit code → subquery FK ─────────────────
 
@@ -36,15 +52,33 @@ class RequestRepository(BaseRepository[Request]):
         ),
     }
 
+    def _expand_status_codes(self, codes: list[str]) -> list[str]:
+        expanded = {normalize_status(str(code)) for code in codes}
+        for alias, canonical in STATUS_ALIASES.items():
+            if canonical in expanded:
+                expanded.add(alias)
+        return sorted(expanded)
+
     def _apply_filters(self, stmt, filters: dict):
         filters = dict(filters)
         # Filtres plage de dates sur created_at
         date_from = filters.pop("date_from", None)
         date_to = filters.pop("date_to", None)
+        exclude_request_status = filters.pop("exclude_request_status", None)
+        unassigned_only = filters.pop("unassigned_only", None)
         if date_from:
             stmt = stmt.where(Request.created_at >= date_from)
         if date_to:
             stmt = stmt.where(Request.created_at <= date_to)
+        if exclude_request_status:
+            excluded_codes = (
+                list(exclude_request_status)
+                if isinstance(exclude_request_status, (list, tuple, set))
+                else [s.strip() for s in str(exclude_request_status).split(",") if s.strip()]
+            )
+            stmt = stmt.where(Request.request_status_id.notin_(self._status_in_sub(excluded_codes)))
+        if unassigned_only:
+            stmt = stmt.where(Request.assignee_id.is_(None))
 
         regular: dict = {}
         for key, val in filters.items():
@@ -53,12 +87,19 @@ class RequestRepository(BaseRepository[Request]):
                 ref_col = getattr(ref_model, code_attr)
                 sub = select(ref_model.id).where(ref_model.deleted_at.is_(None))
                 if isinstance(val, (list, tuple, set)):
+                    if key == "request_status":
+                        val = self._expand_status_codes([str(v) for v in val])
                     sub = sub.where(ref_col.in_(list(val)))
                     stmt = stmt.where(fk_col.in_(sub))
                 else:
-                    stmt = stmt.where(
-                        fk_col == sub.where(ref_col == val).scalar_subquery()
-                    )
+                    if key == "request_status":
+                        stmt = stmt.where(
+                            fk_col.in_(sub.where(ref_col.in_(self._expand_status_codes([str(val)]))))
+                        )
+                    else:
+                        stmt = stmt.where(
+                            fk_col == sub.where(ref_col == val).scalar_subquery()
+                        )
             else:
                 regular[key] = val
         return super()._apply_filters(stmt, regular)
@@ -68,7 +109,7 @@ class RequestRepository(BaseRepository[Request]):
     def _status_in_sub(self, codes: list[str]):
         return (
             select(RequestStatus.id)
-            .where(RequestStatus.code.in_(codes))
+            .where(RequestStatus.code.in_(self._expand_status_codes(codes)))
             .where(RequestStatus.deleted_at.is_(None))
         )
 
@@ -132,6 +173,7 @@ class RequestRepository(BaseRepository[Request]):
             order_by="-created_at",
             page=page,
             limit=limit,
+            load_options=_SKIP_UNUSED_RELS,
         )
 
     async def list_by_assignee(
@@ -145,26 +187,61 @@ class RequestRepository(BaseRepository[Request]):
         filters: dict = {"assignee_id": assignee_id}
         if status_code:
             filters["request_status"] = status_code
-        return await self.list(filters=filters, order_by="-created_at", page=page, limit=limit)
+        return await self.list(
+            filters=filters, order_by="-created_at", page=page, limit=limit,
+            load_options=_SKIP_UNUSED_RELS,
+        )
 
     async def list_by_direction(
         self, direction_id: str, *, page: int = 1, limit: int = 20
     ) -> tuple[list[Request], int]:
+        _ids = await self._direction_unity_ids(direction_id)
         return await self.list(
-            filters={"unity_id": direction_id},
+            filters={"unity_id": _ids},
             order_by="-created_at",
             page=page,
             limit=limit,
+            load_options=_SKIP_UNUSED_RELS,
         )
+
+    async def _direction_unity_ids(self, direction_id: str | int) -> list[int]:
+        root_id = int(direction_id)
+        ids: list[int] = [root_id]
+
+        from api.models.ModelOrganigram import Organigram as _Org
+
+        org_row = await self.session.execute(
+            select(_Org.id)
+            .where(_Org.unity_id == root_id, _Org.deleted_at.is_(None))
+            .limit(1)
+        )
+        org_id = org_row.scalar_one_or_none()
+        if org_id:
+            child_rows = await self.session.execute(
+                select(_Org.unity_id)
+                .where(_Org.parent_id == org_id, _Org.deleted_at.is_(None))
+            )
+            ids.extend(int(uid) for (uid,) in child_rows.all() if uid is not None)
+
+        unity_rows = await self.session.execute(
+            select(Unity.id)
+            .where(Unity.parent_direction_id == root_id, Unity.deleted_at.is_(None))
+        )
+        ids.extend(int(uid) for (uid,) in unity_rows.all() if uid is not None)
+        return sorted(set(ids))
 
     async def list_pending_triage(
         self, *, page: int = 1, limit: int = 20
     ) -> tuple[list[Request], int]:
         return await self.list(
-            filters={"in_triage": True},
+            filters={
+                "in_triage": True,
+                "request_status": self._QUALIFIABLE_STATUSES,
+            },
             order_by="-created_at",
             page=page,
             limit=limit,
+            load_options=_SKIP_UNUSED_RELS,
         )
 
     async def list_sla_breached(
@@ -175,6 +252,7 @@ class RequestRepository(BaseRepository[Request]):
             order_by="-created_at",
             page=page,
             limit=limit,
+            load_options=_SKIP_UNUSED_RELS,
         )
 
     async def list_by_requester(
@@ -185,6 +263,7 @@ class RequestRepository(BaseRepository[Request]):
             order_by="-created_at",
             page=page,
             limit=limit,
+            load_options=_SKIP_UNUSED_RELS,
         )
 
     async def search(
@@ -201,6 +280,7 @@ class RequestRepository(BaseRepository[Request]):
             order_by="-created_at",
             page=page,
             limit=limit,
+            load_options=_SKIP_UNUSED_RELS,
         )
 
     async def list_queue(
@@ -208,6 +288,7 @@ class RequestRepository(BaseRepository[Request]):
         *,
         direction_id: str | None = None,
         assignee_id: str | None = None,
+        unassigned_only: bool = False,
         priority: str | None = None,
         request_status: str | None = None,
         search: str | None = None,
@@ -217,33 +298,23 @@ class RequestRepository(BaseRepository[Request]):
         # Si un statut précis est demandé, on filtre sur ce seul statut ;
         # sinon on utilise la liste des statuts actifs par défaut.
         filters: dict = {
-            "request_status": request_status if request_status else self._ACTIVE_STATUSES
+            "request_status": request_status if request_status else self._ACTIVE_STATUSES,
+            "in_triage": False,
         }
         if direction_id:
-            # Expansion hiérarchique : direction + tous ses services via l'organigramme
-            from sqlalchemy import select as _sel
-            from api.models.ModelOrganigram import Organigram as _Org
-            _r1 = await self.session.execute(
-                _sel(_Org.id)
-                .where(_Org.unity_id == int(direction_id), _Org.deleted_at.is_(None))
-                .limit(1)
-            )
-            _org_id = _r1.scalar_one_or_none()
-            _ids: list[int] = [int(direction_id)]
-            if _org_id:
-                _r2 = await self.session.execute(
-                    _sel(_Org.unity_id)
-                    .where(_Org.parent_id == _org_id, _Org.deleted_at.is_(None))
-                )
-                _ids.extend(uid for (uid,) in _r2.all())
-            filters["unity_id"] = _ids
+            filters["unity_id"] = await self._direction_unity_ids(direction_id)
         if assignee_id:
             filters["assignee_id"] = assignee_id
+        if unassigned_only:
+            filters["unassigned_only"] = True
         if priority:
             filters["priority"] = priority
         if search:
             return await self.search(search, filters=filters, page=page, limit=limit)
-        return await self.list(filters=filters, order_by="-created_at", page=page, limit=limit)
+        return await self.list(
+            filters=filters, order_by="-created_at", page=page, limit=limit,
+            load_options=_SKIP_UNUSED_RELS,
+        )
 
     async def count_by_status(self) -> dict[str, int]:
         """Retourne {status_code: count} pour le tableau de bord."""
@@ -256,13 +327,29 @@ class RequestRepository(BaseRepository[Request]):
         rows = (await self.session.execute(stmt)).all()
         return {row[0]: row[1] for row in rows}
 
-    async def next_ref(self, year: int) -> str:
-        """Calcule la prochaine référence EDG-{year}-{seq:04d}."""
-        prefix = f"EDG-{year}-"
-        stmt = (
-            select(func.count(Request.id))
-            .where(Request.ref.like(f"{prefix}%"))
-            .where(Request.deleted_at.is_(None))
-        )
-        count = (await self.session.execute(stmt)).scalar_one() or 0
-        return f"{prefix}{count + 1:04d}"
+    async def next_ref(self, base: str | int) -> str:
+        """
+        Calcule la prochaine référence unique pour une base donnée.
+
+        Nouvelle forme métier :
+            DIR-UNT-HHMMSSYYYMMDD-SEQ
+
+        La méthode conserve aussi l'ancien appel next_ref(year) par prudence.
+        Elle se base sur le MAX du suffixe parmi TOUTES les lignes, y compris
+        les soft-deleted, car la contrainte unique sur `ref` s'applique aussi
+        aux lignes supprimées.
+        """
+        if isinstance(base, int):
+            prefix = f"EDG-{base}-"
+            seq_width = 4
+        else:
+            prefix = f"{base.rstrip('-').upper()}-"
+            seq_width = 3
+        stmt = select(Request.ref).where(Request.ref.like(f"{prefix}%"))
+        refs = [row[0] for row in (await self.session.execute(stmt)).all()]
+        max_num = 0
+        for r in refs:
+            suffix = r[len(prefix):]
+            if suffix.isdigit():
+                max_num = max(max_num, int(suffix))
+        return f"{prefix}{max_num + 1:0{seq_width}d}"

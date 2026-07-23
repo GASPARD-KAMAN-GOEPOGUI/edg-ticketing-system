@@ -31,6 +31,7 @@ export type NotifItem = {
   at: string;
   read: boolean;
   requestId?: string;
+  actionUrl?: string;
   source: "request" | "announcement";
 };
 
@@ -71,6 +72,7 @@ export function mapNotification(raw: RawNotification): NotifItem {
     at: formatRelativeTime(raw.created_at),
     read: raw.is_read,
     requestId,
+    actionUrl: raw.action_url ?? undefined,
     source: requestId ? "request" : "announcement",
   };
 }

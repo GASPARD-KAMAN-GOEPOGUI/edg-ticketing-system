@@ -22,6 +22,21 @@ import logging
 import sys
 from typing import Optional
 
+def _configure_windows_streams() -> None:
+    """Evite les UnicodeEncodeError sur les consoles Windows en cp1252."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            # Le logging ne doit jamais empêcher l'application de démarrer.
+            pass
+
+
+_configure_windows_streams()
+
 # ── Niveau SUCCESS ────────────────────────────────────────────────────────────
 
 _SUCCESS_LEVEL = 25

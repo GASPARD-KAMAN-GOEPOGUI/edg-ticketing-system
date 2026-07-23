@@ -40,6 +40,8 @@ import {
   reopenRequest,
   rejectTicket,
   reassignService,
+  resolveRequest,
+  escalateRequest,
 } from "@/lib/api/requests";
 import { fetchUsers } from "@/lib/api/accounts";
 import { fetchUnits } from "@/lib/api/directions-units";
@@ -71,7 +73,7 @@ const TABS: { key: Tab; label: string; icon: typeof ClipboardList; color: string
   { key: "escalated",label: "Escalades",     icon: AlertTriangle,  color: "text-destructive" },
 ];
 
-type ModalType = "assign" | "reassign" | "reject" | "reopen" | null;
+type ModalType = "assign" | "reassign" | "reject" | "reopen" | "resolve" | "return_director" | null;
 interface ModalState { type: ModalType; ticket: RequestItem | null }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -95,12 +97,16 @@ function TicketRow({
   onReassign,
   onReject,
   onReopen,
+  onResolve,
+  onReturnDirector,
 }: {
   r: RequestItem;
   onAssign: () => void;
   onReassign: () => void;
   onReject: () => void;
   onReopen?: () => void;
+  onResolve?: () => void;
+  onReturnDirector?: () => void;
 }) {
   const slaOver = r.slaElapsed > r.slaHours;
   const slaLeft = Math.max(0, r.slaHours - r.slaElapsed);
@@ -113,7 +119,7 @@ function TicketRow({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -6 }}
       className={cn(
-        "flex flex-col gap-3 border-b px-5 py-4 last:border-0 transition-colors hover:bg-background/50 sm:flex-row sm:items-start",
+        "flex h-full flex-col gap-3 rounded-2xl border p-4 transition-colors hover:bg-background/50 xl:flex-row xl:items-start",
         r.priority === "critical" ? "border-destructive/30 bg-destructive/3" :
         showReopen               ? "border-amber-500/30 bg-amber-500/3"    :
         r.status === "escalated" ? "border-orange-400/30 bg-orange-500/3" :
@@ -124,7 +130,7 @@ function TicketRow({
       <div className="min-w-0 flex-1 space-y-1.5">
         <div className="flex flex-wrap items-center gap-2">
           <Link
-            to="/app/requests/$id"
+            to="/app/chief-inbox/tickets/$id"
             params={{ id: r.id }}
             className="font-mono text-[11px] text-primary hover:underline"
           >
@@ -144,7 +150,7 @@ function TicketRow({
           )}
         </div>
         <Link
-          to="/app/requests/$id"
+          to="/app/chief-inbox/tickets/$id"
           params={{ id: r.id }}
           className="block font-semibold leading-snug hover:text-primary"
         >
@@ -183,6 +189,25 @@ function TicketRow({
           >
             <XCircle className="mr-1 h-3 w-3" /> Rejeter
           </Button>
+          {onResolve && (
+            <Button
+              size="sm"
+              className="h-7 rounded-full px-3 text-xs bg-success text-success-foreground hover:bg-success/90"
+              onClick={onResolve}
+            >
+              <CheckCircle2 className="mr-1 h-3 w-3" /> Résoudre
+            </Button>
+          )}
+          {onReturnDirector && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 rounded-full px-3 text-xs border-warning/40 text-warning hover:bg-warning/10"
+              onClick={onReturnDirector}
+            >
+              <ArrowRightLeft className="mr-1 h-3 w-3" /> Retour directeur
+            </Button>
+          )}
         </div>
       </div>
     </motion.div>
@@ -225,10 +250,10 @@ function ChiefInbox() {
 
   // ── Agents du service (pour M1) ──────────────────────────────────────────────
   const { data: agentsData } = useQuery({
-    queryKey: ["service-agents", sessionUser?.direction_id],
-    queryFn: () => fetchUsers({ role: "agent", direction_id: sessionUser!.direction_id!, limit: 100 }),
+    queryKey: ["service-agents", sessionUser?.unit_id],
+    queryFn: () => fetchUsers({ role: "agent", unit_id: sessionUser!.unit_id!, limit: 100 }),
     staleTime: 120_000,
-    enabled: !!sessionUser?.direction_id,
+    enabled: !!sessionUser?.unit_id,
   });
   const serviceAgents = agentsData?.items ?? [];
 
@@ -238,13 +263,21 @@ function ChiefInbox() {
     queryFn: () => fetchUnits(),
     staleTime: 5 * 60_000,
   });
-  const allUnits = (unitsData ?? []).filter((u) => u.status && u.id !== sessionUser?.unit_id);
+  const currentUnit = (unitsData ?? []).find((u) => u.id === sessionUser?.unit_id);
+  const serviceDirectionId = sessionUser?.direction_id ?? currentUnit?.direction_id;
+  const allUnits = (unitsData ?? []).filter((u) =>
+    u.status &&
+    u.id !== sessionUser?.unit_id &&
+    !!serviceDirectionId &&
+    u.direction_id === serviceDirectionId
+  );
 
   // ── États formulaires modals ──────────────────────────────────────────────────
-  const [assignAgentId, setAssignAgentId]   = useState("");
-  const [reassignUnitId, setReassignUnitId] = useState("");
-  const [reassignReason, setReassignReason] = useState("");
-  const [rejectReason, setRejectReason]     = useState("");
+  const [assignAgentId, setAssignAgentId]       = useState("");
+  const [reassignUnitId, setReassignUnitId]     = useState("");
+  const [reassignReason, setReassignReason]     = useState("");
+  const [rejectReason, setRejectReason]         = useState("");
+  const [returnReason, setReturnReason]         = useState("");
 
   const closeModal = () => {
     setModal({ type: null, ticket: null });
@@ -252,6 +285,7 @@ function ChiefInbox() {
     setReassignUnitId("");
     setReassignReason("");
     setRejectReason("");
+    setReturnReason("");
   };
 
   const invalidate = () => {
@@ -291,6 +325,28 @@ function ChiefInbox() {
     mutationFn: () => reopenRequest(modal.ticket!.id, undefined, sessionUser?.id),
     onSuccess: () => { toast.success("Réouverture approuvée"); invalidate(); closeModal(); },
     onError: () => toast.error("Erreur lors de l'approbation"),
+  });
+
+  // ── M5 — Résoudre directement ─────────────────────────────────────────────────
+  const resolveMut = useMutation({
+    mutationFn: () => resolveRequest(modal.ticket!.id, sessionUser?.id),
+    onSuccess: () => { toast.success("Ticket résolu"); invalidate(); closeModal(); },
+    onError: () => toast.error("Erreur lors de la résolution"),
+  });
+
+  // ── M6 — Retourner au directeur (escalade L2→L3) ──────────────────────────────
+  const returnDirectorMut = useMutation({
+    mutationFn: () => escalateRequest(
+      modal.ticket!.id,
+      {
+        level: "L3",
+        reason: returnReason || "Renvoyé au directeur pour arbitrage.",
+        from_agent_name: sessionUser?.name ?? "Chef de service",
+      },
+      sessionUser?.id,
+    ),
+    onSuccess: () => { toast.success("Ticket renvoyé au directeur"); invalidate(); closeModal(); },
+    onError: () => toast.error("Erreur lors du renvoi au directeur"),
   });
 
   const openModal = (type: ModalType, ticket: RequestItem) =>
@@ -401,7 +457,7 @@ function ChiefInbox() {
         })}
       </motion.div>
 
-      {/* ── Liste ────────────────────────────────────────────────────────────── */}
+      {/* ── Grille ───────────────────────────────────────────────────────────── */}
       <AsyncSwap
         state={listState}
         empty={
@@ -423,19 +479,23 @@ function ChiefInbox() {
           </GlassCard>
         }
       >
-        <GlassCard className="overflow-hidden p-0">
-          <AnimatePresence mode="popLayout" initial={false}>
-            {displayed.map((r) => (
-              <TicketRow
-                key={r.id}
-                r={r}
-                onAssign={()   => openModal("assign",   r)}
-                onReassign={()  => openModal("reassign", r)}
-                onReject={()   => openModal("reject",   r)}
-                onReopen={r.infos?.reopen_requested ? () => openModal("reopen", r) : undefined}
-              />
-            ))}
-          </AnimatePresence>
+        <GlassCard className="p-4">
+          <div className="grid gap-3 xl:grid-cols-2">
+            <AnimatePresence mode="popLayout" initial={false}>
+              {displayed.map((r) => (
+                <TicketRow
+                  key={r.id}
+                  r={r}
+                  onAssign={() => openModal("assign", r)}
+                  onReassign={() => openModal("reassign", r)}
+                  onReject={() => openModal("reject", r)}
+                  onReopen={r.infos?.reopen_requested ? () => openModal("reopen", r) : undefined}
+                  onResolve={() => openModal("resolve", r)}
+                  onReturnDirector={() => openModal("return_director", r)}
+                />
+              ))}
+            </AnimatePresence>
+          </div>
         </GlassCard>
       </AsyncSwap>
 
@@ -613,6 +673,78 @@ function ChiefInbox() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* ── M5 — Résoudre ────────────────────────────────────────────────────── */}
+      <AlertDialog open={modal.type === "resolve"} onOpenChange={(o) => !o && closeModal()}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-success">
+              <CheckCircle2 className="h-4 w-4" /> Résoudre le ticket
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {modal.ticket && (
+                <>
+                  Confirmez la résolution du ticket <strong>{modal.ticket.ref}</strong>.
+                  Le demandeur pourra confirmer ou demander la réouverture.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={closeModal}>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-success text-success-foreground hover:bg-success/90"
+              disabled={resolveMut.isPending}
+              onClick={() => resolveMut.mutate()}
+            >
+              {resolveMut.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+              Confirmer la résolution
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ── M6 — Retour au directeur ─────────────────────────────────────────── */}
+      <Dialog open={modal.type === "return_director"} onOpenChange={(o) => !o && closeModal()}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-warning">
+              <AlertTriangle className="h-4 w-4" /> Renvoyer au directeur
+            </DialogTitle>
+            <DialogDescription>
+              Ce ticket sera escaladé (L3) pour arbitrage par le directeur de la direction.
+            </DialogDescription>
+          </DialogHeader>
+          {modal.ticket && (
+            <div className="rounded-xl bg-muted/40 px-4 py-3 text-sm">
+              <p className="font-semibold line-clamp-1">{modal.ticket.title}</p>
+              <p className="mt-0.5 font-mono text-xs text-muted-foreground">{modal.ticket.ref}</p>
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <Label>Motif du renvoi</Label>
+            <Textarea
+              className="resize-none"
+              rows={3}
+              placeholder="Expliquer pourquoi ce ticket nécessite un arbitrage de la direction…"
+              value={returnReason}
+              onChange={(e) => setReturnReason(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" className="rounded-full" onClick={closeModal}>Annuler</Button>
+            <Button
+              className="rounded-full border-warning/40 text-warning hover:bg-warning/10"
+              variant="outline"
+              disabled={returnDirectorMut.isPending}
+              onClick={() => returnDirectorMut.mutate()}
+            >
+              {returnDirectorMut.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+              Envoyer au directeur
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
