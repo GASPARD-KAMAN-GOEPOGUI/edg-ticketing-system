@@ -37,7 +37,8 @@ async def my_stats(
     svc: StatsService = Depends(_svc),
 ):
     """Stats personnelles de l'agent connecté (assigné, résolu, SLA, temps moyen)."""
-    if normalize_role(actor.role) not in ("agent", "chief", "director", "admin"):
+    role = normalize_role(actor.role)
+    if role not in {"agent-support", "chief-service", "chief-departement", "director", "admin"}:
         from fastapi import HTTPException
         raise HTTPException(status_code=403, detail="Accès non autorisé.")
     return await svc.my_stats(int(actor.id))
@@ -69,7 +70,7 @@ async def dashboard_summary(
     """
     # Forçage RBAC — le paramètre client est ignoré (même correction que C-N°3)
     role = normalize_role(actor.role)
-    if role == "chief":
+    if role in {"chief-service", "chief-departement"}:
         unit_id = int(actor.unit_id) if actor.unit_id else None
         direction_id = None
     elif role == "director":

@@ -127,23 +127,25 @@ const _ADMIN: Permission[] = [
 ];
 
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
-  public:   _PUBLIC,
-  user:     _USER,
-  agent:    _AGENT,
-  chief:    _CHIEF,
-  director: _DIRECTOR,
-  admin:    _ADMIN,
+  public:              _PUBLIC,
+  user:                _USER,
+  "agent-support":     _AGENT,
+  "chief-service":     _CHIEF,
+  "chief-departement": _CHIEF,
+  director:            _DIRECTOR,
+  admin:               _ADMIN,
 };
 
 // ── Hiérarchie ────────────────────────────────────────────────────────────────
 
 const ROLE_HIERARCHY: Record<Role, number> = {
-  public:   0,
-  user:     1,
-  agent:    2,
-  chief:    3,
-  director: 4,
-  admin:    5,
+  public:              0,
+  user:                1,
+  "agent-support":     2,
+  "chief-service":     3,
+  "chief-departement": 3,
+  director:            4,
+  admin:               5,
 };
 
 // ── Fonctions utilitaires ─────────────────────────────────────────────────────

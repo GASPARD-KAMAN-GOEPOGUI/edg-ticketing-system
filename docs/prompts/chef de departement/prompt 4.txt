@@ -1,0 +1,270 @@
+==========================================================
+CHEF DE DEPARTEMENT
+PARTIE 4
+NOTIFICATIONS - AUDIT - SECURITE
+==========================================================
+
+OBJECTIF
+
+Le Chef de Département doit être informé de tous les événements importants
+qui concernent les services de son département.
+
+Il ne reçoit jamais des notifications inutiles.
+
+Le système lui présente uniquement les informations qui nécessitent une décision
+ou une intervention.
+
+==========================================================
+NOTIFICATIONS
+==========================================================
+
+Le Chef reçoit une notification lorsque :
+
+• un Chef de Service demande son intervention
+
+• un ticket est escaladé au niveau département
+
+• un incident majeur est créé
+
+• plusieurs services sont impliqués dans un même incident
+
+• un SLA critique est dépassé
+
+• un service devient surchargé
+
+• un ticket critique reste sans traitement
+
+• une panne impacte plusieurs services
+
+==========================================================
+CENTRE DE NOTIFICATIONS
+==========================================================
+
+Chaque notification affiche :
+
+• le titre
+
+• le numéro du ticket
+
+• le service concerné
+
+• le Chef de Service concerné
+
+• la priorité
+
+• la date
+
+• le niveau d'urgence
+
+• un bouton "Voir le dossier"
+
+Les notifications peuvent être :
+
+• lues
+
+• filtrées
+
+• recherchées
+
+• archivées
+
+==========================================================
+ALERTES PRIORITAIRES
+==========================================================
+
+Certaines alertes restent affichées jusqu'à leur résolution.
+
+Exemples :
+
+🔴 Incident majeur
+
+🔴 Plusieurs SLA dépassés
+
+🔴 Plusieurs services indisponibles
+
+🔴 Service complètement surchargé
+
+🔴 Escalade vers la Direction DSI en attente
+
+==========================================================
+AUDIT
+==========================================================
+
+Toutes les décisions du Chef de Département sont enregistrées.
+
+Exemples :
+
+• validation d'une escalade
+
+• réaffectation entre services
+
+• création d'un incident majeur
+
+• changement exceptionnel de priorité
+
+• transfert vers la Direction DSI
+
+Chaque ligne d'audit contient :
+
+Date
+
+Heure
+
+Utilisateur
+
+Action
+
+Ancienne valeur
+
+Nouvelle valeur
+
+Motif
+
+==========================================================
+HISTORIQUE
+==========================================================
+
+Le Chef peut consulter tout l'historique d'un ticket.
+
+Création
+
+Qualification
+
+Affectation
+
+Traitement
+
+Commentaires
+
+Réaffectations
+
+Escalades
+
+Résolution
+
+Validation
+
+Clôture
+
+Aucune information ne peut être supprimée.
+
+==========================================================
+RAPPORTS
+==========================================================
+
+Le Chef peut consulter :
+
+• performance des services
+
+• performance des Chefs de Service
+
+• respect des SLA
+
+• incidents majeurs
+
+• tickets critiques
+
+• tickets réouverts
+
+• charge des services
+
+• satisfaction utilisateur
+
+Les rapports sont exportables :
+
+PDF
+
+Excel
+
+CSV
+
+==========================================================
+RECHERCHE
+==========================================================
+
+Recherche par :
+
+Numéro du ticket
+
+Utilisateur
+
+Service
+
+Chef de Service
+
+Catégorie
+
+Priorité
+
+Statut
+
+Date
+
+SLA
+
+Incident majeur
+
+Tous les filtres peuvent être combinés.
+
+==========================================================
+SECURITE
+==========================================================
+
+Le Chef de Département ne peut jamais :
+
+Créer un utilisateur
+
+Supprimer un utilisateur
+
+Modifier les rôles
+
+Modifier les permissions
+
+Modifier les paramètres système
+
+Modifier le workflow global
+
+Supprimer un ticket
+
+Modifier l'historique
+
+Toutes les permissions sont contrôlées par le backend.
+
+==========================================================
+VISIBILITE
+==========================================================
+
+Le Chef voit uniquement :
+
+• les services de son département
+
+• les tickets de son département
+
+• les statistiques de son département
+
+• les rapports de son département
+
+Il ne voit jamais :
+
+• les autres départements
+
+• les autres directions
+
+• les données administrateur
+
+==========================================================
+REGLE ABSOLUE
+==========================================================
+
+Le Chef de Département doit recevoir uniquement les informations utiles
+à la gestion de son département.
+
+Toutes ses décisions doivent être :
+
+• justifiées
+
+• enregistrées
+
+• sécurisées
+
+• auditables

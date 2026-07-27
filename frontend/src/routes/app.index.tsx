@@ -4,7 +4,7 @@ import { GlassCard } from "@/components/glass-card";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { statusLabels } from "@/lib/mock-data";
-import type { RequestItem } from "@/lib/mock-data";
+import type { RequestItem, Role } from "@/lib/mock-data";
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchCsatStats } from "@/lib/api/csat";
@@ -300,17 +300,23 @@ function StatusPie({ data, isLoading }: { data: RequestItem[]; isLoading?: boole
 
 function PersonalRoleShortcuts() {
   const [role] = useRole();
-  const shortcutsByRole: Record<string, { to: string; label: string; description: string; icon: typeof Inbox }[]> = {
+  const shortcutsByRole: Record<Role, { to: string; label: string; description: string; icon: typeof Inbox }[]> = {
+    public: [],
     user: [],
-    agent: [
+    "agent-support": [
       { to: "/app/my-tickets", label: "Mes tickets", description: "Tickets qui me sont assignés", icon: Users2 },
       { to: "/app/queue", label: "File d'attente", description: "Tickets orientés à traiter", icon: Inbox },
     ],
-    chief: [
+    "chief-service": [
       { to: "/app/chief-inbox", label: "Boîte de traitement", description: "Tickets du service à organiser", icon: MessageSquareWarning },
       { to: "/app/queue", label: "File d'attente", description: "Demandes orientées et à qualifier", icon: Inbox },
       { to: "/app/supervision", label: "Supervision", description: "Suivi de l'activité du service", icon: AlertTriangle },
       { to: "/app/reports", label: "Rapports", description: "Indicateurs du service", icon: TrendingUp },
+    ],
+    "chief-departement": [
+      { to: "/app/department-inbox", label: "Boîte de traitement", description: "Tickets du département à organiser", icon: MessageSquareWarning },
+      { to: "/app/supervision", label: "Supervision", description: "Suivi de l'activité du département", icon: AlertTriangle },
+      { to: "/app/reports", label: "Rapports", description: "Indicateurs du département", icon: TrendingUp },
     ],
     director: [
       { to: "/app/supervision", label: "Supervision", description: "Tickets escaladés ou à arbitrer", icon: AlertTriangle },

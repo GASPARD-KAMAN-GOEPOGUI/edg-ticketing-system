@@ -3,7 +3,7 @@ import { requireRole } from "@/lib/auth-guard";
 import { RequestDetailPage } from "./app.requests.$id";
 
 export const Route = createFileRoute("/app/chief-inbox_/tickets/$id")({
-  beforeLoad: () => requireRole("chief", "admin"),
+  beforeLoad: () => requireRole("chief-service", "admin"),
   head: () => ({ meta: [{ title: "Ticket chef de service — EDG Support" }] }),
   component: ChiefInboxTicketDetail,
 });

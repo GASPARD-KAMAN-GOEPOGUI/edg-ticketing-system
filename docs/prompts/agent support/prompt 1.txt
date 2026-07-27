@@ -1,0 +1,458 @@
+=====================================================================
+REFERENTIEL OFFICIEL DES ROLES
+ROLE N°2 : AGENT SUPPORT
+PARTIE 1
+IDENTITE – MISSION – RESPONSABILITES – PERIMETRE – MENUS – DASHBOARD
+VERSION OFFICIELLE
+=====================================================================
+
+OBJECTIF
+
+Ce document définit le comportement officiel du rôle "Agent Support".
+
+L'IA ne doit jamais interpréter ce rôle.
+
+Toutes les interfaces, règles métier, permissions, composants du frontend, API backend et contrôles de sécurité devront respecter exactement cette spécification.
+
+=====================================================================
+
+IDENTITE DU ROLE
+
+Nom officiel
+
+Agent Support
+
+Description
+
+L'Agent Support est le premier acteur opérationnel chargé de prendre en charge les demandes adressées à la DSI.
+
+Il représente le point d'entrée du traitement métier.
+
+Il assure :
+
+• la qualification
+• le diagnostic
+• le traitement
+• la communication avec le demandeur
+• la résolution
+• le suivi des incidents
+
+Il n'est pas un administrateur.
+
+Il ne possède que les permissions qui lui sont explicitement accordées.
+
+=====================================================================
+
+MISSION
+
+L'Agent Support doit garantir que chaque demande soit :
+
+• correctement comprise
+• correctement qualifiée
+• correctement orientée
+• correctement traitée
+• correctement documentée
+• correctement clôturée
+
+Il agit toujours dans l'intérêt du demandeur tout en respectant les procédures internes de la DSI.
+
+=====================================================================
+
+OBJECTIFS METIER
+
+L'Agent Support doit :
+
+Réduire le temps de prise en charge.
+
+Réduire le temps de résolution.
+
+Garantir la qualité des réponses.
+
+Limiter les réouvertures.
+
+Respecter les SLA.
+
+Communiquer avec les utilisateurs.
+
+Conserver un historique complet.
+
+Ne jamais perdre d'informations.
+
+=====================================================================
+
+POSITION DANS LE WORKFLOW
+
+L'Agent Support intervient après la création d'une demande.
+
+Workflow simplifié
+
+Utilisateur
+
+↓
+
+Nouvelle demande
+
+↓
+
+new
+
+↓
+
+Agent Support
+
+↓
+
+Qualification
+
+↓
+
+Traitement
+
+↓
+
+Résolution
+
+↓
+
+Validation utilisateur
+
+↓
+
+Clôture
+
+L'Agent Support est responsable de toute la partie opérationnelle.
+
+=====================================================================
+
+RESPONSABILITES PRINCIPALES
+
+L'Agent Support est responsable de :
+
+Recevoir les nouveaux tickets.
+
+Analyser chaque demande.
+
+Qualifier la demande.
+
+Choisir la catégorie.
+
+Choisir la priorité (si autorisé).
+
+Associer le bon service.
+
+Associer le bon département.
+
+Ajouter des commentaires internes.
+
+Ajouter des commentaires publics.
+
+Communiquer avec le demandeur.
+
+Demander des informations complémentaires.
+
+Ajouter des pièces jointes.
+
+Résoudre les incidents.
+
+Documenter les actions réalisées.
+
+Proposer une solution.
+
+Participer à la base de connaissances (si cette permission lui est accordée).
+
+=====================================================================
+
+RESPONSABILITES INTERDITES
+
+L'Agent Support ne doit jamais :
+
+Créer un utilisateur.
+
+Supprimer un utilisateur.
+
+Modifier les rôles.
+
+Modifier les permissions globales.
+
+Modifier les paramètres système.
+
+Modifier les workflows globaux.
+
+Modifier les SLA globaux.
+
+Modifier les directions.
+
+Modifier les départements.
+
+Modifier les services.
+
+Accéder aux journaux système confidentiels.
+
+Accéder aux paramètres de sécurité.
+
+Modifier la configuration de l'application.
+
+=====================================================================
+
+PERIMETRE DE VISIBILITE
+
+Par défaut l'Agent Support peut voir uniquement :
+
+Les tickets qui lui sont affectés.
+
+Les tickets de son service.
+
+Les tickets qu'il a créés.
+
+Les tickets qu'il est autorisé à consulter.
+
+Il ne peut jamais voir :
+
+Les tickets confidentiels d'un autre service.
+
+Les tickets des ressources humaines.
+
+Les tickets d'une autre direction.
+
+Les données personnelles inutiles.
+
+Les paramètres administrateur.
+
+Toutes les recherches doivent respecter ces règles.
+
+=====================================================================
+
+PERMISSIONS CONFIGURABLES
+
+L'Agent Support reste un seul rôle.
+
+Les permissions sont activables individuellement.
+
+Chaque permission peut être :
+
+Oui
+
+Non
+
+Exemples :
+
+Peut qualifier
+
+Peut affecter
+
+Peut réaffecter
+
+Peut transférer
+
+Peut fusionner
+
+Peut modifier la priorité
+
+Peut modifier la criticité
+
+Peut modifier le SLA
+
+Peut escalader
+
+Peut clôturer directement
+
+Peut voir tous les tickets du service
+
+Peut voir uniquement ses tickets
+
+Peut créer un article de connaissance
+
+Peut valider un article
+
+Peut supprimer un commentaire
+
+Peut exporter une liste
+
+Aucune permission ne doit être supposée.
+
+Toutes doivent être contrôlées par le backend.
+
+=====================================================================
+
+TABLEAU DE BORD
+
+Le tableau de bord Agent Support est un espace opérationnel.
+
+Il doit permettre à l'agent de connaître immédiatement son activité.
+
+Cartes recommandées :
+
+Mes tickets actifs
+
+Tickets à qualifier
+
+Tickets en attente utilisateur
+
+Tickets en attente interne
+
+Tickets en retard SLA
+
+Tickets résolus aujourd'hui
+
+Tickets réouverts
+
+Tickets transférés
+
+Tickets escaladés
+
+Temps moyen de résolution
+
+Temps moyen de première réponse
+
+Taux de résolution
+
+Charge actuelle
+
+Le dashboard doit être dynamique.
+
+Les données doivent être calculées en temps réel.
+
+=====================================================================
+
+WIDGETS
+
+Le dashboard peut contenir :
+
+Graphique des statuts
+
+Répartition par priorité
+
+Répartition par catégorie
+
+Calendrier des échéances
+
+Alertes SLA
+
+Dernières notifications
+
+Derniers commentaires
+
+Derniers tickets créés
+
+Historique personnel
+
+=====================================================================
+
+MENUS PRINCIPAUX
+
+Accueil
+
+Mon travail
+
+Mes tickets
+
+Tickets du service
+
+Qualification
+
+Traitement
+
+Historique
+
+Notifications
+
+Base de connaissances
+
+Recherche
+
+Mon profil
+
+=====================================================================
+
+SOUS-MENUS
+
+Mon travail
+
+• A prendre
+• En cours
+• En attente utilisateur
+• En attente interne
+• Résolus
+
+Qualification
+
+• Nouveaux
+• A qualifier
+• Qualifiés
+
+Tickets du service
+
+• Tous
+• Par priorité
+• Par catégorie
+• Par statut
+
+Historique
+
+• Clôturés
+• Réouverts
+• Transférés
+
+=====================================================================
+
+INTERDICTION DE CONFUSION
+
+L'application ne doit jamais mélanger :
+
+Mes tickets
+
+Tickets du service
+
+Supervision
+
+Administration
+
+Chaque espace possède son propre objectif.
+
+=====================================================================
+
+EXEMPLE
+
+Mamadou est Agent Support.
+
+Il ouvre son tableau de bord.
+
+Il voit :
+
+18 tickets actifs.
+
+4 tickets à qualifier.
+
+2 tickets en attente utilisateur.
+
+1 ticket critique.
+
+Il clique :
+
+Tickets à qualifier.
+
+Il commence immédiatement la qualification.
+
+Le dashboard est automatiquement mis à jour.
+
+=====================================================================
+
+SECURITE
+
+Toutes les permissions doivent être vérifiées côté backend.
+
+Le frontend ne doit jamais décider si une action est autorisée.
+
+Le backend est la seule source de vérité.
+
+=====================================================================
+
+REGLE ABSOLUE
+
+L'Agent Support est un acteur opérationnel.
+
+Il traite les demandes.
+
+Il n'administre jamais l'application.
+
+Toutes les fonctionnalités de son espace doivent servir exclusivement au traitement des tickets et aux missions qui lui sont explicitement autorisées.

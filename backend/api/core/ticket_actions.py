@@ -35,19 +35,19 @@ TERMINAL_STATUSES = frozenset({"cancelled", "closed", "resolved", "rejected"})
 QUALIFIABLE_STATUSES = frozenset({"new", "qualifying", "qualified", "reopened"})
 
 ACTION_ALLOWED_ROLES: dict[str, set[str]] = {
-    "qualify": {"agent", "chief", "admin"},
-    "assign": {"agent", "chief", "admin"},
-    "resolve": {"agent", "chief", "director", "admin"},
-    "close": {"user", "agent", "chief", "director", "admin"},
-    "request_reopen": {"user", "agent", "chief", "director", "admin"},
-    "reopen": {"chief", "director", "admin"},
-    "reject_reopen": {"chief", "director", "admin"},
-    "cancel": {"user", "agent", "chief", "director", "admin"},
-    "reassign": {"chief", "director", "admin"},
+    "qualify": {"agent-support", "chief-service", "chief-departement", "admin"},
+    "assign": {"agent-support", "chief-service", "chief-departement", "admin"},
+    "resolve": {"agent-support", "chief-service", "chief-departement", "director", "admin"},
+    "close": {"user", "agent-support", "chief-service", "chief-departement", "director", "admin"},
+    "request_reopen": {"user", "agent-support", "chief-service", "chief-departement", "director", "admin"},
+    "reopen": {"chief-service", "chief-departement", "director", "admin"},
+    "reject_reopen": {"chief-service", "chief-departement", "director", "admin"},
+    "cancel": {"user", "agent-support", "chief-service", "chief-departement", "director", "admin"},
+    "reassign": {"chief-service", "chief-departement", "director", "admin"},
     "transfer_direction": {"director", "admin"},
-    "reject": {"chief", "admin"},
-    "escalate": {"agent", "chief", "director", "admin"},
-    "change_priority": {"chief", "director", "admin"},
+    "reject": {"chief-service", "chief-departement", "admin"},
+    "escalate": {"agent-support", "chief-service", "chief-departement", "director", "admin"},
+    "change_priority": {"chief-service", "chief-departement", "director", "admin"},
 }
 
 TRIAGE_SCOPE_ACTIONS = frozenset({"qualify", "resolve"})
@@ -146,11 +146,11 @@ def assert_ticket_scope(
     if (
         action in TRIAGE_SCOPE_ACTIONS
         and _value(request, "in_triage") is True
-        and role in {"agent", "chief"}
+        and role in {"agent-support", "chief-service", "chief-departement"}
     ):
         return
 
-    if role in {"agent", "chief"}:
+    if role in {"agent-support", "chief-service", "chief-departement"}:
         if request_assignee_id is not None and str(request_assignee_id) == str(actor_id):
             return
         allowed_ids = set(allowed_dir_unity_ids or set())
@@ -194,11 +194,14 @@ def assert_assignment_allowed(
     *,
     target_unity_id: str | int | None = None,
     target_role: str | None = None,
+    allowed_scope_unity_ids: set[int] | None = None,
 ) -> None:
     """
     Regle metier assignation :
       - agent : auto-assignation uniquement, sur un ticket libre de son perimetre.
-      - chief : assignation a un agent de sa propre unite.
+      - chief-service : assignation a un agent de son propre service.
+      - chief-departement : assignation a un agent de n'importe quel service de son
+        departement (allowed_scope_unity_ids = departement + services rattaches).
       - admin : assignation globale.
     """
     role = normalize_role(_value(actor, "role"))
@@ -208,7 +211,7 @@ def assert_assignment_allowed(
     request_unity_id = _value(request, "unity_id")
     target_role_name = normalize_role(target_role)
 
-    if role == "agent":
+    if role == "agent-support":
         if str(assignee_id) != str(actor_id):
             raise ForbiddenException(
                 "Un agent peut seulement s'auto-assigner un ticket.",
@@ -235,27 +238,26 @@ def assert_assignment_allowed(
             )
         return
 
-    if role == "chief":
-        if target_role_name != "agent":
+    if role in {"chief-service", "chief-departement"}:
+        if target_role_name != "agent-support":
             raise ForbiddenException(
                 "Un chef peut assigner uniquement un agent de son service.",
                 error_code=ErrorCode.FORBIDDEN,
             )
-        if (
-            actor_unity_id is None
-            or target_unity_id is None
-            or str(target_unity_id) != str(actor_unity_id)
-        ):
+        # Seul chief-departement beneficie de l'elargissement au perimetre departemental ;
+        # chief-service reste strictement borne a sa propre unite, meme si le parametre
+        # est fourni par erreur par l'appelant.
+        scope_ids = {str(v) for v in (allowed_scope_unity_ids or set())} if role == "chief-departement" else set()
+        if actor_unity_id is not None:
+            scope_ids.add(str(actor_unity_id))
+        if target_unity_id is None or str(target_unity_id) not in scope_ids:
             raise ForbiddenException(
-                "Un chef ne peut pas assigner un agent hors de son service.",
+                "Un chef ne peut pas assigner un agent hors de son perimetre.",
                 error_code=ErrorCode.FORBIDDEN,
             )
-        if (
-            request_unity_id is not None
-            and str(request_unity_id) != str(actor_unity_id)
-        ):
+        if request_unity_id is not None and str(request_unity_id) not in scope_ids:
             raise ForbiddenException(
-                "Un chef ne peut assigner que les tickets de son service.",
+                "Un chef ne peut assigner que les tickets de son perimetre.",
                 error_code=ErrorCode.FORBIDDEN,
             )
         return
@@ -276,6 +278,7 @@ def assert_service_reassignment_allowed(
     *,
     target_direction_id: str | int | None = None,
     actor_direction_id: str | int | None = None,
+    reason: str | None = None,
 ) -> None:
     """
     Regle metier transfert service :
@@ -290,7 +293,13 @@ def assert_service_reassignment_allowed(
     if role in GLOBAL_SCOPE_ROLES:
         return
 
-    if role == "chief":
+    if role in {"chief-service", "chief-departement"}:
+        clean_reason = reason.strip() if isinstance(reason, str) else ""
+        if not clean_reason:
+            raise BusinessException(
+                "Un motif est obligatoire pour reaffecter un ticket.",
+                error_code=ErrorCode.MISSING_REQUIRED_FIELD,
+            )
         source_direction_id = request_direction_id or actor_direction_id
         if source_direction_id is None or target_direction_id is None:
             raise ForbiddenException(
@@ -328,14 +337,14 @@ def assert_service_reassignment_allowed(
 def assert_escalation_allowed(actor: Any, request: Any) -> None:
     """
     Regle metier escalade :
-      - agent : seulement un ticket qui lui est assigne.
+      - agent-support : seulement un ticket qui lui est assigne.
       - chief/director/admin : escalade autorisee dans leur perimetre.
     """
     role = normalize_role(_value(actor, "role"))
     actor_id = _value(actor, "id")
     current_assignee_id = _value(request, "assignee_id")
 
-    if role == "agent" and str(current_assignee_id) != str(actor_id):
+    if role == "agent-support" and str(current_assignee_id) != str(actor_id):
         raise ForbiddenException(
             "Un agent peut escalader seulement un ticket qui lui est assigne.",
             error_code=ErrorCode.FORBIDDEN,

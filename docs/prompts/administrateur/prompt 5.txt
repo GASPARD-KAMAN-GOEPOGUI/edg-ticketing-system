@@ -1,0 +1,430 @@
+==========================================================
+ADMINISTRATEUR
+PARTIE 5
+CAS METIERS
+==========================================================
+
+OBJECTIF
+
+Cette partie décrit les situations réelles rencontrées par
+l'Administrateur dans l'exploitation quotidienne de la plateforme.
+
+L'application doit appliquer exactement ces comportements.
+
+L'Administrateur agit uniquement sur les aspects techniques,
+organisationnels et de configuration.
+
+Il ne prend jamais les décisions métier concernant les tickets.
+
+==========================================================
+CAS N°1
+CREATION D'UN NOUVEL UTILISATEUR
+==========================================================
+
+Situation
+
+Un nouveau collaborateur rejoint l'organisation.
+
+L'Administrateur :
+
+• crée le compte
+
+• renseigne les informations obligatoires
+
+• attribue la direction
+
+• attribue le département
+
+• attribue le service
+
+• attribue le rôle
+
+• active le compte
+
+Le système :
+
+• vérifie les doublons
+
+• crée les permissions correspondantes
+
+• enregistre toutes les opérations dans l'audit
+
+• envoie les informations de première connexion selon la politique de sécurité
+
+==========================================================
+CAS N°2
+CHANGEMENT DE ROLE
+==========================================================
+
+Situation
+
+Un utilisateur change de fonction.
+
+L'Administrateur :
+
+• retire l'ancien rôle
+
+• attribue le nouveau rôle
+
+Le système :
+
+• recalcule immédiatement les permissions
+
+• conserve l'historique des anciens rôles
+
+• journalise l'opération
+
+Les sessions déjà ouvertes suivent la politique de sécurité définie
+(par exemple, reconnexion obligatoire si nécessaire).
+
+==========================================================
+CAS N°3
+DESACTIVATION D'UN COMPTE
+==========================================================
+
+Situation
+
+Un collaborateur quitte définitivement l'organisation.
+
+Avant la désactivation :
+
+Le système vérifie :
+
+• les tickets affectés
+
+• les validations en attente
+
+• les tâches en cours
+
+Si nécessaire :
+
+• une réaffectation est demandée
+
+Une fois les contrôles terminés :
+
+• le compte est désactivé
+
+• toutes les sessions sont fermées
+
+• l'action est auditée
+
+==========================================================
+CAS N°4
+REINITIALISATION D'UN MOT DE PASSE
+==========================================================
+
+Situation
+
+Un utilisateur ne peut plus accéder à son compte.
+
+L'Administrateur :
+
+• déclenche la réinitialisation
+
+Le système :
+
+• génère un lien sécurisé ou un mot de passe temporaire selon la configuration
+
+• informe l'utilisateur
+
+• enregistre l'opération dans l'audit
+
+==========================================================
+CAS N°5
+CREATION D'UN NOUVEAU DEPARTEMENT
+==========================================================
+
+L'Administrateur :
+
+• crée le département
+
+• l'associe à une direction
+
+• configure les paramètres nécessaires
+
+• vérifie la cohérence de la structure
+
+Toutes les opérations sont historisées.
+
+==========================================================
+CAS N°6
+MODIFICATION D'UN WORKFLOW
+==========================================================
+
+Situation
+
+Une évolution du processus métier est validée.
+
+L'Administrateur :
+
+• modifie le workflow
+
+• configure les transitions
+
+• configure les notifications
+
+• vérifie les permissions concernées
+
+Avant la mise en production :
+
+• les modifications sont testées
+
+• les impacts sont analysés
+
+==========================================================
+CAS N°7
+MODIFICATION D'UN SLA
+==========================================================
+
+Situation
+
+Les objectifs de service évoluent.
+
+L'Administrateur :
+
+• met à jour les paramètres du SLA
+
+• documente la justification
+
+• vérifie les impacts sur les nouveaux tickets
+
+Toutes les modifications sont historisées.
+
+==========================================================
+CAS N°8
+ECHEC D'UNE SAUVEGARDE
+==========================================================
+
+Le système détecte un échec.
+
+L'Administrateur :
+
+• reçoit une alerte
+
+• consulte les détails
+
+• identifie la cause
+
+• relance la sauvegarde si nécessaire
+
+L'incident est enregistré dans les journaux techniques.
+
+==========================================================
+CAS N°9
+RESTAURATION D'UNE SAUVEGARDE
+==========================================================
+
+Situation
+
+Une restauration est nécessaire.
+
+Avant l'exécution :
+
+Le système affiche :
+
+• la sauvegarde
+
+• sa date
+
+• son contenu
+
+• les conséquences attendues
+
+Après confirmation :
+
+• la restauration est exécutée
+
+• un journal est créé
+
+• une entrée d'audit est enregistrée
+
+==========================================================
+CAS N°10
+ACTIVITE SUSPECTE
+==========================================================
+
+Situation
+
+Le système détecte :
+
+• plusieurs tentatives de connexion
+
+• des accès inhabituels
+
+• une activité anormale
+
+L'Administrateur :
+
+• consulte les journaux
+
+• analyse la situation
+
+• applique les mesures prévues par la politique de sécurité
+
+Toutes les actions sont historisées.
+
+==========================================================
+CAS N°11
+COMPTE VERROUILLE
+==========================================================
+
+Un utilisateur est bloqué.
+
+L'Administrateur :
+
+• consulte la cause
+
+• déverrouille le compte si les conditions sont réunies
+
+• conserve une trace de l'intervention
+
+==========================================================
+CAS N°12
+ERREUR SYSTEME CRITIQUE
+==========================================================
+
+Le tableau de bord signale une erreur critique.
+
+L'Administrateur :
+
+• consulte les journaux
+
+• identifie le composant concerné
+
+• documente les actions entreprises
+
+• suit le retour à un fonctionnement normal
+
+==========================================================
+CAS N°13
+MISE A JOUR DE LA CONFIGURATION
+==========================================================
+
+Une configuration système doit évoluer.
+
+Exemples :
+
+• SMTP
+
+• SMS
+
+• Authentification
+
+• Paramètres généraux
+
+• Logo
+
+• Fuseau horaire
+
+L'Administrateur :
+
+• effectue la modification
+
+• vérifie son bon fonctionnement
+
+• conserve l'historique
+
+==========================================================
+CAS N°14
+REVUE HEBDOMADAIRE
+==========================================================
+
+Chaque semaine, l'Administrateur vérifie :
+
+• les sauvegardes
+
+• les journaux
+
+• les comptes inactifs
+
+• les alertes de sécurité
+
+• les erreurs système
+
+• les performances techniques
+
+Les anomalies donnent lieu à un plan d'action.
+
+==========================================================
+CAS N°15
+REPRISE APRES INCIDENT
+==========================================================
+
+Après un incident technique majeur :
+
+L'Administrateur :
+
+• vérifie l'intégrité des données
+
+• confirme la disponibilité des services
+
+• contrôle les sauvegardes
+
+• documente les actions réalisées
+
+• clôture le suivi administratif
+
+Le traitement métier des tickets reste assuré par les responsables
+opérationnels.
+
+==========================================================
+BONNES PRATIQUES
+==========================================================
+
+Toujours vérifier avant de modifier.
+
+Toujours sauvegarder avant une opération critique.
+
+Toujours documenter les changements.
+
+Toujours tester les nouvelles configurations.
+
+Toujours appliquer le principe du moindre privilège.
+
+Toujours vérifier les impacts d'une modification.
+
+==========================================================
+ERREURS A EVITER
+==========================================================
+
+Ne jamais modifier directement les données métier sans justification.
+
+Ne jamais supprimer un journal d'audit.
+
+Ne jamais supprimer une sauvegarde critique sans autorisation.
+
+Ne jamais attribuer des permissions excessives.
+
+Ne jamais intervenir sur un ticket métier à la place des responsables
+opérationnels.
+
+==========================================================
+REGLE ABSOLUE
+==========================================================
+
+L'Administrateur est le garant technique de la plateforme.
+
+Il configure.
+
+Il protège.
+
+Il supervise.
+
+Il maintient la disponibilité.
+
+Toutes les opérations doivent être :
+
+• authentifiées
+
+• autorisées
+
+• journalisées
+
+• auditables
+
+• traçables
+
+L'Administrateur ne remplace jamais les acteurs métier.
+
+Il fournit un environnement fiable et sécurisé permettant aux autres
+rôles d'exercer leurs responsabilités.

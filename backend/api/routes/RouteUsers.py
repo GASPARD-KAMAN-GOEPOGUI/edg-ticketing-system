@@ -33,7 +33,7 @@ me_router = APIRouter(
 )
 
 # ── Routeur lecture annuaire (personnel — pour assignation/orientation) ──────
-# Lecture seule : liste + détail. Nécessaire pour que chief/agent voient les
+# Lecture seule : liste + détail. Nécessaire pour que chief-service/chief-departement/agent-support voient les
 # collègues de leur direction (ex. dialogue "Assigner" dans la file d'attente).
 # Toute mutation (create/update/role/activate/delete) reste admin uniquement,
 # voir `router` ci-dessous.
@@ -41,7 +41,7 @@ me_router = APIRouter(
 staff_router = APIRouter(
     prefix="/users",
     tags=["users-staff"],
-    dependencies=[Depends(require_roles("agent", "chief", "director", "admin"))],
+    dependencies=[Depends(require_roles("agent-support", "chief-service", "chief-departement", "director", "admin"))],
 )
 
 # ── Routeur gestion admin des comptes (admin uniquement) ─────────────────────

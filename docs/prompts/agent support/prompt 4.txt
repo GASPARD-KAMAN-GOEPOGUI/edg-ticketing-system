@@ -1,0 +1,182 @@
+=====================================================================
+REFERENTIEL OFFICIEL DES ROLES
+ROLE N°2 : AGENT SUPPORT
+PARTIE 4
+NOTIFICATIONS – AUDIT – SECURITE – RECHERCHE – VISIBILITE – JOURNALISATION
+VERSION OFFICIELLE
+=====================================================================
+
+CONTEXTE
+
+Tu poursuis le référentiel officiel du rôle "Agent Support".
+
+Les Parties 1, 2 et 3 sont considérées comme définitives.
+
+Tu dois uniquement compléter ce référentiel.
+
+Tu dois respecter strictement le cahier des charges EDG.
+
+Tu n'as pas le droit d'inventer de nouveaux rôles.
+
+Le rôle concerné reste exclusivement :
+
+AGENT SUPPORT
+
+=====================================================================
+
+OBJECTIF
+
+Décrire de manière exhaustive :
+
+• les notifications
+• l'audit
+• la traçabilité
+• la sécurité
+• les permissions
+• la recherche
+• la visibilité
+• les exports
+• les journaux
+• les logs
+• les règles backend
+• les règles frontend
+
+=====================================================================
+
+POUR CHAQUE RUBRIQUE TU DOIS DECRIRE
+
+• objectif
+• comportement attendu
+• composants UI
+• règles backend
+• validations
+• permissions
+• erreurs possibles
+• sécurité
+• audit
+• exemples concrets
+
+=====================================================================
+
+LES CHAPITRES A REDIGER SONT
+
+1. Centre de notifications
+
+2. Types de notifications
+
+3. Déclencheurs
+
+4. Notifications automatiques
+
+5. Notifications manuelles
+
+6. Notifications temps réel
+
+7. Notifications email
+
+8. Notifications SMS (si activées)
+
+9. Journal des notifications
+
+10. Notifications lues / non lues
+
+11. Paramètres personnels de notification
+
+12. Audit complet
+
+13. Journal d'activité
+
+14. Journal métier
+
+15. Journal système
+
+16. Historique sécurisé
+
+17. Historique des modifications
+
+18. Historique des statuts
+
+19. Historique des affectations
+
+20. Historique des escalades
+
+21. Historique des transferts
+
+22. Historique des résolutions
+
+23. Historique des commentaires
+
+24. Historique des pièces jointes
+
+25. Historique des SLA
+
+26. Recherche globale
+
+27. Recherche avancée
+
+28. Filtres combinés
+
+29. Sauvegarde des recherches
+
+30. Visibilité des tickets
+
+31. Visibilité des commentaires
+
+32. Visibilité des pièces jointes
+
+33. Visibilité des audits
+
+34. Visibilité des journaux
+
+35. Export PDF
+
+36. Export Excel
+
+37. Export CSV
+
+38. Sécurité Frontend
+
+39. Sécurité Backend
+
+40. Validation des permissions
+
+41. Vérification des rôles
+
+42. Contrôle RBAC
+
+43. Contrôle ABAC (si implémenté)
+
+44. Protection contre les actions interdites
+
+45. Messages d'erreur
+
+46. Etats de chargement
+
+47. Etats vides
+
+48. Journalisation API
+
+49. Journalisation des erreurs
+
+50. Règles absolues
+
+=====================================================================
+
+Pour chaque chapitre, produire :
+
+• description métier
+• comportement attendu
+• composants UI
+• workflow
+• permissions
+• validations
+• audit
+• journalisation
+• sécurité
+• exemples complets
+
+Le résultat doit devenir la référence officielle du rôle Agent Support.
+
+Ne résume rien.
+
+N'omets aucun détail.

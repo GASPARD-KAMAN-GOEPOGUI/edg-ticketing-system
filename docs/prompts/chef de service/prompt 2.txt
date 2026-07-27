@@ -1,0 +1,472 @@
+=====================================================================
+REFERENTIEL OFFICIEL DES ROLES
+ROLE N°3 : CHEF DE SERVICE
+PARTIE 2
+SUPERVISION – AFFECTATION – VALIDATION – SLA – REGLES METIER
+VERSION OFFICIELLE
+=====================================================================
+
+OBJECTIF
+
+Le Chef de Service n'est pas un simple Agent Support.
+
+Sa mission principale est de piloter son équipe.
+
+Il prend les décisions de répartition.
+
+Il contrôle les délais.
+
+Il garantit la qualité des traitements.
+
+Il accompagne les Agents.
+
+Il intervient uniquement lorsque cela est nécessaire.
+
+=====================================================================
+REGLE FONDAMENTALE
+=====================================================================
+
+Le Chef de Service ne doit jamais traiter systématiquement tous les tickets.
+
+Son rôle est :
+
+• superviser
+• répartir
+• contrôler
+• assister
+• arbitrer
+
+Il ne devient exécutant que lorsque la situation l'exige.
+
+=====================================================================
+PERIMETRE DE SUPERVISION
+=====================================================================
+
+Le Chef de Service supervise uniquement :
+
+• les tickets de son service
+• les Agents de son service
+• les files d'attente de son service
+• les indicateurs de son service
+• les SLA de son service
+
+Il ne peut jamais superviser un autre service.
+
+=====================================================================
+ARRIVEE D'UN NOUVEAU TICKET
+=====================================================================
+
+Le ticket arrive dans la file du service.
+
+Statut :
+
+queued
+
+Le Chef de Service reçoit une notification.
+
+Le ticket apparaît dans :
+
+Tickets non affectés
+
+Le Chef décide :
+
+Affecter
+
+ou
+
+Laisser un Agent prendre le ticket
+
+selon l'organisation retenue.
+
+=====================================================================
+AFFECTATION
+=====================================================================
+
+Le Chef clique :
+
+Affecter
+
+Le système affiche :
+
+Liste des Agents disponibles
+
+Pour chaque Agent :
+
+Nom
+
+Nombre de tickets actifs
+
+Tickets critiques
+
+Temps moyen de résolution
+
+Disponibilité
+
+Congés
+
+Dernière activité
+
+Le Chef choisit l'Agent.
+
+Le système demande :
+
+Motif (facultatif ou obligatoire selon la configuration)
+
+Validation
+
+Le ticket devient :
+
+assigned
+
+Toutes les affectations sont enregistrées dans l'audit.
+
+Une notification est envoyée à l'Agent.
+
+=====================================================================
+REAFFECTATION
+=====================================================================
+
+Le Chef peut réaffecter un ticket lorsque :
+
+L'Agent est absent.
+
+L'Agent est surchargé.
+
+Le ticket nécessite une autre compétence.
+
+Le délai SLA est menacé.
+
+Le ticket a été affecté par erreur.
+
+Le système impose :
+
+Motif obligatoire.
+
+Le ticket conserve son historique.
+
+Toutes les réaffectations sont journalisées.
+
+=====================================================================
+EQUILIBRAGE DE CHARGE
+=====================================================================
+
+Le système calcule automatiquement :
+
+Nombre de tickets
+
+Priorités
+
+Criticités
+
+Temps moyen
+
+SLA
+
+Le Chef dispose d'un écran :
+
+Répartition de charge
+
+Il peut redistribuer les tickets.
+
+Exemple :
+
+Agent A
+
+42 tickets
+
+Agent B
+
+17 tickets
+
+Le Chef déplace plusieurs tickets.
+
+Les KPI sont recalculés immédiatement.
+
+=====================================================================
+SURVEILLANCE DES SLA
+=====================================================================
+
+Le Chef visualise :
+
+Tickets proches de l'échéance
+
+Tickets hors SLA
+
+Tickets critiques
+
+Tickets bloqués
+
+Le système doit mettre en évidence :
+
+Orange
+
+SLA proche
+
+Rouge
+
+SLA dépassé
+
+Rouge clignotant
+
+Critique
+
+=====================================================================
+VALIDATION DES DECISIONS
+=====================================================================
+
+Selon la configuration du workflow,
+
+certaines actions nécessitent une validation du Chef.
+
+Exemples :
+
+Modification importante de priorité
+
+Modification du SLA
+
+Réaffectation exceptionnelle
+
+Escalade
+
+Résolution d'un ticket critique
+
+Chaque validation est :
+
+datée
+
+auditée
+
+signée par le Chef
+
+=====================================================================
+ESCALADE
+=====================================================================
+
+Le Chef peut escalader lorsqu'un Agent ne peut plus résoudre le problème.
+
+Motif obligatoire.
+
+Le ticket devient :
+
+escalated
+
+Le destinataire reçoit une notification.
+
+L'historique est conservé.
+
+=====================================================================
+RETOUR D'ESCALADE
+=====================================================================
+
+Lorsque le niveau supérieur termine son intervention.
+
+Le ticket revient.
+
+Le Chef décide :
+
+Nouvelle affectation
+
+ou
+
+Retour au même Agent
+
+Le motif est enregistré.
+
+=====================================================================
+VALIDATION DE RESOLUTION
+=====================================================================
+
+Si le workflow l'exige,
+
+une résolution peut nécessiter la validation du Chef.
+
+Le Chef consulte :
+
+Résumé
+
+Actions réalisées
+
+Temps passé
+
+Commentaires
+
+Pièces jointes
+
+Il choisit :
+
+Valider
+
+ou
+
+Retourner à l'Agent
+
+Si retour :
+
+Le motif devient obligatoire.
+
+Le ticket revient :
+
+in_progress
+
+=====================================================================
+SUIVI DES AGENTS
+=====================================================================
+
+Pour chaque Agent,
+
+le Chef visualise :
+
+Nombre de tickets
+
+Tickets critiques
+
+Tickets ouverts
+
+Tickets fermés
+
+Temps moyen
+
+Retards
+
+Réouvertures
+
+Satisfaction utilisateur
+
+Charge actuelle
+
+Historique
+
+=====================================================================
+SUIVI DES PERFORMANCES
+=====================================================================
+
+Le Chef consulte :
+
+Performance quotidienne
+
+Hebdomadaire
+
+Mensuelle
+
+Par Agent
+
+Par catégorie
+
+Par priorité
+
+Par SLA
+
+Par délai
+
+Toutes les données doivent être exportables.
+
+=====================================================================
+GESTION DES BLOQUAGES
+=====================================================================
+
+Le système détecte automatiquement :
+
+Tickets sans Agent
+
+Tickets sans activité
+
+Tickets bloqués
+
+Tickets réouverts plusieurs fois
+
+Tickets proches du SLA
+
+Le Chef reçoit des alertes.
+
+=====================================================================
+REGLES METIER
+=====================================================================
+
+Un ticket critique doit être traité en priorité.
+
+Une réaffectation nécessite un motif.
+
+Une escalade nécessite un motif.
+
+Une validation rejetée nécessite un commentaire.
+
+Aucun ticket ne peut rester sans Agent au-delà du délai configuré.
+
+Toutes les décisions doivent être auditables.
+
+Le Chef ne peut pas modifier les historiques.
+
+Le Chef ne peut pas supprimer un ticket.
+
+=====================================================================
+EXEMPLE COMPLET
+=====================================================================
+
+08h00
+
+Le service reçoit 25 nouveaux tickets.
+
+Le tableau de bord indique :
+
+15 tickets réseau
+
+7 tickets logiciels
+
+3 tickets matériels
+
+Le Chef ouvre :
+
+Répartition.
+
+Le système affiche :
+
+Agent Alpha
+
+38 tickets
+
+Agent Bravo
+
+18 tickets
+
+Agent Charlie
+
+14 tickets
+
+Le Chef répartit les nouveaux tickets.
+
+Les Agents reçoivent immédiatement leurs notifications.
+
+Deux tickets critiques apparaissent.
+
+Le Chef décide :
+
+Priorité haute.
+
+Il suit leur évolution en temps réel.
+
+L'un des tickets dépasse le seuil SLA.
+
+Le système déclenche une alerte.
+
+Le Chef réaffecte le ticket à un Agent expérimenté.
+
+L'audit conserve toutes les décisions.
+
+Le tableau de bord est mis à jour automatiquement.
+
+=====================================================================
+REGLE ABSOLUE
+=====================================================================
+
+Le Chef de Service est responsable de la qualité opérationnelle du service.
+
+Toutes ses décisions doivent être :
+
+• justifiées
+• auditables
+• sécurisées
+• traçables
+
+Le backend est la seule source de vérité.
+
+Le frontend ne fait qu'afficher les droits et les décisions autorisés par le backend.

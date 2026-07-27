@@ -47,7 +47,7 @@ import { useSessionState } from "@/lib/use-session-state";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/my-tickets")({
-  beforeLoad: () => requireRole("agent", "chief", "admin"),
+  beforeLoad: () => requireRole("agent-support", "chief-service", "admin"),
   head: () => ({ meta: [{ title: "Mes tickets — EDG Support" }] }),
   component: MyTicketsPage,
 });

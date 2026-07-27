@@ -1,0 +1,257 @@
+==========================================================
+CHEF DE DEPARTEMENT
+PARTIE 5
+CAS METIERS
+==========================================================
+
+OBJECTIF
+
+Cette partie décrit les situations réelles que peut rencontrer un Chef de Département.
+
+L'application doit appliquer exactement ces règles.
+
+==========================================================
+CAS N°1
+PLUSIEURS SERVICES SONT CONCERNES
+==========================================================
+
+Situation
+
+Un incident impacte trois services.
+
+Le Chef de Département reçoit une notification.
+
+Il analyse les informations.
+
+Il décide :
+
+• de coordonner les trois services
+
+• de suivre personnellement le dossier
+
+• de créer un incident majeur si nécessaire
+
+==========================================================
+CAS N°2
+UN CHEF DE SERVICE DEMANDE DE L'AIDE
+==========================================================
+
+Le Chef de Service rencontre un problème complexe.
+
+Il demande l'intervention du Chef de Département.
+
+Le Chef consulte :
+
+• le ticket
+
+• l'historique
+
+• les commentaires
+
+Puis il décide :
+
+• confirmer la décision
+
+• proposer une autre solution
+
+• réaffecter
+
+• escalader
+
+==========================================================
+CAS N°3
+UN SERVICE EST SURCHARGE
+==========================================================
+
+Le Dashboard indique :
+
+Service A : 120 tickets
+
+Service B : 45 tickets
+
+Service C : 38 tickets
+
+Le Chef décide :
+
+• de déplacer certains tickets
+
+• de renforcer le Service A
+
+• de modifier les priorités si nécessaire
+
+Toutes les décisions sont enregistrées.
+
+==========================================================
+CAS N°4
+PLUSIEURS SLA SONT DEPASSES
+==========================================================
+
+Le système détecte plusieurs dépassements.
+
+Le Chef consulte les causes.
+
+Il peut :
+
+• demander un renfort
+
+• réorganiser les équipes
+
+• escalader vers la Direction DSI
+
+==========================================================
+CAS N°5
+UN INCIDENT MAJEUR EST DECLARE
+==========================================================
+
+Une panne importante touche plusieurs utilisateurs.
+
+Le Chef :
+
+• crée un incident majeur
+
+• désigne un responsable
+
+• suit l'évolution
+
+• informe la Direction DSI si nécessaire
+
+Tous les tickets liés restent associés à cet incident.
+
+==========================================================
+CAS N°6
+UN TICKET EST ENVOYE AU MAUVAIS SERVICE
+==========================================================
+
+Le Chef ouvre le ticket.
+
+Il sélectionne :
+
+Réaffecter.
+
+Choisit le bon service.
+
+Ajoute un commentaire obligatoire.
+
+Le nouveau Chef de Service reçoit une notification.
+
+==========================================================
+CAS N°7
+UN CHEF DE SERVICE EST ABSENT
+==========================================================
+
+Le Chef constate l'absence.
+
+Il désigne temporairement un autre responsable.
+
+Le suivi des tickets continue normalement.
+
+Toutes les décisions sont historisées.
+
+==========================================================
+CAS N°8
+UNE ESCALADE VERS LA DIRECTION DSI
+==========================================================
+
+Le problème dépasse le département.
+
+Le Chef prépare le dossier.
+
+Il ajoute :
+
+• le contexte
+
+• les actions réalisées
+
+• les décisions prises
+
+Puis il transmet à la Direction DSI.
+
+==========================================================
+CAS N°9
+UN UTILISATEUR REOUVRE PLUSIEURS FOIS LE MEME TICKET
+==========================================================
+
+Le Chef analyse :
+
+• les causes
+
+• les solutions précédentes
+
+• les commentaires
+
+Il peut demander une expertise complémentaire ou un changement de stratégie.
+
+==========================================================
+CAS N°10
+REVUE DE FIN DE SEMAINE
+==========================================================
+
+Chaque semaine, le Chef consulte :
+
+• les performances
+
+• les SLA
+
+• les incidents majeurs
+
+• les escalades
+
+• les réouvertures
+
+• les services les plus sollicités
+
+Il identifie les axes d'amélioration.
+
+==========================================================
+BONNES PRATIQUES
+==========================================================
+
+Toujours coordonner les services.
+
+Toujours analyser avant de décider.
+
+Toujours documenter les décisions.
+
+Toujours surveiller les SLA.
+
+Toujours anticiper les incidents majeurs.
+
+Toujours accompagner les Chefs de Service.
+
+==========================================================
+ERREURS A EVITER
+==========================================================
+
+Ne jamais intervenir inutilement dans le travail quotidien des Agents.
+
+Ne jamais contourner un Chef de Service sans raison.
+
+Ne jamais modifier un historique.
+
+Ne jamais supprimer des informations.
+
+Ne jamais prendre une décision sans laisser de justification.
+
+==========================================================
+REGLE ABSOLUE
+==========================================================
+
+Le Chef de Département est un coordinateur.
+
+Il garantit la bonne collaboration entre les services.
+
+Il prend des décisions qui dépassent le périmètre d'un seul service.
+
+Toutes ses décisions doivent être :
+
+• justifiées
+
+• enregistrées
+
+• auditables
+
+• sécurisées
+
+Le Chef de Département ne remplace jamais les Chefs de Service.
+
+Il les accompagne et les supervise.

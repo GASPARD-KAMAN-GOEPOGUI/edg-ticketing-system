@@ -9,7 +9,8 @@ Un ticket doit rester dans le contexte depuis lequel il a ete ouvert.
 | Personnel | `/app/requests` | `/app/requests/$id` | Mes propres demandes |
 | Agent | `/app/my-tickets` | `/app/my-tickets/tickets/$id` | Tickets assignes a moi |
 | File/qualification | `/app/queue` | `/app/queue/tickets/$id` | Tickets libres a prendre et demandes a qualifier |
-| Chef | `/app/chief-inbox` | `/app/chief-inbox/tickets/$id` | Tickets du service du chef |
+| Chef de service | `/app/chief-inbox` | `/app/chief-inbox/tickets/$id` | Tickets du service du chef-service |
+| Chef de departement | `/app/department-inbox` | `/app/department-inbox/tickets/$id` | Tickets de tous les services du departement du chef-departement |
 | Supervision | `/app/supervision` | `/app/supervision/tickets/$id` | Tickets supervises |
 | Direction | `/app/direction` | `/app/direction/tickets/$id` | Tickets de la direction |
 | Vue globale admin | `/app/dg` | `/app/dg/tickets/$id` | Pilotage global admin |
@@ -23,14 +24,15 @@ Un ticket doit rester dans le contexte depuis lequel il a ete ouvert.
 | `/app` | Accueil | personnel + resume pro | MOD-PERSONAL | user+ | selon cartes | `app.index.tsx` |
 | `/app/requests` | Mes demandes | personnel | MOD-PERSONAL | user+ | `/app/requests/$id` | `app.requests.index.tsx` |
 | `/app/requests/history` | Historique | personnel | MOD-PERSONAL | user+ | `/app/requests/$id` | `app.requests.history.tsx` |
-| `/app/my-tickets` | Mes tickets | traitement | MOD-AGENT | agent | `/app/my-tickets/tickets/$id` | `app.my-tickets.tsx` |
-| `/app/queue` | File d'attente | traitement | MOD-AGENT/MOD-CHIEF | agent, chief | `/app/queue/tickets/$id` | `app.queue.tsx` |
-| `/app/chief-inbox` | Boite chef | gestion service | MOD-CHIEF | chief | `/app/chief-inbox/tickets/$id` | `app.chief-inbox.tsx` |
-| `/app/supervision` | Supervision | supervision | MOD-SUPERVISION | chief, director | `/app/supervision/tickets/$id` | `app.supervision.tsx` |
+| `/app/my-tickets` | Mes tickets | traitement | MOD-AGENT | agent-support | `/app/my-tickets/tickets/$id` | `app.my-tickets.tsx` |
+| `/app/queue` | File d'attente | traitement | MOD-AGENT/MOD-CHIEF | agent-support, chief-service, chief-departement, director | `/app/queue/tickets/$id` | `app.queue.tsx` |
+| `/app/chief-inbox` | Boite chef de service | gestion service | MOD-CHIEF | chief-service | `/app/chief-inbox/tickets/$id` | `app.chief-inbox.tsx` |
+| `/app/department-inbox` | Boite chef de departement | gestion departement | MOD-CHIEF | chief-departement | `/app/department-inbox/tickets/$id` | `app.department-inbox.tsx` (composant partage avec `app.chief-inbox.tsx`) |
+| `/app/supervision` | Supervision | supervision | MOD-SUPERVISION | chief-service, chief-departement, director | `/app/supervision/tickets/$id` | `app.supervision.tsx` |
 | `/app/direction` | Vue direction | pilotage | MOD-DIRECTION | director | `/app/direction/tickets/$id` | `app.direction.tsx` |
 | `/app/dg` | Vue globale | pilotage global admin | MOD-ADMIN | admin | `/app/dg/tickets/$id` | `app.dg.tsx` |
-| `/app/sla-center` | Centre SLA | pilotage SLA | MOD-SLA | chief, director, admin | `/app/sla-center/tickets/$id` | `app.sla-center.tsx` |
-| `/app/reports` | Rapports | pilotage | MOD-REPORT | chief, director, admin | detail non central | `app.reports.tsx` |
+| `/app/sla-center` | Centre SLA | pilotage SLA | MOD-SLA | chief-service, chief-departement, director, admin | `/app/sla-center/tickets/$id` | `app.sla-center.tsx` |
+| `/app/reports` | Rapports | pilotage | MOD-REPORT | chief-service, chief-departement, director, admin | detail non central | `app.reports.tsx` |
 | `/app/admin/*` | Admin | administration | MOD-ADMIN | admin | `/app/admin/tickets/$id` pour tickets | `app.admin.*.tsx` |
 
 ## Routes organisation admin

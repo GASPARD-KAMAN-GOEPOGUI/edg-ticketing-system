@@ -201,6 +201,7 @@ export async function updateUser(
   id: string,
   data: Partial<{
     name: string;
+    firstname: string;
     job: string;
     matricule: string;
     role: string;
@@ -231,6 +232,7 @@ export async function setUserRole(
 
 export async function createUser(data: {
   name: string;
+  firstname?: string;
   email: string;
   role?: string;
   matricule?: string;

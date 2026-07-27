@@ -1,0 +1,406 @@
+==========================================================
+DIRECTION DSI
+PARTIE 4
+NOTIFICATIONS - AUDIT - SECURITE
+==========================================================
+
+OBJECTIF
+
+La Direction DSI doit être informée immédiatement de toute situation
+susceptible d'avoir un impact sur le fonctionnement global de la DSI.
+
+Elle ne reçoit jamais les notifications liées au traitement quotidien
+des tickets.
+
+Elle reçoit uniquement les événements qui nécessitent une décision
+stratégique.
+
+==========================================================
+NOTIFICATIONS
+==========================================================
+
+La Direction DSI reçoit une notification lorsque :
+
+• un Chef de Département demande un arbitrage
+
+• un incident majeur est déclaré
+
+• une cyberattaque est détectée
+
+• plusieurs départements sont impliqués dans un même incident
+
+• plusieurs SLA critiques sont dépassés
+
+• un département devient indisponible
+
+• une panne générale est détectée
+
+• une escalade stratégique est créée
+
+• un service critique est interrompu
+
+• un incident reste bloqué malgré plusieurs interventions
+
+==========================================================
+CENTRE DE NOTIFICATIONS
+==========================================================
+
+Chaque notification affiche :
+
+• le titre
+
+• le numéro du ticket (si applicable)
+
+• le type d'événement
+
+• les départements concernés
+
+• le niveau de gravité
+
+• la date
+
+• l'heure
+
+• un bouton :
+
+"Ouvrir le dossier"
+
+Les notifications peuvent être :
+
+• marquées comme lues
+
+• archivées
+
+• filtrées
+
+• recherchées
+
+==========================================================
+ALERTES CRITIQUES
+==========================================================
+
+Les alertes critiques restent visibles tant qu'elles ne sont pas résolues.
+
+Exemples :
+
+🔴 Cyberattaque en cours
+
+🔴 Panne générale
+
+🔴 Plusieurs SLA critiques dépassés
+
+🔴 Département totalement indisponible
+
+🔴 Incident majeur sans responsable
+
+🔴 Forte augmentation des tickets critiques
+
+==========================================================
+AUDIT STRATEGIQUE
+==========================================================
+
+Toutes les décisions de la Direction DSI sont enregistrées.
+
+Exemples :
+
+• validation d'une escalade stratégique
+
+• déclaration d'un incident majeur
+
+• création d'une cellule de crise
+
+• réaffectation entre départements
+
+• dérogation exceptionnelle au SLA
+
+• clôture officielle d'un incident majeur
+
+Chaque ligne d'audit contient :
+
+Date
+
+Heure
+
+Décideur
+
+Action
+
+Ancienne valeur
+
+Nouvelle valeur
+
+Justification
+
+==========================================================
+HISTORIQUE
+==========================================================
+
+La Direction DSI peut consulter l'historique complet :
+
+• du ticket
+
+• de l'incident majeur
+
+• des décisions
+
+• des escalades
+
+• des validations
+
+• des communications
+
+Aucun historique ne peut être modifié ou supprimé.
+
+==========================================================
+RAPPORTS EXECUTIFS
+==========================================================
+
+Le Directeur DSI peut générer :
+
+• Rapport global de la DSI
+
+• Rapport par département
+
+• Rapport par service
+
+• Rapport des SLA
+
+• Rapport des incidents majeurs
+
+• Rapport des escalades
+
+• Rapport de disponibilité
+
+• Rapport de satisfaction utilisateur
+
+• Rapport des performances
+
+Tous les rapports sont exportables :
+
+PDF
+
+Excel
+
+CSV
+
+==========================================================
+INDICATEURS STRATEGIQUES
+==========================================================
+
+Le tableau de bord affiche notamment :
+
+• Nombre total de tickets
+
+• Nombre de tickets critiques
+
+• Nombre d'incidents majeurs
+
+• Respect global des SLA
+
+• Temps moyen de résolution
+
+• Temps moyen de première réponse
+
+• Nombre d'escalades
+
+• Taux de réouverture
+
+• Disponibilité des services
+
+• Satisfaction utilisateur
+
+• Charge par département
+
+• Charge par service
+
+• Evolution mensuelle
+
+• Evolution annuelle
+
+==========================================================
+COMPARAISON DES PERFORMANCES
+==========================================================
+
+Le Directeur peut comparer :
+
+• les départements
+
+• les services
+
+• les Chefs de Département
+
+• les Chefs de Service
+
+Les comparaisons portent sur :
+
+• le volume de tickets
+
+• les délais
+
+• le respect des SLA
+
+• les réouvertures
+
+• les escalades
+
+• la satisfaction utilisateur
+
+==========================================================
+RECHERCHE
+==========================================================
+
+La recherche permet de retrouver :
+
+• un ticket
+
+• un incident majeur
+
+• un département
+
+• un service
+
+• un Chef de Département
+
+• un Chef de Service
+
+• une catégorie
+
+• une priorité
+
+• un SLA
+
+Tous les critères peuvent être combinés.
+
+==========================================================
+SECURITE
+==========================================================
+
+La Direction DSI ne peut jamais :
+
+Créer un utilisateur
+
+Supprimer un utilisateur
+
+Créer un rôle
+
+Modifier un rôle
+
+Modifier les permissions
+
+Modifier les paramètres techniques
+
+Modifier les journaux d'audit
+
+Supprimer un ticket
+
+Toutes ces opérations appartiennent exclusivement à l'Administrateur.
+
+==========================================================
+VISIBILITE
+==========================================================
+
+La Direction DSI peut consulter :
+
+• tous les départements
+
+• tous les services
+
+• tous les tickets
+
+• toutes les statistiques
+
+• tous les rapports
+
+• tous les incidents majeurs
+
+• toutes les escalades
+
+Elle ne peut pas modifier les paramètres système.
+
+==========================================================
+TABLEAU DE BORD EXECUTIF
+==========================================================
+
+Le tableau de bord met toujours en avant :
+
+Les incidents majeurs actifs.
+
+Les alertes critiques.
+
+Les départements en difficulté.
+
+Les SLA les plus menacés.
+
+Les services les plus sollicités.
+
+Les indicateurs de performance.
+
+==========================================================
+COMMUNICATION
+==========================================================
+
+La Direction DSI peut publier :
+
+• une communication interne
+
+• une consigne exceptionnelle
+
+• une information sur un incident majeur
+
+• une décision stratégique
+
+Les communications peuvent être envoyées :
+
+• à toute la DSI
+
+• à un département
+
+• à plusieurs départements
+
+• à un ou plusieurs services
+
+Toutes les communications sont historisées.
+
+==========================================================
+REGLES DE SECURITE
+==========================================================
+
+Chaque décision stratégique nécessite :
+
+• une authentification valide
+
+• des permissions appropriées
+
+• une justification obligatoire
+
+• un enregistrement dans l'audit
+
+Aucune décision critique ne peut être exécutée sans laisser une trace.
+
+==========================================================
+REGLE ABSOLUE
+==========================================================
+
+La Direction DSI est le niveau de pilotage stratégique de l'application.
+
+Elle supervise.
+
+Elle arbitre.
+
+Elle coordonne.
+
+Elle prend les décisions importantes.
+
+Toutes les actions doivent être :
+
+• justifiées
+
+• historisées
+
+• sécurisées
+
+• auditables
+
+La Direction DSI ne remplace jamais l'Administrateur.
+
+Elle pilote le métier, tandis que l'Administrateur pilote la plateforme.

@@ -1,0 +1,415 @@
+==========================================================
+ADMINISTRATEUR
+PARTIE 1
+IDENTITE - MISSION - RESPONSABILITES
+==========================================================
+
+OBJECTIF
+
+L'Administrateur est responsable du bon fonctionnement de la plateforme.
+
+Il configure le système.
+
+Il garantit la sécurité.
+
+Il gère les utilisateurs.
+
+Il gère les rôles.
+
+Il gère les paramètres.
+
+Il ne prend pas les décisions métier concernant le traitement des tickets.
+
+==========================================================
+IDENTITE
+==========================================================
+
+Nom officiel
+
+Administrateur
+
+Description
+
+L'Administrateur est le responsable technique et fonctionnel de la plateforme.
+
+Il assure que l'application reste disponible, sécurisée et correctement configurée.
+
+==========================================================
+MISSION
+==========================================================
+
+Garantir la disponibilité de la plateforme.
+
+Configurer les paramètres.
+
+Créer et gérer les utilisateurs.
+
+Créer et gérer les rôles.
+
+Attribuer les permissions.
+
+Configurer les workflows.
+
+Configurer les SLA.
+
+Configurer les notifications.
+
+Surveiller la sécurité.
+
+Superviser les journaux système.
+
+==========================================================
+OBJECTIFS
+==========================================================
+
+Maintenir une plateforme stable.
+
+Garantir la sécurité.
+
+Garantir les bonnes permissions.
+
+Garantir les bonnes configurations.
+
+Réduire les erreurs de configuration.
+
+Assurer la traçabilité.
+
+Faciliter l'administration.
+
+==========================================================
+ESPACES
+==========================================================
+
+L'Administrateur possède deux espaces.
+
+--------------------------------
+
+MON ESPACE
+
+--------------------------------
+
+Mes demandes
+
+Historique
+
+Notifications
+
+Profil
+
+--------------------------------
+
+ADMINISTRATION
+
+--------------------------------
+
+Dashboard
+
+Utilisateurs
+
+Rôles
+
+Permissions
+
+Départements
+
+Services
+
+Directions
+
+Catégories
+
+Sous-catégories
+
+Priorités
+
+SLA
+
+Workflow
+
+Notifications
+
+Paramètres
+
+Sécurité
+
+Audit
+
+Rapports
+
+Sauvegardes
+
+Journal système
+
+==========================================================
+TABLEAU DE BORD
+==========================================================
+
+Le Dashboard présente l'état technique de la plateforme.
+
+Il affiche :
+
+• nombre d'utilisateurs
+
+• utilisateurs actifs
+
+• utilisateurs bloqués
+
+• rôles
+
+• permissions
+
+• tickets
+
+• incidents
+
+• erreurs système
+
+• alertes de sécurité
+
+• espace disque
+
+• sauvegardes
+
+• état des services
+
+==========================================================
+KPIs
+==========================================================
+
+Nombre total d'utilisateurs
+
+Utilisateurs connectés
+
+Utilisateurs inactifs
+
+Nombre de rôles
+
+Nombre de permissions
+
+Nombre de tickets
+
+Nombre d'incidents
+
+Erreurs système
+
+Sauvegardes réussies
+
+Sauvegardes échouées
+
+==========================================================
+MENUS
+==========================================================
+
+Accueil
+
+Administration
+
+Utilisateurs
+
+Rôles
+
+Permissions
+
+Directions
+
+Départements
+
+Services
+
+Catégories
+
+Sous-catégories
+
+Priorités
+
+SLA
+
+Workflow
+
+Notifications
+
+Paramètres
+
+Audit
+
+Sécurité
+
+Journal système
+
+Rapports
+
+Sauvegardes
+
+Mon espace
+
+Profil
+
+==========================================================
+SOUS-MENUS
+==========================================================
+
+Utilisateurs
+
+Liste
+
+Créer
+
+Modifier
+
+Désactiver
+
+Réinitialiser le mot de passe
+
+Rôles
+
+Liste
+
+Créer
+
+Modifier
+
+Supprimer
+
+Permissions
+
+Liste
+
+Affectation
+
+Groupes
+
+Workflow
+
+Statuts
+
+Transitions
+
+Actions
+
+Validations
+
+SLA
+
+Politiques
+
+Objectifs
+
+Exceptions
+
+Paramètres
+
+Généraux
+
+Messagerie
+
+Authentification
+
+Sécurité
+
+==========================================================
+RESPONSABILITES
+==========================================================
+
+Créer un utilisateur.
+
+Modifier un utilisateur.
+
+Désactiver un utilisateur.
+
+Réinitialiser un mot de passe.
+
+Créer un rôle.
+
+Modifier un rôle.
+
+Attribuer des permissions.
+
+Créer un département.
+
+Créer un service.
+
+Créer une catégorie.
+
+Configurer un SLA.
+
+Configurer un workflow.
+
+Configurer les notifications.
+
+Consulter les journaux.
+
+Lancer une sauvegarde.
+
+Restaurer une sauvegarde.
+
+==========================================================
+ACTIONS INTERDITES
+==========================================================
+
+L'Administrateur ne doit jamais :
+
+Modifier le contenu métier d'un ticket sans justification.
+
+Supprimer un historique.
+
+Supprimer un journal d'audit.
+
+Prendre des décisions métier à la place de la Direction DSI.
+
+Modifier une décision stratégique.
+
+==========================================================
+PERMISSIONS CONFIGURABLES
+==========================================================
+
+Certaines fonctions peuvent être limitées.
+
+Exemples :
+
+Peut gérer les utilisateurs.
+
+Peut gérer les rôles.
+
+Peut gérer les workflows.
+
+Peut gérer les sauvegardes.
+
+Peut gérer les paramètres.
+
+Toutes les permissions sont configurables.
+
+==========================================================
+EXEMPLE
+==========================================================
+
+Un nouveau Chef de Service arrive.
+
+L'Administrateur :
+
+• crée son compte
+
+• lui attribue le rôle correspondant
+
+• l'associe au bon service
+
+• vérifie ses permissions
+
+Le nouvel utilisateur peut immédiatement accéder à son espace.
+
+==========================================================
+REGLE ABSOLUE
+==========================================================
+
+L'Administrateur administre la plateforme.
+
+Il ne pilote pas le métier.
+
+Toutes les opérations techniques doivent être :
+
+• sécurisées
+
+• journalisées
+
+• auditables
+
+Toute modification de configuration doit laisser une trace.

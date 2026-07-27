@@ -1,0 +1,495 @@
+==========================================================
+CHEF DE DEPARTEMENT
+PARTIE 3
+INTERFACES DETAILLEES
+==========================================================
+
+OBJECTIF
+
+Le Chef de Département doit disposer d'interfaces simples qui lui permettent
+de superviser plusieurs services sans entrer dans le travail quotidien des Agents.
+
+Toutes les interfaces doivent être orientées pilotage et prise de décision.
+
+==========================================================
+TABLEAU DE BORD
+==========================================================
+
+Le Dashboard présente une vue globale du département.
+
+Le Chef doit comprendre la situation en quelques secondes.
+
+Le tableau de bord affiche :
+
+• Nombre total de tickets
+
+• Tickets ouverts
+
+• Tickets critiques
+
+• Tickets en retard
+
+• Tickets réouverts
+
+• Tickets escaladés
+
+• SLA dépassés
+
+• Temps moyen de résolution
+
+• Satisfaction utilisateur
+
+• Nombre de services supervisés
+
+==========================================================
+GRAPHIQUES
+==========================================================
+
+Le Dashboard contient plusieurs graphiques :
+
+• Evolution des tickets
+
+• Répartition par service
+
+• Répartition par priorité
+
+• Répartition par catégorie
+
+• Evolution des SLA
+
+• Performance des services
+
+• Performance des Chefs de Service
+
+==========================================================
+ALERTES
+==========================================================
+
+Une zone affiche les alertes importantes.
+
+Exemples :
+
+• Plusieurs SLA dépassés
+
+• Service surchargé
+
+• Incident majeur
+
+• Nombre élevé de tickets critiques
+
+Chaque alerte permet d'ouvrir directement les dossiers concernés.
+
+==========================================================
+MENU PRINCIPAL
+==========================================================
+
+Accueil
+
+Supervision
+
+Services
+
+Chefs de Service
+
+Incidents majeurs
+
+Escalades
+
+Rapports
+
+Recherche
+
+Notifications
+
+Mon espace
+
+Profil
+
+==========================================================
+PAGE SUPERVISION
+==========================================================
+
+Cette page affiche tous les tickets du département.
+
+Colonnes :
+
+• Numéro
+
+• Titre
+
+• Utilisateur
+
+• Service
+
+• Chef de Service
+
+• Priorité
+
+• Statut
+
+• SLA
+
+• Date de création
+
+• Dernière mise à jour
+
+• Actions
+
+==========================================================
+ACTIONS DISPONIBLES
+==========================================================
+
+Le Chef peut :
+
+• Voir le ticket
+
+• Voir l'historique
+
+• Voir les commentaires
+
+• Réaffecter vers un autre service
+
+• Escalader
+
+• Consulter l'audit
+
+==========================================================
+PAGE SERVICES
+==========================================================
+
+Chaque service est présenté sous forme de carte.
+
+Chaque carte affiche :
+
+Nom du service
+
+Chef de Service
+
+Nombre de tickets
+
+Tickets critiques
+
+Tickets en retard
+
+Charge actuelle
+
+Respect des SLA
+
+Performance
+
+Bouton :
+
+Voir les détails
+
+==========================================================
+DETAIL D'UN SERVICE
+==========================================================
+
+Le détail affiche :
+
+Informations générales
+
+Chef responsable
+
+Nombre d'Agents
+
+Liste des tickets
+
+Statistiques
+
+Historique des performances
+
+Evolution mensuelle
+
+Incidents majeurs
+
+Escalades
+
+==========================================================
+PAGE CHEFS DE SERVICE
+==========================================================
+
+Chaque Chef de Service possède une fiche.
+
+La fiche affiche :
+
+Nom
+
+Photo
+
+Service
+
+Nombre de tickets
+
+Nombre de réouvertures
+
+Nombre d'escalades
+
+Respect des SLA
+
+Temps moyen de résolution
+
+Performance globale
+
+Boutons :
+
+Voir
+
+Historique
+
+Performance
+
+==========================================================
+DETAIL D'UN TICKET
+==========================================================
+
+Le Chef de Département peut consulter :
+
+Résumé
+
+Historique
+
+Commentaires
+
+Pièces jointes
+
+Audit
+
+Escalades
+
+SLA
+
+Services impliqués
+
+Décisions prises
+
+Il ne modifie pas directement le traitement technique du ticket.
+
+==========================================================
+PAGE INCIDENTS MAJEURS
+==========================================================
+
+Cette page affiche tous les incidents majeurs.
+
+Pour chaque incident :
+
+Titre
+
+Description
+
+Services concernés
+
+Responsable
+
+Nombre de tickets liés
+
+Statut
+
+Date d'ouverture
+
+Date de clôture
+
+==========================================================
+PAGE ESCALADES
+==========================================================
+
+Cette page regroupe toutes les escalades.
+
+Colonnes :
+
+Ticket
+
+Service d'origine
+
+Service concerné
+
+Motif
+
+Date
+
+Décision
+
+Responsable
+
+==========================================================
+PAGE RAPPORTS
+==========================================================
+
+Le Chef peut consulter :
+
+Rapport journalier
+
+Rapport hebdomadaire
+
+Rapport mensuel
+
+Rapport annuel
+
+Rapport SLA
+
+Rapport des services
+
+Rapport des Chefs de Service
+
+Rapport des incidents majeurs
+
+Rapport des escalades
+
+Tous les rapports sont exportables.
+
+==========================================================
+RECHERCHE
+==========================================================
+
+Le moteur de recherche permet de rechercher par :
+
+Numéro
+
+Utilisateur
+
+Service
+
+Chef de Service
+
+Catégorie
+
+Priorité
+
+Statut
+
+Date
+
+SLA
+
+Les filtres peuvent être combinés.
+
+==========================================================
+NOTIFICATIONS
+==========================================================
+
+Le centre de notifications affiche :
+
+Incident majeur
+
+Escalade
+
+SLA dépassé
+
+Service surchargé
+
+Demande d'intervention
+
+Toutes les notifications permettent d'ouvrir directement le dossier.
+
+==========================================================
+FORMULAIRES
+==========================================================
+
+Le Chef dispose des formulaires suivants :
+
+Réaffectation entre services
+
+Création d'un incident majeur
+
+Validation d'une escalade
+
+Ajout d'un commentaire
+
+Export d'un rapport
+
+Chaque formulaire possède :
+
+Validation
+
+Annulation
+
+Contrôle des données
+
+Message de confirmation
+
+==========================================================
+MODALES
+==========================================================
+
+Avant chaque action importante :
+
+Le système affiche une confirmation.
+
+Exemples :
+
+Confirmer la réaffectation ?
+
+Confirmer l'escalade ?
+
+Créer un incident majeur ?
+
+Exporter ce rapport ?
+
+==========================================================
+ETATS VIDES
+==========================================================
+
+Chaque page prévoit un affichage lorsqu'aucune donnée n'est disponible.
+
+Exemple :
+
+"Aucun incident majeur."
+
+"Aucune escalade."
+
+"Aucun rapport disponible."
+
+==========================================================
+MESSAGES D'ERREUR
+==========================================================
+
+Les messages doivent être simples.
+
+Exemples :
+
+Impossible de charger les données.
+
+Vous ne disposez pas des permissions nécessaires.
+
+Une erreur est survenue.
+
+Veuillez réessayer.
+
+==========================================================
+REGLES UX
+==========================================================
+
+Le Chef de Département ne doit jamais être noyé sous les informations.
+
+Les données importantes doivent apparaître en premier.
+
+Les tableaux doivent permettre :
+
+• le tri
+
+• les filtres
+
+• la recherche instantanée
+
+• l'export
+
+• la pagination
+
+Toutes les pages doivent être cohérentes avec le reste de l'application.
+
+==========================================================
+REGLE ABSOLUE
+==========================================================
+
+Toutes les interfaces du Chef de Département doivent lui permettre de
+piloter efficacement plusieurs services.
+
+Il supervise.
+
+Il coordonne.
+
+Il prend des décisions.
+
+Il ne réalise pas le travail quotidien des Agents.
+
+Le frontend ne doit afficher que les actions autorisées par le backend.

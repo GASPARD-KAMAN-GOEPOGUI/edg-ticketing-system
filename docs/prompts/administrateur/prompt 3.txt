@@ -1,0 +1,510 @@
+==========================================================
+ADMINISTRATEUR
+PARTIE 3
+INTERFACES ET EXPERIENCE UTILISATEUR
+==========================================================
+
+OBJECTIF
+
+Cette partie décrit l'ensemble des interfaces accessibles à
+l'Administrateur.
+
+Chaque interface doit respecter la charte graphique officielle de
+l'application (design moderne, glassmorphism maîtrisé, responsive,
+accessible et cohérent).
+
+Toutes les actions disponibles dans l'interface doivent être validées par
+les permissions définies côté backend.
+
+==========================================================
+TABLEAU DE BORD ADMINISTRATEUR
+==========================================================
+
+Le tableau de bord est le point d'entrée de l'administration.
+
+Il affiche notamment :
+
+• Nombre total d'utilisateurs
+• Comptes actifs
+• Comptes désactivés
+• Comptes verrouillés
+• Nombre de rôles
+• Nombre de permissions
+• Nombre de directions
+• Nombre de départements
+• Nombre de services
+• Nombre de catégories
+• Nombre de tickets
+• Alertes système
+• Alertes de sécurité
+• État des sauvegardes
+• Santé générale de la plateforme
+
+Widgets :
+
+• KPI
+• Graphiques d'évolution
+• Dernières activités
+• Notifications système
+• Actions rapides
+
+==========================================================
+GESTION DES UTILISATEURS
+==========================================================
+
+Vue Liste
+
+Colonnes :
+
+• Photo (optionnelle)
+• Nom
+• Prénom
+• Email
+• Téléphone
+• Direction
+• Département
+• Service
+• Rôle
+• Statut
+• Dernière connexion
+• Date de création
+• Actions
+
+Fonctionnalités :
+
+• Recherche
+• Tri
+• Filtres avancés
+• Pagination
+• Vue grille / liste
+• Export CSV
+• Export Excel
+• Export PDF
+
+Actions :
+
+• Consulter
+• Créer
+• Modifier
+• Désactiver
+• Réactiver
+• Réinitialiser le mot de passe
+• Déverrouiller un compte
+• Historique utilisateur
+
+==========================================================
+FORMULAIRE UTILISATEUR
+==========================================================
+
+Champs :
+
+• Photo
+• Nom
+• Prénom
+• Sexe (optionnel selon le contexte)
+• Email
+• Téléphone
+• Direction
+• Département
+• Service
+• Fonction
+• Rôle
+• Statut
+• Authentification (locale/SSO si disponible)
+
+Validation :
+
+• Champs obligatoires
+• Unicité de l'email
+• Format téléphone
+• Cohérence Direction > Département > Service
+
+==========================================================
+GESTION DES ROLES
+==========================================================
+
+Liste :
+
+• Nom
+• Description
+• Nombre d'utilisateurs
+• Statut
+• Date de création
+• Actions
+
+Actions :
+
+• Créer
+• Modifier
+• Désactiver
+• Réactiver
+• Dupliquer
+• Consulter les permissions
+
+==========================================================
+GESTION DES PERMISSIONS
+==========================================================
+
+Affichage matriciel :
+
+Rôles
+×
+
+Permissions
+
+Exemples :
+
+• Lecture
+• Création
+• Modification
+• Suppression
+• Validation
+• Export
+• Administration
+
+Filtres :
+
+• Module
+• Fonction
+• Permission
+
+==========================================================
+GESTION DES DIRECTIONS
+==========================================================
+
+Liste :
+
+• Nom
+• Responsable
+• Nombre de départements
+• Nombre de services
+• Nombre d'utilisateurs
+• Statut
+
+Actions :
+
+• Créer
+• Modifier
+• Désactiver
+• Réactiver
+• Consulter
+
+==========================================================
+GESTION DES DEPARTEMENTS
+==========================================================
+
+Liste :
+
+• Nom
+• Direction
+• Responsable
+• Nombre de services
+• Nombre d'agents
+• Statut
+
+==========================================================
+GESTION DES SERVICES
+==========================================================
+
+Liste :
+
+• Nom
+• Département
+• Responsable
+• Nombre d'utilisateurs
+• Statut
+
+==========================================================
+GESTION DES CATEGORIES
+==========================================================
+
+Affichage :
+
+• Catégorie
+• Sous-catégories
+• SLA associé
+• Priorité par défaut
+• Statut
+
+Actions :
+
+• Créer
+• Modifier
+• Désactiver
+• Réactiver
+
+==========================================================
+GESTION DES PRIORITES
+==========================================================
+
+Affichage :
+
+• Nom
+• Couleur
+• Niveau
+• Temps cible
+• Ordre
+
+Prévisualisation des couleurs.
+
+==========================================================
+GESTION DES SLA
+==========================================================
+
+Liste :
+
+• Nom
+• Première réponse
+• Résolution
+• Escalade
+• Horaires
+• Exceptions
+• Statut
+
+Actions :
+
+• Créer
+• Modifier
+• Désactiver
+• Historique
+
+==========================================================
+GESTION DU WORKFLOW
+==========================================================
+
+Visualisation graphique du workflow.
+
+Éléments :
+
+• Statuts
+• Transitions
+• Conditions
+• Actions automatiques
+• Notifications associées
+
+L'interface doit permettre une lecture simple des flux.
+
+==========================================================
+PARAMETRES SYSTEME
+==========================================================
+
+Sections :
+
+• Général
+• Identité visuelle
+• Authentification
+• Email
+• SMS
+• Notifications
+• Sécurité
+• Langues
+• Fuseau horaire
+• Sauvegardes
+• Journalisation
+
+==========================================================
+JOURNAL D'AUDIT
+==========================================================
+
+Colonnes :
+
+• Date
+• Heure
+• Utilisateur
+• Action
+• Module
+• Ancienne valeur
+• Nouvelle valeur
+• Adresse IP
+• Résultat
+
+Filtres :
+
+• Utilisateur
+• Action
+• Module
+• Période
+
+==========================================================
+JOURNAL SYSTEME
+==========================================================
+
+Affichage :
+
+• Date
+• Niveau (INFO/WARN/ERROR)
+• Source
+• Message
+• Référence
+
+Recherche plein texte.
+
+==========================================================
+SECURITE
+==========================================================
+
+Vue dédiée :
+
+• Comptes verrouillés
+• Tentatives de connexion
+• Sessions actives
+• Historique des connexions
+• Alertes de sécurité
+
+==========================================================
+SAUVEGARDES
+==========================================================
+
+Liste :
+
+• Date
+• Heure
+• Type
+• Taille
+• Statut
+• Auteur
+
+Actions :
+
+• Lancer une sauvegarde
+• Restaurer
+• Télécharger (si autorisé)
+• Vérifier l'intégrité
+
+==========================================================
+RAPPORTS
+==========================================================
+
+Catalogue des rapports :
+
+• Utilisateurs
+• Rôles
+• Activité
+• Audit
+• Sécurité
+• Tickets
+• SLA
+• Performances
+
+Exports :
+
+• PDF
+• Excel
+• CSV
+
+==========================================================
+CENTRE DE NOTIFICATIONS
+==========================================================
+
+L'Administrateur reçoit :
+
+• erreurs système
+• échecs de sauvegarde
+• alertes de sécurité
+• anomalies techniques
+• mises à jour importantes
+
+Actions :
+
+• Consulter
+• Marquer comme lues
+• Archiver
+
+==========================================================
+MODALES STANDARD
+==========================================================
+
+Toutes les opérations critiques utilisent une modale.
+
+Exemples :
+
+• Confirmation de suppression logique
+• Confirmation de désactivation
+• Réinitialisation du mot de passe
+• Restauration d'une sauvegarde
+• Attribution d'un rôle
+• Modification d'un SLA
+
+Chaque modale affiche :
+
+• le contexte
+• les impacts
+• les boutons Confirmer / Annuler
+
+==========================================================
+ETATS VIDES
+==========================================================
+
+Chaque écran possède un état vide avec :
+
+• illustration
+• message explicatif
+• action recommandée
+
+Exemple :
+
+"Aucun utilisateur trouvé."
+
+Bouton :
+
+Créer un utilisateur
+
+==========================================================
+MESSAGES D'ERREUR
+==========================================================
+
+Les erreurs doivent être explicites.
+
+Exemples :
+
+"Impossible de supprimer ce rôle car il est utilisé."
+
+"Ce département contient encore des services."
+
+"La sauvegarde a échoué."
+
+==========================================================
+REGLES UX
+==========================================================
+
+Toutes les listes proposent :
+
+• recherche instantanée
+
+• filtres combinables
+
+• tri multi-colonnes
+
+• pagination
+
+• vue grille / liste lorsque pertinent
+
+• export
+
+• responsive desktop / tablette
+
+Les actions critiques doivent toujours demander une confirmation.
+
+Les formulaires doivent afficher les erreurs champ par champ.
+
+==========================================================
+REGLE ABSOLUE
+==========================================================
+
+L'interface Administrateur constitue le centre de configuration de la
+plateforme.
+
+Elle doit être :
+
+• simple
+
+• cohérente
+
+• sécurisée
+
+• rapide
+
+• entièrement pilotée par les permissions du backend.
+
+Aucune action d'administration ne doit être visible ou exécutable sans
+l'autorisation correspondante.

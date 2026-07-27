@@ -93,7 +93,7 @@ import { LayoutToggle } from "@/components/layout-toggle";
 import type { LayoutMode } from "@/components/layout-toggle";
 
 export const Route = createFileRoute("/app/supervision")({
-  beforeLoad: () => requireRole("chief", "director", "admin"),
+  beforeLoad: () => requireRole("chief-service", "chief-departement", "director", "admin"),
   head: () => ({ meta: [{ title: "Supervision — EDG Support" }] }),
   component: SupervisionPage,
 });
@@ -140,11 +140,13 @@ function SupervisionPage() {
   const [role] = useRole();
   const qc = useQueryClient();
   const sessionUser = useUser();
-  const unitId = role === "chief" ? sessionUser?.unit_id : undefined;
+  const isChiefRole = role === "chief-service" || role === "chief-departement";
+  const isChiefService = role === "chief-service";
+  const unitId = isChiefRole ? sessionUser?.unit_id : undefined;
   const directionId = role === "director"
     ? (sessionUser?.direction_id ?? sessionUser?.unit_id)
     : sessionUser?.direction_id;
-  const hasOperationalScope = role === "chief" ? !!unitId : !!directionId;
+  const hasOperationalScope = isChiefRole ? !!unitId : !!directionId;
   const [teamMsg, setTeamMsg] = useState("");
   const teamMsgMut = useMutation({
     mutationFn: () => apiFetch("/announcements/team-message", {
@@ -158,7 +160,7 @@ function SupervisionPage() {
         audience: "unit",
         author_id: sessionUser?.id ?? "",
         channel_names: ["in_app"],
-        role_names: ["agent"],
+        role_names: ["agent-support"],
         direction_ids: [],
       }),
     }),
@@ -181,9 +183,9 @@ function SupervisionPage() {
   const [transferEsc, setTransferEsc] = useState<EscalationItem | null>(null);
   const [transferReason, setTransferReason] = useState("");
 
-  const canReassignEscalation = role === "chief" || role === "admin";
+  const canReassignEscalation = isChiefRole || role === "admin";
   const canTakeOverEscalation = role === "admin";
-  const canTransferToDirector = role === "chief" || role === "admin";
+  const canTransferToDirector = isChiefRole || role === "admin";
 
   // ── Queries ────────────────────────────────────────────────────────────────
   const { data: dirsData = [] } = useQuery({
@@ -202,9 +204,9 @@ function SupervisionPage() {
 
   const { data: agentsData, isLoading: loadAgents, isError: agentsError } = useQuery({
     queryKey: ["agents-supervision", role, unitId, directionId],
-    queryFn: () => role === "chief"
-      ? fetchUsers({ role: "agent", unit_id: unitId, limit: 100 })
-      : fetchUsers({ role: "agent", direction_id: directionId, limit: 100 }),
+    queryFn: () => isChiefRole
+      ? fetchUsers({ role: "agent-support", unit_id: unitId, limit: 100 })
+      : fetchUsers({ role: "agent-support", direction_id: directionId, limit: 100 }),
     enabled: hasOperationalScope,
     staleTime: 60_000,
     refetchInterval: 45_000,
@@ -213,7 +215,7 @@ function SupervisionPage() {
 
   const { data: chiefsData, isLoading: loadChiefs, isError: chiefsError } = useQuery({
     queryKey: ["chiefs-supervision", directionId],
-    queryFn: () => fetchUsers({ role: "chief", direction_id: directionId, limit: 100 }),
+    queryFn: () => fetchUsers({ role: "chief-service", direction_id: directionId, limit: 100 }),
     enabled: role === "director" && !!directionId,
     staleTime: 60_000,
     refetchInterval: 45_000,
@@ -229,7 +231,7 @@ function SupervisionPage() {
 
   const { data: ticketsData, isLoading: loadTickets, isError: ticketsError } = useQuery({
     queryKey: ["tickets-supervision", role, unitId, directionId],
-    queryFn: () => role === "chief"
+    queryFn: () => isChiefRole
       ? fetchRequests({ unit_id: unitId, limit: 500 })
       : fetchRequests({ direction_id: directionId, limit: 500 }),
     enabled: hasOperationalScope,
@@ -442,7 +444,7 @@ function SupervisionPage() {
       </header>
 
       {/* ── Message d'équipe (chef uniquement) ── */}
-      {role === "chief" && (
+      {isChiefService && (
         <GlassCard className="p-4">
           <div className="mb-2 flex items-center gap-2">
             <Megaphone className="h-4 w-4 text-primary" />
@@ -1006,8 +1008,8 @@ type DirectorSortKey = "updated_desc" | "created_desc" | "sla_urgency" | "priori
 const ALL_FILTER = "__all__";
 type DirectorQuickFilterKind =
   | "service"
-  | "chief"
-  | "agent"
+  | "chief-service"
+  | "agent-support"
   | "status"
   | "priority"
   | "category"
@@ -1124,8 +1126,8 @@ function DirectorSupervisionCenter({
       const isReopened = ticket.status === "reopened" || ticket.timeline?.some((event) => event.type === "reopened");
 
       if (scope.kind === "service" && String(serviceId) !== scope.value) return false;
-      if (scope.kind === "chief" && String(chief?.id ?? "") !== scope.value) return false;
-      if (scope.kind === "agent" && String(ticket.assigneeId ?? "") !== scope.value) return false;
+      if (scope.kind === "chief-service" && String(chief?.id ?? "") !== scope.value) return false;
+      if (scope.kind === "agent-support" && String(ticket.assigneeId ?? "") !== scope.value) return false;
       if (scope.kind === "status" && ticket.status !== scope.value) return false;
       if (scope.kind === "priority" && ticket.priority !== scope.value) return false;
       if (scope.kind === "category" && ticket.category !== scope.value) return false;
@@ -1472,7 +1474,7 @@ function DirectorSupervisionCenter({
                 <SelectSeparator />
                 <QuickFilterGroupLabel>Chefs</QuickFilterGroupLabel>
                 {chiefs.map((chief) => (
-                  <SelectItem key={chief.id} value={quickFilterValue("chief", chief.id)}>
+                  <SelectItem key={chief.id} value={quickFilterValue("chief-service", chief.id)}>
                     {chief.name}
                   </SelectItem>
                 ))}
@@ -1480,7 +1482,7 @@ function DirectorSupervisionCenter({
                 <SelectSeparator />
                 <QuickFilterGroupLabel>Agents</QuickFilterGroupLabel>
                 {agents.map((agent) => (
-                  <SelectItem key={agent.id} value={quickFilterValue("agent", agent.id)}>
+                  <SelectItem key={agent.id} value={quickFilterValue("agent-support", agent.id)}>
                     {agent.name}
                   </SelectItem>
                 ))}

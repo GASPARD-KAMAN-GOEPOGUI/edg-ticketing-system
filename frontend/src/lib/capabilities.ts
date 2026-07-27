@@ -1,7 +1,7 @@
 /**
  * Système de capacités hiérarchiques — Algo 2
  *
- * Les rôles sont additifs : un chief hérite de toutes les capacités d'un agent,
+ * Les rôles sont additifs : un chief-service/chief-departement hérite des capacités agent-support,
  * qui hérite de toutes celles d'un user.
  * Règle : le rôle détermine ce qu'on peut FAIRE — la propriété du ticket
  * détermine ce qu'on VOIT (voir iAmRequester dans les composants).
@@ -11,12 +11,13 @@ import type { RequestStatus, Role } from "@/lib/mock-data";
 // ── Rang hiérarchique ─────────────────────────────────────────────────────────
 
 const ROLE_RANK: Record<Role, number> = {
-  public:   0,  // visiteur non-authentifié — aucune capacité opérationnelle
-  user:     1,
-  agent:    2,
-  chief:    3,
-  director: 4,
-  admin:    5,
+  public:              0,  // visiteur non-authentifié — aucune capacité opérationnelle
+  user:                1,
+  "agent-support":     2,
+  "chief-service":     3,
+  "chief-departement": 3,
+  director:            4,
+  admin:               5,
 };
 
 // ── Plancher de capacité (rang minimum requis) ────────────────────────────────
@@ -43,7 +44,7 @@ const CAPABILITY_FLOOR: Record<string, number> = {
  *
  * Usage :
  *   can(role, "submit_request")  → true pour TOUS les rôles
- *   can(role, "process_ticket")  → true pour agent, chief, director, admin
+ *   can(role, "process_ticket")  → true pour agent-support, chief-service, chief-departement, director, admin
  *   can(role, "admin_system")    → true uniquement pour admin
  */
 export function can(role: Role, capability: string): boolean {
@@ -96,28 +97,28 @@ type TicketActionOptions = {
   canReopenClosed?: boolean;
 };
 
-const AUTHENTICATED_ROLES: Role[] = ["user", "agent", "chief", "director", "admin"];
+const AUTHENTICATED_ROLES: Role[] = ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"];
 
 const TICKET_ACTION_ROLES: Record<TicketAction, Role[]> = {
   requester_edit: AUTHENTICATED_ROLES,
-  self_assign: ["agent"],
-  take_ownership: ["agent", "chief", "director", "admin"],
-  request_info: ["agent", "chief", "director", "admin"],
-  resume: ["agent", "chief", "director", "admin"],
-  assign: ["chief", "admin"],
-  resolve: ["agent", "chief", "director", "admin"],
+  self_assign: ["agent-support"],
+  take_ownership: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
+  request_info: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
+  resume: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
+  assign: ["chief-service", "chief-departement", "admin"],
+  resolve: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
   close: AUTHENTICATED_ROLES,
   request_reopen: AUTHENTICATED_ROLES,
-  approve_reopen: ["chief", "director", "admin"],
-  reject_reopen: ["chief", "director", "admin"],
-  cancel: ["user", "agent", "chief", "director", "admin"],
-  reject: ["chief", "admin"],
-  escalate: ["agent", "chief", "director", "admin"],
-  change_priority: ["chief", "director", "admin"],
-  change_service: ["chief", "director", "admin"],
+  approve_reopen: ["chief-service", "chief-departement", "director", "admin"],
+  reject_reopen: ["chief-service", "chief-departement", "director", "admin"],
+  cancel: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"],
+  reject: ["chief-service", "chief-departement", "admin"],
+  escalate: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
+  change_priority: ["chief-service", "chief-departement", "director", "admin"],
+  change_service: ["chief-service", "chief-departement", "director", "admin"],
   transfer_direction: ["director", "admin"],
-  create_circuit: ["agent", "chief", "admin"],
-  accept_workflow_step: ["agent", "chief", "director", "admin"],
+  create_circuit: ["agent-support", "chief-service", "chief-departement", "admin"],
+  accept_workflow_step: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
 };
 
 const TICKET_ACTION_STATUSES: Record<TicketAction, RequestStatus[]> = {
@@ -165,7 +166,7 @@ export function canTicketAction(
   }
   if (action === "requester_edit") return options.isRequester === true;
   if (action === "self_assign") return options.hasAssignee !== true;
-  if (action === "take_ownership" && role === "agent") {
+  if (action === "take_ownership" && role === "agent-support") {
     return options.isAssignedToMe === true;
   }
   if (action === "request_reopen") {

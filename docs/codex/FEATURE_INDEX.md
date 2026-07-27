@@ -7,7 +7,7 @@ Ce fichier est le premier point d'entree pour localiser un probleme fonctionnel.
 Identifiant: FEATURE-PERSONAL-REQUESTS
 Nom: Mes demandes personnelles
 Module: MOD-PERSONAL / MOD-REQUEST
-Description: creation personnelle, liste, historique et detail des demandes creees par l'utilisateur connecte, sans export personnel. Le formulaire de creation demandeur ne montre pas les champs internes categorie, priorite, direction destinataire et service. `Mes demandes` contient les statuts actifs/evolutifs; `Historique` contient seulement `closed`, `cancelled`, `rejected`.
+Description: creation personnelle, liste, historique et detail des demandes creees par l'utilisateur connecte, sans export personnel. Les formulaires demandeur de creation et d'edition personnelle ne montrent pas les champs internes categorie, priorite, direction destinataire et service. `Mes demandes` contient les statuts actifs/evolutifs; `Historique` contient seulement `closed`, `cancelled`, `rejected`.
 Roles concernes: user, agent, chief, director, admin.
 Route frontend: `/app/requests`, `/app/requests/$id`.
 Page principale: `frontend/src/routes/app.requests.index.tsx`, `frontend/src/routes/app.requests.$id.tsx`.
@@ -20,7 +20,7 @@ Schemas: `SchemaRequest.py`.
 Modeles: `ModelRequest.py`, `ModelWorkflow.py`, `ModelWorkflowDetail.py`.
 Tables: `request`, `workflow`, `workflow_detail`.
 Permissions: `CREATE_REQUEST`, `VIEW_OWN_REQUESTS`, `CANCEL_REQUEST`, `REOPEN_REQUEST`.
-Regles metier: BR-NAV-001, BR-PERSONAL-CREATE-001, BR-REQ-001, BR-REQ-REF-001, BR-OWN-001.
+Regles metier: BR-NAV-001, BR-PERSONAL-CREATE-001, BR-PERSONAL-EDIT-001, BR-REQ-001, BR-REQ-REF-001, BR-OWN-001.
 Tests: `backend/tests/api/test_requests_baseline.py`, `backend/tests/api/test_ticket_actions.py`.
 Fonctionnalites dependantes: notifications, workflow, appreciation.
 Chemins probables en cas de probleme: `app.requests.*`, `requests.ts`, `RouteRequest.py`, `ServiceRequest.py`.
@@ -61,12 +61,12 @@ Chemins probables: `app.queue.tsx`, `requests.ts`, `RouteRequest.py`, `ServiceRe
 Identifiant: FEATURE-CHIEF-INBOX
 Nom: Boite de traitement chef
 Module: MOD-CHIEF
-Description: vue chef pour les tickets de service et actions d'assignation/reassignation.
+Description: vue chef pour les tickets de service et actions d'assignation/reassignation; la reaffectation service et le renvoi au directeur exigent un motif explicite pour garder la decision tracable.
 Roles concernes: chief.
 Route frontend: `/app/chief-inbox`, `/app/chief-inbox/tickets/$id`.
 Endpoint backend: `GET /api/v1/requests/by-unity/{unity_id}`, `POST /api/v1/requests/{id}/assign`, `POST /api/v1/requests/{id}/reassign`, `POST /api/v1/requests/{id}/priority`.
 Regles metier: BR-ROLE-CHIEF-001, BR-ASSIGN-001, BR-PRIORITY-001.
-Chemins probables: `app.chief-inbox.tsx`, `capabilities.ts`, `RouteRequest.py`, `ticket_actions.py`.
+Chemins probables: `app.chief-inbox.tsx`, `capabilities.ts`, `RouteRequest.py`, `ServiceRequest.py`, `ticket_actions.py`.
 
 ## FEATURE-SUPERVISION
 

@@ -6,7 +6,7 @@ BR-NAV-001
 Description: Un ticket ouvert depuis un espace metier doit rester dans cet espace metier.
 Module: MOD-PERSONAL, MOD-SUPERVISION, MOD-AGENT, MOD-CHIEF, MOD-DIRECTION, MOD-GLOBAL, MOD-ADMIN.
 Roles: tous.
-Fichiers: `ticket-navigation.ts`, `app-layout.tsx`, `app.*_.tickets.$id.tsx`, `app.requests.$id.tsx`.
+Fichiers: `ticket-navigation.ts`, `app-layout.tsx`, `app.*_.tickets.$id.tsx` (dont `app.chief-inbox_.tickets.$id.tsx` et `app.department-inbox_.tickets.$id.tsx`), `app.requests.$id.tsx`.
 Endpoints: `GET /requests/{id}`.
 Tables: `request`.
 Tests associes: `frontend/role-visual-check.mjs`.
@@ -26,12 +26,25 @@ Description: Dans l'espace personnel demandeur, `Mes demandes` affiche uniquemen
 Fichiers: `app.index.tsx`, `app.requests.index.tsx`, `app.requests.history.tsx`, `requests.ts`, `RouteRequest.py`, `ServiceRequest.py`, `RepositoryRequest.py`.
 Note statut: `resolved` reste dans `Mes demandes` jusqu'a cloture demandeur ou passage vers un statut terminal.
 Note implementation: l'espace personnel (`Mes demandes`, `Historique`) ne propose aucun export des propres demandes, quel que soit le role connecte. Les exports restent reserves aux espaces metier/reporting/admin.
+Note acces: tout role connecte qui est `requester_id` d'une demande doit pouvoir la consulter dans `Mon espace` comme demande personnelle, sans etre bloque par son perimetre metier service/direction.
 Note UI: `Mes demandes` et `Historique` suivent `BR-UI-TICKET-LAYOUT-001`.
 
 BR-PERSONAL-CREATE-001
 Description: Dans l'espace personnel, le formulaire de creation demandeur ne doit afficher que les informations necessaires au depot de la demande: titre, description detaillee et pieces jointes optionnelles. Les champs categorie, priorite, direction destinataire et service/unite sont reserves au traitement interne et ne sont pas visibles ni modifiables par le demandeur lors de la creation.
 Fichiers: `new-request-form.tsx`, `requests.ts`, `RouteRequest.py`, `ServiceRequest.py`.
 Note implementation: le frontend envoie une categorie technique non modifiable `autre` et une priorite technique `medium` uniquement pour satisfaire le contrat actuel de creation; aucune direction ni service n'est envoye depuis le formulaire demandeur. La qualification/orientation reste effectuee dans les espaces metier autorises.
+
+BR-PERSONAL-EDIT-001
+Description: Dans le detail d'une demande personnelle, le demandeur peut modifier uniquement le titre et la description lorsque l'edition initiale est autorisee. Les champs categorie, priorite, direction destinataire et service/unite restent reserves aux espaces metier et ne doivent pas etre affiches ni envoyes par l'interface demandeur.
+Fichiers: `app.requests.$id.tsx`, `requests.ts`, `RouteRequest.py`, `ServiceRequest.py`.
+Note implementation: le frontend et le backend limitent l'edition demandeur a `title` et `description`; les champs internes non prevus par le schema sont refuses par l'API.
+
+BR-ATTACHMENT-001
+Description: Les pieces jointes d'une demande doivent etre visibles depuis le detail de la demande/ticket pour les acteurs autorises. Chaque fichier doit proposer une action `Voir` et une action `Telecharger` via une requete authentifiee, sans exposer un acces direct non controle.
+Fichiers: `app.requests.$id.tsx`, `requests.ts`, `client.ts`, `RouteRequest.py`, `storage.py`.
+Endpoints: `GET /requests/{id}/attachments`, `POST /requests/{id}/attachments`, `GET /requests/download/{path}`.
+Note securite: l'acces aux fichiers reutilise le scoping de la demande; un role professionnel qui est aussi demandeur proprietaire reste autorise via la regle d'acces personnel.
+Note UI/stockage: les URLs de fichiers doivent encoder le chemin de stockage et l'action `Voir` doit ouvrir la fenetre de previsualisation au moment du clic, avant la recuperation authentifiee du blob, afin d'eviter le blocage navigateur.
 
 ## Roles et perimetres
 
@@ -52,8 +65,17 @@ Fichiers: `ticket_actions.py`, `app.my-tickets.tsx`, `app.queue.tsx`.
 Note implementation: les KPI de `Mes tickets` sont calcules depuis les tickets filtres par `assignee_id` de l'agent connecte. La vue `A prendre` de `/app/queue` exclut les tickets deja assignes via `unassigned_only=true`; apres prise/assignation, le ticket sort de la file et rejoint `Mes tickets`.
 
 BR-ROLE-CHIEF-001
-Description: Un chef supervise son service, assigne a un agent de son service et peut changer la priorite.
-Fichiers: `ticket_actions.py`, `app.chief-inbox.tsx`, `app.supervision.tsx`.
+Description: Un chef supervise son service, assigne a un agent de son service, peut changer la priorite et peut reaffecter un ticket vers un autre service de la meme direction uniquement avec un motif explicite conserve dans la timeline. Le renvoi/escalade vers le directeur doit aussi etre justifie cote interface.
+Fichiers: `ticket_actions.py`, `ServiceRequest.py`, `RouteRequest.py`, `app.chief-inbox.tsx`, `app.supervision.tsx`.
+
+BR-ROLE-CHIEF-DEPARTEMENT-001
+Description: Un chief-departement (Chef Departement du CDC) partage la meme matrice de permissions qu'un chief-service, mais son perimetre organisationnel est elargi au departement entier (le departement et tous les services qui lui sont rattaches dans l'organigramme), alors qu'un chief-service reste strictement borne a son propre service. Concretement : lecture/action sur les tickets (`assert_ticket_scope`), listing (`GET /requests`, `GET /requests/{id}`, `GET /requests/by-unity/{id}`) et assignation a un agent (`assert_assignment_allowed`) acceptent tout service descendant du departement pour chief-departement, contre une correspondance exacte d'unite pour chief-service.
+Fichiers: `ticket_actions.py` (`assert_ticket_scope`, `assert_assignment_allowed`), `ServiceRequest.py` (`_guard_ticket_action`, `assign`), `RouteRequest.py` (`list_requests`, `_resolve_access`, `_check_unity_access`), `app.chief-inbox.tsx` (selecteur d'agent assignable via `direction_id` pour chief-departement).
+Tests: `test_ticket_actions.py` (`test_chief_departement_can_assign_across_department_scope`).
+
+BR-ROLE-CHIEF-DEPARTEMENT-002
+Description: chief-service et chief-departement ont chacun leur propre espace professionnel nomme et route dediee — `/app/chief-inbox` pour chief-service, `/app/department-inbox` pour chief-departement — au lieu de partager une seule page. Les deux routes rendent le meme composant partage (`ChiefInbox`, defini et exporte depuis `app.chief-inbox.tsx`) qui detecte dynamiquement l'espace courant via le chemin d'URL (`useRouterState`) pour adapter le libelle affiche, la cle de requete/cache et la portee de la liste d'agents assignables (`unit_id` exact pour chief-service, `direction_id` elargi via organigramme pour chief-departement). Un ticket ouvert depuis l'un des deux espaces reste dans cet espace (BR-NAV-001) via `ticketDetailRouteForList`/`ticketDetailRouteForSource` dans `ticket-navigation.ts`.
+Fichiers: `app.chief-inbox.tsx`, `app.department-inbox.tsx`, `app.chief-inbox_.tickets.$id.tsx`, `app.department-inbox_.tickets.$id.tsx`, `ticket-navigation.ts`, `app.requests.$id.tsx` (contexte `departmentInbox`), `app-layout.tsx` (navigation sidebar/mobile par role).
 
 BR-ROLE-DIRECTOR-001
 Description: Un directeur pilote sa direction, arbitre et transfere; il n'est pas un agent de traitement quotidien.

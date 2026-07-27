@@ -1,0 +1,712 @@
+=====================================================================
+REFERENTIEL OFFICIEL DES ROLES
+ROLE N°3 : CHEF DE SERVICE
+PARTIE 3
+INTERFACES DETAILLEES
+VERSION OFFICIELLE
+=====================================================================
+
+OBJECTIF
+
+Toutes les interfaces du Chef de Service doivent être conçues pour lui
+permettre de piloter son service.
+
+Le Chef ne travaille pas comme un Agent.
+
+Il supervise.
+
+Il décide.
+
+Il répartit.
+
+Il contrôle.
+
+Toutes les interfaces doivent être orientées Management.
+
+=====================================================================
+ORGANISATION GENERALE
+=====================================================================
+
+Le Chef dispose de deux espaces totalement indépendants.
+
+------------------------------------------------------
+
+ESPACE PERSONNEL
+
+------------------------------------------------------
+
+Accessible depuis :
+
+Mon espace
+
+Il contient uniquement :
+
+• Mes demandes
+
+• Historique personnel
+
+• Notifications personnelles
+
+• Profil
+
+Aucune donnée de supervision.
+
+------------------------------------------------------
+
+ESPACE SUPERVISION
+
+------------------------------------------------------
+
+Accessible depuis :
+
+Supervision
+
+Il contient exclusivement :
+
+Pilotage du service
+
+Répartition
+
+Performance
+
+Equipe
+
+Rapports
+
+SLA
+
+Escalades
+
+Réouvertures
+
+Le passage d'un espace à l'autre doit être explicite.
+
+=====================================================================
+TABLEAU DE BORD
+=====================================================================
+
+Le Dashboard est orienté décision.
+
+Il doit permettre de comprendre la situation du service en moins de
+30 secondes.
+
+=====================================================================
+HEADER
+=====================================================================
+
+Logo
+
+Titre
+
+Bonjour Chef [Nom]
+
+Date
+
+Recherche globale
+
+Centre de notifications
+
+Profil
+
+Sélecteur de période
+
+=====================================================================
+CARTES KPI
+=====================================================================
+
+Tickets actifs
+
+Tickets critiques
+
+Tickets non affectés
+
+Tickets réouverts
+
+Tickets escaladés
+
+Tickets SLA dépassés
+
+Tickets SLA proches
+
+Tickets résolus aujourd'hui
+
+Temps moyen de résolution
+
+Temps moyen de première réponse
+
+Charge moyenne des Agents
+
+Satisfaction utilisateur
+
+=====================================================================
+COULEURS KPI
+=====================================================================
+
+Vert
+
+Situation normale
+
+Orange
+
+Attention
+
+Rouge
+
+Action immédiate
+
+Rouge clignotant
+
+Situation critique
+
+=====================================================================
+GRAPHIQUES
+=====================================================================
+
+Evolution des tickets
+
+Répartition des statuts
+
+Répartition des catégories
+
+Répartition des priorités
+
+Répartition par Agent
+
+Evolution SLA
+
+Evolution des réouvertures
+
+Charge des Agents
+
+Performance hebdomadaire
+
+Performance mensuelle
+
+=====================================================================
+ALERTES
+=====================================================================
+
+Bloc supérieur :
+
+Alertes importantes.
+
+Exemples :
+
+3 SLA dépassés.
+
+2 tickets critiques.
+
+1 Agent indisponible.
+
+15 tickets non affectés.
+
+=====================================================================
+MENU SUPERVISION
+=====================================================================
+
+Sous-menus
+
+Vue globale
+
+Tous les tickets
+
+Critiques
+
+SLA
+
+Escalades
+
+Réouvertures
+
+Historique
+
+=====================================================================
+VUE GLOBALE
+=====================================================================
+
+Affiche :
+
+Tous les tickets du service.
+
+Colonnes :
+
+Numéro
+
+Titre
+
+Utilisateur
+
+Catégorie
+
+Priorité
+
+Criticité
+
+Agent
+
+Statut
+
+SLA
+
+Date création
+
+Dernière activité
+
+Actions
+
+=====================================================================
+ACTIONS RAPIDES
+=====================================================================
+
+Ouvrir
+
+Réaffecter
+
+Escalader
+
+Voir Agent
+
+Voir historique
+
+Voir audit
+
+Exporter
+
+=====================================================================
+REPARTITION
+=====================================================================
+
+Ecran spécifique.
+
+Objectif
+
+Répartir les tickets.
+
+Affichage :
+
+Liste des Agents
+
+Pour chaque Agent
+
+Nom
+
+Photo
+
+Disponibilité
+
+Nombre de tickets
+
+Tickets critiques
+
+Temps moyen
+
+SLA
+
+Charge
+
+Barre graphique
+
+Le Chef peut :
+
+Glisser un ticket
+
+Déposer sur un Agent
+
+Le système :
+
+demande confirmation
+
+journalise
+
+notifie
+
+recalcule immédiatement.
+
+=====================================================================
+EQUIPE
+=====================================================================
+
+Liste complète des Agents.
+
+Chaque carte affiche :
+
+Nom
+
+Photo
+
+Fonction
+
+Disponibilité
+
+Présence
+
+Tickets actifs
+
+Tickets critiques
+
+Retards
+
+Temps moyen
+
+Performance
+
+Satisfaction
+
+Boutons
+
+Voir
+
+Historique
+
+Performance
+
+Tickets
+
+=====================================================================
+PERFORMANCE
+=====================================================================
+
+Tableau détaillé.
+
+Colonnes
+
+Agent
+
+Tickets
+
+Résolus
+
+Réouverts
+
+Escaladés
+
+Retards
+
+Temps moyen
+
+SLA respectés
+
+Score global
+
+Filtres
+
+Période
+
+Catégorie
+
+Priorité
+
+=====================================================================
+DETAIL D'UN AGENT
+=====================================================================
+
+Informations
+
+Photo
+
+Téléphone
+
+Service
+
+Equipe
+
+Historique
+
+Statistiques
+
+Charge
+
+Performance
+
+Commentaires Manager
+
+Historique des affectations
+
+=====================================================================
+DETAIL D'UN TICKET
+=====================================================================
+
+Le Chef voit davantage d'informations que l'Utilisateur.
+
+Onglets
+
+Résumé
+
+Qualification
+
+Commentaires publics
+
+Commentaires internes
+
+Historique
+
+Journal
+
+Audit
+
+Pièces jointes
+
+Tâches
+
+Sous-tâches
+
+Escalades
+
+SLA
+
+=====================================================================
+SIDEBAR
+=====================================================================
+
+Utilisateur
+
+Agent
+
+Service
+
+Département
+
+Direction
+
+Catégorie
+
+Sous-catégorie
+
+Priorité
+
+Criticité
+
+Etat SLA
+
+Dates
+
+Durée
+
+=====================================================================
+FORMULAIRE AFFECTATION
+=====================================================================
+
+Agent
+
+Motif
+
+Commentaires
+
+Priorité
+
+Validation
+
+Boutons
+
+Affecter
+
+Annuler
+
+=====================================================================
+FORMULAIRE REAFFECTATION
+=====================================================================
+
+Nouvel Agent
+
+Motif obligatoire
+
+Commentaires
+
+Historique affiché
+
+Boutons
+
+Réaffecter
+
+Annuler
+
+=====================================================================
+FORMULAIRE VALIDATION
+=====================================================================
+
+Résumé
+
+Commentaires
+
+Décision
+
+Approuver
+
+Retour traitement
+
+Motif obligatoire si refus
+
+=====================================================================
+FORMULAIRE ESCALADE
+=====================================================================
+
+Destinataire
+
+Niveau
+
+Motif
+
+Commentaires
+
+Boutons
+
+Escalader
+
+Annuler
+
+=====================================================================
+RAPPORTS
+=====================================================================
+
+Rapport SLA
+
+Rapport Agents
+
+Rapport Tickets
+
+Rapport Priorités
+
+Rapport Catégories
+
+Rapport Charge
+
+Rapport Réouvertures
+
+Rapport Escalades
+
+Rapport Satisfaction
+
+Tous exportables.
+
+=====================================================================
+RECHERCHE
+=====================================================================
+
+Recherche globale.
+
+Recherche avancée.
+
+Recherche sauvegardée.
+
+Filtres combinables.
+
+=====================================================================
+MODALES
+=====================================================================
+
+Confirmation affectation
+
+Confirmation réaffectation
+
+Confirmation escalade
+
+Confirmation validation
+
+Confirmation transfert
+
+Confirmation changement SLA
+
+Confirmation priorité
+
+Toutes les modales affichent
+
+Conséquences
+
+Historique
+
+Confirmation
+
+Annuler
+
+=====================================================================
+NOTIFICATIONS
+=====================================================================
+
+Centre temps réel.
+
+Le Chef reçoit :
+
+Nouvelle demande.
+
+Ticket critique.
+
+SLA.
+
+Escalade.
+
+Réouverture.
+
+Retour Agent.
+
+Validation demandée.
+
+Toutes les notifications sont historisées.
+
+=====================================================================
+ETATS VIDES
+=====================================================================
+
+Aucun Agent.
+
+Aucun ticket.
+
+Aucun rapport.
+
+Aucune alerte.
+
+Chaque écran propose une action.
+
+=====================================================================
+MESSAGES D'ERREUR
+=====================================================================
+
+Erreur permission.
+
+Erreur réseau.
+
+Erreur validation.
+
+Erreur serveur.
+
+Erreur SLA.
+
+Messages compréhensibles.
+
+Jamais de messages techniques.
+
+=====================================================================
+REGLES UX
+=====================================================================
+
+Le Chef ne doit jamais naviguer dans plusieurs écrans pour prendre une
+décision simple.
+
+Les indicateurs importants doivent toujours être visibles.
+
+Les couleurs doivent permettre d'identifier immédiatement les urgences.
+
+Les tableaux doivent supporter :
+
+Tri
+
+Filtres
+
+Colonnes personnalisables
+
+Pagination
+
+Recherche instantanée
+
+Export
+
+=====================================================================
+REGLE ABSOLUE
+=====================================================================
+
+Toutes les interfaces doivent être conçues pour aider le Chef de
+Service à piloter efficacement son équipe.
+
+Le frontend ne doit jamais afficher une action que le backend refuse.
+
+Toutes les actions critiques doivent être confirmées, journalisées,
+auditables et sécurisées.

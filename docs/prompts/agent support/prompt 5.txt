@@ -1,0 +1,184 @@
+=====================================================================
+REFERENTIEL OFFICIEL DES ROLES
+ROLE N°2 : AGENT SUPPORT
+PARTIE 5
+CAS METIERS COMPLETS
+VERSION OFFICIELLE
+=====================================================================
+
+CONTEXTE
+
+Les Parties 1 à 4 sont considérées comme validées.
+
+Tu dois terminer définitivement le référentiel Agent Support.
+
+Cette partie doit servir de guide officiel pour les développeurs.
+
+Aucune interprétation n'est autorisée.
+
+=====================================================================
+
+OBJECTIF
+
+Construire des scénarios métier complets.
+
+Chaque scénario doit décrire :
+
+• le contexte
+• les acteurs
+• les statuts
+• les interfaces
+• les formulaires
+• les validations
+• les permissions
+• les notifications
+• les journaux
+• les audits
+• les erreurs possibles
+• le résultat final
+
+=====================================================================
+
+REDIGER AU MINIMUM LES SCENARIOS SUIVANTS
+
+1. Création d'un incident informatique
+
+2. Création d'une demande de service
+
+3. Incident réseau
+
+4. Incident serveur
+
+5. Incident applicatif
+
+6. Demande d'accès
+
+7. Réinitialisation de mot de passe
+
+8. Installation d'un logiciel
+
+9. Création d'un compte
+
+10. Incident critique
+
+11. Ticket urgent
+
+12. Mauvaise qualification
+
+13. Changement de catégorie
+
+14. Changement de priorité
+
+15. Réaffectation
+
+16. Transfert vers un autre service
+
+17. Escalade
+
+18. Retour d'escalade
+
+19. Demande d'informations utilisateur
+
+20. Réponse utilisateur
+
+21. Mise en attente interne
+
+22. Fin de mise en attente
+
+23. Résolution
+
+24. Validation utilisateur
+
+25. Réouverture
+
+26. Clôture automatique
+
+27. Clôture manuelle
+
+28. Refus de résolution
+
+29. Ticket en doublon (si cette fonctionnalité est activée)
+
+30. Ticket fusionné (si cette fonctionnalité est activée)
+
+31. Ticket annulé
+
+32. Ticket rejeté
+
+33. SLA dépassé
+
+34. SLA critique
+
+35. Pièce jointe invalide
+
+36. Erreur d'autorisation
+
+37. Tentative d'action interdite
+
+38. Perte réseau
+
+39. Conflit de modification simultanée
+
+40. Historique complet d'un ticket
+
+=====================================================================
+
+POUR CHAQUE SCENARIO
+
+Présenter :
+
+Contexte
+
+Objectif
+
+Acteurs
+
+Préconditions
+
+Déroulement complet étape par étape
+
+Transitions de statuts
+
+Interfaces utilisées
+
+Boutons utilisés
+
+Modales
+
+Notifications envoyées
+
+Historique généré
+
+Audit généré
+
+Erreurs possibles
+
+Résultat attendu
+
+=====================================================================
+
+TERMINE LE DOCUMENT PAR
+
+Les règles absolues de l'Agent Support.
+
+Les erreurs que le système ne doit jamais permettre.
+
+Les règles UX obligatoires.
+
+Les règles Backend obligatoires.
+
+Les règles Frontend obligatoires.
+
+Les règles de sécurité.
+
+Les règles de journalisation.
+
+Les règles d'audit.
+
+Les indicateurs de performance.
+
+Les bonnes pratiques.
+
+Les points de contrôle qualité.
+
+Le document final doit constituer la référence officielle du rôle Agent Support pour tout le projet EDG Connect.

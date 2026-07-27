@@ -1,0 +1,305 @@
+=========================================
+CHEF DE SERVICE
+PARTIE 4
+NOTIFICATIONS – AUDIT – SECURITE
+=========================================
+
+OBJECTIF
+
+Le Chef de Service doit être informé de tout ce qui se passe dans son service.
+
+Il ne doit jamais découvrir un problème trop tard.
+
+Le système doit attirer automatiquement son attention lorsqu'une intervention est nécessaire.
+
+=========================================
+NOTIFICATIONS
+=========================================
+
+Le Chef reçoit une notification lorsque :
+
+• un nouveau ticket arrive dans son service
+
+• un ticket critique est créé
+
+• un SLA risque d'être dépassé
+
+• un SLA est dépassé
+
+• un Agent prend un ticket
+
+• un Agent termine un ticket
+
+• un ticket est réouvert
+
+• un ticket est transféré
+
+• un ticket est escaladé
+
+• un Agent demande son intervention
+
+• un utilisateur refuse la résolution
+
+• un ticket reste sans Agent
+
+=========================================
+CENTRE DE NOTIFICATIONS
+=========================================
+
+Chaque notification affiche :
+
+✔ le titre
+
+✔ le numéro du ticket
+
+✔ le nom de l'utilisateur
+
+✔ le nom de l'Agent
+
+✔ la date
+
+✔ le niveau d'urgence
+
+✔ un bouton :
+
+Voir le ticket
+
+Toutes les notifications peuvent être :
+
+• marquées comme lues
+
+• supprimées
+
+• filtrées
+
+• recherchées
+
+=========================================
+ALERTES IMPORTANTES
+=========================================
+
+Certaines notifications doivent apparaître immédiatement.
+
+Exemples :
+
+🔴 SLA dépassé
+
+🔴 Ticket critique
+
+🔴 Ticket sans Agent
+
+🔴 Ticket bloqué
+
+🔴 Plus de 10 tickets en attente
+
+Ces alertes restent visibles tant que le problème existe.
+
+=========================================
+RECHERCHE
+=========================================
+
+Le Chef peut rechercher :
+
+Numéro du ticket
+
+Nom de l'utilisateur
+
+Nom de l'Agent
+
+Catégorie
+
+Priorité
+
+Statut
+
+Date
+
+SLA
+
+Direction
+
+Service
+
+Tous les filtres peuvent être utilisés ensemble.
+
+=========================================
+RAPPORTS
+=========================================
+
+Le Chef peut consulter :
+
+• Nombre total de tickets
+
+• Tickets ouverts
+
+• Tickets fermés
+
+• Tickets critiques
+
+• Tickets réouverts
+
+• Tickets en retard
+
+• Performance des Agents
+
+• Temps moyen de résolution
+
+• Respect des SLA
+
+• Satisfaction utilisateur
+
+Les rapports peuvent être :
+
+PDF
+
+Excel
+
+CSV
+
+=========================================
+AUDIT
+=========================================
+
+Toutes les actions importantes sont enregistrées.
+
+Par exemple :
+
+Qui a affecté le ticket ?
+
+Qui a changé la priorité ?
+
+Qui a modifié le SLA ?
+
+Qui a réaffecté ?
+
+Qui a validé ?
+
+Qui a escaladé ?
+
+Chaque ligne contient :
+
+Date
+
+Heure
+
+Utilisateur
+
+Action
+
+Ancienne valeur
+
+Nouvelle valeur
+
+=========================================
+HISTORIQUE
+=========================================
+
+Le Chef peut consulter tout l'historique d'un ticket.
+
+Création
+
+Qualification
+
+Affectation
+
+Commentaires
+
+Réponses
+
+Réaffectation
+
+Escalade
+
+Résolution
+
+Validation
+
+Clôture
+
+Aucun élément de l'historique ne peut être supprimé.
+
+=========================================
+SECURITE
+=========================================
+
+Le Chef ne peut jamais :
+
+Créer des rôles
+
+Supprimer un utilisateur
+
+Modifier les paramètres système
+
+Modifier les permissions
+
+Modifier le workflow global
+
+Voir les tickets d'un autre service
+
+Toutes les autorisations sont contrôlées par le backend.
+
+=========================================
+VISIBILITE
+=========================================
+
+Le Chef voit uniquement :
+
+✔ les tickets de son service
+
+✔ les Agents de son service
+
+✔ les rapports de son service
+
+✔ les statistiques de son service
+
+Il ne voit jamais :
+
+✘ les autres services
+
+✘ les autres directions
+
+✘ les données administrateur
+
+=========================================
+EXEMPLE
+=========================================
+
+Le système détecte :
+
+3 tickets critiques
+
+Le Chef reçoit immédiatement une alerte.
+
+Il ouvre :
+
+Supervision
+
+↓
+
+Tickets critiques
+
+↓
+
+Il voit les 3 tickets.
+
+Il décide :
+
+• d'affecter le premier à Alpha
+
+• le deuxième à Bravo
+
+• d'escalader le troisième
+
+Toutes les actions sont enregistrées automatiquement dans l'audit.
+
+=========================================
+REGLE ABSOLUE
+=========================================
+
+Le Chef de Service pilote son équipe.
+
+Il ne doit jamais perdre de temps à chercher les informations.
+
+Les alertes, rapports et notifications doivent lui permettre de prendre rapidement les bonnes décisions.
+
+Toutes les actions importantes doivent être enregistrées automatiquement.

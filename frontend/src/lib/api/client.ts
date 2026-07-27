@@ -204,6 +204,90 @@ export async function apiFetch<T>(
   return json as T;
 }
 
+function normalizeApiBlobPath(path: string): string {
+  if (/^https?:\/\//i.test(path)) return path;
+  if (path.startsWith("/api/v1")) return path.slice("/api/v1".length) || "/";
+  return path.startsWith("/") ? path : `/${path}`;
+}
+
+function filenameFromContentDisposition(value: string | null): string | undefined {
+  if (!value) return undefined;
+  const utf8 = value.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8?.[1]) return decodeURIComponent(utf8[1].replace(/"/g, ""));
+  const ascii = value.match(/filename="?([^";]+)"?/i);
+  return ascii?.[1];
+}
+
+export async function apiFetchBlob(
+  path: string,
+  init?: RequestInit & { skipAuth?: boolean },
+): Promise<{ blob: Blob; filename?: string; contentType?: string }> {
+  const { skipAuth, headers: extraHeaders, signal: externalSignal, ...rest } = init ?? {};
+  const headers: Record<string, string> = {};
+
+  if (!skipAuth) {
+    const { getAccessToken, isTokenExpired, getRefreshToken, AUTH_DISABLED } = await import("../session");
+
+    if (!AUTH_DISABLED) {
+      let token = getAccessToken();
+      if (token && isTokenExpired()) {
+        token = getRefreshToken() ? await _attemptRefresh() : null;
+      }
+      if (token) headers.Authorization = `Bearer ${token}`;
+    }
+  }
+
+  if (extraHeaders) Object.assign(headers, extraHeaders);
+
+  const normalizedPath = normalizeApiBlobPath(path);
+  const url = /^https?:\/\//i.test(normalizedPath) ? normalizedPath : `${API_BASE}${normalizedPath}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  if (externalSignal) externalSignal.addEventListener("abort", () => controller.abort());
+
+  let res: Response;
+  try {
+    res = await fetch(url, { headers, ...rest, signal: controller.signal });
+  } catch (err) {
+    clearTimeout(timer);
+    if ((err as Error).name === "AbortError") {
+      throw new Error("La requête a expiré. Vérifiez que le serveur backend est démarré.");
+    }
+    throw new Error("Impossible de contacter le serveur. Vérifiez votre connexion.");
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (res.status === 401 && !skipAuth) {
+    const newToken = await _attemptRefresh();
+    if (newToken) {
+      res = await fetch(url, {
+        headers: { ...headers, Authorization: `Bearer ${newToken}` },
+        ...rest,
+      });
+    }
+  }
+
+  if (!res.ok) {
+    let message = res.statusText || "Erreur inattendue";
+    try {
+      const body = await res.json();
+      message = body.message ?? body.detail ?? message;
+    } catch {
+      try {
+        message = await res.text();
+      } catch { /* ignore */ }
+    }
+    throw new ApiError(res.status, "FILE_DOWNLOAD_FAILED", message);
+  }
+
+  return {
+    blob: await res.blob(),
+    filename: filenameFromContentDisposition(res.headers.get("content-disposition")),
+    contentType: res.headers.get("content-type") ?? undefined,
+  };
+}
+
 /** Vérifie la disponibilité du backend et de la base de données. Endpoint public, sans JWT. */
 export async function checkHealth(): Promise<{ status: string; database: string }> {
   const res = await fetch(`${API_ROOT}/health`);

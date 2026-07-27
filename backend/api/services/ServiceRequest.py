@@ -13,6 +13,7 @@ from sqlalchemy.orm import noload
 from api.core.exceptions import ConflictException
 from api.core.error_codes import ErrorCode
 from api.core.event_bus import AppEvent, emit as emit_event
+from api.core.rbac import normalize_role
 from api.core.ticket_actions import (
     BYPASS_TRANSITION_ROLES as _BYPASS_ROLES,
     TERMINAL_STATUSES,
@@ -79,7 +80,7 @@ class RequestService(BaseService):
             assert_action_allowed(effective_role, action)
         if actor is not None:
             allowed_dir_unity_ids = None
-            if effective_role.strip().lower() in {"agent", "chief", "director"}:
+            if normalize_role(effective_role) in {"director", "chief-departement"}:
                 allowed_dir_unity_ids = await self._direction_unity_ids(getattr(actor, "unity_id", None))
             assert_ticket_scope(actor, obj, action=action, allowed_dir_unity_ids=allowed_dir_unity_ids)
             assert_role_specific_action_constraints(actor, obj, action)
@@ -1081,9 +1082,9 @@ class RequestService(BaseService):
         return obj
 
     async def requester_edit(self, id: str, data: dict, *, actor_id: str, actor_role: str = "user"):
-        """Modification complète d'un ticket par son demandeur.
+        """Modification personnelle d'un ticket par son demandeur.
         Autorisé uniquement si request_status == 'new' (aucun acteur n'a encore agi).
-        Relance le routage automatique après mise à jour.
+        Seuls le titre et la description sont modifiables depuis l'espace personnel.
         """
         from fastapi import HTTPException as _HTTP
 
@@ -1106,16 +1107,12 @@ class RequestService(BaseService):
         raw_desc = data.get("description", "")
         if raw_desc:
             patch["description"] = raw_desc.strip()
-        if data.get("category"):
-            patch["category"] = data["category"]
-        if data.get("priority"):
-            patch["priority"] = data["priority"]
-        if data.get("unity_id") is not None:
-            patch["unity_id"] = data["unity_id"]
-        elif data.get("unit_id") is not None:
-            patch["unity_id"] = data["unit_id"]
-        elif data.get("direction_id") is not None:
-            patch["unity_id"] = data["direction_id"]
+
+        if not patch:
+            raise _HTTP(
+                status_code=422,
+                detail="Aucune modification autorisée à enregistrer.",
+            )
 
         patch["assignee_id"] = None
 
@@ -1194,12 +1191,16 @@ class RequestService(BaseService):
         assignee_name = self._account_display_name(assignee_name_raw, assignee_firstname)
 
         if actor is not None:
+            allowed_scope_unity_ids = None
+            if normalize_role(str(getattr(actor, "role", actor_role or "") or "")) == "chief-departement":
+                allowed_scope_unity_ids = await self._direction_unity_ids(getattr(actor, "unity_id", None))
             assert_assignment_allowed(
                 actor,
                 current,
                 assignee_id,
                 target_unity_id=assignee_unity_id,
                 target_role=assignee_role,
+                allowed_scope_unity_ids=allowed_scope_unity_ids,
             )
 
         if actor_role not in _BYPASS_ROLES:
@@ -1705,6 +1706,7 @@ class RequestService(BaseService):
         """
         from api.repositories.RepositoryAccount import AccountRepository
 
+        clean_reason = reason.strip() if isinstance(reason, str) else ""
         obj = await self._guard_ticket_action(
             id,
             "reassign",
@@ -1725,7 +1727,7 @@ class RequestService(BaseService):
         actor_direction_id = None
         effective_actor_role = str(getattr(actor, "role", actor_role or "") or "").strip().lower()
         actor_unity_id = getattr(actor, "unity_id", None)
-        if actor is not None and effective_actor_role == "chief" and actor_unity_id is not None:
+        if actor is not None and normalize_role(effective_actor_role) in {"chief-service", "chief-departement"} and actor_unity_id is not None:
             actor_unity_row = await self.session.execute(
                 select(Unity.id, Unity.parent_direction_id)
                 .where(Unity.id == int(actor_unity_id), Unity.deleted_at.is_(None))
@@ -1742,6 +1744,7 @@ class RequestService(BaseService):
                 target_unity_id,
                 target_direction_id=target_direction_id,
                 actor_direction_id=actor_direction_id,
+                reason=clean_reason,
             )
 
         if obj.unity_id is not None and int(obj.unity_id) == int(target_unity_id):
@@ -1756,12 +1759,12 @@ class RequestService(BaseService):
         await self.detail_repo.create_event({
             "workflow_id": wf_id,
             "event_type": "reassigned_service",
-            "label": f"Réaffecté vers {target_label or 'un autre service'}{' — ' + reason if reason else ''}",
+            "label": f"Réaffecté vers {target_label or 'un autre service'}{' — ' + clean_reason if clean_reason else ''}",
             "actor_id": actor_id,
             "actor_name": actor_name,
             "dest_id": chief.id if chief else None,
             "unity_id": target_unity_id,
-            "comment": reason,
+            "comment": clean_reason or None,
             "activated": True,
             "infos": self._clean_infos({
                 "event_status": "pending_validation",
@@ -1778,7 +1781,7 @@ class RequestService(BaseService):
                 "new_status": "assigned",
                 "old_assignee_id": obj.assignee_id,
                 "new_assignee_id": chief.id if chief else None,
-                "reason": reason,
+                "reason": clean_reason or None,
             }),
         })
 

@@ -33,7 +33,7 @@ def _check_attachment_access(actor, req) -> None:
         if str(req.requester_id) != str(actor.id):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Accès refusé.")
         return
-    if role in ("agent", "chief"):
+    if role in {"agent-support", "chief-service", "chief-departement"}:
         if actor.unit_id and req.unit_id and str(req.unit_id) == str(actor.unit_id):
             return
         if actor.direction_id and req.direction_id and str(req.direction_id) == str(actor.direction_id):

@@ -1,0 +1,516 @@
+===========================================================
+CHEF DE SERVICE
+PARTIE 5
+CAS METIERS
+===========================================================
+
+OBJECTIF
+
+Cette partie explique comment un Chef de Service doit réagir dans les
+situations réelles.
+
+L'IA ne doit jamais improviser.
+
+Elle doit appliquer exactement ces comportements.
+
+===========================================================
+CAS N°1
+UN NOUVEAU TICKET ARRIVE
+===========================================================
+
+Situation
+
+Un nouveau ticket est orienté vers le service.
+
+Le système :
+
+• ajoute le ticket dans la file du service
+
+• notifie le Chef
+
+Le Chef ouvre :
+
+Supervision
+
+↓
+
+Tickets non affectés
+
+Il vérifie :
+
+• la priorité
+
+• la catégorie
+
+• le SLA
+
+• la charge de ses Agents
+
+Puis il décide :
+
+• affecter immédiatement
+
+ou
+
+• laisser un Agent le prendre
+
+Le ticket ne doit jamais rester sans suivi.
+
+===========================================================
+CAS N°2
+UN AGENT EST ABSENT
+===========================================================
+
+Situation
+
+L'Agent Alpha est absent.
+
+Il possède encore 18 tickets.
+
+Le Chef ouvre :
+
+Equipe
+
+↓
+
+Alpha
+
+↓
+
+Voir les tickets
+
+Le système affiche les 18 tickets.
+
+Le Chef sélectionne les tickets.
+
+↓
+
+Réaffecter
+
+↓
+
+Choisit Bravo et Charlie
+
+↓
+
+Valider
+
+Toutes les réaffectations sont enregistrées.
+
+Les Agents reçoivent une notification.
+
+===========================================================
+CAS N°3
+UN AGENT EST SURCHARGE
+===========================================================
+
+Situation
+
+Agent Alpha
+
+42 tickets
+
+Agent Bravo
+
+11 tickets
+
+Agent Charlie
+
+15 tickets
+
+Le tableau de bord affiche une alerte.
+
+Le Chef ouvre :
+
+Répartition
+
+↓
+
+Il déplace plusieurs tickets.
+
+↓
+
+Le système met à jour :
+
+• les statistiques
+
+• les KPI
+
+• les tableaux
+
+• les notifications
+
+===========================================================
+CAS N°4
+UN TICKET CRITIQUE ARRIVE
+===========================================================
+
+Situation
+
+Priorité
+
+Critique
+
+Le tableau de bord affiche immédiatement une alerte rouge.
+
+Le Chef :
+
+ouvre le ticket
+
+↓
+
+analyse
+
+↓
+
+choisit l'Agent le plus expérimenté
+
+↓
+
+affecte immédiatement
+
+↓
+
+surveille l'évolution
+
+Le ticket apparaît toujours dans :
+
+Tickets critiques
+
+jusqu'à sa résolution.
+
+===========================================================
+CAS N°5
+UN SLA EST PROCHE D'ETRE DEPASSE
+===========================================================
+
+Le système détecte :
+
+30 minutes restantes.
+
+Le Chef reçoit une notification.
+
+Il consulte le ticket.
+
+Deux possibilités.
+
+Cas 1
+
+L'Agent continue.
+
+Le Chef ne fait rien.
+
+Cas 2
+
+L'Agent est bloqué.
+
+Le Chef :
+
+réaffecte
+
+ou
+
+escalade
+
+afin d'éviter le dépassement.
+
+===========================================================
+CAS N°6
+LE SLA EST DEPASSE
+===========================================================
+
+Le système affiche :
+
+SLA dépassé.
+
+Le Chef reçoit une alerte.
+
+Le ticket devient prioritaire.
+
+Le Chef décide :
+
+• réaffectation
+
+• assistance
+
+• escalade
+
+Toutes les décisions sont auditables.
+
+===========================================================
+CAS N°7
+UN UTILISATEUR REOUVRE SON TICKET
+===========================================================
+
+Le ticket passe :
+
+reopened
+
+Le Chef reçoit une notification.
+
+Il consulte :
+
+le motif
+
+↓
+
+le traitement précédent
+
+↓
+
+les commentaires
+
+Puis il décide :
+
+Retour au même Agent
+
+ou
+
+Nouvelle affectation
+
+Le motif de la décision est enregistré.
+
+===========================================================
+CAS N°8
+UN AGENT DEMANDE DE L'AIDE
+===========================================================
+
+L'Agent clique :
+
+Demander assistance.
+
+Le Chef reçoit une notification.
+
+Il consulte le ticket.
+
+Il peut :
+
+prendre le ticket
+
+réaffecter
+
+escalader
+
+ou accompagner l'Agent.
+
+===========================================================
+CAS N°9
+UN TICKET EST MAL QUALIFIE
+===========================================================
+
+Le Chef remarque :
+
+mauvaise catégorie
+
+ou
+
+mauvaise priorité
+
+Il ouvre :
+
+Qualification
+
+↓
+
+corrige
+
+↓
+
+enregistre
+
+Toutes les modifications sont auditables.
+
+===========================================================
+CAS N°10
+UN TICKET EST BLOQUE
+===========================================================
+
+Le système détecte :
+
+Aucune activité depuis plusieurs jours.
+
+Le Chef reçoit une alerte.
+
+Il consulte :
+
+Historique
+
+Commentaires
+
+Agent responsable
+
+Puis décide :
+
+Relancer
+
+Réaffecter
+
+Escalader
+
+===========================================================
+CAS N°11
+UN AGENT COMMET PLUSIEURS ERREURS
+===========================================================
+
+Le tableau de bord montre :
+
+fort taux de réouverture
+
+nombreux retards
+
+Le Chef consulte :
+
+Performance
+
+↓
+
+Historique
+
+↓
+
+Rapports
+
+Il décide :
+
+Accompagnement
+
+Formation
+
+Répartition différente
+
+Le système ne prend jamais cette décision automatiquement.
+
+===========================================================
+CAS N°12
+UN UTILISATEUR EST MECONTENT
+===========================================================
+
+Le ticket est résolu.
+
+L'utilisateur refuse la solution.
+
+Le Chef consulte :
+
+Commentaires
+
+Historique
+
+Solution
+
+Il décide :
+
+Retour au traitement
+
+ou
+
+Escalade
+
+===========================================================
+CAS N°13
+PLUSIEURS INCIDENTS SIMILAIRES ARRIVENT
+===========================================================
+
+Le Chef constate :
+
+20 tickets identiques.
+
+Il peut :
+
+Créer un incident majeur
+
+ou
+
+Demander une communication globale
+
+ou
+
+Créer une intervention collective
+
+Les tickets restent liés à leur utilisateur.
+
+===========================================================
+CAS N°14
+FIN DE JOURNEE
+===========================================================
+
+Avant de quitter,
+
+le Chef consulte :
+
+Tickets critiques
+
+Tickets sans Agent
+
+SLA
+
+Escalades
+
+Réouvertures
+
+Il s'assure qu'aucun ticket important n'est oublié.
+
+===========================================================
+BONNES PRATIQUES
+===========================================================
+
+Toujours répartir la charge.
+
+Toujours surveiller les SLA.
+
+Toujours privilégier la qualité.
+
+Toujours accompagner les Agents.
+
+Toujours documenter les décisions.
+
+Toujours justifier une réaffectation.
+
+Toujours justifier une escalade.
+
+Toujours contrôler les tickets critiques.
+
+===========================================================
+ERREURS A EVITER
+===========================================================
+
+Ne jamais garder tous les tickets.
+
+Ne jamais ignorer une alerte SLA.
+
+Ne jamais réaffecter sans raison.
+
+Ne jamais modifier un historique.
+
+Ne jamais supprimer un ticket.
+
+Ne jamais prendre une décision sans laisser de trace.
+
+===========================================================
+REGLE ABSOLUE
+===========================================================
+
+Le Chef de Service est un manager.
+
+Il organise le travail.
+
+Il aide son équipe.
+
+Il contrôle la qualité.
+
+Il garantit le respect des délais.
+
+Il protège la qualité du service rendu aux utilisateurs.
+
+Toutes ses décisions doivent être :
+
+• justifiées
+
+• enregistrées
+
+• auditables
+
+• sécurisées
+
+Le Chef de Service ne doit jamais agir comme un Administrateur.
+
+Il reste responsable uniquement de son service.

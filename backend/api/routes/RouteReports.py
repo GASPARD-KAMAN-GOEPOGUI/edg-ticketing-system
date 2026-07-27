@@ -29,6 +29,7 @@ from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_db, get_current_user, require_roles
+from api.core.rbac import normalize_role
 from api.services.ServiceReport import ReportService
 from api.services.ServiceExport import (
     ExportFormat,
@@ -74,11 +75,11 @@ def _apply_decision_scope(
     direction_id: Optional[int],
     unity_id: Optional[int],
 ) -> tuple[Optional[int], Optional[int]]:
-    role = getattr(actor, "role", None)
+    role = normalize_role(getattr(actor, "role", None))
     if role == "director":
         actor_direction_id = getattr(actor, "direction_id", None)
         direction_id = int(actor_direction_id) if actor_direction_id else -1
-    elif role == "chief":
+    elif role in {"chief-service", "chief-departement"}:
         actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
         unity_id = int(actor_unity_id) if actor_unity_id else -1
     return direction_id, unity_id

@@ -48,12 +48,15 @@ import {
   cancelRequest,
   escalateRequest,
   uploadAttachment,
+  fetchAttachments,
+  fetchAttachmentFile,
   rejectTicket,
   reassignService,
   transferDirection,
   requesterEditRequest,
+  type RawAttachment,
 } from "@/lib/api/requests";
-import { fetchRefTable, fetchRequestCategories } from "@/lib/api/admin-config";
+import { fetchRefTable } from "@/lib/api/admin-config";
 import { fetchUser, fetchUsers } from "@/lib/api/accounts";
 import { fetchDirections, fetchUnits } from "@/lib/api/directions-units";
 import type { Direction, Unit } from "@/lib/api/directions-units";
@@ -68,6 +71,9 @@ import {
   ArrowLeft,
   Clock,
   Paperclip,
+  Download,
+  ExternalLink,
+  FileText,
   User,
   AlertTriangle,
   CheckCircle2,
@@ -141,6 +147,12 @@ const DETAIL_CONTEXTS = {
     notFoundBackLabel: "Retour à la boîte de traitement",
     backTo: "/app/chief-inbox",
   },
+  departmentInbox: {
+    eyebrow: "Boîte de traitement — Département",
+    backLabel: "Retour à la boîte de traitement",
+    notFoundBackLabel: "Retour à la boîte de traitement",
+    backTo: "/app/department-inbox",
+  },
   direction: {
     eyebrow: "Vue direction",
     backLabel: "Retour à la vue direction",
@@ -184,10 +196,10 @@ type Participant = {
 
 const PARTICIPANT_ROLE_LABELS: Record<string, string> = {
   user: "Demandeur",
-  agent: "Agent",
-  chief: "Chef",
+  "agent-support": "Agent Support",
+  "chief-service": "Chef de Service",
+  "chief-departement": "Chef de Département",
   director: "Directeur",
-  dg: "Directeur",
   admin: "Admin",
   support: "Support",
 };
@@ -234,7 +246,7 @@ function buildParticipants(
     add({
       key: request.assigneeId || `assignee-${name}`,
       name,
-      role: "agent",
+      role: "agent-support",
       detail: "Assigné",
       lastAt: request.updatedAt,
     });
@@ -352,6 +364,32 @@ function traceTime(value?: string): number {
 function formatTraceDate(value?: string): string | undefined {
   if (!value || !traceTime(value)) return undefined;
   return format(new Date(value), "dd MMM HH:mm", { locale: fr });
+}
+
+function formatAttachmentSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "Taille inconnue";
+  const units = ["o", "Ko", "Mo", "Go"];
+  let value = bytes;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  const precision = index === 0 || value >= 10 ? 0 : 1;
+  return `${value.toFixed(precision)} ${units[index]}`;
+}
+
+function attachmentTypeLabel(mimeType: string): string {
+  if (mimeType.startsWith("image/")) return "Image";
+  if (mimeType === "application/pdf") return "PDF";
+  return mimeType || "Fichier";
+}
+
+function formatAttachmentDate(value?: string): string {
+  if (!value) return "Date inconnue";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Date inconnue";
+  return format(date, "d MMM yyyy HH:mm", { locale: fr });
 }
 
 function findLatestTraceEvent(
@@ -774,11 +812,19 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const authorName = [sessionUser?.firstname, sessionUser?.name].filter(Boolean).join(" ") || "Agent";
   const includeDeleted = context === "admin";
   const requestQueryKey = ["request", id, includeDeleted ? "with-deleted" : "active"] as const;
+  const attachmentsQueryKey = [...requestQueryKey, "attachments"] as const;
 
   const { data: r, isLoading, isError } = useQuery({
     queryKey: requestQueryKey,
     queryFn: () => fetchRequest(id, { includeDeleted }),
     staleTime: 15_000,
+  });
+
+  const { data: attachments = [], isLoading: attachmentsLoading } = useQuery({
+    queryKey: attachmentsQueryKey,
+    queryFn: () => fetchAttachments(id),
+    enabled: !!r?.id,
+    staleTime: 30_000,
   });
 
   const [comment, setComment] = useState("");
@@ -788,7 +834,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   // métier, le contexte fonctionnel prime sur la propriété personnelle du ticket.
   const iAmRequester = isRequester(r?.requesterId, sessionUser?.id);
   const isRequesterView = role === "user" || (isPersonalContext && iAmRequester);
-  const isAgentOnly = role === "agent" && !iAmRequester;
+  const isAgentOnly = role === "agent-support" && !iAmRequester;
   const [localAppreciation, setLocalAppreciation] = useState<Appreciation | undefined>(undefined);
   const [showReassign, setShowReassign] = useState(false);
   const [reopenReason, setReopenReason] = useState("");
@@ -796,10 +842,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const [showEditForm, setShowEditForm] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
-  const [editCategory, setEditCategory] = useState("");
-  const [editPriority, setEditPriority] = useState("");
-  const [editDirectionId, setEditDirectionId] = useState("");
-  const [editServiceId, setEditServiceId] = useState("");
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [showRequestInfoForm, setShowRequestInfoForm] = useState(false);
@@ -823,10 +865,15 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const [showCircuitDialog, setShowCircuitDialog] = useState(false);
   const [circuitDirectionId, setCircuitDirectionId] = useState("");
   const [circuitUnitId, setCircuitUnitId] = useState("");
+  const [attachmentAction, setAttachmentAction] = useState<{
+    id: string;
+    mode: "open" | "download";
+  } | null>(null);
 
   const invalidate = () => {
     // Détail du ticket (et sous-queries via préfixe)
     qc.invalidateQueries({ queryKey: requestQueryKey });
+    qc.invalidateQueries({ queryKey: attachmentsQueryKey });
     // Toutes les listes/vues qui peuvent contenir ce ticket
     qc.invalidateQueries({ queryKey: ["requests"] });
     qc.invalidateQueries({ queryKey: ["queue"] });
@@ -841,6 +888,58 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const invalidateWorkflows = () => {
     qc.invalidateQueries({ queryKey: ["request", id, "workflows"] });
     qc.invalidateQueries({ queryKey: ["workflow"] });
+  };
+
+  const handleAttachmentFile = async (
+    attachment: RawAttachment,
+    mode: "open" | "download",
+  ) => {
+    let previewWindow: Window | null = null;
+
+    if (mode === "open") {
+      previewWindow = window.open("about:blank", "_blank");
+      if (!previewWindow) {
+        toast.error("Ouverture bloquée par le navigateur. Autorisez les pop-ups pour prévisualiser le fichier.");
+        return;
+      }
+      previewWindow.document.title = attachment.filename;
+      previewWindow.document.body.innerHTML =
+        "<p style=\"font-family: system-ui, sans-serif; padding: 24px;\">Chargement de la pièce jointe...</p>";
+    }
+
+    setAttachmentAction({ id: attachment.id, mode });
+
+    try {
+      const { blob, filename } = await fetchAttachmentFile(attachment);
+      const url = URL.createObjectURL(blob);
+
+      if (mode === "open") {
+        if (previewWindow && !previewWindow.closed) {
+          previewWindow.location.href = url;
+          setTimeout(() => URL.revokeObjectURL(url), 60_000);
+          return;
+        }
+        URL.revokeObjectURL(url);
+        toast.error("La fenêtre de prévisualisation a été fermée.");
+        return;
+      }
+
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1_000);
+    } catch (err) {
+      if (previewWindow && !previewWindow.closed) {
+        previewWindow.close();
+      }
+      const message = err instanceof Error ? err.message : undefined;
+      toast.error(message ? `Impossible d'accéder à la pièce jointe : ${message}` : "Impossible d'accéder à la pièce jointe.");
+    } finally {
+      setAttachmentAction(null);
+    }
   };
 
   const resolveMut = useMutation({
@@ -1026,13 +1125,9 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     mutationFn: () => requesterEditRequest(id, {
       title: editTitle.trim() || undefined,
       description: editDescription.trim() || undefined,
-      category: editCategory || undefined,
-      priority: editPriority || undefined,
-      direction_id: editDirectionId || undefined,
-      unity_id: editServiceId || undefined,
     }),
     onSuccess: () => {
-      toast.success("Demande modifiée — re-routage effectué.");
+      toast.success("Demande modifiée.");
       setShowEditForm(false);
       invalidate();
     },
@@ -1300,7 +1395,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
 
   const { data: agentsData } = useQuery({
     queryKey: ["agents"],
-    queryFn: () => fetchUsers({ role: "agent", limit: 100 }),
+    queryFn: () => fetchUsers({ role: "agent-support", limit: 100 }),
     enabled: !isRequesterView,
     staleTime: 120_000,
   });
@@ -1311,27 +1406,12 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     staleTime: 5 * 60_000,
   });
 
-  const { data: editUnits = [] } = useQuery({
-    queryKey: ["units", editDirectionId],
-    queryFn: () => fetchUnits(editDirectionId),
-    enabled: !!editDirectionId && showEditForm,
-    staleTime: 5 * 60_000,
-  });
-
   const { data: units = [] } = useQuery({
     queryKey: ["units-all"],
     queryFn: () => fetchUnits(),
     enabled: !!r?.serviceId,
     staleTime: 5 * 60_000,
   });
-
-  const { data: categoriesRef = [] } = useQuery({
-    queryKey: ["ref-request-categories"],
-    queryFn: fetchRequestCategories,
-    staleTime: 10 * 60_000,
-    enabled: isRequesterView,
-  });
-  const activeCategories = categoriesRef.filter((c) => c.status !== false);
 
   const escalationLevelsRef: { label: string }[] = [];
 
@@ -1414,7 +1494,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const canEscalateTicket = !isArchived
     && !iAmRequester
     && canTicketAction(role, "escalate", r.status, ownershipOptions)
-    && (role !== "agent" || isAssignedToMe);
+    && (role !== "agent-support" || isAssignedToMe);
   const canAssignTicket = !isArchived && !iAmRequester && canTicketAction(role, "assign", r.status, ownershipOptions);
   const canResolveTicket = !isArchived && !iAmRequester && canTicketAction(role, "resolve", r.status, ownershipOptions);
   const canCreateCircuit = !isArchived && !iAmRequester && canTicketAction(role, "create_circuit", r.status, ownershipOptions);
@@ -1501,10 +1581,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                 onClick={() => {
                   setEditTitle(r.title);
                   setEditDescription(r.description);
-                  setEditCategory(r.category ?? "");
-                  setEditPriority(r.priority ?? "medium");
-                  setEditDirectionId(r.directionId ?? "");
-                  setEditServiceId(r.serviceId ?? "");
                   setShowEditForm(true);
                 }}
               >
@@ -1809,7 +1885,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             <GlassCard className="border-primary/30 bg-primary/5">
               <h3 className="mb-1 font-semibold">Modifier la demande</h3>
               <p className="mb-4 text-xs text-muted-foreground">
-                Si vous changez la catégorie, la demande sera automatiquement re-routée vers le service concerné.
+                Vous pouvez corriger le titre ou la description tant que la demande n'est pas encore traitée.
               </p>
               <div className="space-y-3">
                 <div>
@@ -1820,79 +1896,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                     onChange={(e) => setEditTitle(e.target.value)}
                     className="mt-1.5 w-full rounded-xl border border-border/50 bg-background/60 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
                   />
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <Label className="text-sm">Catégorie</Label>
-                    <Select value={editCategory} onValueChange={setEditCategory}>
-                      <SelectTrigger className="mt-1.5 h-11">
-                        <SelectValue placeholder="Sélectionner une catégorie" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {activeCategories.map((c) => (
-                          <SelectItem key={c.code} value={c.code}>{c.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label className="text-sm">Priorité</Label>
-                    <Select value={editPriority} onValueChange={setEditPriority}>
-                      <SelectTrigger className="mt-1.5 h-11">
-                        <SelectValue placeholder="Sélectionner une priorité" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="low">Basse</SelectItem>
-                        <SelectItem value="medium">Moyenne</SelectItem>
-                        <SelectItem value="high">Haute</SelectItem>
-                        <SelectItem value="critical">Critique</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <Label className="text-sm">Direction destinataire</Label>
-                    <Select
-                      value={editDirectionId}
-                      onValueChange={(v) => {
-                        setEditDirectionId(v);
-                        setEditServiceId("");
-                      }}
-                    >
-                      <SelectTrigger className="mt-1.5 h-11">
-                        <SelectValue placeholder="Sélectionner une direction" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {directions.filter((d) => d.status).map((d) => (
-                          <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label className="text-sm">Service destinataire</Label>
-                    <Select
-                      value={editServiceId}
-                      onValueChange={setEditServiceId}
-                      disabled={!editDirectionId || editUnits.filter((u) => u.status).length === 0}
-                    >
-                      <SelectTrigger className="mt-1.5 h-11">
-                        <SelectValue
-                          placeholder={
-                            !editDirectionId
-                              ? "Choisissez une direction"
-                              : "Service optionnel"
-                          }
-                        />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {editUnits.filter((u) => u.status).map((u) => (
-                          <SelectItem key={u.id} value={String(u.id)}>{u.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
                 </div>
                 <div>
                   <Label className="text-sm">Description détaillée</Label>
@@ -1913,16 +1916,13 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                     className="rounded-full gradient-primary"
                     disabled={
                       !editTitle.trim() ||
-                      !editCategory ||
-                      !editPriority ||
-                      !editDirectionId ||
                       editDescription.trim().length < 10 ||
                       editMut.isPending
                     }
                     onClick={() => editMut.mutate()}
                   >
                     {editMut.isPending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-4 w-4" />}
-                    Enregistrer &amp; re-router
+                    Enregistrer
                   </Button>
                 </div>
               </div>
@@ -2207,6 +2207,96 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             <section className="p-5">
               <h3 className="mb-2 font-semibold">Description</h3>
               <p className="text-sm leading-6 text-muted-foreground">{r.description}</p>
+            </section>
+
+            <section className="border-t border-border/40 p-5">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="font-semibold">Pièces jointes</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Fichiers ajoutés à cette demande.
+                  </p>
+                </div>
+                <span className="rounded-full bg-muted px-2.5 py-1 text-[10px] font-medium text-muted-foreground">
+                  {attachments.length} fichier{attachments.length > 1 ? "s" : ""}
+                </span>
+              </div>
+
+              {attachmentsLoading ? (
+                <div className="flex items-center gap-2 rounded-2xl border border-border/40 bg-background/40 px-4 py-3 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Chargement des pièces jointes…
+                </div>
+              ) : attachments.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-border/60 bg-background/35 px-4 py-5 text-sm text-muted-foreground">
+                  Aucune pièce jointe n'a encore été ajoutée à cette demande.
+                </div>
+              ) : (
+                <ul className="grid gap-3 md:grid-cols-2">
+                  {attachments.map((attachment) => {
+                    const isOpeningAttachment =
+                      attachmentAction?.id === attachment.id && attachmentAction.mode === "open";
+                    const isDownloadingAttachment =
+                      attachmentAction?.id === attachment.id && attachmentAction.mode === "download";
+                    const isAttachmentBusy = attachmentAction?.id === attachment.id;
+
+                    return (
+                    <li
+                      key={attachment.id}
+                      className="flex min-w-0 items-center gap-3 rounded-2xl border border-border/50 bg-background/55 p-3"
+                    >
+                      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+                        <FileText className="h-5 w-5" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold">{attachment.filename}</p>
+                        <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                          {attachmentTypeLabel(attachment.mime_type)} · {formatAttachmentSize(attachment.size_bytes)} ·{" "}
+                          {formatAttachmentDate(attachment.created_at)}
+                        </p>
+                        {attachment.scan_status && (
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            Scan : {attachment.scan_status}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-9 rounded-full px-3"
+                          disabled={Boolean(isAttachmentBusy)}
+                          onClick={() => void handleAttachmentFile(attachment, "open")}
+                        >
+                          {isOpeningAttachment ? (
+                            <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                          ) : (
+                            <ExternalLink className="mr-1.5 h-4 w-4" />
+                          )}
+                          Voir
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-9 w-9 rounded-full"
+                          disabled={Boolean(isAttachmentBusy)}
+                          title="Télécharger"
+                          onClick={() => void handleAttachmentFile(attachment, "download")}
+                        >
+                          {isDownloadingAttachment ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Download className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
+                    </li>
+                    );
+                  })}
+                </ul>
+              )}
             </section>
 
             <section className="border-t border-border/40 p-5">

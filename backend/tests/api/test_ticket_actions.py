@@ -84,6 +84,13 @@ def test_status_aliases_are_normalized():
     assert normalize_status("escaladed") == "escalated"
 
 
+def test_agent_support_role_is_normalized_and_authorized_for_agent_actions():
+    assert_action_allowed("agent-support", "resolve")
+    assert_action_allowed("agent-support", "escalate")
+    with pytest.raises(ForbiddenException):
+        assert_action_allowed("agent-support", "reject")
+
+
 @pytest.mark.parametrize("current", ["cancelled", "cancalled", "closed", "resolved", "rejected"])
 def test_terminal_statuses_cannot_transition_to_assigned(current):
     with pytest.raises(BusinessException):
@@ -276,6 +283,42 @@ def test_chief_and_admin_can_assign_other_agents():
         )
 
 
+def test_chief_departement_can_assign_across_department_scope():
+    current_ticket = ticket(status="qualified", unity_id=2, assignee_id=None)
+
+    # Sans perimetre departemental fourni, un chef-departement reste borne a sa propre unite.
+    with pytest.raises(ForbiddenException):
+        assert_assignment_allowed(
+            actor("chief-departement", id=3, unity_id=1),
+            current_ticket,
+            assignee_id=2,
+            target_unity_id=2,
+            target_role="agent-support",
+        )
+
+    # Avec le perimetre departemental (departement + services rattaches), l'assignation
+    # a un agent d'un autre service du meme departement est autorisee.
+    assert_assignment_allowed(
+        actor("chief-departement", id=3, unity_id=1),
+        current_ticket,
+        assignee_id=2,
+        target_unity_id=2,
+        target_role="agent-support",
+        allowed_scope_unity_ids={1, 2, 3},
+    )
+
+    # Un chef-service ne beneficie pas de cet elargissement meme si le perimetre est fourni par erreur.
+    with pytest.raises(ForbiddenException):
+        assert_assignment_allowed(
+            actor("chief-service", id=3, unity_id=1),
+            current_ticket,
+            assignee_id=2,
+            target_unity_id=2,
+            target_role="agent-support",
+            allowed_scope_unity_ids={1, 2, 3},
+        )
+
+
 def test_service_reassignment_is_limited_by_role_scope():
     current_ticket = ticket(status="qualified", unity_id=10, direction_id=1)
 
@@ -284,6 +327,7 @@ def test_service_reassignment_is_limited_by_role_scope():
         current_ticket,
         target_unity_id=11,
         target_direction_id=1,
+        reason="Agent indisponible",
     )
     assert_service_reassignment_allowed(
         actor("director", id=4, unity_id=1),
@@ -304,6 +348,7 @@ def test_service_reassignment_is_limited_by_role_scope():
             current_ticket,
             target_unity_id=99,
             target_direction_id=2,
+            reason="Mauvais service",
         )
 
     assert_service_reassignment_allowed(
@@ -312,6 +357,7 @@ def test_service_reassignment_is_limited_by_role_scope():
         target_unity_id=11,
         target_direction_id=1,
         actor_direction_id=1,
+        reason="Charge trop elevee",
     )
 
     with pytest.raises(ForbiddenException):
@@ -329,11 +375,25 @@ def test_service_reassignment_is_limited_by_role_scope():
             target_unity_id=99,
             target_direction_id=2,
             actor_direction_id=1,
+            reason="Mauvais perimetre",
         )
 
 
-def test_agent_escalation_requires_own_assigned_ticket():
-    current_actor = actor("agent", id=2, unity_id=1)
+@pytest.mark.parametrize("chief_role", ["chief", "chief-service", "chief-departement"])
+def test_chief_service_reassignment_requires_reason(chief_role):
+    with pytest.raises(BusinessException):
+        assert_service_reassignment_allowed(
+            actor(chief_role, id=3, unity_id=10),
+            ticket(status="qualified", unity_id=10, direction_id=1),
+            target_unity_id=11,
+            target_direction_id=1,
+            reason="  ",
+        )
+
+
+@pytest.mark.parametrize("agent_role", ["agent", "agent-support"])
+def test_agent_escalation_requires_own_assigned_ticket(agent_role):
+    current_actor = actor(agent_role, id=2, unity_id=1)
 
     assert_escalation_allowed(
         current_actor,

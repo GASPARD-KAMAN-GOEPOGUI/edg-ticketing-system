@@ -78,12 +78,13 @@ type NavItem = {
 };
 
 const HEADER_ROLE_LABEL: Record<Role, string> = {
-  public:   "PUBLIC",
-  user:     "EMPLOYÉ",
-  agent:    "AGENT",
-  chief:    "CHEF DE SERVICE",
-  director: "DIRECTION",
-  admin:    "ADMINISTRATION",
+  public:              "PUBLIC",
+  user:                "EMPLOYÉ",
+  "agent-support":     "AGENT SUPPORT",
+  "chief-service":     "CHEF DE SERVICE",
+  "chief-departement": "CHEF DE DÉPARTEMENT",
+  director:            "DIRECTION",
+  admin:               "ADMINISTRATION",
 };
 
 function resolveBackFallback(pathname: string, role: Role): string {
@@ -91,6 +92,7 @@ function resolveBackFallback(pathname: string, role: Role): string {
   if (pathname.startsWith("/app/queue/tickets/")) return "/app/queue";
   if (pathname.startsWith("/app/my-tickets/tickets/")) return "/app/my-tickets";
   if (pathname.startsWith("/app/chief-inbox/tickets/")) return "/app/chief-inbox";
+  if (pathname.startsWith("/app/department-inbox/tickets/")) return "/app/department-inbox";
   if (pathname.startsWith("/app/direction/tickets/")) return "/app/direction";
   if (pathname.startsWith("/app/dg/tickets/")) return "/app/dg";
   if (pathname.startsWith("/app/sla-center/tickets/")) return "/app/sla-center";
@@ -100,6 +102,7 @@ function resolveBackFallback(pathname: string, role: Role): string {
   if (pathname.startsWith("/app/my-tickets")) return "/app";
   if (pathname.startsWith("/app/queue")) return "/app";
   if (pathname.startsWith("/app/chief-inbox")) return "/app";
+  if (pathname.startsWith("/app/department-inbox")) return "/app";
   if (pathname.startsWith("/app/direction")) return "/app";
   if (pathname.startsWith("/app/supervision")) return "/app";
   if (pathname.startsWith("/app/reports")) return "/app";
@@ -110,23 +113,24 @@ function resolveBackFallback(pathname: string, role: Role): string {
 
 const navItems: NavItem[] = [
   // ── Mon espace personnel (tous les rôles — chaque acteur garde son espace propre) ──
-  { to: "/app",                  label: "Accueil",          icon: LayoutDashboard, roles: ["user", "agent", "chief", "director", "admin"], group: "Mon espace" },
-  { to: "/app/requests",         label: "Mes demandes",      icon: Inbox,   roles: ["user", "agent", "chief", "director", "admin"], group: "Mon espace" },
-  { to: "/app/requests/history", label: "Historique",        icon: History, roles: ["user", "agent", "chief", "director", "admin"], group: "Mon espace" },
+  { to: "/app",                  label: "Accueil",          icon: LayoutDashboard, roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Mon espace" },
+  { to: "/app/requests",         label: "Mes demandes",      icon: Inbox,   roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Mon espace" },
+  { to: "/app/requests/history", label: "Historique",        icon: History, roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Mon espace" },
 
   // ── Agent / Chef ─────────────────────────────────────────────────────────
-  { to: "/app/chief-inbox", label: "Boîte de traitement", icon: ClipboardList,   roles: ["chief"],                   group: "Traitement" },
-  { to: "/app/my-tickets",  label: "Mes tickets",          icon: Ticket,          roles: ["agent"],                   group: "Traitement" },
-  { to: "/app/queue",       label: "File d'attente",       icon: ListChecks,      roles: ["agent", "chief"], group: "Traitement" },
+  { to: "/app/chief-inbox",      label: "Boîte de traitement",              icon: ClipboardList, roles: ["chief-service"],                   group: "Traitement" },
+  { to: "/app/department-inbox", label: "Boîte de traitement (département)", icon: ClipboardList, roles: ["chief-departement"],                group: "Traitement" },
+  { to: "/app/my-tickets",  label: "Mes tickets",          icon: Ticket,          roles: ["agent-support"],                   group: "Traitement" },
+  { to: "/app/queue",       label: "File d'attente",       icon: ListChecks,      roles: ["agent-support", "chief-service"], group: "Traitement" },
 
   // ── Chef de service ───────────────────────────────────────────────────────
-  { to: "/app/supervision", label: "Supervision", icon: ShieldAlert, roles: ["chief", "director"], group: "Pilotage" },
+  { to: "/app/supervision", label: "Supervision", icon: ShieldAlert, roles: ["chief-service", "chief-departement", "director"], group: "Pilotage" },
 
   // ── Direction / pilotage global ───────────────────────────────────────────
   { to: "/app/direction",  label: "Vue direction", icon: Building2,  roles: ["director"],                          group: "Pilotage" },
   { to: "/app/dg",         label: "Vue globale",   icon: TrendingUp, roles: ["admin"],                             group: "Pilotage" },
-  { to: "/app/sla-center", label: "Centre SLA",    icon: AlarmClock, roles: ["chief", "director", "admin"],       group: "Pilotage" },
-  { to: "/app/reports",    label: "Rapports",      icon: BarChart3,  roles: ["chief", "director", "admin"],       group: "Pilotage" },
+  { to: "/app/sla-center", label: "Centre SLA",    icon: AlarmClock, roles: ["chief-service", "chief-departement", "director", "admin"],       group: "Pilotage" },
+  { to: "/app/reports",    label: "Rapports",      icon: BarChart3,  roles: ["chief-service", "chief-departement", "director", "admin"],       group: "Pilotage" },
 
   // ── Admin — Utilisateurs ──────────────────────────────────────────────────
   { to: "/app/admin/users", label: "Utilisateurs & Rôles", icon: Users2, roles: ["admin"], group: "Utilisateurs" },
@@ -155,9 +159,9 @@ const navItems: NavItem[] = [
   { to: "/app/admin/knowledge",     label: "Base de connaissances", icon: Library,   roles: ["admin"], group: "Système" },
 
   // ── Ressources (tous) ─────────────────────────────────────────────────────
-  { to: "/app/knowledge",    label: "Base de connaissance", icon: BookOpen, roles: ["user", "agent", "chief", "director"], group: "Ressources" },
-  { to: "/app/notifications", label: "Notifications",       icon: Bell,     roles: ["user", "agent", "chief", "director", "admin"], group: "Ressources" },
-  { to: "/app/profile",       label: "Profil",              icon: Settings, roles: ["user", "agent", "chief", "director", "admin"], group: "Ressources" },
+  { to: "/app/knowledge",    label: "Base de connaissance", icon: BookOpen, roles: ["user", "agent-support", "chief-service", "chief-departement", "director"], group: "Ressources" },
+  { to: "/app/notifications", label: "Notifications",       icon: Bell,     roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Ressources" },
+  { to: "/app/profile",       label: "Profil",              icon: Settings, roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Ressources" },
 ];
 
 export function AppLayout({ children }: { children: ReactNode }) {
@@ -630,14 +634,21 @@ export function AppLayout({ children }: { children: ReactNode }) {
                       { to: "/app/notifications", icon: Bell,           label: "Alertes" },
                       { to: "/app/profile",      icon: Settings,        label: "Profil" },
                     ]
-                  : role === "chief"
+                  : role === "chief-service"
                     ? [
                         { to: "/app/queue",         icon: ListChecks,      label: "Tickets" },
                         { to: "/app/chief-inbox",   icon: ClipboardList,   label: "Boîte", primary: true },
                         { to: "/app/notifications", icon: Bell,            label: "Alertes" },
                         { to: "/app/profile",       icon: Settings,        label: "Profil" },
                       ]
-                    : role === "agent"
+                    : role === "chief-departement"
+                      ? [
+                          { to: "/app/supervision",       icon: ShieldAlert,     label: "Superviser" },
+                          { to: "/app/department-inbox",  icon: ClipboardList,   label: "Boîte", primary: true },
+                          { to: "/app/notifications",     icon: Bell,            label: "Alertes" },
+                          { to: "/app/profile",           icon: Settings,        label: "Profil" },
+                        ]
+                    : role === "agent-support"
                       ? [
                           { to: "/app/queue",         icon: ListChecks,        label: "File att." },
                           { to: "/app/my-tickets",    icon: Ticket,            label: "Mes tickets", primary: true },
@@ -719,7 +730,7 @@ function RoleSwitcher({
   userName?: string;
   userAvatar?: string;
 }) {
-  const roles: Role[] = ["user", "agent", "chief", "director", "admin"];
+  const roles: Role[] = ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"];
   const initials = userName ? getInitials(userName) : role.slice(0, 2).toUpperCase();
 
   const avatar = (

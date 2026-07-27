@@ -1,0 +1,414 @@
+==========================================================
+DIRECTION DSI
+PARTIE 1
+IDENTITE - MISSION - RESPONSABILITES
+==========================================================
+
+OBJECTIF
+
+La Direction DSI est responsable du bon fonctionnement de toute la plateforme de support informatique.
+
+Elle supervise l'ensemble des départements, des services et des équipes.
+
+Son rôle est stratégique.
+
+Elle prend les décisions importantes et pilote la performance globale de la DSI.
+
+Elle ne traite pas les tickets au quotidien.
+
+==========================================================
+IDENTITE
+==========================================================
+
+Nom officiel
+
+Direction DSI
+
+Description
+
+La Direction DSI supervise toute l'organisation du support informatique.
+
+Elle coordonne les départements.
+
+Elle arbitre les décisions importantes.
+
+Elle valide les situations exceptionnelles.
+
+==========================================================
+MISSION
+==========================================================
+
+Garantir la qualité du support informatique.
+
+Piloter tous les départements.
+
+Suivre les performances globales.
+
+Garantir le respect des SLA.
+
+Décider lors des incidents majeurs.
+
+Valider les décisions stratégiques.
+
+Optimiser les ressources.
+
+Améliorer continuellement la qualité du service.
+
+==========================================================
+OBJECTIFS
+==========================================================
+
+Réduire les délais de traitement.
+
+Réduire les incidents critiques.
+
+Améliorer la satisfaction utilisateur.
+
+Améliorer la collaboration entre les départements.
+
+Réduire les escalades.
+
+Garantir la disponibilité des services.
+
+Piloter les performances de toute la DSI.
+
+==========================================================
+PERIMETRE
+==========================================================
+
+La Direction DSI supervise :
+
+• tous les départements
+
+• tous les services
+
+• tous les Chefs de Département
+
+• tous les Chefs de Service
+
+• tous les Agents
+
+• tous les tickets
+
+• tous les incidents majeurs
+
+• tous les rapports
+
+• tous les SLA
+
+==========================================================
+ESPACES
+==========================================================
+
+La Direction DSI possède deux espaces.
+
+--------------------------------
+
+MON ESPACE
+
+--------------------------------
+
+Mes demandes
+
+Historique personnel
+
+Notifications
+
+Profil
+
+--------------------------------
+
+PILOTAGE DSI
+
+--------------------------------
+
+Vue globale
+
+Départements
+
+Services
+
+Incidents majeurs
+
+Performance
+
+Rapports
+
+SLA
+
+Escalades
+
+Statistiques
+
+==========================================================
+TABLEAU DE BORD EXECUTIF
+==========================================================
+
+Le tableau de bord donne une vision complète de la DSI.
+
+Le Directeur doit comprendre la situation en quelques secondes.
+
+==========================================================
+KPIs PRINCIPAUX
+==========================================================
+
+Nombre total de tickets
+
+Tickets ouverts
+
+Tickets fermés
+
+Tickets critiques
+
+Incidents majeurs
+
+Réouvertures
+
+Escalades
+
+SLA dépassés
+
+SLA respectés
+
+Temps moyen de résolution
+
+Temps moyen de première réponse
+
+Satisfaction utilisateur
+
+Disponibilité des services
+
+Nombre total d'utilisateurs
+
+==========================================================
+GRAPHIQUES
+==========================================================
+
+Evolution des tickets
+
+Evolution des SLA
+
+Evolution des incidents majeurs
+
+Performance des départements
+
+Performance des services
+
+Performance des Chefs de Département
+
+Performance des Chefs de Service
+
+Evolution de la satisfaction utilisateur
+
+Répartition des priorités
+
+Répartition des catégories
+
+==========================================================
+ALERTES
+==========================================================
+
+La Direction DSI reçoit uniquement les alertes importantes.
+
+Exemples :
+
+• Incident majeur
+
+• Cyberattaque
+
+• Panne générale
+
+• Plusieurs SLA dépassés
+
+• Département surchargé
+
+• Forte augmentation des tickets
+
+• Rupture de service
+
+==========================================================
+MENUS
+==========================================================
+
+Accueil
+
+Pilotage DSI
+
+Départements
+
+Services
+
+Incidents majeurs
+
+Escalades
+
+Rapports
+
+Statistiques
+
+Recherche
+
+Notifications
+
+Mon espace
+
+Profil
+
+==========================================================
+SOUS-MENUS
+==========================================================
+
+Pilotage
+
+Vue globale
+
+Vue par département
+
+Vue par service
+
+Vue par SLA
+
+Vue des incidents majeurs
+
+Départements
+
+Liste
+
+Performance
+
+Charge
+
+Historique
+
+Services
+
+Liste
+
+Performance
+
+Charge
+
+Rapports
+
+Journalier
+
+Hebdomadaire
+
+Mensuel
+
+Annuel
+
+==========================================================
+ACTIONS AUTORISEES
+==========================================================
+
+Consulter tous les tickets.
+
+Consulter tous les départements.
+
+Consulter tous les services.
+
+Suivre tous les SLA.
+
+Créer un incident majeur.
+
+Valider une escalade stratégique.
+
+Réaffecter un ticket entre départements.
+
+Consulter les performances.
+
+Exporter les rapports.
+
+Décider lors des situations critiques.
+
+==========================================================
+ACTIONS INTERDITES
+==========================================================
+
+Créer un utilisateur.
+
+Supprimer un utilisateur.
+
+Modifier les rôles.
+
+Modifier les permissions.
+
+Modifier les paramètres système.
+
+Administrer la plateforme.
+
+Supprimer un ticket.
+
+Modifier l'historique.
+
+Ces actions sont réservées à l'Administrateur.
+
+==========================================================
+PERMISSIONS CONFIGURABLES
+==========================================================
+
+Peut valider une escalade stratégique.
+
+Peut modifier exceptionnellement une priorité.
+
+Peut autoriser une dérogation au SLA.
+
+Peut ouvrir un incident majeur.
+
+Peut consulter tous les rapports.
+
+Peut exporter les statistiques.
+
+Toutes les permissions sont gérées par le backend.
+
+==========================================================
+EXEMPLE
+==========================================================
+
+Le tableau de bord affiche :
+
+Département Exploitation :
+320 tickets
+
+Département Développement :
+185 tickets
+
+Département Réseau :
+240 tickets
+
+Le Directeur constate une surcharge importante du Département Exploitation.
+
+Il décide :
+
+• d'organiser une réunion avec les Chefs de Département
+
+• de réaffecter certaines ressources
+
+• de suivre les indicateurs jusqu'au retour à la normale
+
+Toutes les décisions sont enregistrées dans l'audit.
+
+==========================================================
+REGLE ABSOLUE
+==========================================================
+
+La Direction DSI pilote toute l'organisation du support informatique.
+
+Elle prend des décisions stratégiques.
+
+Elle coordonne les départements.
+
+Elle garantit la qualité globale du service.
+
+Elle ne remplace jamais les Chefs de Département ni les Chefs de Service.
+
+Toutes ses décisions doivent être :
+
+• justifiées
+
+• enregistrées
+
+• auditables
+
+• sécurisées.

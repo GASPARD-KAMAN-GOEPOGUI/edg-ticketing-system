@@ -72,11 +72,18 @@ def _check_request_access(actor, req, allowed_dir_unity_ids: set[int] | None = N
     Lève HTTP 403 si l'acteur est hors périmètre.
 
     Politique d'accès :
-      user         → uniquement ses propres demandes
-      agent/chief  → demandes de leur unité ou périmètre file calculé
-      director     → demandes de leur direction ET tous ses services (allowed_dir_unity_ids)
-      admin        → accès global
+      tout rôle        → ses propres demandes en lecture personnelle
+      user             → uniquement ses propres demandes
+      agent-support/chief-service → demandes de leur unité (service) uniquement
+      chief-departement → demandes de leur département ET tous ses services (allowed_dir_unity_ids)
+      director         → demandes de leur direction ET tous ses services (allowed_dir_unity_ids)
+      admin            → accès global
     """
+    actor_id = getattr(actor, "id", None)
+    requester_id = getattr(req, "requester_id", None)
+    if actor_id is not None and requester_id is not None and str(requester_id) == str(actor_id):
+        return
+
     role = normalize_role(actor.role)
     if role == "admin":
         return
@@ -89,7 +96,7 @@ def _check_request_access(actor, req, allowed_dir_unity_ids: set[int] | None = N
             )
         return
 
-    if role in ("agent", "chief"):
+    if role in {"agent-support", "chief-service", "chief-departement"}:
         allowed_ids = set(allowed_dir_unity_ids or set())
         if actor.unity_id is not None:
             allowed_ids.add(int(actor.unity_id))
@@ -115,7 +122,10 @@ def _check_request_access(actor, req, allowed_dir_unity_ids: set[int] | None = N
 async def _resolve_access(actor, req, db: AsyncSession) -> None:
     """Wrapper async : pré-calcule les unity_ids autorisés puis vérifie l'accès."""
     dir_ids = None
-    if normalize_role(actor.role) in ("agent", "chief", "director") and actor.unity_id:
+    # Seuls chief-departement (departement + services rattaches) et director
+    # (direction + services rattaches) beneficient d'un perimetre elargi ;
+    # agent-support/chief-service restent bornes a leur propre unite.
+    if normalize_role(actor.role) in {"chief-departement", "director"} and actor.unity_id:
         dir_ids = await _get_dir_unity_ids(db, actor.unity_id)
     _check_request_access(actor, req, dir_ids)
 
@@ -133,7 +143,7 @@ async def _check_unity_access(actor, unity_id: str, db: AsyncSession) -> None:
             detail="Identifiant d'unité invalide.",
         )
 
-    if role in ("agent", "chief"):
+    if role in {"agent-support", "chief-service"}:
         if actor.unity_id and int(actor.unity_id) == requested_unity_id:
             return
         raise HTTPException(
@@ -141,7 +151,7 @@ async def _check_unity_access(actor, unity_id: str, db: AsyncSession) -> None:
             detail="Accès refusé : cette unité n'est pas dans votre périmètre.",
         )
 
-    if role == "director":
+    if role in {"chief-departement", "director"}:
         if actor.unity_id:
             allowed_ids = await _get_dir_unity_ids(db, int(actor.unity_id))
             if requested_unity_id in allowed_ids:
@@ -197,7 +207,10 @@ def _hide_internal_comments(schema: RequestResponse) -> RequestResponse:
 
 def _request_response_for_actor(req, svc: RequestService, actor=None, *, public_only: bool = False) -> RequestResponse:
     schema = svc._decrypt_schema(RequestResponse.from_orm(req))
-    if public_only or getattr(actor, "role", None) == "user":
+    actor_id = getattr(actor, "id", None)
+    requester_id = getattr(req, "requester_id", None)
+    is_owner_view = actor_id is not None and requester_id is not None and str(requester_id) == str(actor_id)
+    if public_only or getattr(actor, "role", None) == "user" or is_owner_view:
         return _hide_internal_comments(schema)
     return schema
 
@@ -229,11 +242,12 @@ async def list_requests(
     is_own_view = requester_id is not None and requester_id == str(actor.id)
 
     # Filtrage RBAC — forcé, le client ne peut pas étendre son périmètre (C-N°3)
+    actor_role = normalize_role(actor.role)
     if is_own_view:
         pass  # requester_id = actor.id suffit ; unit/direction non forcés
-    elif actor.role == "user":
+    elif actor_role == "user":
         requester_id = str(actor.id)           # toujours ses propres demandes
-    elif actor.role in ("agent", "chief"):
+    elif actor_role in {"agent-support", "chief-service"}:
         if actor.unity_id:
             unit_id = str(actor.unity_id)       # forcé, ignore le paramètre client
             direction_id = None
@@ -242,7 +256,16 @@ async def list_requests(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Compte non rattaché à une unité. Contactez un administrateur.",
             )
-    elif actor.role == "director":
+    elif actor_role == "chief-departement":
+        if actor.unity_id:
+            direction_id = str(actor.unity_id)  # forcé : departement + services rattaches
+            unit_id = None
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Compte non rattaché à une unité. Contactez un administrateur.",
+            )
+    elif actor_role == "director":
         if actor.unity_id:
             direction_id = str(actor.unity_id)  # forcé
             unit_id = None
@@ -278,7 +301,7 @@ async def list_requests(
     return await svc.list_all(page=page, limit=limit)
 
 
-_staff = Depends(require_roles("agent", "chief", "director", "admin"))
+_staff = Depends(require_roles("agent-support", "chief-service", "chief-departement", "director", "admin"))
 
 
 @router.get("/triage", response_model=PaginatedResponse[RequestListItemResponse])
@@ -315,7 +338,7 @@ async def search_requests(
     svc: RequestService = Depends(_svc),
 ):
     # Les utilisateurs standard ne recherchent que dans leurs propres demandes
-    if actor.role == "user":
+    if normalize_role(actor.role) == "user":
         return await svc.list_filtered(requester_id=str(actor.id), search=q, page=page, limit=limit)
     return await svc.search(q, page=page, limit=limit)
 
@@ -344,12 +367,13 @@ async def list_queue(
     priority: Optional[str] = Query(None),
     request_status: Optional[str] = Query(None),
     search: Optional[str] = Query(None, min_length=1),
-    actor=Depends(require_roles("agent", "chief", "director", "admin")),
+    actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "director", "admin")),
     svc: RequestService = Depends(_svc),
 ):
     """File d'attente active — réservée aux agents et supérieurs, filtrée par périmètre."""
     # Forçage RBAC — le paramètre client direction_id est ignoré (C-N°3)
-    if actor.role in ("agent", "chief", "director"):
+    actor_role = normalize_role(actor.role)
+    if actor_role in {"agent-support", "chief-service", "chief-departement", "director"}:
         direction_id = str(actor.unity_id) if actor.unity_id else None
     return await svc.list_queue(
         direction_id=direction_id,
@@ -375,10 +399,10 @@ class QualifyTriageBody(BaseModel):
 async def qualify_triage(
     id: str,
     body: QualifyTriageBody,
-    actor=Depends(require_roles("agent", "chief", "admin")),
+    actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "admin")),
     svc: RequestService = Depends(_svc),
 ):
-    """Qualifie une demande de triage — réservé agent, chief, admin."""
+    """Qualifie une demande de triage — reserve agent-support, chief-service, chief-departement, admin."""
     return await svc.qualify_triage(
         id,
         body.dict(exclude_none=True),
@@ -432,7 +456,7 @@ async def list_by_direction(
     direction_id: str,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    actor=Depends(require_roles("agent", "chief", "director", "admin")),
+    actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "director", "admin")),
     svc: RequestService = Depends(_svc),
     db: AsyncSession = Depends(get_db),
 ):
@@ -445,7 +469,7 @@ async def list_by_unity(
     unity_id: str,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    actor=Depends(require_roles("agent", "chief", "director", "admin")),
+    actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "director", "admin")),
     svc: RequestService = Depends(_svc),
     db: AsyncSession = Depends(get_db),
 ):
@@ -533,7 +557,7 @@ async def create_request(
 async def update_request(
     id: str,
     body: RequestUpdate,
-    actor=Depends(require_roles("user", "agent", "chief", "director", "admin")),
+    actor=Depends(require_roles("user", "agent-support", "chief-service", "chief-departement", "director", "admin")),
     svc: RequestService = Depends(_svc),
 ):
     data = body.dict(exclude_unset=True)
@@ -561,11 +585,9 @@ async def update_request(
 class RequesterEditBody(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
-    category: Optional[str] = None
-    priority: Optional[str] = None
-    direction_id: Optional[int] = None
-    unit_id: Optional[int] = None
-    unity_id: Optional[int] = None
+
+    class Config:
+        extra = "forbid"
 
 
 @router.patch("/{id}/requester-edit", response_model=RequestResponse)
@@ -575,7 +597,7 @@ async def requester_edit(
     actor=Depends(get_current_user),
     svc: RequestService = Depends(_svc),
 ):
-    """Modification complète par le demandeur — uniquement si status=new et aucun acteur n'est intervenu.
+    """Modification personnelle par le demandeur — uniquement titre/description si status=new.
     Ouvert à tous les rôles : le service valide que l'acteur est bien le demandeur du ticket (C-02)."""
     return await svc.requester_edit(
         id,
@@ -589,10 +611,10 @@ async def requester_edit(
 async def assign_request(
     id: str,
     assignee_id: str = Query(...),
-    actor=Depends(require_roles("agent", "chief", "admin")),
+    actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "admin")),
     svc: RequestService = Depends(_svc),
 ):
-    """Assignation d'une demande — rôles autorisés : agent, chief, admin."""
+    """Assignation d'une demande — roles autorises : agent-support, chief-service, chief-departement, admin."""
     return await svc.assign(
         id,
         assignee_id,
@@ -606,10 +628,10 @@ async def assign_request(
 @router.post("/{id}/resolve", response_model=RequestResponse)
 async def resolve_request(
     id: str,
-    actor=Depends(require_roles("agent", "chief", "director", "admin")),
+    actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "director", "admin")),
     svc: RequestService = Depends(_svc),
 ):
-    """Résolution — réservé agent, chef, directeur, admin."""
+    """Resolution — reserve agent-support, chief-service, chief-departement, directeur, admin."""
     return await svc.resolve(
         id,
         actor_id=str(actor.id),
@@ -625,7 +647,7 @@ async def close_request(
     actor=Depends(get_current_user),
     svc: RequestService = Depends(_svc),
 ):
-    """Clôture — demandeur (ses propres tickets résolus) ou agent/chef/directeur/admin."""
+    """Cloture — demandeur (ses propres tickets resolus) ou agent-support/chief-service/chief-departement/directeur/admin."""
     if actor.role == "user":
         req = await svc.get_by_id(id)
         if str(req.requester_id) != str(actor.id):
@@ -638,7 +660,7 @@ async def close_request(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Vous pouvez clôturer uniquement une demande à l'état 'resolved'.",
             )
-    elif actor.role not in ("agent", "chief", "director", "admin"):
+    elif normalize_role(actor.role) not in {"agent-support", "chief-service", "chief-departement", "director", "admin"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Accès refusé.")
     return await svc.close(
         id,
@@ -688,7 +710,7 @@ async def user_request_reopen(
 @router.post("/{id}/reopen", response_model=RequestResponse)
 async def reopen_request(
     id: str,
-    actor=Depends(require_roles("chief", "director", "admin")),
+    actor=Depends(require_roles("chief-service", "chief-departement", "director", "admin")),
     svc: RequestService = Depends(_svc),
 ):
     """Phase 2 — Le chef approuve la réouverture (change le statut en REOPENED)."""
@@ -705,7 +727,7 @@ async def reopen_request(
 async def reject_reopen_request(
     id: str,
     body: RejectReopenBody,
-    actor=Depends(require_roles("chief", "director", "admin")),
+    actor=Depends(require_roles("chief-service", "chief-departement", "director", "admin")),
     svc: RequestService = Depends(_svc),
 ):
     """Phase 2 — Le chef refuse la réouverture avec motif obligatoire."""
@@ -726,7 +748,7 @@ async def cancel_request(
     actor=Depends(get_current_user),
     svc: RequestService = Depends(_svc),
 ):
-    """Annulation — demandeur (ses propres tickets) ou agent/chief/admin."""
+    """Annulation — demandeur (ses propres tickets) ou agent-support/chief-service/chief-departement/admin."""
     if actor.role == "user":
         req = await svc.get_by_id(id)
         if req.requester_id != actor.id:
@@ -734,7 +756,7 @@ async def cancel_request(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Vous ne pouvez annuler que vos propres demandes.",
             )
-    elif actor.role not in ("agent", "chief", "director", "admin"):
+    elif normalize_role(actor.role) not in {"agent-support", "chief-service", "chief-departement", "director", "admin"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Accès refusé.")
     return await svc.cancel(
         id,
@@ -754,7 +776,7 @@ class RejectBody(BaseModel):
 async def reject_request(
     id: str,
     body: RejectBody,
-    actor=Depends(require_roles("chief", "admin")),
+    actor=Depends(require_roles("chief-service", "chief-departement", "admin")),
     svc: RequestService = Depends(_svc),
 ):
     """Rejet d'un ticket par le chef de service — motif obligatoire."""
@@ -776,7 +798,7 @@ class PriorityBody(BaseModel):
 async def change_request_priority(
     id: str,
     body: PriorityBody,
-    actor=Depends(require_roles("chief", "director", "admin")),
+    actor=Depends(require_roles("chief-service", "chief-departement", "director", "admin")),
     svc: RequestService = Depends(_svc),
 ):
     """Changement de priorité — autorisé à tous les chefs dans leur périmètre."""
@@ -799,7 +821,7 @@ class ReassignBody(BaseModel):
 async def reassign_request(
     id: str,
     body: ReassignBody,
-    actor=Depends(require_roles("chief", "director", "admin")),
+    actor=Depends(require_roles("chief-service", "chief-departement", "director", "admin")),
     svc: RequestService = Depends(_svc),
 ):
     """Réaffectation d'un ticket à un autre service."""
@@ -863,7 +885,7 @@ class EscalateBody(BaseModel):
 async def escalate_request(
     id: str,
     body: EscalateBody,
-    actor=Depends(require_roles("agent", "chief", "director", "admin")),
+    actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "director", "admin")),
     svc: RequestService = Depends(_svc),
     detail_repo: WorkflowDetailRepository = Depends(_detail_repo),
     wf_repo: WorkflowRepository = Depends(_wf_repo),
@@ -952,10 +974,13 @@ async def list_comments(
     db: AsyncSession = Depends(get_db),
 ):
     """C-05 — liste les événements event_type='comment' du workflow de la demande.
-    Un citoyen (role=user) ne voit que les commentaires publics (is_public=True dans infos)."""
+    Un demandeur propriétaire ne voit que les commentaires publics (is_public=True dans infos)."""
     req = await req_svc.get_by_id(request_id)
     await _resolve_access(actor, req, db)
-    if actor.role == "user":
+    actor_id = getattr(actor, "id", None)
+    requester_id = getattr(req, "requester_id", None)
+    is_owner_view = actor_id is not None and requester_id is not None and str(requester_id) == str(actor_id)
+    if actor.role == "user" or is_owner_view:
         public_only = True
     return await repo.list_comments_by_request(request_id, public_only=public_only)
 
@@ -1032,7 +1057,10 @@ async def delete_comment(
     entry = await detail_repo.get_by_id(comment_id)
     if entry is None or entry.event_type != "comment_added":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Commentaire introuvable.")
-    if actor.role == "user" and str(entry.agent_id) != str(actor.id):
+    actor_id = getattr(actor, "id", None)
+    requester_id = getattr(req, "requester_id", None)
+    is_owner_view = actor_id is not None and requester_id is not None and str(requester_id) == str(actor_id)
+    if (actor.role == "user" or is_owner_view) and str(entry.agent_id) != str(actor.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Vous ne pouvez supprimer que vos propres commentaires.",
@@ -1066,7 +1094,7 @@ class _TimelineEventBody(BaseModel):
 async def add_timeline_event(
     request_id: str,
     body: _TimelineEventBody,
-    actor=Depends(require_roles("agent", "chief", "director", "admin")),
+    actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "director", "admin")),
     repo: WorkflowDetailRepository = Depends(_detail_repo),
     wf_repo: WorkflowRepository = Depends(_wf_repo),
 ):

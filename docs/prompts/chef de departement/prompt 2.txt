@@ -1,0 +1,315 @@
+==========================================================
+CHEF DE DEPARTEMENT
+PARTIE 2
+WORKFLOW ET REGLES METIER
+==========================================================
+
+OBJECTIF
+
+Le Chef de Département supervise plusieurs services.
+
+Il n'effectue pas le traitement quotidien des tickets.
+
+Il intervient uniquement lorsque la situation dépasse le niveau d'un service ou lorsqu'une décision concerne plusieurs services.
+
+==========================================================
+ROLE DANS LE WORKFLOW
+==========================================================
+
+Le Chef de Département intervient lorsque :
+
+• un Chef de Service demande son aide
+
+• un ticket est escaladé au niveau département
+
+• plusieurs services sont concernés
+
+• une panne majeure impacte plusieurs équipes
+
+• un conflit existe entre plusieurs services
+
+• une décision importante doit être prise
+
+==========================================================
+SUPERVISION
+==========================================================
+
+Depuis son tableau de bord, le Chef de Département voit :
+
+• tous les services du département
+
+• tous les tickets actifs
+
+• les tickets critiques
+
+• les tickets en retard
+
+• les SLA
+
+• les escalades
+
+• les réouvertures
+
+• la charge de chaque service
+
+Il peut ouvrir le détail de chaque service.
+
+==========================================================
+ESCALADE D'UN CHEF DE SERVICE
+==========================================================
+
+Un Chef de Service peut demander l'intervention du Chef de Département.
+
+Exemples :
+
+• manque de ressources
+
+• problème technique complexe
+
+• conflit entre services
+
+• dépassement important du SLA
+
+Le Chef de Département reçoit une notification.
+
+Il consulte le dossier avant de prendre une décision.
+
+==========================================================
+ANALYSE D'UN DOSSIER
+==========================================================
+
+Avant toute décision, il consulte :
+
+• le ticket
+
+• l'historique
+
+• les commentaires
+
+• les pièces jointes
+
+• les actions déjà réalisées
+
+• le SLA
+
+• les Agents impliqués
+
+• les services concernés
+
+Il prend ensuite une décision.
+
+==========================================================
+DECISIONS POSSIBLES
+==========================================================
+
+Le Chef de Département peut :
+
+• confirmer la décision du Chef de Service
+
+• demander un complément d'information
+
+• réaffecter le ticket vers un autre service du département
+
+• mobiliser plusieurs services sur le même ticket
+
+• escalader vers la Direction DSI
+
+Toutes les décisions sont enregistrées dans l'audit.
+
+==========================================================
+REAFFECTATION ENTRE SERVICES
+==========================================================
+
+Si un ticket est envoyé au mauvais service :
+
+Le Chef ouvre le ticket.
+
+↓
+
+Choisit :
+
+Réaffecter
+
+↓
+
+Sélectionne le nouveau service.
+
+↓
+
+Ajoute un commentaire obligatoire.
+
+↓
+
+Valide.
+
+Le système :
+
+• notifie les deux Chefs de Service
+
+• met à jour les statistiques
+
+• conserve l'historique
+
+==========================================================
+GESTION DES INCIDENTS MAJEURS
+==========================================================
+
+Si plusieurs tickets concernent le même incident :
+
+Le Chef peut créer un incident majeur.
+
+Tous les tickets restent liés à cet incident.
+
+Les différents services peuvent travailler ensemble.
+
+Chaque action reste enregistrée.
+
+==========================================================
+GESTION DE LA CHARGE
+==========================================================
+
+Le Chef surveille la charge des services.
+
+Si un service est surchargé :
+
+Il peut :
+
+• déplacer certains tickets
+
+• demander un renfort
+
+• réorganiser les priorités
+
+Le but est d'équilibrer le travail entre les services.
+
+==========================================================
+SUIVI DES SLA
+==========================================================
+
+Le Chef surveille les SLA de tous les services.
+
+Lorsque plusieurs SLA sont proches du dépassement :
+
+Il analyse les causes.
+
+Il décide des actions nécessaires.
+
+Exemples :
+
+• renfort d'équipe
+
+• changement de priorité
+
+• réaffectation
+
+• escalade
+
+==========================================================
+VALIDATION DES DECISIONS
+==========================================================
+
+Certaines décisions importantes nécessitent son accord.
+
+Exemples :
+
+• réaffectation entre services
+
+• incident majeur
+
+• escalade vers la Direction DSI
+
+• changement exceptionnel de priorité
+
+Chaque validation est enregistrée.
+
+==========================================================
+COLLABORATION
+==========================================================
+
+Le Chef de Département travaille avec :
+
+• les Chefs de Service
+
+• les Agents (indirectement)
+
+• la Direction DSI
+
+Il ne donne pas directement des tâches aux Agents, sauf situation exceptionnelle définie par l'organisation.
+
+==========================================================
+SITUATIONS EXCEPTIONNELLES
+==========================================================
+
+Le Chef peut intervenir directement lorsqu'il y a :
+
+• une panne majeure
+
+• une urgence de sécurité
+
+• une indisponibilité complète d'un service
+
+• une crise nécessitant une coordination rapide
+
+Toutes ces interventions doivent être justifiées.
+
+==========================================================
+REGLES METIER
+==========================================================
+
+Le Chef de Département ne doit jamais :
+
+• traiter tous les tickets à la place des Chefs de Service
+
+• contourner le workflow normal sans justification
+
+• modifier l'historique d'un ticket
+
+• supprimer des informations
+
+Toutes les actions importantes doivent laisser une trace.
+
+==========================================================
+EXEMPLE
+==========================================================
+
+Le Service Support reçoit un incident critique.
+
+Le Chef de Service constate que le problème concerne également le Service Réseau.
+
+Il demande l'intervention du Chef de Département.
+
+Le Chef de Département analyse la situation.
+
+Il décide :
+
+• de mobiliser les deux services
+
+• de créer un incident majeur
+
+• de suivre personnellement le dossier
+
+Les deux Chefs de Service reçoivent les instructions.
+
+Toutes les décisions sont enregistrées automatiquement.
+
+==========================================================
+REGLE ABSOLUE
+==========================================================
+
+Le Chef de Département coordonne les services.
+
+Il prend des décisions qui dépassent le niveau d'un seul service.
+
+Il garantit la bonne collaboration entre les équipes.
+
+Toutes ses décisions doivent être :
+
+• justifiées
+
+• sécurisées
+
+• historisées
+
+• auditables
+
+Le Chef de Département est un responsable de coordination, pas un Agent de traitement.

@@ -237,7 +237,7 @@ function Register() {
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt className="text-muted-foreground">Rôle attribué</dt>
-                  <dd className="font-medium">Simple utilisateur</dd>
+                  <dd className="font-medium">Utilisateur</dd>
                 </div>
               </dl>
 

@@ -1,0 +1,347 @@
+==========================================================
+DIRECTION DSI
+PARTIE 2
+WORKFLOW ET REGLES METIER
+==========================================================
+
+OBJECTIF
+
+La Direction DSI supervise l'ensemble des départements de la DSI.
+
+Elle n'intervient pas dans le traitement quotidien des tickets.
+
+Son rôle est de prendre les décisions stratégiques lorsque la situation dépasse le niveau d'un département.
+
+==========================================================
+ROLE DANS LE WORKFLOW
+==========================================================
+
+La Direction DSI intervient lorsque :
+
+• un Chef de Département demande son arbitrage
+
+• un incident impacte plusieurs départements
+
+• une panne majeure affecte plusieurs services
+
+• plusieurs SLA critiques sont dépassés
+
+• une décision stratégique est nécessaire
+
+• une crise informatique est déclarée
+
+• un incident de sécurité nécessite une validation
+
+==========================================================
+SUPERVISION GLOBALE
+==========================================================
+
+Depuis son tableau de bord, la Direction DSI peut voir :
+
+• tous les départements
+
+• tous les services
+
+• tous les tickets
+
+• tous les incidents majeurs
+
+• toutes les escalades
+
+• tous les SLA
+
+• les performances globales
+
+• les statistiques de la DSI
+
+Elle peut accéder au détail de chaque département.
+
+==========================================================
+ESCALADE D'UN CHEF DE DEPARTEMENT
+==========================================================
+
+Lorsqu'un Chef de Département ne peut plus résoudre une situation :
+
+Il transmet le dossier à la Direction DSI.
+
+Le dossier contient :
+
+• le ticket
+
+• les actions réalisées
+
+• les décisions prises
+
+• les commentaires
+
+• les justificatifs
+
+La Direction DSI analyse le dossier avant toute décision.
+
+==========================================================
+ANALYSE D'UNE SITUATION
+==========================================================
+
+Avant de prendre une décision, la Direction DSI consulte :
+
+• le ticket
+
+• son historique
+
+• les commentaires
+
+• les pièces jointes
+
+• les départements concernés
+
+• les services concernés
+
+• les SLA
+
+• les impacts métiers
+
+• les risques
+
+==========================================================
+DECISIONS POSSIBLES
+==========================================================
+
+La Direction DSI peut :
+
+• valider la décision du Chef de Département
+
+• demander des informations complémentaires
+
+• réaffecter un ticket vers un autre département
+
+• mobiliser plusieurs départements
+
+• déclarer un incident majeur
+
+• lancer une cellule de crise
+
+• définir une priorité exceptionnelle
+
+• autoriser une dérogation au SLA
+
+Toutes les décisions sont enregistrées dans l'audit.
+
+==========================================================
+COORDINATION ENTRE DEPARTEMENTS
+==========================================================
+
+Si plusieurs départements sont concernés :
+
+La Direction DSI désigne :
+
+• le département pilote
+
+• les départements participants
+
+Chaque département conserve ses responsabilités.
+
+Le système suit l'avancement global de l'incident.
+
+==========================================================
+GESTION DES INCIDENTS MAJEURS
+==========================================================
+
+Lorsqu'un incident majeur est déclaré :
+
+La Direction DSI :
+
+• nomme un responsable
+
+• identifie les départements concernés
+
+• suit l'évolution en temps réel
+
+• valide les décisions importantes
+
+• clôture officiellement l'incident lorsque tout est rétabli
+
+==========================================================
+GESTION DES CRISES
+==========================================================
+
+En cas de crise informatique :
+
+La Direction DSI peut :
+
+• réunir plusieurs départements
+
+• suivre les actions en temps réel
+
+• définir les priorités
+
+• réorganiser les ressources
+
+• communiquer avec la Direction Générale si nécessaire
+
+Toutes les décisions sont historisées.
+
+==========================================================
+GESTION DES RESSOURCES
+==========================================================
+
+La Direction DSI surveille la charge globale.
+
+Si un département est fortement sollicité :
+
+Elle peut :
+
+• autoriser un renfort
+
+• redistribuer certaines activités
+
+• modifier exceptionnellement les priorités
+
+L'objectif est de maintenir la continuité du service.
+
+==========================================================
+SUIVI DES SLA
+==========================================================
+
+La Direction DSI suit les SLA de toute la DSI.
+
+Si plusieurs SLA critiques sont menacés :
+
+Elle analyse les causes.
+
+Elle décide :
+
+• d'un renfort
+
+• d'une réorganisation
+
+• d'une escalade
+
+• d'une dérogation exceptionnelle
+
+Toutes les décisions doivent être justifiées.
+
+==========================================================
+VALIDATION STRATEGIQUE
+==========================================================
+
+Certaines décisions nécessitent obligatoirement la validation de la Direction DSI.
+
+Exemples :
+
+• création d'un incident majeur
+
+• escalade inter-départements
+
+• dérogation exceptionnelle au SLA
+
+• changement stratégique de priorité
+
+• mobilisation de plusieurs départements
+
+Chaque validation est enregistrée automatiquement.
+
+==========================================================
+COLLABORATION
+==========================================================
+
+La Direction DSI travaille avec :
+
+• les Chefs de Département
+
+• les Chefs de Service (indirectement)
+
+• les Administrateurs
+
+• la Direction Générale lorsque cela est nécessaire
+
+Elle ne donne pas directement des tâches aux Agents.
+
+==========================================================
+SITUATIONS EXCEPTIONNELLES
+==========================================================
+
+La Direction DSI intervient directement lorsqu'il y a :
+
+• une cyberattaque
+
+• une panne générale
+
+• une indisponibilité complète d'un système critique
+
+• une catastrophe informatique
+
+• une crise nécessitant une coordination immédiate
+
+Toutes les décisions doivent être justifiées.
+
+==========================================================
+REGLES METIER
+==========================================================
+
+La Direction DSI ne doit jamais :
+
+• traiter les tickets à la place des équipes opérationnelles
+
+• contourner le workflow normal sans justification
+
+• modifier l'historique d'un ticket
+
+• supprimer des informations
+
+Elle agit uniquement lorsque la décision dépasse le niveau d'un département.
+
+==========================================================
+EXEMPLE
+==========================================================
+
+Une panne du réseau principal affecte plusieurs sites.
+
+Trois départements sont mobilisés :
+
+• Infrastructure
+
+• Exploitation
+
+• Développement
+
+Le Chef de Département Infrastructure demande l'intervention de la Direction DSI.
+
+La Direction DSI :
+
+• déclare un incident majeur
+
+• désigne le Département Infrastructure comme pilote
+
+• mobilise les deux autres départements
+
+• suit les indicateurs en temps réel
+
+• valide les décisions importantes
+
+Une fois les services rétablis, elle clôture officiellement l'incident majeur.
+
+==========================================================
+REGLE ABSOLUE
+==========================================================
+
+La Direction DSI pilote l'ensemble de la DSI.
+
+Elle garantit la coordination entre les départements.
+
+Elle prend les décisions stratégiques.
+
+Elle assure la continuité des services informatiques.
+
+Toutes ses décisions doivent être :
+
+• justifiées
+
+• enregistrées
+
+• sécurisées
+
+• auditables
+
+La Direction DSI ne remplace jamais les Chefs de Département.
+
+Elle les accompagne, les coordonne et arbitre les situations qui dépassent leur périmètre.

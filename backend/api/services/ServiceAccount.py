@@ -107,11 +107,11 @@ class AccountService(BaseService):
             allowed = {"direction"}
             message = "La direction est obligatoire pour ce rôle."
             hint = "Affectez ce compte à une direction active."
-        elif role == "chief":
+        elif role in {"chief-service", "chief-departement"}:
             allowed = {"department", "unit"}
             message = "Le chef doit être affecté à un département ou à un service actif."
             hint = "Sélectionnez Chef de département ou Chef de service dans le formulaire admin."
-        elif role in {"user", "agent", "admin"}:
+        elif role in {"user", "agent-support", "admin"}:
             allowed = {"unit"}
             message = "Le service ou l'unité est obligatoire pour ce rôle."
             hint = "Affectez ce compte à une unité active appartenant à un département."

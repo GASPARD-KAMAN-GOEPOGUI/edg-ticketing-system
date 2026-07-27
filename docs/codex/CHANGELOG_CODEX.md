@@ -1,5 +1,159 @@
 # Changelog Codex
 
+## 2026-07-27 - Pieces jointes visibles et telechargeables
+
+Demande: afficher les fichiers ajoutes a une demande et permettre de les voir ou telecharger depuis le detail.
+
+Module: MOD-PERSONAL / MOD-REQUEST.
+
+Fichiers modifies:
+- `frontend/src/lib/api/client.ts`
+- `frontend/src/lib/api/requests.ts`
+- `frontend/src/routes/app.requests.$id.tsx`
+- `backend/api/storage.py`
+- `docs/codex/API_INDEX.md`
+- `docs/codex/BUSINESS_RULES.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Correction: la page detail demande/ticket charge maintenant les pieces jointes via `GET /requests/{id}/attachments` et affiche une section dediee avec nom, type, taille, date, statut de scan, action `Voir` et action `Telecharger`. Les fichiers sont recuperes en blob via une requete authentifiee avant ouverture ou telechargement. L'URL locale generee par `storage.presigned_url` pointe maintenant vers la route existante `/api/v1/requests/download/{path}`.
+
+Verification: `python -m compileall backend/api/storage.py backend/api/routes/RouteRequest.py` OK ; `npm run build` cote frontend OK.
+
+## 2026-07-27 - Acces personnel Mon espace pour tous les roles
+
+Demande: garantir que `Mon espace` affiche et ouvre correctement les demandes personnelles pour tous les roles, comme pour le role utilisateur.
+
+Module: MOD-PERSONAL / MOD-REQUEST.
+
+Fichiers modifies:
+- `backend/api/routes/RouteRequest.py`
+- `docs/codex/API_INDEX.md`
+- `docs/codex/BUSINESS_RULES.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Correction: l'acces detail d'une demande verifie maintenant d'abord si l'acteur connecte est le `requester_id` de la demande. Dans ce cas, l'acces personnel est autorise quel que soit son role metier, sans appliquer le perimetre service/direction. Le detail personnel, la lecture des commentaires et la suppression de commentaires gardent le mode demandeur proprietaire: commentaires internes non publics masques, suppression limitee aux propres commentaires.
+
+Verification: compilation ciblee de `backend/api/routes/RouteRequest.py` OK. Test pytest cible `backend/tests/api/test_requests_baseline.py -k VuePersonnelleBaseline` tente mais non execute dans l'environnement disponible (`No module named pytest` avec Python global; lancement du venv bloque par Windows error 1920).
+
+## 2026-07-27 - Verrouillage edition personnelle demandeur
+
+Demande: corriger la modification d'une demande personnelle pour qu'elle fonctionne sans bug et reste alignee au cahier des charges.
+
+Module: MOD-PERSONAL / MOD-REQUEST.
+
+Fichiers modifies:
+
+- `frontend/src/lib/api/requests.ts`
+- `backend/api/routes/RouteRequest.py`
+- `backend/api/services/ServiceRequest.py`
+- `docs/codex/API_INDEX.md`
+- `docs/codex/BUSINESS_RULES.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Correction: l'edition personnelle via `/requests/{id}/requester-edit` est desormais limitee au titre et a la description dans le type frontend, le schema backend et le service. Les champs internes (`category`, `priority`, `direction_id`, `unit_id`, `unity_id`) ne font plus partie du contrat demandeur et sont refuses par l'API (`extra=forbid`). Le service rejette aussi une edition vide sans champ autorise.
+
+Verification: `python -m compileall backend/api/routes/RouteRequest.py backend/api/services/ServiceRequest.py` OK ; controles `rg` cibles OK sur le schema backend, le service et l'appel frontend `requesterEditRequest`.
+
+## 2026-07-27 - Espaces frontend dedies Chef de Service / Chef Departement
+
+Demande: chaque role doit avoir « son espace propre » — chief-service et chief-departement partageaient jusque-la exactement la meme page `/app/chief-inbox` (aucune route ni composant distinct), la seule difference etant desormais le perimetre de donnees cote backend (voir entree precedente du meme jour).
+
+Module: MOD-CHIEF.
+
+Fichiers modifies/crees:
+
+- `frontend/src/routes/app.chief-inbox.tsx` (composant `ChiefInbox` exporte, rendu route-aware)
+- `frontend/src/routes/app.department-inbox.tsx` (nouveau — reutilise `ChiefInbox`)
+- `frontend/src/routes/app.department-inbox_.tickets.$id.tsx` (nouveau)
+- `frontend/src/lib/ticket-navigation.ts`
+- `frontend/src/routes/app.requests.$id.tsx` (contexte `departmentInbox`)
+- `frontend/src/components/app-layout.tsx`
+- `docs/codex/ROLE_INDEX.md`, `FRONTEND_INDEX.md`, `ROUTE_INDEX.md`, `MODULE_INDEX.md`, `BUSINESS_RULES.md`, `CHANGELOG_CODEX.md`
+
+Correction: creation de la route `/app/department-inbox` (+ detail `/app/department-inbox/tickets/$id`), reservee a `chief-departement` (et `admin`), avec guard de role, titre et back-navigation propres. `/app/chief-inbox` reste reserve a `chief-service` (deja le cas via `requireRole`, aucun changement de guard necessaire). Les deux routes rendent le meme composant `ChiefInbox` (evite la duplication d'environ 600 lignes de logique/JSX) qui detecte l'espace courant via `useRouterState` pour adapter dynamiquement : le libelle d'en-tete et les messages vides (« service » vs « departement »), la cle de requete/cache (`chief-inbox` vs `department-inbox`), le lien de navigation vers le detail ticket (`ticketDetailRouteForList`) et la portee de la liste d'agents assignables (`unit_id` exact vs `direction_id` elargi). Navigation sidebar/mobile mise a jour pour proposer a chaque role son propre lien (plus de partage de l'entree « Boite de traitement » entre les deux roles).
+
+Verification: `npx tsc --noEmit` sans nouvelle erreur imputable aux fichiers touches (erreurs preexistantes non liees dans d'autres fichiers) ; `npx eslint` sans probleme hors bruit prettier CRLF preexistant sur tout le depot.
+
+## 2026-07-27 - Distinction fonctionnelle Chef de Service / Chef Departement
+
+Demande: poursuivre l'alignement CDC des roles en donnant a `chief-departement` un perimetre reellement plus large que `chief-service` (jusque-la, les deux roles etaient des clones stricts partageant exactement le meme perimetre `unity_id`).
+
+Module: MOD-CHIEF / MOD-REQUEST.
+
+Fichiers modifies:
+
+- `backend/api/core/ticket_actions.py`
+- `backend/api/services/ServiceRequest.py`
+- `backend/api/routes/RouteRequest.py`
+- `backend/tests/api/test_ticket_actions.py`
+- `frontend/src/routes/app.chief-inbox.tsx`
+- `docs/codex/BUSINESS_RULES.md`
+- `docs/codex/ROLE_INDEX.md`
+- `docs/codex/FRONTEND_INDEX.md`
+- `docs/codex/MODULE_INDEX.md`
+- `docs/codex/ROUTE_INDEX.md`
+- `docs/codex/API_INDEX.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Cause: `chief-departement` et `chief-service` avaient la meme matrice de permissions ET le meme calcul de perimetre (`actor.unity_id` seul), sans jamais utiliser le mecanisme d'elargissement par organigramme deja disponible (utilise pour `director`). Un chef de departement ne pouvait donc jamais voir ni agir sur les tickets des autres services de son propre departement — la distinction CDC entre les deux roles etait purement nominale. Le listing principal `GET /requests` forcait meme `unit_id` (correspondance exacte) pour `chief-departement`, et le selecteur d'agent assignable du frontend interrogeait `/users?unit_id=...` sur l'unite exacte du chef, qui ne contient generalement aucun agent (les agents sont rattaches aux services, pas au noeud departement) — rendant l'assignation impossible en pratique pour ce role.
+
+Correction: `chief-departement` beneficie desormais du meme mecanisme d'elargissement d'organigramme que `director` (departement + tous ses services descendants), applique de bout en bout : lecture/action ticket (`assert_ticket_scope`, `_guard_ticket_action`), assignation a un agent de n'importe quel service du departement (`assert_assignment_allowed` avec `allowed_scope_unity_ids`), listing principal et par-unite (`list_requests`, `_resolve_access`, `_check_unity_access`), et selecteur d'agent assignable cote frontend (`fetchUsers({ direction_id })` au lieu de `unit_id` pour ce role). `chief-service` reste strictement borne a son unite. Au passage, corrige une sur-permission existante ou `agent-support`/`chief-service` recevaient a tort un perimetre elargi dans `_resolve_access` (acces detail ticket).
+
+Verification: `backend\venv\Scripts\pytest.exe backend\tests\api\test_ticket_actions.py -q` OK avec 69 tests passes (nouveau test `test_chief_departement_can_assign_across_department_scope`). Note: `backend\tests\api\test_requests_baseline.py` presente 21 echecs preexistants non lies a cette intervention — ce fichier de tests n'a pas ete mis a jour lors du renommage de roles du 2026-07-23 et utilise encore les libelles `agent`/`chief` obsoletes ; a traiter separement.
+
+## 2026-07-24 - Alignement Chef de Service actions tracables
+
+Demande: poursuivre l'alignement CDC avec le module Chef de Service.
+
+Module: MOD-CHIEF / MOD-REQUEST.
+
+Fichiers modifies:
+
+- `frontend/src/routes/app.chief-inbox.tsx`
+- `backend/api/core/ticket_actions.py`
+- `backend/api/services/ServiceRequest.py`
+- `backend/tests/api/test_ticket_actions.py`
+- `docs/codex/BUSINESS_RULES.md`
+- `docs/codex/FEATURE_INDEX.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Correction: la reaffectation service par un chef exige maintenant un motif explicite cote backend et frontend. Le motif nettoye est conserve dans la timeline et les metadonnees. Le renvoi au directeur depuis la boite chef exige aussi un motif avant envoi.
+
+Verification: test cible `backend\\venv\\Scripts\\pytest.exe backend\\tests\\api\\test_ticket_actions.py -q` OK avec 68 tests passes.
+
+## 2026-07-24 - Alignement Agent Support escalade
+
+Demande: poursuivre l'alignement CDC avec le module Agent Support.
+
+Module: MOD-AGENT / MOD-REQUEST.
+
+Fichiers modifies:
+
+- `backend/api/core/ticket_actions.py`
+- `backend/tests/api/test_ticket_actions.py`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Correction: la contrainte d'escalade agent utilise maintenant le role normalise `agent-support`. Un agent support ne peut escalader que les tickets qui lui sont personnellement assignes, que le libelle entrant soit l'ancien `agent` ou le role CDC `agent-support`.
+
+Verification: test cible des regles ticket d'abord en echec sur l'escalade agent, puis `backend\\venv\\Scripts\\pytest.exe backend\\tests\\api\\test_ticket_actions.py -q` OK avec 65 tests passes.
+
+## 2026-07-24 - Alignement detail demandeur
+
+Demande: demarrer l'alignement du module Demandeur avec le cahier des charges et verifier creation, `Mes demandes`, `Historique`, accueil personnel et detail.
+
+Module: MOD-PERSONAL / MOD-REQUEST.
+
+Fichiers modifies:
+
+- `frontend/src/routes/app.requests.$id.tsx`
+- `docs/codex/BUSINESS_RULES.md`
+- `docs/codex/FEATURE_INDEX.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Correction: la modification d'une demande personnelle ne montre plus `Categorie`, `Priorite`, `Direction destinataire` ni `Service`. L'interface demandeur envoie uniquement `title` et `description`, en coherence avec la restriction backend existante.
+
+Verification: controle cible des listes personnelles, du formulaire de creation, du detail demandeur et des references mortes.
+
 ## 2026-07-23 - Alignement CDC des roles metier
 
 Demande: aligner strictement l'application sur les six acteurs du cahier des charges et supprimer la distinction metier Directeur / Directeur General.
@@ -125,6 +279,27 @@ Fichiers modifies:
 Correction: le formulaire admin distingue `Chef de departement` et `Chef de service` sans creer de role base supplementaire; les deux restent portes par le role backend `chief` avec un `unity_id` pointant vers le niveau choisi. Les champs direction/departement/service sont filtres sur les entites actives, les valeurs masquees sont videes et le backend valide le niveau organisationnel avant persistence.
 
 Verification: compilation ciblee backend, test cible `test_user_org_assignment.py`, lint cible frontend et build Vite/TanStack.
+
+## 2026-07-24 - Normalisation RBAC Agent Support / Chief Service / Chief Département
+
+Demande: normaliser les rôles métier canoniques sans casser le flux existant, en gardant la compatibilité backward sur les libellés historiques de persistance.
+
+Module: MOD-RBAC / MOD-ACCOUNTS.
+
+Fichiers modifies:
+
+- `backend/api/core/rbac.py`
+- `backend/api/core/ticket_actions.py`
+- `backend/api/models/ModelAccount.py`
+- `backend/api/dependencies.py`
+- `backend/api/routes/RouteRequest.py`
+- `backend/api/routes/RouteAttachment.py`
+- `backend/api/services/ServiceAccount.py`
+- `backend/tests/api/test_ticket_actions.py`
+
+Correction: la couche technique bascule sur la nomenclature canonique `agent-support`, `chief-service` et `chief-departement`; les alias historiques (`agent`, `chief`, `chief-department`, `chief-dept`) sont remis sur la bonne normalisation sans refonte de workflow.
+
+Verification: exécution directe Python sur `normalize_role()` / `has_role()` / `assert_action_allowed()` confirmant `agent-support -> resolve_allowed=OK` et refus explicite sur `reject`.
 
 ## 2026-07-23 - Structure organisationnelle Direction / Departement / Service
 

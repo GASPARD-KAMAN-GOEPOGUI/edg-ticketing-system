@@ -18,7 +18,7 @@ import { useRole, useUser } from "@/lib/session";
 import { fetchDirections, fetchUnits } from "@/lib/api/directions-units";
 
 export const Route = createFileRoute("/app/sla-center")({
-  beforeLoad: () => requireRole("chief", "director", "admin"),
+  beforeLoad: () => requireRole("chief-service", "chief-departement", "director", "admin"),
   head: () => ({ meta: [{ title: "Centre SLA — EDG Support" }] }),
   component: SlaCenterPage,
 });
@@ -106,7 +106,7 @@ function SlaCenterPage() {
   const [role] = useRole();
   const sessionUser = useUser();
   const isDirector = role === "director";
-  const isChief = role === "chief";
+  const isChief = role === "chief-service" || role === "chief-departement";
 
   const filters = useMemo(
     () => ({

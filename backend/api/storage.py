@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import uuid
 from pathlib import Path
+from urllib.parse import quote
 
 from api.configs.Environment import get_environment
 
@@ -35,7 +36,7 @@ def save_file(data: bytes, filename: str, request_id: str) -> tuple[str, str]:
     dest.mkdir(parents=True, exist_ok=True)
     (dest / unique).write_bytes(data)
 
-    public_url = f"/api/v1/attachments/download/{storage_path}"
+    public_url = f"/api/v1/requests/download/{quote(storage_path, safe='/')}"
     return storage_path, public_url
 
 
@@ -53,4 +54,4 @@ def presigned_url(storage_path: str, expires: int = 3600) -> str:
     En local : URL directe. En MinIO : URL temporaire S3.
     """
     # TODO MINIO: return client.presigned_get_object(Bucket=..., Key=storage_path, expires=expires)
-    return f"/api/v1/attachments/download/{storage_path}"
+    return f"/api/v1/requests/download/{quote(storage_path, safe='/')}"

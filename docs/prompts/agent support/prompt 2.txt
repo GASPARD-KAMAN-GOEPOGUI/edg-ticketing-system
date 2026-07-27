@@ -1,0 +1,583 @@
+=====================================================================
+REFERENTIEL OFFICIEL DES ROLES
+ROLE N°2 : AGENT SUPPORT
+PARTIE 2
+QUALIFICATION – AFFECTATION – TRAITEMENT – STATUTS – REGLES METIER
+VERSION OFFICIELLE
+=====================================================================
+
+OBJECTIF
+
+Cette spécification définit exactement comment un Agent Support doit
+traiter un ticket.
+
+Aucun développeur ni aucune IA ne doit interpréter librement les
+transitions du workflow.
+
+Chaque changement de statut doit être déclenché par une action métier.
+
+=====================================================================
+REGLE FONDAMENTALE
+=====================================================================
+
+Un ticket ne change jamais de statut automatiquement sans raison métier.
+
+Chaque changement doit avoir :
+
+• un acteur
+• une action
+• une justification
+• une date
+• une trace dans l'audit
+
+=====================================================================
+ETAPE 1 : RECEPTION D'UN TICKET
+=====================================================================
+
+Statut concerné
+
+new
+
+Signification
+
+Le ticket vient d'être créé par un utilisateur.
+
+L'Agent Support reçoit une notification.
+
+Le ticket apparaît dans :
+
+• Tickets nouveaux
+• Qualification
+
+Actions autorisées
+
+• Ouvrir le ticket
+• Lire la demande
+• Consulter les pièces jointes
+• Commencer la qualification
+
+Actions interdites
+
+• Résoudre directement
+• Clôturer
+• Supprimer
+• Modifier l'auteur
+
+=====================================================================
+PASSAGE A QUALIFYING
+=====================================================================
+
+Déclencheur
+
+L'Agent clique :
+
+Commencer la qualification
+
+Le système passe le ticket :
+
+new
+
+↓
+
+qualifying
+
+Une entrée d'audit est créée.
+
+=====================================================================
+ETAPE 2 : QUALIFICATION
+=====================================================================
+
+Objectif
+
+Comprendre parfaitement la demande.
+
+L'Agent doit vérifier :
+
+• le titre
+• la description
+• les pièces jointes
+• les informations fournies
+• la catégorie
+• le type de demande
+• le niveau d'urgence
+
+Il ne doit jamais faire d'hypothèses.
+
+=====================================================================
+PENDANT LA QUALIFICATION
+=====================================================================
+
+L'Agent peut :
+
+Ajouter une catégorie
+
+Choisir une sous-catégorie
+
+Ajouter des tags
+
+Modifier la priorité
+(si autorisé)
+
+Modifier la criticité
+(si autorisé)
+
+Associer un service
+
+Associer un département
+
+Associer une direction
+
+Ajouter des notes internes
+
+Ajouter des commentaires publics
+
+Ajouter des pièces jointes
+
+=====================================================================
+SI LES INFORMATIONS SONT INSUFFISANTES
+=====================================================================
+
+L'Agent clique :
+
+Demander des informations
+
+Le système :
+
+envoie une notification
+
+change le statut :
+
+pending_user
+
+Le ticket disparaît de :
+
+En cours
+
+Il apparaît dans :
+
+En attente utilisateur
+
+=====================================================================
+RETOUR DE L'UTILISATEUR
+=====================================================================
+
+Lorsque l'utilisateur répond :
+
+Le système :
+
+enregistre la réponse
+
+notifie l'Agent
+
+replace automatiquement :
+
+pending_user
+
+↓
+
+in_progress
+
+L'Agent reprend son traitement.
+
+=====================================================================
+FIN DE LA QUALIFICATION
+=====================================================================
+
+Lorsque l'Agent estime :
+
+la catégorie correcte
+
+la priorité correcte
+
+le service correct
+
+la demande comprise
+
+Il clique :
+
+Valider la qualification
+
+Le ticket devient :
+
+qualified
+
+Une entrée d'audit est créée.
+
+=====================================================================
+AFFECTATION
+=====================================================================
+
+Le ticket est prêt à être distribué.
+
+Deux possibilités.
+
+CAS 1
+
+Le Chef de Service affecte.
+
+CAS 2
+
+L'Agent possède la permission :
+
+Peut affecter
+
+Il choisit :
+
+Nom de l'Agent
+
+Clique :
+
+Affecter
+
+Le ticket devient :
+
+assigned
+
+=====================================================================
+AUTO-AFFECTATION
+=====================================================================
+
+Si l'Agent possède la permission :
+
+Peut prendre un ticket
+
+Il clique :
+
+Prendre le ticket
+
+Le ticket devient :
+
+assigned
+
+L'Agent devient responsable.
+
+=====================================================================
+PRISE EN CHARGE
+=====================================================================
+
+Le ticket est affecté.
+
+L'Agent clique :
+
+Commencer le traitement
+
+Le ticket devient :
+
+in_progress
+
+Le chronomètre de traitement démarre.
+
+=====================================================================
+PENDANT LE TRAITEMENT
+=====================================================================
+
+L'Agent peut :
+
+Ajouter des commentaires
+
+Ajouter des pièces jointes
+
+Créer des tâches
+
+Créer des sous-tâches
+
+Ajouter des notes internes
+
+Téléphoner au demandeur
+
+Envoyer un email
+
+Planifier une intervention
+
+Changer le responsable
+(si autorisé)
+
+Modifier la priorité
+(si autorisé)
+
+Modifier le SLA
+(si autorisé)
+
+=====================================================================
+TRANSFERT
+=====================================================================
+
+Si le ticket concerne un autre service.
+
+L'Agent clique :
+
+Transférer
+
+Choisit :
+
+le nouveau service
+
+Ajoute :
+
+motif obligatoire
+
+Le ticket retourne :
+
+queued
+
+Le nouveau service reçoit une notification.
+
+=====================================================================
+ESCALADE
+=====================================================================
+
+Si l'Agent ne peut plus traiter.
+
+Il clique :
+
+Escalader
+
+Motif obligatoire.
+
+Le ticket devient :
+
+escalated
+
+Le responsable reçoit une notification.
+
+=====================================================================
+ATTENTE INTERNE
+=====================================================================
+
+Si l'Agent attend :
+
+une validation
+
+une intervention
+
+un fournisseur
+
+une autre équipe
+
+Il clique :
+
+Mettre en attente interne
+
+Le ticket devient :
+
+pending_internal
+
+=====================================================================
+FIN DE L'ATTENTE
+=====================================================================
+
+Lorsque le blocage disparaît.
+
+L'Agent clique :
+
+Reprendre
+
+Le ticket revient :
+
+in_progress
+
+=====================================================================
+RESOLUTION
+=====================================================================
+
+L'Agent estime :
+
+Le problème est résolu.
+
+Avant de résoudre.
+
+Les champs suivants deviennent obligatoires.
+
+Résumé de résolution
+
+Cause
+
+Solution appliquée
+
+Temps passé
+
+Code de résolution
+(si utilisé)
+
+Sans ces informations.
+
+Le bouton :
+
+Résoudre
+
+reste désactivé.
+
+=====================================================================
+PASSAGE A RESOLVED
+=====================================================================
+
+L'Agent clique :
+
+Résoudre
+
+Le ticket devient :
+
+resolved
+
+Le système :
+
+notifie l'utilisateur
+
+crée une entrée d'audit
+
+archive le résumé
+
+=====================================================================
+SI L'UTILISATEUR CONFIRME
+=====================================================================
+
+Le ticket devient :
+
+closed
+
+Le workflow est terminé.
+
+=====================================================================
+SI L'UTILISATEUR REFUSE
+=====================================================================
+
+Le ticket devient :
+
+reopened
+
+Le système :
+
+notifie immédiatement l'Agent
+
+Le ticket revient :
+
+assigned
+
+ou
+
+in_progress
+
+selon la configuration.
+
+=====================================================================
+REGLES METIER
+=====================================================================
+
+Un Agent ne peut pas résoudre un ticket sans résumé.
+
+Un Agent ne peut pas transférer sans motif.
+
+Un Agent ne peut pas escalader sans justification.
+
+Une demande d'information doit toujours passer :
+
+pending_user
+
+Une réponse utilisateur doit toujours ramener :
+
+in_progress
+
+Toutes les modifications de priorité sont auditées.
+
+Toutes les modifications de SLA sont auditées.
+
+Toutes les affectations sont auditées.
+
+Toutes les escalades sont auditées.
+
+Toutes les résolutions sont auditées.
+
+Aucun ticket ne peut être supprimé après soumission.
+
+=====================================================================
+EXEMPLE COMPLET
+=====================================================================
+
+08h15
+
+Jean crée un ticket.
+
+↓
+
+new
+
+08h18
+
+Mamadou ouvre le ticket.
+
+↓
+
+qualifying
+
+08h22
+
+Qualification terminée.
+
+↓
+
+qualified
+
+08h23
+
+Affectation à Mamadou.
+
+↓
+
+assigned
+
+08h24
+
+Début du traitement.
+
+↓
+
+in_progress
+
+08h35
+
+Photo supplémentaire demandée.
+
+↓
+
+pending_user
+
+09h10
+
+Jean répond.
+
+↓
+
+in_progress
+
+09h45
+
+Intervention terminée.
+
+↓
+
+resolved
+
+10h00
+
+Jean confirme.
+
+↓
+
+closed
+
+Le ticket est terminé.
+
+=====================================================================
+REGLE ABSOLUE
+=====================================================================
+
+L'Agent Support ne doit jamais modifier un statut sans action métier.
+
+Chaque transition doit être :
+
+• explicable
+• traçable
+• sécurisée
+• auditée
+
+Le backend reste la seule source de vérité concernant les changements de statuts.

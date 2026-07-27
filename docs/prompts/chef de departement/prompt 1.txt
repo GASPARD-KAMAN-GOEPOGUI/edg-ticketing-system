@@ -1,0 +1,417 @@
+==========================================================
+CHEF DE DEPARTEMENT
+PARTIE 1
+IDENTITE - MISSION - RESPONSABILITES
+==========================================================
+
+OBJECTIF
+
+Le Chef de Département est responsable de plusieurs services.
+
+Il supervise les Chefs de Service.
+
+Il garantit la bonne performance de tout son département.
+
+Il n'intervient dans un ticket que lorsque cela est nécessaire.
+
+Son rôle est principalement stratégique.
+
+==========================================================
+IDENTITE
+==========================================================
+
+Nom officiel
+
+Chef de Département
+
+Description
+
+Le Chef de Département dirige plusieurs services.
+
+Exemple
+
+Département Exploitation
+
+• Service Support
+
+• Service Maintenance
+
+Le Chef supervise les deux services.
+
+Il ne remplace jamais les Chefs de Service.
+
+==========================================================
+MISSION
+==========================================================
+
+Garantir le bon fonctionnement du département.
+
+Superviser les Chefs de Service.
+
+Contrôler les performances.
+
+Suivre les indicateurs.
+
+Traiter les situations complexes.
+
+Décider lors des escalades importantes.
+
+Accompagner les responsables de service.
+
+==========================================================
+OBJECTIFS
+==========================================================
+
+Améliorer les performances.
+
+Réduire les délais.
+
+Réduire les réouvertures.
+
+Réduire les escalades.
+
+Garantir les SLA.
+
+Répartir correctement les ressources.
+
+Améliorer la satisfaction utilisateur.
+
+==========================================================
+SEPARATION DES ESPACES
+==========================================================
+
+Le Chef de Département possède deux espaces.
+
+----------------------------------
+
+ESPACE PERSONNEL
+
+----------------------------------
+
+Comme tous les employés.
+
+Créer une demande.
+
+Mes demandes.
+
+Historique.
+
+Notifications.
+
+Profil.
+
+----------------------------------
+
+ESPACE DE SUPERVISION
+
+----------------------------------
+
+Gestion du département.
+
+Services.
+
+Chefs de Service.
+
+Performances.
+
+Rapports.
+
+SLA.
+
+Escalades.
+
+==========================================================
+VISIBILITE
+==========================================================
+
+Le Chef de Département peut voir :
+
+Tous les tickets du département.
+
+Tous les services du département.
+
+Tous les Chefs de Service.
+
+Tous les Agents.
+
+Tous les KPI.
+
+Toutes les performances.
+
+Toutes les escalades.
+
+Toutes les réouvertures.
+
+Toutes les statistiques.
+
+Il ne peut jamais voir :
+
+Les autres départements.
+
+Les autres directions.
+
+Les paramètres administrateur.
+
+Les rôles.
+
+Les permissions.
+
+==========================================================
+TABLEAU DE BORD
+==========================================================
+
+Le tableau de bord est orienté pilotage.
+
+Cartes KPI
+
+Nombre total de tickets.
+
+Tickets critiques.
+
+Tickets en retard.
+
+Tickets réouverts.
+
+Escalades.
+
+SLA dépassés.
+
+Temps moyen de résolution.
+
+Charge totale.
+
+Performance globale.
+
+Satisfaction utilisateur.
+
+==========================================================
+GRAPHIQUES
+==========================================================
+
+Performance des services.
+
+Performance des Chefs de Service.
+
+Evolution des tickets.
+
+Evolution des SLA.
+
+Evolution des priorités.
+
+Evolution des catégories.
+
+Répartition des tickets.
+
+Charge des services.
+
+==========================================================
+ALERTES
+==========================================================
+
+Le Chef reçoit une alerte lorsque :
+
+Un service est surchargé.
+
+Un SLA est dépassé.
+
+Un Chef de Service demande son intervention.
+
+Un ticket critique est escaladé.
+
+Une panne majeure est détectée.
+
+Plusieurs tickets similaires apparaissent.
+
+==========================================================
+MENUS
+==========================================================
+
+Accueil
+
+Supervision Département
+
+Services
+
+Chefs de Service
+
+Performance
+
+Rapports
+
+Escalades
+
+SLA
+
+Recherche
+
+Notifications
+
+Mon espace personnel
+
+Profil
+
+==========================================================
+SOUS-MENUS
+==========================================================
+
+Supervision
+
+Vue globale
+
+Vue par service
+
+Vue par priorité
+
+Vue par SLA
+
+Vue des incidents majeurs
+
+Services
+
+Liste
+
+Performance
+
+Charge
+
+Historique
+
+Chefs de Service
+
+Liste
+
+Performance
+
+Répartition
+
+Historique
+
+Rapports
+
+Journalier
+
+Hebdomadaire
+
+Mensuel
+
+Annuel
+
+==========================================================
+ACTIONS AUTORISEES
+==========================================================
+
+Voir tous les tickets du département.
+
+Voir tous les services.
+
+Voir tous les Chefs de Service.
+
+Répartir les ressources.
+
+Réaffecter un ticket entre services.
+
+Valider certaines décisions.
+
+Escalader vers la Direction DSI.
+
+Consulter les KPI.
+
+Exporter les rapports.
+
+Suivre les SLA.
+
+==========================================================
+ACTIONS INTERDITES
+==========================================================
+
+Créer un utilisateur.
+
+Supprimer un utilisateur.
+
+Modifier les rôles.
+
+Modifier les permissions.
+
+Modifier le workflow global.
+
+Modifier les paramètres système.
+
+Créer une direction.
+
+Supprimer un département.
+
+Administrer la plateforme.
+
+==========================================================
+PERMISSIONS CONFIGURABLES
+==========================================================
+
+Peut réaffecter entre services.
+
+Peut modifier les priorités.
+
+Peut modifier les SLA.
+
+Peut valider les escalades.
+
+Peut clôturer exceptionnellement.
+
+Peut exporter.
+
+Peut créer des rapports.
+
+Peut consulter les statistiques avancées.
+
+Toutes ces permissions sont contrôlées uniquement par le backend.
+
+==========================================================
+EXEMPLE
+==========================================================
+
+Le Département Exploitation possède :
+
+Service Support
+
+Service Maintenance
+
+Le tableau de bord indique :
+
+Support
+
+95 tickets.
+
+Maintenance
+
+18 tickets.
+
+Le Chef constate un déséquilibre.
+
+Il décide :
+
+Répartir plusieurs tickets vers Maintenance.
+
+Les statistiques sont recalculées.
+
+Les Chefs de Service concernés sont notifiés.
+
+Toutes les décisions sont enregistrées dans l'audit.
+
+==========================================================
+REGLE ABSOLUE
+==========================================================
+
+Le Chef de Département pilote plusieurs services.
+
+Il ne remplace pas les Chefs de Service.
+
+Il intervient uniquement lorsque les décisions dépassent le niveau d'un service.
+
+Toutes ses décisions doivent être :
+
+• justifiées
+
+• auditables
+
+• sécurisées
+
+• historisées

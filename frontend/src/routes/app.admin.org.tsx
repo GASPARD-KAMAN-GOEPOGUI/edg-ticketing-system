@@ -282,7 +282,7 @@ function DepartmentNode({
         <span className="text-[10px] text-muted-foreground">{visibleUnits.length} service{visibleUnits.length !== 1 ? "s" : ""}</span>
       </button>
       {!isCollapsed && (
-        <div className="grid gap-2 px-3 py-2.5 sm:grid-cols-2">
+        <div className="space-y-2 px-3 py-2.5">
           {visibleUnits.length > 0
             ? visibleUnits.map((unit) => <UnitRow key={unit.id} unit={unit} />)
             : <p className="text-xs text-muted-foreground">Aucun service rattaché.</p>}

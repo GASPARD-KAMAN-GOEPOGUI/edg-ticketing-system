@@ -40,7 +40,9 @@ export type SessionUser = {
 export function normalizeRole(role: string | null | undefined): Role {
   const value = String(role ?? "user").trim().toLowerCase();
   if (value === "dg") return "director";
-  if (["public", "user", "agent", "chief", "director", "admin"].includes(value)) {
+  if (value === "agent") return "agent-support";
+  if (value === "chief") return "chief-service";
+  if (["public", "user", "agent-support", "chief-service", "chief-departement", "director", "admin"].includes(value)) {
     return value as Role;
   }
   return "user";
@@ -219,12 +221,13 @@ export { roleLabels };
 // Toute logique de redirection doit référencer ce mapping, jamais de chemins en dur.
 
 export const ROLE_DEFAULT_ROUTES: Record<Role, string> = {
-  public:   "/app",
-  user:     "/app",
-  agent:    "/app",
-  chief:    "/app",
-  director: "/app",
-  admin:    "/app",
+  public:              "/app",
+  user:                "/app",
+  "agent-support":     "/app",
+  "chief-service":     "/app",
+  "chief-departement": "/app",
+  director:            "/app",
+  admin:               "/app",
 };
 
 export function getDefaultRouteForRole(role: Role | string): string {

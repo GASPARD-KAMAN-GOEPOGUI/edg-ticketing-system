@@ -165,7 +165,7 @@ class EscaladeService:
             select(Account.id)
             .where(
                 Account.unity_id == unity_id,
-                Account.role == "chief",
+                Account.role.in_(("chief-service", "chief-departement")),
                 Account.account_status == "active",
                 Account.deleted_at.is_(None),
             )

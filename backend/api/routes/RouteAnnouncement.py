@@ -115,7 +115,7 @@ async def create_team_message(
 ):
     """Chef : publie un message d'équipe visible uniquement par son service (audience=unit)."""
     data = body.dict()
-    if actor.role == "chief":
+    if normalize_role(actor.role) in {"chief-service", "chief-departement"}:
         data["audience"] = "unit"
         data["announcement_status"] = "published"
         # Restreindre à son unité uniquement

@@ -1,0 +1,442 @@
+==========================================================
+ADMINISTRATEUR
+PARTIE 2
+WORKFLOW ET REGLES METIER
+==========================================================
+
+OBJECTIF
+
+L'Administrateur est responsable du fonctionnement technique et fonctionnel
+de la plateforme.
+
+Il configure le système.
+
+Il ne traite pas les tickets métier.
+
+Toutes ses actions concernent l'administration de l'application.
+
+==========================================================
+ROLE DANS LE WORKFLOW
+==========================================================
+
+L'Administrateur intervient pour :
+
+• gérer les utilisateurs
+
+• gérer les rôles
+
+• gérer les permissions
+
+• gérer les directions
+
+• gérer les départements
+
+• gérer les services
+
+• gérer les catégories
+
+• gérer les priorités
+
+• gérer les SLA
+
+• gérer les workflows
+
+• gérer les paramètres système
+
+• superviser la sécurité
+
+• superviser les journaux techniques
+
+==========================================================
+CREATION D'UN UTILISATEUR
+==========================================================
+
+Le workflow est le suivant :
+
+Créer un utilisateur
+
+↓
+
+Renseigner les informations
+
+↓
+
+Choisir le rôle
+
+↓
+
+Associer la direction
+
+↓
+
+Associer le département
+
+↓
+
+Associer le service
+
+↓
+
+Définir le statut du compte
+
+↓
+
+Enregistrer
+
+Le système :
+
+• vérifie les informations
+
+• crée le compte
+
+• attribue les permissions
+
+• enregistre l'action dans l'audit
+
+==========================================================
+MODIFICATION D'UN UTILISATEUR
+==========================================================
+
+L'Administrateur peut modifier :
+
+• nom
+
+• prénom
+
+• téléphone
+
+• email
+
+• service
+
+• département
+
+• direction
+
+• rôle
+
+• statut
+
+Toutes les modifications sont historisées.
+
+==========================================================
+DESACTIVATION D'UN UTILISATEUR
+==========================================================
+
+Avant de désactiver un compte :
+
+Le système vérifie :
+
+• si des tickets lui sont affectés
+
+• si des validations sont en attente
+
+• si des tâches sont en cours
+
+Si nécessaire, le système demande de réaffecter les éléments avant la désactivation.
+
+==========================================================
+REINITIALISATION D'UN MOT DE PASSE
+==========================================================
+
+L'Administrateur sélectionne un utilisateur.
+
+↓
+
+Clique sur :
+
+Réinitialiser le mot de passe
+
+↓
+
+Le système :
+
+• génère un mot de passe temporaire ou un lien de réinitialisation (selon la configuration)
+
+• notifie l'utilisateur
+
+• enregistre l'action dans l'audit
+
+==========================================================
+GESTION DES ROLES
+==========================================================
+
+L'Administrateur peut :
+
+• créer un rôle
+
+• modifier un rôle
+
+• désactiver un rôle
+
+• supprimer un rôle uniquement s'il n'est utilisé par aucun utilisateur
+
+Toutes les modifications sont enregistrées.
+
+==========================================================
+GESTION DES PERMISSIONS
+==========================================================
+
+Les permissions sont attribuées par rôle.
+
+Pour chaque permission :
+
+• consultation
+
+• création
+
+• modification
+
+• suppression
+
+• export
+
+• validation
+
+Toute modification prend effet immédiatement.
+
+==========================================================
+GESTION DES DIRECTIONS
+==========================================================
+
+L'Administrateur peut :
+
+Créer
+
+Modifier
+
+Désactiver
+
+Réactiver
+
+Une direction.
+
+Une direction ne peut pas être supprimée si elle contient encore des départements.
+
+==========================================================
+GESTION DES DEPARTEMENTS
+==========================================================
+
+L'Administrateur peut :
+
+Créer
+
+Modifier
+
+Désactiver
+
+Réactiver
+
+Un département.
+
+Un département ne peut pas être supprimé tant qu'il contient des services.
+
+==========================================================
+GESTION DES SERVICES
+==========================================================
+
+L'Administrateur peut :
+
+Créer
+
+Modifier
+
+Désactiver
+
+Réactiver
+
+Un service.
+
+Un service ne peut pas être supprimé tant qu'il contient des utilisateurs.
+
+==========================================================
+GESTION DES CATEGORIES
+==========================================================
+
+L'Administrateur peut :
+
+Créer
+
+Modifier
+
+Désactiver
+
+Réactiver
+
+Une catégorie.
+
+Les catégories utilisées par des tickets existants ne peuvent pas être supprimées.
+
+==========================================================
+GESTION DES PRIORITES
+==========================================================
+
+L'Administrateur configure :
+
+• le nom
+
+• la couleur
+
+• le niveau
+
+• l'ordre d'affichage
+
+Les priorités utilisées restent conservées dans l'historique.
+
+==========================================================
+GESTION DES SLA
+==========================================================
+
+L'Administrateur définit :
+
+• le délai de première réponse
+
+• le délai de résolution
+
+• les horaires de calcul
+
+• les exceptions
+
+• les niveaux d'escalade
+
+Les nouveaux paramètres s'appliquent selon les règles définies par la plateforme.
+
+==========================================================
+GESTION DU WORKFLOW
+==========================================================
+
+L'Administrateur configure :
+
+• les statuts
+
+• les transitions autorisées
+
+• les validations
+
+• les notifications
+
+• les règles automatiques
+
+Les modifications doivent être testées avant leur mise en production.
+
+==========================================================
+PARAMETRES SYSTEME
+==========================================================
+
+L'Administrateur configure :
+
+• logo
+
+• nom de l'application
+
+• langue
+
+• fuseau horaire
+
+• paramètres de messagerie
+
+• paramètres SMS
+
+• authentification
+
+• sécurité
+
+• sauvegardes
+
+==========================================================
+SECURITE
+==========================================================
+
+L'Administrateur surveille :
+
+• les connexions
+
+• les tentatives d'accès refusées
+
+• les comptes verrouillés
+
+• les journaux de sécurité
+
+• les activités suspectes
+
+==========================================================
+AUDIT
+==========================================================
+
+Toutes les actions de l'Administrateur sont enregistrées.
+
+Chaque enregistrement contient :
+
+• la date
+
+• l'heure
+
+• l'utilisateur
+
+• l'action
+
+• l'ancienne valeur
+
+• la nouvelle valeur
+
+• l'adresse IP (si disponible)
+
+• le motif lorsque requis
+
+==========================================================
+REGLES METIER
+==========================================================
+
+L'Administrateur ne doit jamais :
+
+• modifier directement le contenu métier d'un ticket
+
+• supprimer l'historique
+
+• supprimer les journaux d'audit
+
+• attribuer des permissions sans justification
+
+• contourner les règles de sécurité
+
+==========================================================
+EXEMPLE
+==========================================================
+
+Un nouveau Chef de Département est nommé.
+
+L'Administrateur :
+
+• crée son compte
+
+• lui attribue le rôle "Chef de Département"
+
+• l'associe au bon département
+
+• vérifie ses permissions
+
+• active le compte
+
+Le nouveau responsable peut immédiatement accéder à son espace.
+
+Toutes les opérations sont enregistrées automatiquement.
+
+==========================================================
+REGLE ABSOLUE
+==========================================================
+
+L'Administrateur est responsable de la configuration de la plateforme.
+
+Il garantit son bon fonctionnement.
+
+Toutes ses actions doivent être :
+
+• sécurisées
+
+• journalisées
+
+• auditables
+
+• traçables
+
+L'Administrateur ne prend jamais de décisions métier à la place des responsables opérationnels.

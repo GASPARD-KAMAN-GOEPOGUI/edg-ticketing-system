@@ -76,7 +76,7 @@ function normalizeQueueStatus(status?: string) {
 const PRIORITIES: Priority[] = ["low", "medium", "high", "critical"];
 
 export const Route = createFileRoute("/app/queue")({
-  beforeLoad: () => requireRole("agent", "chief", "admin"),
+  beforeLoad: () => requireRole("agent-support", "chief-service", "admin"),
   validateSearch: (search: Record<string, unknown>): { tab?: Tab } => ({
     ...(search.tab === "qualify" && { tab: "qualify" as const }),
   }),
@@ -153,7 +153,7 @@ function QueueTab() {
   }, [search]);
   useEffect(() => { setPage(1); }, [filterPriority, filterDirection, debouncedSearch]);
   useEffect(() => {
-    if (role === "chief" && sessionUser?.direction_id && filterDirection === "all") {
+    if (role === "chief-service" && sessionUser?.direction_id && filterDirection === "all") {
       setFilterDirection(sessionUser.direction_id);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -193,7 +193,7 @@ function QueueTab() {
 
   const { data: directionAgentsData } = useQuery({
     queryKey: ["agents-by-direction", assignDirectionId],
-    queryFn: () => fetchUsers({ role: "agent", direction_id: assignDirectionId, limit: 100 }),
+    queryFn: () => fetchUsers({ role: "agent-support", direction_id: assignDirectionId, limit: 100 }),
     enabled: !!assignDirectionId,
     staleTime: 60_000,
   });

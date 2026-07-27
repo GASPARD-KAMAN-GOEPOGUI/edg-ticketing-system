@@ -41,8 +41,16 @@ class Account(Base, BaseColumns):
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
     phone: Mapped[Optional[str]] = mapped_column(String(30), unique=True, nullable=True)
     role: Mapped[str] = mapped_column(
-        SAEnum("public", "user", "agent", "chief", "director", "dg", "admin",
-               name="role_enum"),
+        SAEnum(
+            "public",
+            "user",
+            "agent-support",
+            "chief-service",
+            "chief-departement",
+            "director",
+            "admin",
+            name="role_enum",
+        ),
         nullable=False,
         default="user",
     )

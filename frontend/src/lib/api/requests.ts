@@ -7,7 +7,7 @@
  *    pour que les composants UI n'aient pas besoin de changer
  */
 
-import { apiFetch } from "./client";
+import { apiFetch, apiFetchBlob } from "./client";
 import type {
   RequestItem,
   RequestStatus,
@@ -619,6 +619,17 @@ export async function deleteAttachment(
   });
 }
 
+export async function fetchAttachmentFile(
+  attachment: RawAttachment,
+): Promise<{ blob: Blob; filename: string; contentType?: string }> {
+  const file = await apiFetchBlob(attachment.storage_path);
+  return {
+    blob: file.blob,
+    filename: file.filename ?? attachment.filename,
+    contentType: file.contentType ?? attachment.mime_type,
+  };
+}
+
 /** Rejet d'un ticket par le chef de service — motif obligatoire. */
 export async function rejectTicket(
   id: string,
@@ -674,11 +685,6 @@ export async function requesterEditRequest(
   data: {
     title?: string;
     description?: string;
-    category?: string;
-    priority?: string;
-    direction_id?: string;
-    unit_id?: string;
-    unity_id?: string | number;
   },
 ): Promise<RequestItem> {
   const raw = await apiFetch<RawRequest>(`/requests/${id}/requester-edit`, {

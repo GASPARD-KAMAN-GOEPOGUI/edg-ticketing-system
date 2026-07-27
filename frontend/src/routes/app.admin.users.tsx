@@ -30,13 +30,13 @@ import {
 import { Label } from "@/components/ui/label";
 import { roleLabels } from "@/lib/mock-data";
 import type { Role } from "@/lib/mock-data";
-import { useState, useEffect, useMemo } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   fetchUsers,
   createUser,
   updateUser,
-  setUserRole,
   activateUser,
   deactivateUser,
   resetUserPassword,
@@ -55,6 +55,7 @@ import {
   UserCheck,
   UserX,
   Trash2,
+  Plus,
 } from "lucide-react";
 import { PaginationBar, usePagination } from "@/components/pagination-bar";
 import { cn } from "@/lib/utils";
@@ -64,7 +65,7 @@ export const Route = createFileRoute("/app/admin/users")({
   component: AdminUsers,
 });
 
-const ROLES: Role[] = ["user", "agent", "chief", "director", "admin"];
+const ROLES: Role[] = ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"];
 
 const statusBadge: Record<string, string> = {
   active: "bg-success/15 text-success",
@@ -79,8 +80,9 @@ const statusLabel: Record<string, string> = {
 
 type FormData = {
   name: string;
+  firstname: string;
   email: string;
-  role: string;
+  role: Role;
   matricule: string;
   job: string;
   direction_id: string;
@@ -92,6 +94,7 @@ type FormData = {
 
 const emptyForm = (): FormData => ({
   name: "",
+  firstname: "",
   email: "",
   role: "user",
   matricule: "",
@@ -103,37 +106,32 @@ const emptyForm = (): FormData => ({
   password: "",
 });
 
-type RoleChoice = Role | "chief_department" | "chief_service";
 type OrgTarget = "direction" | "department" | "unit";
 
-const USER_FORM_ROLE_OPTIONS: Array<{ value: RoleChoice; label: string }> = [
+const USER_FORM_ROLE_OPTIONS: Array<{ value: Role; label: string }> = [
   { value: "user", label: roleLabels.user },
-  { value: "agent", label: roleLabels.agent },
-  { value: "chief_service", label: "Chef de service" },
-  { value: "chief_department", label: "Chef de département" },
+  { value: "agent-support", label: roleLabels["agent-support"] },
+  { value: "chief-service", label: roleLabels["chief-service"] },
+  { value: "chief-departement", label: roleLabels["chief-departement"] },
   { value: "director", label: roleLabels.director },
   { value: "admin", label: roleLabels.admin },
 ];
 
-function backendRole(role: string): Role {
-  return role === "chief_department" || role === "chief_service" ? "chief" : (role as Role);
-}
-
-function orgTargetForRole(role: string): OrgTarget {
+// Niveau organisationnel requis selon BR-ADMIN-USER-ORG-001 :
+// director -> direction ; chief-departement -> departement ; les autres -> service/unite.
+function orgTargetForRole(role: Role): OrgTarget {
   if (role === "director") return "direction";
-  if (role === "chief_department") return "department";
+  if (role === "chief-departement") return "department";
   return "unit";
-}
-
-function roleChoiceFromAssignment(role: string, orgKind: OrgTarget | "none"): RoleChoice {
-  if (role === "chief") {
-    return orgKind === "department" ? "chief_department" : "chief_service";
-  }
-  return (role as RoleChoice) || "user";
 }
 
 function initials(name: string) {
   return name.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase();
+}
+
+function fullName(u?: { name: string; firstname?: string } | null): string {
+  if (!u) return "";
+  return [u.firstname, u.name].filter(Boolean).join(" ");
 }
 
 function AdminUsers() {
@@ -155,6 +153,18 @@ function AdminUsers() {
 
   // form
   const [form, setForm] = useState<FormData>(emptyForm());
+
+  // ── Action rapide flottante (visible apres scroll) ──────────────────────────
+  const pageRef = useRef<HTMLDivElement>(null);
+  const [showQuickCreate, setShowQuickCreate] = useState(false);
+
+  useEffect(() => {
+    const scrollEl = pageRef.current?.closest("main");
+    if (!scrollEl) return;
+    const handleScroll = () => setShowQuickCreate(scrollEl.scrollTop > 240);
+    scrollEl.addEventListener("scroll", handleScroll);
+    return () => scrollEl.removeEventListener("scroll", handleScroll);
+  }, []);
 
   // Debounce search
   useEffect(() => {
@@ -242,15 +252,6 @@ function AdminUsers() {
       updateUser(id, data),
     onSuccess: () => { invalidate(); setEditUser(null); toast.success("Compte mis à jour."); },
     onError: () => toast.error("Erreur lors de la mise à jour."),
-  });
-
-  const roleMut = useMutation({
-    mutationFn: ({ id, role }: { id: string; role: string }) => setUserRole(id, role),
-    onSuccess: (_u, { role }) => {
-      invalidate();
-      toast.success(`Rôle mis à jour : ${roleLabels[role as Role] ?? role}`);
-    },
-    onError: () => toast.error("Impossible de mettre à jour le rôle."),
   });
 
   const activateMut = useMutation({
@@ -353,7 +354,7 @@ function AdminUsers() {
   }
 
   function validationMessage(current: FormData, requirePassword: boolean) {
-    if (!current.name.trim()) return "Le nom complet est obligatoire.";
+    if (!current.name.trim()) return "Le nom de famille est obligatoire.";
     if (requirePassword && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(current.email.trim())) {
       return "L'adresse email est obligatoire et doit être valide.";
     }
@@ -381,8 +382,9 @@ function AdminUsers() {
     const assignment = resolveAssignment(u.unit_id, u.direction_id);
     setForm({
       name: u.name,
+      firstname: u.firstname ?? "",
       email: u.email,
-      role: roleChoiceFromAssignment(u.role, assignment.kind),
+      role: u.role as Role,
       matricule: u.matricule ?? "",
       job: u.job ?? "",
       direction_id: assignment.direction_id,
@@ -408,8 +410,9 @@ function AdminUsers() {
     createMut.mutate({
       data: {
         name: form.name.trim(),
+        firstname: form.firstname.trim() || undefined,
         email: form.email.trim(),
-        role: backendRole(form.role),
+        role: form.role,
         matricule: form.matricule || undefined,
         job: form.job || undefined,
         ...buildOrgPayload(form),
@@ -430,7 +433,8 @@ function AdminUsers() {
       id: editUser.id,
       data: {
         name: form.name.trim() || undefined,
-        role: backendRole(form.role),
+        firstname: form.firstname.trim() || undefined,
+        role: form.role,
         matricule: form.matricule || undefined,
         job: form.job || undefined,
         ...buildOrgPayload(form),
@@ -440,7 +444,7 @@ function AdminUsers() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="mx-auto max-w-7xl space-y-6">
+    <div ref={pageRef} className="mx-auto max-w-7xl space-y-6">
       {/* Header */}
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
@@ -466,7 +470,7 @@ function AdminUsers() {
         {[
           { label: "Total", value: list.length },
           { label: "Actifs", value: list.filter((u) => u.account_status === "active").length },
-          { label: "Agents", value: list.filter((u) => u.role === "agent").length },
+          { label: "Agents", value: list.filter((u) => u.role === "agent-support").length },
           { label: "Admins", value: list.filter((u) => u.role === "admin").length },
         ].map((s) => (
           <GlassCard key={s.label} className="py-4">
@@ -538,10 +542,10 @@ function AdminUsers() {
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-3">
                           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full gradient-accent text-xs font-semibold text-white">
-                            {initials(u.name)}
+                            {initials(fullName(u))}
                           </span>
                           <div>
-                            <div className="font-medium">{u.name}</div>
+                            <div className="font-medium">{fullName(u)}</div>
                             <div className="text-xs text-muted-foreground">{u.email}</div>
                             {u.matricule && (
                               <div className="text-xs text-muted-foreground font-mono">{u.matricule}</div>
@@ -560,20 +564,9 @@ function AdminUsers() {
                         {u.job && <div className="text-xs opacity-70">{u.job}</div>}
                       </td>
                       <td className="px-5 py-3.5">
-                        <Select
-                          value={u.role}
-                          onValueChange={(v) => roleMut.mutate({ id: u.id, role: v })}
-                          disabled={!isAdmin || roleMut.isPending}
-                        >
-                          <SelectTrigger className="h-8 w-40 rounded-full text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {ROLES.map((r) => (
-                              <SelectItem key={r} value={r}>{roleLabels[r]}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <span className="inline-flex h-8 w-40 items-center justify-center rounded-full bg-muted px-3 text-xs font-medium text-muted-foreground">
+                          {roleLabels[u.role as Role] ?? u.role}
+                        </span>
                       </td>
                       <td className="px-5 py-3.5">
                         <span className={cn(
@@ -696,7 +689,7 @@ function AdminUsers() {
       <Dialog open={!!editUser} onOpenChange={(o) => !o && setEditUser(null)}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Modifier — {editUser?.name}</DialogTitle>
+            <DialogTitle>Modifier — {fullName(editUser)}</DialogTitle>
           </DialogHeader>
           <UserForm
             form={form}
@@ -727,7 +720,7 @@ function AdminUsers() {
             <DialogTitle>Réinitialiser le mot de passe</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Définir un nouveau mot de passe pour <strong>{resetUser?.name}</strong>.
+            Définir un nouveau mot de passe pour <strong>{fullName(resetUser)}</strong>.
           </p>
           <div className="space-y-2">
             <Label>Nouveau mot de passe</Label>
@@ -758,7 +751,7 @@ function AdminUsers() {
           <AlertDialogHeader>
             <AlertDialogTitle>Supprimer ce compte ?</AlertDialogTitle>
             <AlertDialogDescription>
-              L'action est irréversible. Le compte de <strong>{deleteTarget?.name}</strong> sera
+              L'action est irréversible. Le compte de <strong>{fullName(deleteTarget)}</strong> sera
               définitivement supprimé.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -774,6 +767,24 @@ function AdminUsers() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* ── Action rapide flottante : Nouvel utilisateur (visible apres scroll) ── */}
+      <AnimatePresence>
+        {isAdmin && showQuickCreate && (
+          <motion.button
+            className="fixed bottom-36 right-5 z-40 md:bottom-24 md:right-6 grid h-11 w-11 place-items-center rounded-full gradient-primary text-primary-foreground shadow-lg shadow-primary/40 hover:scale-110 transition-transform duration-150"
+            initial={{ opacity: 0, scale: 0.3, y: 24 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.3, y: 24 }}
+            transition={{ type: "spring", stiffness: 380, damping: 18 }}
+            onClick={openCreate}
+            title="Nouvel utilisateur"
+            aria-label="Nouvel utilisateur"
+          >
+            <Plus className="h-5 w-5" />
+          </motion.button>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -803,7 +814,8 @@ function UserForm({
     setForm({ ...form, [key]: value });
   }
 
-  function onRoleChange(role: string) {
+  function onRoleChange(value: string) {
+    const role = value as Role;
     const nextTarget = orgTargetForRole(role);
     setForm({
       ...form,
@@ -834,8 +846,12 @@ function UserForm({
     <div className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <Label>Nom complet <span className="text-destructive">*</span></Label>
-          <Input value={form.name} onChange={(e) => field("name", e.target.value)} placeholder="Prénom Nom" />
+          <Label>Prénom</Label>
+          <Input value={form.firstname} onChange={(e) => field("firstname", e.target.value)} placeholder="Prénom" />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Nom de famille <span className="text-destructive">*</span></Label>
+          <Input value={form.name} onChange={(e) => field("name", e.target.value)} placeholder="Nom" />
         </div>
         {showEmail && (
           <div className="space-y-1.5">

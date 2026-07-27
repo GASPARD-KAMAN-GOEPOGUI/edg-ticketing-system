@@ -131,6 +131,20 @@ _ADMIN: set[Permission] = {p for p in _P}  # toutes les permissions
 
 LEGACY_ROLE_ALIASES: dict[str, str] = {
     "dg": "director",
+    "agent": "agent-support",
+    "chief": "chief-service",
+    "chief-service": "chief-service",
+    "chief-departement": "chief-departement",
+    "chief-department": "chief-departement",
+    "chief-dept": "chief-departement",
+}
+
+ROLE_GROUP_ALIASES: dict[str, set[str]] = {
+    "agent": {"agent-support"},
+    "agent-support": {"agent-support"},
+    "chief": {"chief-service", "chief-departement"},
+    "chief-service": {"chief-service"},
+    "chief-departement": {"chief-departement"},
 }
 
 
@@ -141,22 +155,24 @@ def normalize_role(role: str | None) -> str:
 
 
 ROLE_PERMISSIONS: dict[str, set[Permission]] = {
-    "public":   _PUBLIC,
-    "user":     _USER,
-    "agent":    _AGENT,
-    "chief":    _CHIEF,
-    "director": _DIRECTOR,
-    "admin":    _ADMIN,
+    "public":           _PUBLIC,
+    "user":             _USER,
+    "agent-support":    _AGENT,
+    "chief-service":    _CHIEF,
+    "chief-departement": _CHIEF,
+    "director":         _DIRECTOR,
+    "admin":            _ADMIN,
 }
 
 # Hiérarchie pour les comparaisons
 ROLE_HIERARCHY: dict[str, int] = {
-    "public":   0,
-    "user":     1,
-    "agent":    2,
-    "chief":    3,
-    "director": 4,
-    "admin":    5,
+    "public":           0,
+    "user":             1,
+    "agent-support":    2,
+    "chief-service":    3,
+    "chief-departement": 3,
+    "director":         4,
+    "admin":            5,
 }
 
 
@@ -165,9 +181,19 @@ def has_permission(role: str, permission: Permission) -> bool:
     return permission in ROLE_PERMISSIONS.get(normalize_role(role), set())
 
 
+def _expand_required_roles(*required_roles: str) -> set[str]:
+    expanded: set[str] = set()
+    for role in required_roles:
+        if role is None:
+            continue
+        raw = role.strip().lower()
+        expanded.update(ROLE_GROUP_ALIASES.get(raw, ROLE_GROUP_ALIASES.get(normalize_role(role), {normalize_role(role)})))
+    return expanded
+
+
 def has_role(current_role: str, *required_roles: str) -> bool:
     """Vérifie si le rôle actuel est dans la liste des rôles requis."""
-    allowed = {normalize_role(role) for role in required_roles if role != "dg"}
+    allowed = _expand_required_roles(*required_roles)
     return normalize_role(current_role) in allowed
 
 

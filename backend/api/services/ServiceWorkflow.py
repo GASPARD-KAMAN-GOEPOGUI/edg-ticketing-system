@@ -92,7 +92,7 @@ class WorkflowService(BaseService):
         detail_unity_id = self._to_int(getattr(detail, "unity_id", None))
         request_unity_id = await self._workflow_request_unity_id(getattr(detail, "workflow_id", None))
 
-        if role == "chief":
+        if role in {"chief-service", "chief-departement"}:
             if self._same_id(detail_unity_id, actor_unity_id) or self._same_id(request_unity_id, actor_unity_id):
                 return
 

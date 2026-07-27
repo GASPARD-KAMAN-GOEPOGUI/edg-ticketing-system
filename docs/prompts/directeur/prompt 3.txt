@@ -1,0 +1,539 @@
+==========================================================
+DIRECTION DSI
+PARTIE 3
+INTERFACES DETAILLEES
+==========================================================
+
+OBJECTIF
+
+La Direction DSI doit disposer d'interfaces de pilotage exécutif.
+
+Ces interfaces permettent de superviser toute la DSI sans intervenir
+dans le traitement quotidien des tickets.
+
+Toutes les pages doivent être simples, lisibles et orientées décision.
+
+==========================================================
+TABLEAU DE BORD EXECUTIF
+==========================================================
+
+Le Dashboard est la première page affichée après la connexion.
+
+Il présente un résumé complet de l'état de la DSI.
+
+Le Directeur doit comprendre la situation en moins de 30 secondes.
+
+==========================================================
+KPIs PRINCIPAUX
+==========================================================
+
+Le Dashboard affiche :
+
+• Nombre total de tickets
+
+• Tickets ouverts
+
+• Tickets fermés
+
+• Tickets critiques
+
+• Tickets en retard
+
+• Tickets réouverts
+
+• Incidents majeurs
+
+• Escalades
+
+• SLA respectés
+
+• SLA dépassés
+
+• Temps moyen de première réponse
+
+• Temps moyen de résolution
+
+• Satisfaction utilisateur
+
+• Disponibilité des services
+
+==========================================================
+GRAPHIQUES
+==========================================================
+
+Le Dashboard contient :
+
+• Evolution des tickets par jour
+
+• Evolution des tickets par mois
+
+• Répartition par département
+
+• Répartition par service
+
+• Répartition par priorité
+
+• Répartition par catégorie
+
+• Respect des SLA
+
+• Performance des départements
+
+• Performance des services
+
+• Evolution de la satisfaction utilisateur
+
+==========================================================
+ZONE D'ALERTES
+==========================================================
+
+Une zone affiche uniquement les événements importants.
+
+Exemples :
+
+🔴 Incident majeur
+
+🔴 Cyberattaque
+
+🔴 Panne générale
+
+🔴 Plusieurs SLA dépassés
+
+🔴 Département surchargé
+
+🔴 Service indisponible
+
+Chaque alerte permet d'ouvrir directement le dossier concerné.
+
+==========================================================
+MENU PRINCIPAL
+==========================================================
+
+Accueil
+
+Pilotage DSI
+
+Départements
+
+Services
+
+Incidents majeurs
+
+Escalades
+
+Rapports
+
+Statistiques
+
+Recherche
+
+Notifications
+
+Mon espace
+
+Profil
+
+==========================================================
+PAGE PILOTAGE DSI
+==========================================================
+
+Cette page présente une vue consolidée de toute la DSI.
+
+Elle affiche :
+
+• Tous les départements
+
+• Tous les services
+
+• Tous les tickets
+
+• Tous les SLA
+
+• Tous les incidents majeurs
+
+• Toutes les performances
+
+==========================================================
+PAGE DEPARTEMENTS
+==========================================================
+
+Chaque département est présenté sous forme de carte.
+
+Chaque carte affiche :
+
+Nom du département
+
+Chef de Département
+
+Nombre de services
+
+Nombre de tickets
+
+Tickets critiques
+
+Tickets en retard
+
+Incidents majeurs
+
+Performance
+
+Respect des SLA
+
+Bouton :
+
+Voir le détail
+
+==========================================================
+DETAIL D'UN DEPARTEMENT
+==========================================================
+
+Cette page affiche :
+
+Informations générales
+
+Chef responsable
+
+Liste des services
+
+Nombre d'Agents
+
+Nombre de tickets
+
+Performance globale
+
+Historique
+
+Incidents majeurs
+
+Escalades
+
+Rapports
+
+==========================================================
+PAGE SERVICES
+==========================================================
+
+Chaque service possède une fiche.
+
+Elle contient :
+
+Nom
+
+Département
+
+Chef de Service
+
+Nombre de tickets
+
+Charge actuelle
+
+Performance
+
+Respect des SLA
+
+Temps moyen de résolution
+
+Bouton :
+
+Voir le détail
+
+==========================================================
+DETAIL D'UN SERVICE
+==========================================================
+
+Le Directeur peut consulter :
+
+Informations générales
+
+Chef de Service
+
+Equipe
+
+Tickets
+
+Statistiques
+
+Historique
+
+Performance
+
+Réouvertures
+
+Escalades
+
+==========================================================
+PAGE INCIDENTS MAJEURS
+==========================================================
+
+Cette page regroupe tous les incidents majeurs.
+
+Colonnes :
+
+Numéro
+
+Titre
+
+Date
+
+Départements concernés
+
+Responsable
+
+Priorité
+
+Statut
+
+Impact
+
+Actions
+
+Le Directeur peut :
+
+• consulter
+
+• suivre
+
+• clôturer officiellement
+
+==========================================================
+PAGE ESCALADES
+==========================================================
+
+Cette page affiche toutes les escalades.
+
+Colonnes :
+
+Ticket
+
+Département
+
+Service
+
+Motif
+
+Niveau
+
+Responsable
+
+Date
+
+Décision
+
+==========================================================
+PAGE RAPPORTS
+==========================================================
+
+La Direction DSI peut consulter :
+
+Rapport journalier
+
+Rapport hebdomadaire
+
+Rapport mensuel
+
+Rapport annuel
+
+Rapport SLA
+
+Rapport des départements
+
+Rapport des services
+
+Rapport des incidents majeurs
+
+Rapport des performances
+
+Tous les rapports sont exportables.
+
+==========================================================
+PAGE STATISTIQUES
+==========================================================
+
+Cette page regroupe tous les indicateurs.
+
+Exemples :
+
+Evolution des tickets
+
+Evolution des SLA
+
+Evolution des incidents
+
+Performance annuelle
+
+Performance mensuelle
+
+Comparaison entre départements
+
+Comparaison entre services
+
+==========================================================
+RECHERCHE GLOBALE
+==========================================================
+
+La recherche permet de retrouver :
+
+Ticket
+
+Utilisateur
+
+Agent
+
+Chef de Service
+
+Chef de Département
+
+Département
+
+Service
+
+Catégorie
+
+Priorité
+
+Statut
+
+Incident majeur
+
+Tous les filtres sont combinables.
+
+==========================================================
+NOTIFICATIONS
+==========================================================
+
+Le centre de notifications affiche :
+
+Incident majeur
+
+Escalade
+
+SLA critique
+
+Panne générale
+
+Cyberattaque
+
+Dérogation exceptionnelle
+
+Chaque notification permet d'ouvrir directement le dossier.
+
+==========================================================
+FORMULAIRES
+==========================================================
+
+La Direction DSI dispose des formulaires suivants :
+
+Validation d'une escalade
+
+Création d'un incident majeur
+
+Réaffectation inter-départements
+
+Ajout d'un commentaire stratégique
+
+Export d'un rapport
+
+Validation d'une dérogation SLA
+
+Chaque formulaire contient :
+
+Contrôle des données
+
+Validation
+
+Annulation
+
+Message de confirmation
+
+==========================================================
+MODALES
+==========================================================
+
+Avant chaque action importante :
+
+Le système demande une confirmation.
+
+Exemples :
+
+Confirmer l'escalade ?
+
+Créer un incident majeur ?
+
+Valider cette dérogation ?
+
+Clôturer officiellement l'incident ?
+
+Exporter ce rapport ?
+
+==========================================================
+ETATS VIDES
+==========================================================
+
+Chaque page prévoit un affichage lorsqu'aucune donnée n'est disponible.
+
+Exemples :
+
+Aucun incident majeur.
+
+Aucune escalade.
+
+Aucun rapport.
+
+Aucune alerte.
+
+==========================================================
+MESSAGES D'ERREUR
+==========================================================
+
+Les messages doivent être simples.
+
+Exemples :
+
+Impossible de charger les données.
+
+Accès refusé.
+
+Une erreur est survenue.
+
+Veuillez réessayer.
+
+==========================================================
+REGLES UX
+==========================================================
+
+Les informations les plus importantes apparaissent en premier.
+
+Le Directeur ne doit jamais rechercher longtemps une information critique.
+
+Tous les tableaux permettent :
+
+• tri
+
+• filtres
+
+• recherche instantanée
+
+• export
+
+• pagination
+
+Les graphiques doivent être interactifs.
+
+Chaque carte KPI ouvre une vue détaillée.
+
+==========================================================
+REGLE ABSOLUE
+==========================================================
+
+Toutes les interfaces de la Direction DSI doivent permettre de piloter
+l'ensemble de la DSI depuis un seul espace.
+
+Le Directeur supervise.
+
+Il analyse.
+
+Il décide.
+
+Il ne réalise jamais le traitement opérationnel des tickets.
+
+Le frontend n'affiche que les actions autorisées par le backend.

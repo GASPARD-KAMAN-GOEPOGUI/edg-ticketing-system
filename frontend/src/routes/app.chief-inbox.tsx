@@ -1,6 +1,7 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouterState } from "@tanstack/react-router";
 import { requireRole } from "@/lib/auth-guard";
 import { useUser } from "@/lib/session";
+import { ticketDetailRouteForList, type TicketDetailRoute } from "@/lib/ticket-navigation";
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
@@ -58,7 +59,7 @@ import { AsyncSwap } from "@/components/async-states";
 import type { RequestItem } from "@/lib/mock-data";
 
 export const Route = createFileRoute("/app/chief-inbox")({
-  beforeLoad: () => requireRole("chief", "admin"),
+  beforeLoad: () => requireRole("chief-service", "admin"),
   head: () => ({ meta: [{ title: "Boîte de traitement — EDG Support" }] }),
   component: ChiefInbox,
 });
@@ -93,6 +94,7 @@ function isEscalated(r: RequestItem): boolean {
 
 function TicketRow({
   r,
+  detailRoute,
   onAssign,
   onReassign,
   onReject,
@@ -101,6 +103,7 @@ function TicketRow({
   onReturnDirector,
 }: {
   r: RequestItem;
+  detailRoute: TicketDetailRoute;
   onAssign: () => void;
   onReassign: () => void;
   onReject: () => void;
@@ -130,7 +133,7 @@ function TicketRow({
       <div className="min-w-0 flex-1 space-y-1.5">
         <div className="flex flex-wrap items-center gap-2">
           <Link
-            to="/app/chief-inbox/tickets/$id"
+            to={detailRoute}
             params={{ id: r.id }}
             className="font-mono text-[11px] text-primary hover:underline"
           >
@@ -150,7 +153,7 @@ function TicketRow({
           )}
         </div>
         <Link
-          to="/app/chief-inbox/tickets/$id"
+          to={detailRoute}
           params={{ id: r.id }}
           className="block font-semibold leading-snug hover:text-primary"
         >
@@ -215,17 +218,26 @@ function TicketRow({
 }
 
 // ── Composant principal ────────────────────────────────────────────────────────
+// Partagé par /app/chief-inbox (chief-service) et /app/department-inbox
+// (chief-departement) : deux espaces distincts avec leur propre route, guard de
+// rôle et navigation ticket, mais la même interface — seul le périmètre de
+// données change (service unique vs département entier).
 
-function ChiefInbox() {
+export function ChiefInbox() {
   const sessionUser = useUser();
   const queryClient = useQueryClient();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const isDepartmentSpace = pathname.startsWith("/app/department-inbox");
+  const spaceKey = isDepartmentSpace ? "department-inbox" : "chief-inbox";
+  const listRoute = isDepartmentSpace ? "/app/department-inbox" : "/app/chief-inbox";
+  const detailRoute = ticketDetailRouteForList(listRoute);
 
   const [activeTab, setActiveTab] = useState<Tab>("assign");
   const [modal, setModal] = useState<ModalState>({ type: null, ticket: null });
 
   // ── Données service ──────────────────────────────────────────────────────────
   const { data: queueData, isLoading, isError } = useQuery({
-    queryKey: ["chief-inbox", sessionUser?.id, sessionUser?.unit_id],
+    queryKey: [spaceKey, sessionUser?.id, sessionUser?.unit_id],
     queryFn: () => fetchQueue({
       limit: 200,
       ...(sessionUser?.unit_id ? { unit_id: sessionUser.unit_id } : {}),
@@ -248,10 +260,19 @@ function ChiefInbox() {
   const listState: "loading" | "empty" | "ready" = isLoading
     ? "loading" : isError || displayed.length === 0 ? "empty" : "ready";
 
-  // ── Agents du service (pour M1) ──────────────────────────────────────────────
+  // ── Agents du service (pour M1) ───────────────────────────────────────────────
+  // Dans l'espace département, la liste des agents assignables couvre tout le
+  // département (direction_id => élargi via l'organigramme) ; dans l'espace
+  // service, elle reste bornée à l'unité exacte du chef.
   const { data: agentsData } = useQuery({
-    queryKey: ["service-agents", sessionUser?.unit_id],
-    queryFn: () => fetchUsers({ role: "agent", unit_id: sessionUser!.unit_id!, limit: 100 }),
+    queryKey: ["service-agents", spaceKey, sessionUser?.unit_id],
+    queryFn: () => fetchUsers({
+      role: "agent-support",
+      ...(isDepartmentSpace
+        ? { direction_id: sessionUser!.unit_id! }
+        : { unit_id: sessionUser!.unit_id! }),
+      limit: 100,
+    }),
     staleTime: 120_000,
     enabled: !!sessionUser?.unit_id,
   });
@@ -289,7 +310,7 @@ function ChiefInbox() {
   };
 
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ["chief-inbox"] });
+    queryClient.invalidateQueries({ queryKey: [spaceKey] });
     queryClient.invalidateQueries({ queryKey: ["queue"] });
     queryClient.invalidateQueries({ queryKey: ["requests"] });
     queryClient.invalidateQueries({ queryKey: ["my-tickets"] });
@@ -308,7 +329,7 @@ function ChiefInbox() {
 
   // ── M2 — Réaffecter service ───────────────────────────────────────────────────
   const reassignMut = useMutation({
-    mutationFn: () => reassignService(modal.ticket!.id, reassignUnitId, reassignReason || undefined),
+    mutationFn: () => reassignService(modal.ticket!.id, reassignUnitId, reassignReason.trim()),
     onSuccess: () => { toast.success("Ticket réaffecté au nouveau service"); invalidate(); closeModal(); },
     onError: () => toast.error("Erreur lors de la réaffectation"),
   });
@@ -340,7 +361,7 @@ function ChiefInbox() {
       modal.ticket!.id,
       {
         level: "L3",
-        reason: returnReason || "Renvoyé au directeur pour arbitrage.",
+        reason: returnReason.trim(),
         from_agent_name: sessionUser?.name ?? "Chef de service",
       },
       sessionUser?.id,
@@ -352,10 +373,11 @@ function ChiefInbox() {
   const openModal = (type: ModalType, ticket: RequestItem) =>
     setModal({ type, ticket });
 
+  const scopeLabel = isDepartmentSpace ? "département" : "service";
   const emptyMessages: Record<Tab, string> = {
     assign:   "Aucun ticket en attente d'affectation.",
     reopen:   "Aucune demande de réouverture en attente.",
-    escalated:"Aucune escalade reçue pour votre service.",
+    escalated:`Aucune escalade reçue pour votre ${scopeLabel}.`,
   };
 
   return (
@@ -369,10 +391,12 @@ function ChiefInbox() {
       >
         <div className="flex items-center gap-2">
           <ClipboardList className="h-6 w-6 text-primary" />
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Boîte de traitement</h1>
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+            {isDepartmentSpace ? "Boîte de traitement — Département" : "Boîte de traitement"}
+          </h1>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          Tickets de votre service nécessitant une action de votre part.
+          Tickets de votre {scopeLabel} nécessitant une action de votre part.
         </p>
       </motion.header>
 
@@ -486,6 +510,7 @@ function ChiefInbox() {
                 <TicketRow
                   key={r.id}
                   r={r}
+                  detailRoute={detailRoute}
                   onAssign={() => openModal("assign", r)}
                   onReassign={() => openModal("reassign", r)}
                   onReject={() => openModal("reject", r)}
@@ -578,7 +603,7 @@ function ChiefInbox() {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Motif</Label>
+              <Label>Motif <span className="text-destructive">*</span></Label>
               <Textarea
                 className="resize-none"
                 rows={3}
@@ -592,7 +617,7 @@ function ChiefInbox() {
             <Button variant="ghost" className="rounded-full" onClick={closeModal}>Annuler</Button>
             <Button
               className="rounded-full gradient-primary"
-              disabled={!reassignUnitId || reassignMut.isPending}
+              disabled={!reassignUnitId || !reassignReason.trim() || reassignMut.isPending}
               onClick={() => reassignMut.mutate()}
             >
               {reassignMut.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
@@ -722,7 +747,7 @@ function ChiefInbox() {
             </div>
           )}
           <div className="space-y-1.5">
-            <Label>Motif du renvoi</Label>
+            <Label>Motif du renvoi <span className="text-destructive">*</span></Label>
             <Textarea
               className="resize-none"
               rows={3}
@@ -736,7 +761,7 @@ function ChiefInbox() {
             <Button
               className="rounded-full border-warning/40 text-warning hover:bg-warning/10"
               variant="outline"
-              disabled={returnDirectorMut.isPending}
+              disabled={!returnReason.trim() || returnDirectorMut.isPending}
               onClick={() => returnDirectorMut.mutate()}
             >
               {returnDirectorMut.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}

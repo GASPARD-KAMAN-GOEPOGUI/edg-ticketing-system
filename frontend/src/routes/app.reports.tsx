@@ -54,7 +54,7 @@ import {
 } from "recharts";
 
 export const Route = createFileRoute("/app/reports")({
-  beforeLoad: () => requireRole("chief", "director", "admin"),
+  beforeLoad: () => requireRole("chief-service", "chief-departement", "director", "admin"),
   head: () => ({ meta: [{ title: "Rapports — EDG Support" }] }),
   component: ReportsPage,
 });
@@ -279,7 +279,7 @@ function ReportsPage() {
 
   const roleLabel =
     role === "director" ? "Direction"
-    : role === "chief" ? "Service"
+    : role === "chief-service" || role === "chief-departement" ? "Service"
     : "Globaux";
 
   return (

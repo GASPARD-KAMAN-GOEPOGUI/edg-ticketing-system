@@ -1,0 +1,720 @@
+=====================================================================
+REFERENTIEL OFFICIEL DES ROLES
+ROLE N°2 : AGENT SUPPORT
+PARTIE 3
+INTERFACES UTILISATEUR
+VERSION OFFICIELLE
+=====================================================================
+
+OBJECTIF
+
+Toutes les interfaces de l'Agent Support doivent être orientées vers
+l'efficacité opérationnelle.
+
+L'Agent traite plusieurs dizaines de tickets par jour.
+
+Chaque clic inutile doit être supprimé.
+
+Toutes les interfaces doivent être rapides.
+
+Toutes les informations importantes doivent être visibles immédiatement.
+
+=====================================================================
+TABLEAU DE BORD
+=====================================================================
+
+Objectif
+
+Donner immédiatement une vue globale de l'activité.
+
+Disposition
+
+----------------------------------------
+HEADER
+----------------------------------------
+
+Bonjour [Nom Agent]
+
+Date
+
+Recherche globale
+
+Notifications
+
+Profil
+
+----------------------------------------
+CARTES KPI
+----------------------------------------
+
+Mes tickets actifs
+
+Tickets à qualifier
+
+En attente utilisateur
+
+En attente interne
+
+Tickets critiques
+
+Tickets SLA dépassés
+
+Résolus aujourd'hui
+
+Réouverts
+
+----------------------------------------
+GRAPHIQUES
+----------------------------------------
+
+Répartition des statuts
+
+Répartition des catégories
+
+Répartition des priorités
+
+Evolution des tickets
+
+Temps moyen de résolution
+
+----------------------------------------
+ACTIVITE RECENTE
+----------------------------------------
+
+Derniers tickets
+
+Derniers commentaires
+
+Dernières affectations
+
+Dernières notifications
+
+=====================================================================
+MENU MON TRAVAIL
+=====================================================================
+
+Objectif
+
+Regrouper uniquement les tickets sur lesquels l'Agent travaille.
+
+Sous-menus
+
+A prendre
+
+En cours
+
+En attente utilisateur
+
+En attente interne
+
+Résolus
+
+Réouverts
+
+Chaque sous-menu affiche :
+
+Nombre
+
+Badge couleur
+
+Temps moyen
+
+=====================================================================
+LISTE DES TICKETS
+=====================================================================
+
+Modes d'affichage
+
+Vue Tableau
+
+Vue Cartes
+
+La dernière vue utilisée est mémorisée.
+
+Colonnes
+
+Numéro
+
+Titre
+
+Utilisateur
+
+Catégorie
+
+Priorité
+
+Statut
+
+Service
+
+Agent
+
+Date création
+
+SLA
+
+Dernière mise à jour
+
+Actions
+
+=====================================================================
+FILTRES
+=====================================================================
+
+Recherche texte
+
+Priorité
+
+Statut
+
+Catégorie
+
+Sous-catégorie
+
+Service
+
+Direction
+
+Agent
+
+Créateur
+
+Date début
+
+Date fin
+
+SLA
+
+Urgence
+
+Criticité
+
+Tags
+
+Tous les filtres peuvent être combinés.
+
+=====================================================================
+TRI
+=====================================================================
+
+Date
+
+Priorité
+
+SLA
+
+Dernière activité
+
+Titre
+
+Numéro
+
+Créateur
+
+=====================================================================
+ACTIONS RAPIDES
+=====================================================================
+
+Depuis la liste
+
+Ouvrir
+
+Prendre
+
+Affecter
+
+Transférer
+
+Escalader
+
+Ajouter commentaire
+
+Résoudre
+
+Réouvrir
+
+Toutes ces actions sont soumises aux permissions.
+
+=====================================================================
+DETAIL D'UN TICKET
+=====================================================================
+
+Disposition
+
+----------------------------------------------------
+
+HEADER
+
+Numéro
+
+Titre
+
+Statut
+
+Priorité
+
+Badges SLA
+
+Actions rapides
+
+----------------------------------------------------
+
+ONGLETS
+
+Résumé
+
+Historique
+
+Commentaires
+
+Pièces jointes
+
+Journal
+
+Audit
+
+Tâches
+
+Sous-tâches
+
+Base de connaissances liée
+
+----------------------------------------------------
+
+SIDEBAR
+
+Utilisateur
+
+Téléphone
+
+Email
+
+Service
+
+Direction
+
+Catégorie
+
+Sous-catégorie
+
+Priorité
+
+Criticité
+
+Agent
+
+Dates
+
+SLA
+
+=====================================================================
+ZONE RESUME
+=====================================================================
+
+Titre
+
+Description
+
+Informations utilisateur
+
+Résumé qualification
+
+Résumé résolution
+
+=====================================================================
+COMMENTAIRES
+=====================================================================
+
+Deux types
+
+Commentaires publics
+
+Commentaires internes
+
+Les commentaires internes
+
+ne sont jamais visibles
+
+par l'utilisateur.
+
+Fonctions
+
+Ajouter
+
+Modifier
+
+Répondre
+
+Joindre un fichier
+
+Mentionner un collègue
+
+=====================================================================
+PIECES JOINTES
+=====================================================================
+
+Fonctions
+
+Télécharger
+
+Prévisualiser
+
+Ajouter
+
+Supprimer
+
+Historique des versions
+
+Formats autorisés
+
+Images
+
+PDF
+
+Office
+
+Archives
+
+=====================================================================
+HISTORIQUE
+=====================================================================
+
+Chronologie complète
+
+Création
+
+Qualification
+
+Affectation
+
+Transfert
+
+Escalade
+
+Commentaires
+
+Réponses
+
+Résolution
+
+Validation
+
+Clôture
+
+Chaque événement contient
+
+Date
+
+Heure
+
+Auteur
+
+Description
+
+=====================================================================
+JOURNAL
+=====================================================================
+
+Réservé aux Agents
+
+Actions système
+
+API
+
+Automatisations
+
+Notifications
+
+Déclencheurs
+
+=====================================================================
+AUDIT
+=====================================================================
+
+Historique sécurisé
+
+Aucune modification possible.
+
+Chaque ligne contient
+
+Qui
+
+Quand
+
+Quoi
+
+Ancienne valeur
+
+Nouvelle valeur
+
+Adresse IP
+
+=====================================================================
+TACHES
+=====================================================================
+
+Fonctions
+
+Créer
+
+Modifier
+
+Terminer
+
+Annuler
+
+Prioriser
+
+Chaque tâche possède
+
+Responsable
+
+Date
+
+Statut
+
+Description
+
+=====================================================================
+SOUS-TACHES
+=====================================================================
+
+Une tâche
+
+peut contenir
+
+plusieurs sous-tâches.
+
+Progression automatique
+
+0 %
+
+25 %
+
+50 %
+
+75 %
+
+100 %
+
+=====================================================================
+FORMULAIRE QUALIFICATION
+=====================================================================
+
+Champs
+
+Catégorie
+
+Sous-catégorie
+
+Priorité
+
+Criticité
+
+Service
+
+Direction
+
+Résumé qualification
+
+Tags
+
+Boutons
+
+Valider
+
+Annuler
+
+Demander informations
+
+=====================================================================
+FORMULAIRE AFFECTATION
+=====================================================================
+
+Agent
+
+Service
+
+Motif
+
+Commentaires
+
+Boutons
+
+Affecter
+
+Annuler
+
+=====================================================================
+FORMULAIRE TRANSFERT
+=====================================================================
+
+Service destination
+
+Département
+
+Direction
+
+Motif obligatoire
+
+Commentaires
+
+Boutons
+
+Transférer
+
+Annuler
+
+=====================================================================
+FORMULAIRE ESCALADE
+=====================================================================
+
+Niveau
+
+Destinataire
+
+Motif
+
+Commentaires
+
+Boutons
+
+Escalader
+
+Annuler
+
+=====================================================================
+FORMULAIRE RESOLUTION
+=====================================================================
+
+Résumé
+
+Cause
+
+Solution
+
+Temps passé
+
+Code résolution
+
+Pièces jointes
+
+Boutons
+
+Résoudre
+
+Enregistrer brouillon
+
+Annuler
+
+Le bouton Résoudre reste désactivé tant que les champs obligatoires
+ne sont pas renseignés.
+
+=====================================================================
+MODALES
+=====================================================================
+
+Confirmation suppression commentaire
+
+Confirmation transfert
+
+Confirmation escalade
+
+Confirmation affectation
+
+Confirmation résolution
+
+Confirmation clôture
+
+Confirmation changement priorité
+
+Confirmation changement SLA
+
+Toutes les modales doivent afficher
+
+Titre
+
+Message
+
+Conséquences
+
+Bouton principal
+
+Bouton Annuler
+
+=====================================================================
+ETATS VIDES
+=====================================================================
+
+Aucun ticket
+
+Aucune notification
+
+Aucune pièce jointe
+
+Aucun commentaire
+
+Chaque état vide doit proposer
+
+une action.
+
+Exemple
+
+Créer une demande
+
+Retour à la liste
+
+Actualiser
+
+=====================================================================
+MESSAGES D'ERREUR
+=====================================================================
+
+Erreur réseau
+
+Erreur permission
+
+Erreur validation
+
+Erreur serveur
+
+Erreur SLA
+
+Les messages doivent être compréhensibles.
+
+Jamais de message technique.
+
+=====================================================================
+RACCOURCIS
+=====================================================================
+
+Double clic
+
+ouvre un ticket.
+
+Ctrl + F
+
+Recherche.
+
+Ctrl + Enter
+
+Enregistrer commentaire.
+
+Ctrl + Shift + A
+
+Affectation rapide.
+
+=====================================================================
+REGLE ABSOLUE
+=====================================================================
+
+Toutes les interfaces doivent permettre à l'Agent Support de traiter
+un ticket avec un minimum de clics.
+
+Les informations critiques doivent toujours être visibles.
+
+Les actions doivent toujours être sécurisées par les permissions
+retournées par le backend.
+
+Le frontend ne doit jamais afficher une action que l'Agent n'est pas
+autorisé à exécuter.
