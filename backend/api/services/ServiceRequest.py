@@ -204,6 +204,10 @@ class RequestService(BaseService):
         return {k: v for k, v in infos.items() if v is not None}
 
     @staticmethod
+    def _same_account(left: Any, right: Any) -> bool:
+        return left is not None and right is not None and str(left) == str(right)
+
+    @staticmethod
     def _reference_part(value: str | None, fallback: str) -> str:
         raw = value or fallback
         ascii_value = unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode("ascii")
@@ -238,7 +242,45 @@ class RequestService(BaseService):
         )
         return row.scalar_one_or_none()
 
-    async def _requester_ref_unities(self, data: dict) -> tuple[Unity | None, Unity | None]:
+    async def _org_chain_for_unity(self, unity_id: int) -> list[Unity]:
+        """Chaîne organigramme feuille→racine (ex : Service, Département, Direction)."""
+        from api.models.ModelOrganigram import Organigram
+
+        row = await self.session.execute(
+            select(Organigram)
+            .where(Organigram.unity_id == unity_id)
+            .where(Organigram.deleted_at.is_(None))
+            .limit(1)
+        )
+        node = row.scalar_one_or_none()
+        if node is None:
+            unity = await self._ref_unity_by_id(unity_id)
+            return [unity] if unity else []
+
+        chain: list[Unity] = []
+        visited: set[int] = set()
+        while node is not None and node.unity_id not in visited:
+            visited.add(node.unity_id)
+            chain.append(node.unity)
+            if node.parent_id is None:
+                break
+            parent_row = await self.session.execute(
+                select(Organigram)
+                .where(Organigram.id == node.parent_id)
+                .where(Organigram.deleted_at.is_(None))
+                .limit(1)
+            )
+            node = parent_row.scalar_one_or_none()
+        return chain
+
+    async def _requester_ref_hierarchy(self, data: dict) -> tuple[Unity | None, Unity | None, Unity | None]:
+        """Retourne (direction, departement, service) via l'organigramme du demandeur.
+
+        Formule de référence métier : direction du demandeur / département du
+        demandeur / service du demandeur. Quand un niveau intermédiaire n'existe
+        pas dans l'organigramme (ex : direction sans département dédié), le
+        département reprend la direction.
+        """
         requester_unity: Unity | None = None
         requester_id = data.get("requester_id")
         if requester_id is not None:
@@ -255,25 +297,37 @@ class RequestService(BaseService):
                 )
                 requester_unity = await self._ref_unity_by_id(row.scalar_one_or_none())
 
-        unit = (
+        base_unit = (
             requester_unity
             or await self._ref_unity_by_id(data.get("on_behalf_unity_id"))
             or await self._ref_unity_by_id(data.get("unity_id"))
             or await self._ref_unity_by_id(data.get("direction_id"))
         )
-        direction = await self._ref_unity_by_id(unit.parent_direction_id) if unit and unit.parent_direction_id else unit
-        return direction, unit
+        if base_unit is None:
+            return None, None, None
+
+        chain = await self._org_chain_for_unity(base_unit.id)
+        if not chain:
+            chain = [base_unit]
+
+        service = chain[0]
+        direction = chain[-1]
+        departement = chain[1] if len(chain) >= 3 else None
+        return direction, departement, service
 
     async def _build_reference_base(self, data: dict, submitted_at: datetime) -> str:
-        direction, unit = await self._requester_ref_unities(data)
+        direction, departement, service = await self._requester_ref_hierarchy(data)
         direction_code = self._reference_part(self._unity_ref_source(direction), "GEN")
-        unit_code = self._reference_part(self._unity_ref_source(unit, prefer_tail=True), "UNK")
+        departement_code = self._reference_part(
+            self._unity_ref_source(departement, prefer_tail=True), direction_code
+        )
+        service_code = self._reference_part(self._unity_ref_source(service, prefer_tail=True), "UNK")
         stamp = (
             f"{submitted_at:%H%M%S}"
             f"{submitted_at.year % 1000:03d}"
             f"{submitted_at:%m%d}"
         )
-        return f"{direction_code}-{unit_code}-{stamp}"
+        return f"{direction_code}-{departement_code}-{service_code}-{stamp}"
 
     async def _direction_unity_ids(self, direction_id: int | str | None) -> set[int]:
         """Retourne la direction et ses services via organigramme + parent_direction_id."""
@@ -991,6 +1045,7 @@ class RequestService(BaseService):
         status_code = normalize_status(raw_status) if raw_status else None
         if raw_status and status_code != raw_status:
             data = {**data, "request_status": status_code}
+        status_reason = data.pop("status_reason", None)
         current = await self.repo.get_by_id(id)
 
         # Validation stricte de la matrice : les routes dediees portent les exceptions metier.
@@ -1012,7 +1067,10 @@ class RequestService(BaseService):
             )
         if status_code:
             event_type = _STATUS_EVENT_MAP.get(status_code, "status_changed")
-            event_label = _STATUS_LABEL_MAP.get(status_code, f"Statut → {status_code}")
+            if status_code == "pending" and status_reason == "info_request":
+                event_label = "Informations complémentaires demandées"
+            else:
+                event_label = _STATUS_LABEL_MAP.get(status_code, f"Statut → {status_code}")
             wf_id = await self._get_or_create_workflow(int(id))
             await self.detail_repo.create_event({
                 "workflow_id": wf_id,
@@ -1081,9 +1139,15 @@ class RequestService(BaseService):
             ))
         return obj
 
+    _REQUESTER_EDIT_STATUSES = ("new", "qualifying")
+
     async def requester_edit(self, id: str, data: dict, *, actor_id: str, actor_role: str = "user"):
         """Modification personnelle d'un ticket par son demandeur.
-        Autorisé uniquement si request_status == 'new' (aucun acteur n'a encore agi).
+        Autorisé uniquement si request_status in ('new', 'qualifying') — dès que le
+        ticket est qualifié/assigné/traité, le contenu d'origine est verrouillé pour
+        préserver la traçabilité du workflow ; toute information complémentaire passe
+        par les commentaires/réponses/pièces jointes. Un ticket réouvert (reopened)
+        reste verrouillé : ce n'est volontairement pas un statut autorisé ici.
         Seuls le titre et la description sont modifiables depuis l'espace personnel.
         """
         from fastapi import HTTPException as _HTTP
@@ -1095,7 +1159,7 @@ class RequestService(BaseService):
         if str(req.requester_id) != str(actor_id):
             raise _HTTP(status_code=403, detail="Seul le demandeur peut modifier ce ticket.")
 
-        if req.request_status != "new":
+        if req.request_status not in self._REQUESTER_EDIT_STATUSES:
             raise _HTTP(
                 status_code=422,
                 detail="Ce ticket ne peut plus être modifié — un acteur est déjà intervenu.",
@@ -1300,6 +1364,17 @@ class RequestService(BaseService):
                 "new_status": "closed",
             }),
         })
+        if obj.requester_id:
+            await emit_notif(
+                self.session,
+                recipient_id=str(obj.requester_id),
+                title="Demande clôturée",
+                body=f"Votre demande {obj.ref} est clôturée.",
+                type="success",
+                request_id=id,
+                action_label="Voir la demande",
+                action_url=f"/app/requests/{id}",
+            )
         await emit_event(AppEvent(type="request.closed", payload={"id": id}, target={"roles": "all"}))
         return obj
 
@@ -1550,6 +1625,35 @@ class RequestService(BaseService):
                 action_url=f"/app/requests/{id}",
             )
 
+        next_handler_id = getattr(obj, "assignee_id", None)
+        if next_handler_id and not self._same_account(next_handler_id, obj.requester_id):
+            await emit_notif(
+                self.session,
+                recipient_id=str(next_handler_id),
+                title="Demande réouverte",
+                body=f"La demande {obj.ref} a été réouverte et nécessite une reprise de traitement.",
+                type="warning",
+                request_id=id,
+                action_label="Voir la demande",
+                action_url=f"/app/requests/{id}",
+            )
+        elif obj.unity_id:
+            from api.repositories.RepositoryAccount import AccountRepository
+
+            acc_repo = AccountRepository(self.session)
+            chief = await acc_repo.find_chief_for_unity(obj.unity_id)
+            if chief and not self._same_account(chief.id, obj.requester_id):
+                await emit_notif(
+                    self.session,
+                    recipient_id=str(chief.id),
+                    title="Demande réouverte",
+                    body=f"La demande {obj.ref} a été réouverte et doit être réorientée.",
+                    type="warning",
+                    request_id=id,
+                    action_label="Voir la demande",
+                    action_url=f"/app/requests/{id}",
+                )
+
         await emit_event(AppEvent(type="request.reopened", payload={"id": id}, target={"roles": "all"}))
         fresh = await self.repo.get_by_id(int(id))
         return fresh if fresh else updated
@@ -1684,6 +1788,28 @@ class RequestService(BaseService):
                 "reason": clean_reason,
             }),
         })
+        if obj.requester_id:
+            await emit_notif(
+                self.session,
+                recipient_id=str(obj.requester_id),
+                title="Demande annulée",
+                body=f"Votre demande {obj.ref} a été annulée : {clean_reason}",
+                type="warning",
+                request_id=id,
+                action_label="Voir la demande",
+                action_url=f"/app/requests/{id}",
+            )
+        if obj.assignee_id and not self._same_account(obj.assignee_id, obj.requester_id):
+            await emit_notif(
+                self.session,
+                recipient_id=str(obj.assignee_id),
+                title="Demande annulée",
+                body=f"La demande {obj.ref} qui vous était assignée a été annulée : {clean_reason}",
+                type="warning",
+                request_id=id,
+                action_label="Voir la demande",
+                action_url=f"/app/requests/{id}",
+            )
         await emit_event(AppEvent(type="request.cancelled", payload={"id": id}, target={"roles": "all"}))
         return obj
 

@@ -394,14 +394,18 @@ class ReportService(BaseService):
                         ) AS reopen_reasons
                     FROM workflow_detail wd
                     JOIN workflow w ON w.id = wd.workflow_id AND w.deleted_at IS NULL
+                    JOIN request rf ON rf.id = w.request_id AND rf.deleted_at IS NULL
+                        AND DATE(rf.created_at) BETWEEN :start AND :end
                     WHERE wd.deleted_at IS NULL
                     GROUP BY w.request_id
                 ) evt ON evt.request_id = r.id
                 LEFT JOIN (
-                    SELECT request_id, COUNT(*) AS attachment_count
-                    FROM attachment
-                    WHERE deleted_at IS NULL
-                    GROUP BY request_id
+                    SELECT att.request_id, COUNT(*) AS attachment_count
+                    FROM attachment att
+                    JOIN request rf2 ON rf2.id = att.request_id AND rf2.deleted_at IS NULL
+                        AND DATE(rf2.created_at) BETWEEN :start AND :end
+                    WHERE att.deleted_at IS NULL
+                    GROUP BY att.request_id
                 ) att ON att.request_id = r.id
                 LEFT JOIN appreciation ap ON ap.request_id = r.id AND ap.deleted_at IS NULL
                 WHERE {conditions}

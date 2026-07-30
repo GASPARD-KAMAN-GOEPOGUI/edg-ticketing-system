@@ -34,9 +34,9 @@ Base API frontend: `/api/v1` en production, `http://localhost:8000/api/v1` en de
 | POST | `/requests/{id}/reassign` | `RouteRequest.py` | `ServiceRequest.py` | Request | `request`, `workflow_detail` | chief-service/chief-departement/director/admin | changement service (meme direction) |
 | POST | `/requests/{id}/transfer-direction` | `RouteRequest.py` | `ServiceRequest.py` | Request | `request`, `workflow_detail` | director/admin | transfert direction |
 | POST | `/requests/{id}/escalate` | `RouteRequest.py` | `ServiceRequest.py` | WorkflowDetail | `workflow_detail` | agent-support/chief-service/chief-departement/director/admin | escalade |
-| GET/POST | `/requests/{id}/comments` | `RouteRequest.py` | `ServiceWorkflow.py` | WorkflowDetail | `workflow_detail` | scoping ticket; lecture publique seule si l'acteur est le demandeur proprietaire | commentaires |
+| GET/POST | `/requests/{id}/comments` | `RouteRequest.py` | `ServiceWorkflow.py` | WorkflowDetail | `workflow_detail` | scoping ticket; lecture publique seule si l'acteur est le demandeur proprietaire | commentaires; `POST` accepte `attachment_id` optionnel (piece jointe deja uploadee sur la meme demande, rattachee au commentaire) |
 | GET | `/requests/{id}/timeline` | `RouteRequest.py` | `ServiceWorkflow.py` | WorkflowDetail | `workflow_detail` | scoping ticket | timeline |
-| GET/POST | `/requests/{id}/attachments` | `RouteRequest.py` | `AttachmentService.py` | Attachment | `attachment` | scoping ticket/personnel | liste et ajout pieces jointes |
+| GET/POST | `/requests/{id}/attachments` | `RouteRequest.py` | `AttachmentService.py` | Attachment | `attachment` | scoping ticket/personnel | liste et ajout pieces jointes ; `POST` accepte `skip_timeline_event=true` (query) pour ne pas creer d'evenement `attachment_added` separe quand la piece jointe est immediatement rattachee a un commentaire |
 | GET | `/requests/download/{path}` | `RouteRequest.py` | storage | fichier local | `uploads` | scoping ticket/personnel par `request_id` extrait du chemin | ouverture/telechargement piece jointe |
 | GET | `/workflows/*` | `RouteWorkflow.py` | `ServiceWorkflow.py` | Workflow | `workflow` | agent+ selon endpoint | workflow |
 | GET | `/reports/by-agent` | `RouteReports.py` | `ServiceReport.py` | Request/Account | `request`, `account` | chief-service/chief-departement/director/admin | rapports |
@@ -51,7 +51,7 @@ Base API frontend: `/api/v1` en production, `http://localhost:8000/api/v1` en de
 
 - Payloads ticket: schemas dans `backend/api/schemas/SchemaRequest.py`.
 - Payloads workflow/commentaires: `SchemaWorkflowDetail.py`.
-- Reponses: enveloppes `RequestResponse`, `RequestListItemResponse`, `WorkflowDetailResponse`, `PaginatedResponse`.
+- Reponses: enveloppes `RequestResponse`, `RequestListItemResponse`, `WorkflowDetailResponse`, `PaginatedResponse`. Depuis 2026-07-29, `requester_unit_id` (unite d'appartenance du demandeur, via `Account.unity_id`) est expose en plus de `unity_id`/`direction_id` (unite/direction en charge du traitement) — cote frontend, la direction du demandeur se deduit de `requester_unit_id` via la liste `units` (`direction_id`), il n'existe pas de champ `requester_direction_id` cote backend.
 - Erreurs metier: `ForbiddenException`, `BusinessException`, `ValidationException` dans `backend/api/core/exceptions.py`; codes dans `error_codes.py`.
 - Validations action/status/scope: `backend/api/core/ticket_actions.py`.
 

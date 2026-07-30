@@ -21,8 +21,18 @@ import {
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { sseClient } from "@/lib/realtime/sse-client";
-import { INVALIDATION_MAP } from "@/lib/realtime/invalidation-map";
+import { INVALIDATION_MAP, type QueryKeyPrefix } from "@/lib/realtime/invalidation-map";
 import { getAccessToken } from "@/lib/session";
+
+// Union dédupliquée de tous les préfixes de query keys de la carte d'invalidation —
+// utilisée comme filet de rattrapage après une reconnexion SSE (voir plus bas).
+const ALL_INVALIDATION_KEYS: QueryKeyPrefix[] = Array.from(
+  new Map(
+    Object.values(INVALIDATION_MAP)
+      .flat()
+      .map((key) => [JSON.stringify(key), key] as const),
+  ).values(),
+);
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -48,6 +58,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<RealtimeStatus>("connecting");
   const cleanupFns = useRef<Array<() => void>>([]);
+  const hasDroppedRef = useRef(false);
 
   const invalidateForEvent = useCallback(
     (eventType: string) => {
@@ -67,8 +78,23 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     sseClient.connect(() => getAccessToken());
 
     // Méta-événements
-    const offConnected = sseClient.on("_connected", () => setStatus("connected"));
-    const offDisconnected = sseClient.on("_disconnected", () => setStatus("disconnected"));
+    const offConnected = sseClient.on("_connected", () => {
+      // Reconnexion après une coupure (pas la connexion initiale) : rattrape tout
+      // événement potentiellement manqué pendant la coupure, en invalidant toutes
+      // les query keys connues plutôt que de compter uniquement sur les prochains
+      // événements SSE (qui ne rejouent pas l'historique).
+      if (hasDroppedRef.current) {
+        hasDroppedRef.current = false;
+        for (const key of ALL_INVALIDATION_KEYS) {
+          queryClient.invalidateQueries({ queryKey: key });
+        }
+      }
+      setStatus("connected");
+    });
+    const offDisconnected = sseClient.on("_disconnected", () => {
+      hasDroppedRef.current = true;
+      setStatus("disconnected");
+    });
 
     // Enregistrer un handler d'invalidation pour chaque type d'événement connu
     const offHandlers = Object.keys(INVALIDATION_MAP).map((eventType) =>

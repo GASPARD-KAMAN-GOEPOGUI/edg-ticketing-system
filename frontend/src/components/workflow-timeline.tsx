@@ -1,5 +1,13 @@
+import { useState } from "react";
 import { formatDistanceToNow, differenceInHours, format } from "date-fns";
 import { fr } from "date-fns/locale";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import {
   PlusCircle,
   Navigation,
@@ -97,21 +105,6 @@ function formatEventDate(isoDate: string): string {
   return format(date, "d MMM yyyy 'à' HH:mm", { locale: fr });
 }
 
-const ROLE_LABELS: Record<string, string> = {
-  user: "Demandeur",
-  agent: "Agent",
-  chief: "Chef",
-  director: "Directeur",
-  dg: "Directeur",
-  admin: "Admin",
-  support: "Support",
-};
-
-function roleLabel(role?: string): string | undefined {
-  if (!role) return undefined;
-  return ROLE_LABELS[role] ?? role;
-}
-
 function infoString(event: TimelineEvent, key: string): string | undefined {
   const value = event.infos?.[key];
   if (value === null || value === undefined || value === "") return undefined;
@@ -119,141 +112,160 @@ function infoString(event: TimelineEvent, key: string): string | undefined {
   return undefined;
 }
 
-function eventDetails(event: TimelineEvent): string[] {
-  const details: string[] = [];
-  const actorRole = roleLabel(event.actorRole);
-  const targetRole = roleLabel(event.targetRole);
+function primaryEventLabel(event: TimelineEvent): string {
+  let label = event.label;
   const filename = infoString(event, "filename");
-  const targetDirectionName = infoString(event, "target_direction_name");
 
-  if (actorRole) details.push(`Acteur: ${actorRole}`);
-  if (targetDirectionName) details.push(`Direction: ${targetDirectionName}`);
-  if (event.targetUserName) {
-    details.push(`Vers ${event.targetUserName}${targetRole ? ` (${targetRole})` : ""}`);
-  } else if (targetRole) {
-    details.push(`Vers ${targetRole}`);
-  }
-  if (event.oldStatus && event.newStatus && event.oldStatus !== event.newStatus) {
-    details.push(`${event.oldStatus} -> ${event.newStatus}`);
-  } else if (event.newStatus) {
-    details.push(event.newStatus);
-  }
-  if (event.type === "comment_added") {
-    details.push(event.isPublic ? "Visible demandeur" : "Interne");
-  }
-  if (filename && !event.label.includes(filename)) {
-    details.push(filename);
+  if (event.targetUserName && /\bun agent\b/i.test(label)) {
+    label = label.replace(/\bun agent\b/i, event.targetUserName);
   }
 
-  return details;
+  if (filename && !label.includes(filename) && (event.type.includes("attachment") || event.type === "comment_added")) {
+    label = `${label} - ${filename}`;
+  }
+
+  return label;
 }
 
 type WorkflowTimelineProps = {
   events: TimelineEvent[];
+  onOpenAttachment?: (attachment: { id?: string; filename?: string }) => void;
 };
 
 function TimelineItem({
   event,
   isLast,
+  onOpenAttachment,
 }: {
   event: TimelineEvent;
   isLast: boolean;
+  onOpenAttachment?: WorkflowTimelineProps["onOpenAttachment"];
 }) {
   const cfg = EVENT_CONFIG[event.type] ?? DEFAULT_CONFIG;
   const Icon = cfg.icon;
-  const details = eventDetails(event);
+  const label = primaryEventLabel(event);
   const reason = !event.comment && event.type !== "comment_added"
     ? infoString(event, "reason")
     : undefined;
+  const attachmentId = infoString(event, "attachment_id") ?? infoString(event, "attachmentId");
+  const attachmentFilename = infoString(event, "filename");
+  const isAutoRoutedToSupport = event.type === "routed_to_support";
+  const canOpenAttachment = Boolean(
+    onOpenAttachment &&
+    !event.type.includes("deleted") &&
+    (attachmentId || attachmentFilename),
+  );
+  const openAttachment = () => {
+    if (!canOpenAttachment) return;
+    onOpenAttachment?.({ id: attachmentId, filename: attachmentFilename });
+  };
+
   return (
-    <li className="flex gap-4">
-      <div className="flex flex-col items-center">
+    <li className="group flex gap-3">
+      <div className="flex w-9 shrink-0 flex-col items-center">
         <div
-          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ring-2 ${cfg.bg} ${cfg.ring}`}
+          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border/25 shadow-sm ring-2 transition-transform group-hover:scale-105 ${cfg.bg} ${cfg.ring}`}
         >
-          <Icon className={`h-4 w-4 ${cfg.color}`} />
+          <Icon className={`h-3.5 w-3.5 ${cfg.color}`} />
         </div>
-        {!isLast && <div className="mt-1 w-px grow bg-border" />}
+        {!isLast && <div className="mt-1.5 w-px grow bg-gradient-to-b from-border via-border/70 to-border/20" />}
       </div>
-      <div className={`min-w-0 flex-1 ${isLast ? "pb-0" : "pb-6"}`}>
-        <p className={`text-sm font-medium leading-8 ${cfg.color}`}>{event.label}</p>
+      <div className={`min-w-0 flex-1 ${isLast ? "pb-0" : "pb-4"}`}>
+        <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+          <div className="min-w-0">
+            {canOpenAttachment ? (
+              <button
+                type="button"
+                className={`min-w-0 text-left text-sm font-semibold leading-5 underline-offset-4 transition hover:underline ${cfg.color}`}
+                onClick={openAttachment}
+              >
+                {label}
+              </button>
+            ) : (
+              <p className={`min-w-0 text-sm font-semibold leading-5 ${cfg.color}`}>{label}</p>
+            )}
+          </div>
+          {!isAutoRoutedToSupport && (
+            <p className="shrink-0 text-left text-[11px] leading-5 text-muted-foreground sm:text-right">
+              {event.by && <span className="font-medium">{event.by}</span>}
+              {event.by && <span className="mx-1">·</span>}
+              <span>{formatEventDate(event.at)}</span>
+            </p>
+          )}
+        </div>
         {event.comment && (
-          <p className="mb-1 rounded-lg border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground">
+          <p className="mt-2 rounded-xl border border-border/40 bg-background/45 px-3 py-2 text-sm leading-5 text-foreground">
             {event.comment}
           </p>
         )}
         {reason && (
-          <p className="mb-1 rounded-lg border border-border/40 bg-background/60 px-3 py-2 text-sm text-foreground">
+          <p className="mt-2 rounded-xl border border-border/40 bg-background/45 px-3 py-2 text-sm leading-5 text-foreground">
             <span className="mr-1 font-medium text-muted-foreground">Motif:</span>
             {reason}
           </p>
         )}
-        {details.length > 0 && (
-          <div className="mb-1 flex flex-wrap gap-1.5">
-            {details.map((detail) => (
-              <span
-                key={detail}
-                className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
-              >
-                {detail}
-              </span>
-            ))}
-          </div>
-        )}
-        <p className="text-xs text-muted-foreground">
-          {formatEventDate(event.at)}
-          {event.by && (
-            <span className="ml-1 before:mr-1 before:content-['·']">{event.by}</span>
-          )}
-        </p>
       </div>
     </li>
   );
 }
 
-export function WorkflowTimeline({ events }: WorkflowTimelineProps) {
+export function WorkflowTimeline({ events, onOpenAttachment }: WorkflowTimelineProps) {
+  const [showAll, setShowAll] = useState(false);
+
   if (events.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">Aucun événement enregistré.</p>
+      <div className="rounded-2xl border border-dashed border-border/60 bg-background/30 px-4 py-6 text-sm text-muted-foreground">
+        Aucun événement enregistré.
+      </div>
     );
   }
 
-  const pinned = events.slice(0, 2);
-  const rest = events.slice(2);
-  const hasMore = rest.length > 0;
+  const visibleEvents = events.slice(0, 3);
 
   return (
-    <ol className="relative space-y-0">
-      {/* Les 2 premiers toujours visibles */}
-      {pinned.map((event, index) => {
-        const isLastPinned = !hasMore && index === pinned.length - 1;
-        return (
-          <TimelineItem key={event.id} event={event} isLast={isLastPinned} />
-        );
-      })}
+    <div>
+      <ol className="relative space-y-0">
+        {visibleEvents.map((event, index) => (
+          <TimelineItem
+            key={event.id}
+            event={event}
+            isLast={index === visibleEvents.length - 1}
+            onOpenAttachment={onOpenAttachment}
+          />
+        ))}
+      </ol>
 
-      {/* Reste scrollable */}
-      {hasMore && (
-        <li className="flex gap-4">
-          {/* Ligne de connexion continue sur toute la hauteur du scroll */}
-          <div className="flex w-8 shrink-0 flex-col items-center">
-            <div className="w-px flex-1 bg-border" />
-          </div>
-          <div className="min-w-0 flex-1 pb-0">
-            <ol
-              className="max-h-52 space-y-0 overflow-y-auto pr-1 [scrollbar-width:thin]"
-            >
-              {rest.map((event, index) => (
-                <TimelineItem
-                  key={event.id}
-                  event={event}
-                  isLast={index === rest.length - 1}
-                />
-              ))}
-            </ol>
-          </div>
-        </li>
+      {events.length > 3 && (
+        <div className="mt-1 flex justify-center">
+          <button
+            type="button"
+            className="inline-flex items-center gap-2 rounded-xl border border-border/50 bg-background/45 px-4 py-2 text-xs font-medium text-foreground shadow-sm transition hover:bg-background/70"
+            onClick={() => setShowAll(true)}
+          >
+            Voir tout
+            <ArrowUpRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
       )}
-    </ol>
+
+      <Dialog open={showAll} onOpenChange={setShowAll}>
+        <DialogContent className="flex max-h-[80vh] flex-col overflow-hidden sm:max-w-lg">
+          <DialogHeader className="shrink-0">
+            <DialogTitle>Journaux ({events.length})</DialogTitle>
+            <DialogDescription>Historique complet des événements de cette demande.</DialogDescription>
+          </DialogHeader>
+          <ol className="relative min-h-0 flex-1 space-y-0 overflow-y-auto pr-1">
+            {events.map((event, index) => (
+              <TimelineItem
+                key={event.id}
+                event={event}
+                isLast={index === events.length - 1}
+                onOpenAttachment={onOpenAttachment}
+              />
+            ))}
+          </ol>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }

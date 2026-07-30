@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +10,58 @@ from api.core.event_bus import AppEvent, emit as emit_event
 from api.repositories.RepositoryNotification import NotificationRepository
 
 logger = logging.getLogger(__name__)
+
+
+def _display_date(value) -> str:
+    if not value:
+        return ""
+    if isinstance(value, datetime):
+        return value.strftime("%d/%m/%Y à %H:%M")
+    return str(value)
+
+
+def _display_name(*parts: str | None) -> str:
+    return " ".join(part for part in parts if part).strip()
+
+
+def _request_label(obj, attr: str, fallback: str = "") -> str:
+    ref = getattr(obj, attr, None)
+    if not ref:
+        return fallback
+    return (
+        getattr(ref, "label", None)
+        or getattr(ref, "name", None)
+        or getattr(ref, "code", None)
+        or getattr(ref, "slug", None)
+        or fallback
+    )
+
+
+def _request_email_details(req) -> dict[str, str]:
+    assignee = getattr(req, "assignee", None)
+    requester = getattr(req, "requester", None)
+    requester_name = (
+        _display_name(getattr(requester, "firstname", None), getattr(requester, "name", None))
+        or getattr(req, "requester_name", "")
+    )
+    details = {
+        "Numero de demande": getattr(req, "ref", "") or str(getattr(req, "id", "")),
+        "Objet": getattr(req, "title", ""),
+        "Service concerne": _request_label(req, "unity"),
+        "Priorite": _request_label(req, "priority_definition_ref", getattr(req, "priority", "")),
+        "Statut actuel": _request_label(req, "request_status_ref", getattr(req, "request_status", "")),
+        "Date de creation": _display_date(getattr(req, "created_at", None)),
+        "Demandeur": requester_name,
+        "Agent assigne": _display_name(
+            getattr(assignee, "firstname", None),
+            getattr(assignee, "name", None),
+        ),
+        "Date de resolution": _display_date(getattr(req, "resolved_at", None)),
+        "Date de cloture": _display_date(getattr(req, "closed_at", None)),
+    }
+    if getattr(req, "sla_breached", False):
+        details["Delai limite SLA"] = _display_date(getattr(req, "sla_response_at", None))
+    return {key: value for key, value in details.items() if value}
 
 
 async def emit(
@@ -74,6 +127,7 @@ async def emit(
                     from sqlalchemy import select as _select
                     from api.models.ModelCommunicationSetting import CommunicationSetting
                     from api.models.ModelAccount import Account
+                    from api.models.ModelRequest import Request
                     from api.core.mailer import send_notification_email
 
                     cs_row = await session.execute(_select(CommunicationSetting).limit(1))
@@ -86,6 +140,20 @@ async def emit(
                         acc = acc_row.first()
                         if acc and acc.email:
                             name = f"{acc.firstname or ''} {acc.name or ''}".strip() or acc.name or ""
+                            request_details = None
+                            if request_id:
+                                try:
+                                    req_row = await session.execute(
+                                        _select(Request).where(Request.id == int(request_id))
+                                    )
+                                    req = req_row.scalar_one_or_none()
+                                    if req:
+                                        request_details = _request_email_details(req)
+                                except Exception as detail_exc:
+                                    logger.debug(
+                                        "NotificationEmitter : details email indisponibles : %s",
+                                        detail_exc,
+                                    )
                             await send_notification_email(
                                 to_email=acc.email,
                                 recipient_name=name,
@@ -93,6 +161,8 @@ async def emit(
                                 body=body,
                                 action_url=action_url,
                                 action_label=action_label or "Voir la demande",
+                                notification_type=type,
+                                request_details=request_details,
                             )
                 except Exception as _exc:
                     logger.warning("NotificationEmitter : email auto échoué : %s", _exc)

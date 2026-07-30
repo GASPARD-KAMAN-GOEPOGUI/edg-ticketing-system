@@ -1,20 +1,19 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useSearch } from "@tanstack/react-router";
 import { requireAuth } from "@/lib/auth-guard";
 import { WorkflowTimeline } from "@/components/workflow-timeline";
-import { useState, useRef } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState, useRef, useEffect, useMemo } from "react";
+import { useQuery, useMutation, useQueryClient, useQueries } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { GlassCard } from "@/components/glass-card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
 import type { RequestItem, Appreciation } from "@/lib/mock-data";
 import { AppreciationForm } from "@/components/appreciation-form";
 import {
-  EscalationProgressBar,
-  buildRequesterStepsFromStatus,
   DEFAULT_LEVELS,
 } from "@/components/escalation-progress-bar";
 import { cn } from "@/lib/utils";
@@ -35,10 +34,18 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
   fetchRequest,
   resolveRequest,
   assignRequest,
   createComment,
+  deleteComment,
   requestReopen,
   reopenRequest,
   rejectReopenRequest,
@@ -57,7 +64,7 @@ import {
   type RawAttachment,
 } from "@/lib/api/requests";
 import { fetchRefTable } from "@/lib/api/admin-config";
-import { fetchUser, fetchUsers } from "@/lib/api/accounts";
+import { buildAvatarUrl, fetchUser, fetchUsers, type AccountUser } from "@/lib/api/accounts";
 import { fetchDirections, fetchUnits } from "@/lib/api/directions-units";
 import type { Direction, Unit } from "@/lib/api/directions-units";
 import { submitAppreciation, updateRequestAppreciation } from "@/lib/api/csat";
@@ -94,8 +101,19 @@ import {
   RotateCcw,
   Pencil,
   Ban,
+  Wrench,
   MessageSquare,
   MessageSquareWarning,
+  MoreVertical,
+  Smile,
+  Star,
+  Copy,
+  Trash2,
+  Tag,
+  ZoomIn,
+  ZoomOut,
+  UserCog,
+  type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDistanceToNow, format, differenceInDays } from "date-fns";
@@ -180,6 +198,14 @@ const DETAIL_CONTEXTS = {
 } as const;
 
 export type RequestDetailContext = keyof typeof DETAIL_CONTEXTS;
+type DetailTab = "description" | "journal" | "comments" | "files" | "sla" | "treatment";
+type DirectTreatmentAction =
+  | "approveReopen"
+  | "selfAssign"
+  | "takeOwnership"
+  | "resume"
+  | "resolve"
+  | "close";
 
 type RequestDetailPageProps = {
   id: string;
@@ -194,6 +220,14 @@ type Participant = {
   lastAt?: string;
 };
 
+const COMMENT_EMOJIS = [
+  "😀", "😃", "😄", "😁", "😊", "🙂", "😉", "😍", "🤩", "😘",
+  "😅", "😂", "🤣", "😇", "🙃", "😜", "🤔", "😐", "😴", "😪",
+  "😢", "😭", "😡", "😱", "😳", "🥳", "😷", "🤒", "🤕", "🤗",
+  "👍", "👎", "👏", "🙏", "💪", "👌", "✌️", "🤝", "🙌", "🤞",
+  "❤️", "🔥", "⭐", "✅", "❌", "⚠️", "❓", "❗", "💡", "📌",
+] as const;
+
 const PARTICIPANT_ROLE_LABELS: Record<string, string> = {
   user: "Demandeur",
   "agent-support": "Agent Support",
@@ -207,6 +241,37 @@ const PARTICIPANT_ROLE_LABELS: Record<string, string> = {
 function participantRoleLabel(role?: string): string | undefined {
   if (!role) return undefined;
   return PARTICIPANT_ROLE_LABELS[role] ?? role;
+}
+
+function ParticipantRow({ participant }: { participant: Participant }) {
+  return (
+    <li className="flex items-start gap-3 rounded-2xl bg-background/30 p-3 transition hover:bg-background/50">
+      <span className="relative grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-bold text-primary ring-2 ring-primary/10">
+        {initialsFor(participant.name)}
+        <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-background bg-primary" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium" title={participant.name}>
+          {participant.name}
+        </div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+          {participant.role && (
+            <span className="rounded-full bg-muted px-2 py-0.5">
+              {participantRoleLabel(participant.role)}
+            </span>
+          )}
+          <span className="truncate" title={participant.detail}>
+            {participant.detail}
+          </span>
+        </div>
+        {participant.lastAt && (
+          <div className="mt-0.5 text-[10px] text-muted-foreground">
+            {formatDistanceToNow(new Date(participant.lastAt), { addSuffix: true, locale: fr })}
+          </div>
+        )}
+      </div>
+    </li>
+  );
 }
 
 function buildParticipants(
@@ -290,17 +355,6 @@ function buildParticipants(
 }
 
 type TimelineItem = RequestItem["timeline"][number];
-type ComplianceStepState = "done" | "active" | "pending" | "warning" | "muted";
-type EscalationRoleLevel = "chief" | "director";
-
-type ComplianceStep = {
-  key: string;
-  label: string;
-  state: ComplianceStepState;
-  actor?: string;
-  date?: string;
-  detail?: string;
-};
 
 const DETAIL_STATUS_LABELS: Record<string, string> = {
   new: "Création",
@@ -315,21 +369,6 @@ const DETAIL_STATUS_LABELS: Record<string, string> = {
   reopened: "Réouvert",
   rejected: "Rejeté",
   cancelled: "Annulé",
-};
-
-const STATUS_RANK: Record<string, number> = {
-  new: 0,
-  qualifying: 1,
-  qualified: 2,
-  assigned: 3,
-  in_progress: 4,
-  pending: 4,
-  escalated: 5,
-  reopened: 4,
-  resolved: 6,
-  closed: 7,
-  rejected: 7,
-  cancelled: 7,
 };
 
 function normalizeTraceValue(value: unknown): string {
@@ -392,6 +431,31 @@ function formatAttachmentDate(value?: string): string {
   return format(date, "d MMM yyyy HH:mm", { locale: fr });
 }
 
+function initialsFor(value?: string): string {
+  if (!value?.trim()) return "??";
+  return value
+    .trim()
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+
+function formatCommentDate(value?: string): string {
+  if (!value) return "Date inconnue";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Date inconnue";
+  return format(date, "d MMM yyyy 'à' HH:mm", { locale: fr });
+}
+
+function formatTicketDateTime(value?: string): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return format(date, "d MMM yyyy HH:mm", { locale: fr });
+}
+
 function findLatestTraceEvent(
   events: TimelineItem[],
   predicate: (event: TimelineItem) => boolean,
@@ -406,84 +470,37 @@ function findFirstTraceEvent(
   return [...events].sort((a, b) => traceTime(a.at) - traceTime(b.at)).find(predicate);
 }
 
-function isEscalationTraceEvent(event: TimelineItem): boolean {
-  const text = traceEventText(event);
-  const type = normalizeTraceValue(event.type);
-  return type.includes("escal") || text.includes("escalad") || /\bl[23]\b/.test(text);
-}
+const FIXED_LIFECYCLE_STEPS = [
+  { key: "opening", label: "Ouverture" },
+  { key: "qualification", label: "Qualification" },
+  { key: "treatment", label: "Traitement" },
+  { key: "validation", label: "Valider" },
+  { key: "closure", label: "Fermeture" },
+] as const;
 
-function isFormalTraceAction(event: TimelineItem): boolean {
-  const text = traceEventText(event);
-  const type = normalizeTraceValue(event.type);
-  return (
-    isEscalationTraceEvent(event) ||
-    [
-      "assign",
-      "reassign",
-      "transfer",
-      "transfere",
-      "orient",
-      "route",
-      "resolve",
-      "resolu",
-      "resolution",
-      "closed",
-      "cloture",
-      "reopen",
-      "reouvert",
-      "reouverture",
-      "rouvert",
-      "reject",
-      "rejete",
-      "arbitr",
-      "validation",
-    ].some((term) => type.includes(term) || text.includes(term))
-  );
-}
+type FixedStepState = "done" | "active" | "pending" | "warning";
 
-function escalationRoleLevel(event: TimelineItem): EscalationRoleLevel | undefined {
-  const roleText = normalizeTraceValue([event.actorRole, event.targetRole].filter(Boolean).join(" "));
-  if (/\bdg\b/.test(roleText)) return "director";
-  if (roleText.includes("director") || roleText.includes("directeur")) return "director";
-  if (roleText.includes("chief") || roleText.includes("chef") || roleText.includes("responsable")) {
-    return "chief";
-  }
+// Position (0-4) du statut courant dans le cycle de vie fixe CDC
+// Ouverture -> Qualification -> Traitement -> Validation -> Fermeture.
+const STATUS_STEP_INDEX: Record<string, number> = {
+  new: 0,
+  qualifying: 1,
+  qualified: 2,
+  assigned: 2,
+  in_progress: 2,
+  pending: 2,
+  escalated: 2,
+  reopened: 2,
+  resolved: 3,
+  closed: 4,
+  rejected: 2,
+  cancelled: 2,
+};
 
-  if (!isEscalationTraceEvent(event)) return undefined;
-
-  const text = traceEventText(event);
-  if (/\bdg\b/.test(text) || text.includes("direction generale")) return "director";
-  if (text.includes("directeur") || text.includes("director") || text.includes("l3")) return "director";
-  if (text.includes("chef") || text.includes("chief") || text.includes("responsable") || text.includes("l2")) {
-    return "chief";
-  }
-  return undefined;
-}
-
-function latestFormalRoleEvent(
-  events: TimelineItem[],
-  level: EscalationRoleLevel,
-): TimelineItem | undefined {
-  return findLatestTraceEvent(events, (event) => (
-    isFormalTraceAction(event) && escalationRoleLevel(event) === level
-  ));
-}
-
-function complianceStepClass(state: ComplianceStepState): string {
-  if (state === "done") return "border-emerald-500 bg-emerald-500 text-white shadow-[0_0_18px_rgba(16,185,129,0.35)]";
-  if (state === "active") return "border-primary bg-primary text-primary-foreground shadow-[0_0_18px_rgba(34,197,94,0.28)]";
-  if (state === "warning") return "border-amber-500 bg-amber-500 text-white shadow-[0_0_18px_rgba(245,158,11,0.25)]";
-  if (state === "muted") return "border-border bg-muted text-muted-foreground";
-  return "border-border bg-background text-muted-foreground";
-}
-
-function buildTicketComplianceTrace(
-  request: RequestItem,
-  assigneeName?: string,
-) {
+function buildFixedLifecycleSteps(request: RequestItem) {
   const events = request.timeline ?? [];
-  const statusRank = STATUS_RANK[request.status] ?? 0;
-  const isRejectedOrCancelled = request.status === "rejected" || request.status === "cancelled";
+  const status = request.status;
+  const isRejectedOrCancelled = status === "rejected" || status === "cancelled";
 
   const creationEvent = findFirstTraceEvent(events, (event) => normalizeTraceValue(event.type).includes("created"));
   const qualificationEvent = findLatestTraceEvent(events, (event) => {
@@ -491,16 +508,10 @@ function buildTicketComplianceTrace(
     const type = normalizeTraceValue(event.type);
     return type.includes("qualif") || type.includes("routed") || text.includes("qualif") || text.includes("orient");
   });
-  const assignmentEvent = findLatestTraceEvent(events, (event) => {
+  const treatmentEvent = findLatestTraceEvent(events, (event) => {
     const text = traceEventText(event);
     const type = normalizeTraceValue(event.type);
-    return (
-      type.includes("assign") ||
-      type.includes("in_progress") ||
-      text.includes("prise en charge") ||
-      event.actorRole === "agent" ||
-      event.targetRole === "agent"
-    );
+    return type.includes("assign") || type.includes("in_progress") || text.includes("prise en charge");
   });
   const resolvedEvent = findLatestTraceEvent(events, (event) => {
     const text = traceEventText(event);
@@ -512,283 +523,67 @@ function buildTicketComplianceTrace(
     const type = normalizeTraceValue(event.type);
     return type.includes("closed") || text.includes("cloture") || text.includes("cloturer");
   });
-  const reopenEvent = findLatestTraceEvent(events, (event) => {
-    const text = traceEventText(event);
-    const type = normalizeTraceValue(event.type);
-    return (
-      type.includes("reopen") ||
-      text.includes("rouvert") ||
-      text.includes("reouvert") ||
-      text.includes("reouverture")
-    );
-  });
-  const finalEvent = closedEvent ?? resolvedEvent;
-  const reopenTime = traceTime(reopenEvent?.at);
-  const cycleEvents = reopenEvent
-    ? events.filter((event) => traceTime(event.at) >= reopenTime)
-    : events;
-  const isClosed = request.status === "closed";
-  const isResolved = request.status === "resolved" || request.status === "closed";
 
-  const chiefEvent = latestFormalRoleEvent(cycleEvents, "chief");
-  const directorEvent = latestFormalRoleEvent(cycleEvents, "director");
-
-  if (reopenEvent) {
-    const cycleQualificationEvent = findLatestTraceEvent(cycleEvents, (event) => {
-      const text = traceEventText(event);
-      const type = normalizeTraceValue(event.type);
-      return type.includes("qualif") || type.includes("routed") || text.includes("qualif") || text.includes("orient");
-    });
-    const cycleAssignmentEvent = findLatestTraceEvent(cycleEvents, (event) => {
-      const text = traceEventText(event);
-      const type = normalizeTraceValue(event.type);
-      return (
-        type.includes("assign") ||
-        type.includes("in_progress") ||
-        text.includes("prise en charge") ||
-        event.actorRole === "agent" ||
-        event.targetRole === "agent"
-      );
-    });
-    const cycleResolvedEvent = findLatestTraceEvent(cycleEvents, (event) => {
-      const text = traceEventText(event);
-      const type = normalizeTraceValue(event.type);
-      return type.includes("resolved") || text.includes("resolu") || text.includes("resolution");
-    });
-    const cycleClosedEvent = findLatestTraceEvent(cycleEvents, (event) => {
-      const text = traceEventText(event);
-      const type = normalizeTraceValue(event.type);
-      return type.includes("closed") || text.includes("cloture") || text.includes("cloturer");
-    });
-    const cycleResolvedAt = request.resolvedAt && traceTime(request.resolvedAt) >= reopenTime
-      ? request.resolvedAt
-      : undefined;
-    const cycleClosedAt = request.closedAt && traceTime(request.closedAt) >= reopenTime
-      ? request.closedAt
-      : undefined;
-    const cycleHasResolutionTrace = Boolean(cycleResolvedEvent || cycleResolvedAt || request.status === "resolved");
-    const cycleClosedWithoutResolutionTrace = isClosed && !cycleHasResolutionTrace;
-    const cycleFinalActor =
-      cycleClosedEvent?.by ??
-      cycleResolvedEvent?.by ??
-      (isResolved ? (request.assigneeName ?? assigneeName) : undefined) ??
-      request.assigneeName ??
-      assigneeName ??
-      "Non renseigné";
-
-    const cycleSteps: ComplianceStep[] = [
-      {
-        key: "reopen",
-        label: "Réouverture",
-        state: "done",
-        actor: reopenEvent.by,
-        date: reopenEvent.at,
-        detail: reopenEvent.label ?? "Ticket rouvert",
-      },
-    ];
-
-    if (cycleQualificationEvent || request.status === "qualifying") {
-      cycleSteps.push({
-        key: "requalification",
-        label: "Réorientation",
-        state: cycleQualificationEvent || statusRank >= 2 || request.serviceId ? "done" : "active",
-        actor: cycleQualificationEvent?.by,
-        date: cycleQualificationEvent?.at,
-        detail: cycleQualificationEvent?.label ?? "Réorientation après réouverture",
-      });
-    }
-
-    cycleSteps.push({
-      key: "reopened-treatment",
-      label: "Traitement repris",
-      state:
-        isResolved || request.status === "escalated" ? "done"
-        : ["assigned", "in_progress", "pending", "reopened"].includes(request.status) ? "active"
-        : request.assigneeId || request.assigneeName || assigneeName ? "done"
-        : "pending",
-      actor: cycleAssignmentEvent?.targetUserName ?? cycleAssignmentEvent?.by ?? request.assigneeName ?? assigneeName,
-      date: cycleAssignmentEvent?.at,
-      detail: cycleAssignmentEvent?.label ?? "Cycle repris après réouverture",
-    });
-
-    [
-      { key: "chief", label: "Chef de service", event: chiefEvent },
-      { key: "director", label: "Directeur", event: directorEvent },
-    ].forEach((level) => {
-      if (!level.event) return;
-      cycleSteps.push({
-        key: `${level.key}-after-reopen`,
-        label: level.label,
-        state: "done",
-        actor: level.event.by ?? level.event.targetUserName,
-        date: level.event.at,
-        detail: level.event.label,
-      });
-    });
-
-    if (isRejectedOrCancelled) {
-      const finalLabel = DETAIL_STATUS_LABELS[request.status] ?? request.status;
-      cycleSteps.push({
-        key: "final-after-reopen",
-        label: finalLabel,
-        state: "warning",
-        actor: cycleFinalActor,
-        date: request.updatedAt,
-        detail: `Sortie du cycle rouvert : ${finalLabel}`,
-      });
-    } else {
-      cycleSteps.push({
-        key: "resolution-after-reopen",
-        label: "Nouvelle résolution",
-        state: isResolved ? (cycleHasResolutionTrace ? "done" : "warning") : "pending",
-        actor: cycleResolvedEvent?.by ?? (isResolved ? cycleFinalActor : undefined),
-        date: cycleResolvedEvent?.at ?? cycleResolvedAt,
-        detail: cycleHasResolutionTrace ? (cycleResolvedEvent?.label ?? "Résolution après réouverture") : "Résolution en attente",
-      });
-      cycleSteps.push({
-        key: "closure-after-reopen",
-        label: "Nouvelle clôture",
-        state: isClosed ? (cycleClosedWithoutResolutionTrace ? "warning" : "done") : request.status === "resolved" ? "active" : "pending",
-        actor: cycleClosedEvent?.by,
-        date: cycleClosedEvent?.at ?? cycleClosedAt,
-        detail: isClosed ? (cycleClosedEvent?.label ?? "Clôture après réouverture") : "Clôture en attente",
-      });
-    }
-
-    return { steps: cycleSteps };
-  }
-
-  const hasResolutionTrace = Boolean(resolvedEvent || request.resolvedAt || request.status === "resolved");
-  const closedWithoutResolutionTrace = isClosed && !hasResolutionTrace;
-
-  const finalActor =
-    finalEvent?.by ??
-    (isResolved ? (request.assigneeName ?? assigneeName) : undefined) ??
-    request.assigneeName ??
-    assigneeName ??
-    "Non renseigné";
-
-  const steps: ComplianceStep[] = [
-    {
-      key: "creation",
-      label: "Création",
-      state: "done",
-      actor: creationEvent?.by ?? request.requesterName,
-      date: creationEvent?.at ?? request.createdAt,
-      detail: creationEvent?.label ?? "Demande enregistrée",
-    },
-    {
-      key: "qualification",
-      label: "Qualification",
-      state: qualificationEvent || statusRank >= 2 || request.serviceId ? "done" : request.status === "qualifying" ? "active" : "pending",
-      actor: qualificationEvent?.by,
-      date: qualificationEvent?.at,
-      detail: qualificationEvent?.label ?? (request.serviceId ? "Service orienté" : "Orientation attendue"),
-    },
-    {
-      key: "agent",
-      label: "Agent",
-      state:
-        isResolved || request.status === "escalated" ? "done"
-        : ["assigned", "in_progress", "pending", "reopened"].includes(request.status) ? "active"
-        : request.assigneeId || request.assigneeName || assigneeName ? "done"
-        : "pending",
-      actor: assignmentEvent?.targetUserName ?? assignmentEvent?.by ?? request.assigneeName ?? assigneeName,
-      date: assignmentEvent?.at,
-      detail: assignmentEvent?.label ?? (request.assigneeId || request.assigneeName || assigneeName ? "Agent assigné" : "Aucun agent assigné"),
-    },
+  const stepDates = [
+    creationEvent?.at ?? request.createdAt,
+    qualificationEvent?.at,
+    treatmentEvent?.at,
+    resolvedEvent?.at ?? request.resolvedAt,
+    closedEvent?.at ?? request.closedAt,
   ];
+  const currentIndex = STATUS_STEP_INDEX[status] ?? 0;
+  const isTerminalDone = status === "closed";
 
-  [
-    { key: "chief", label: "Chef de service", event: chiefEvent },
-    { key: "director", label: "Directeur", event: directorEvent },
-  ].forEach((level) => {
-    if (!level.event) return;
-    steps.push({
-      key: level.key,
-      label: level.label,
-      state: "done",
-      actor: level.event.by ?? level.event.targetUserName,
-      date: level.event.at,
-      detail: level.event.label,
-    });
+  return FIXED_LIFECYCLE_STEPS.map((step, index) => {
+    let state: FixedStepState;
+    if (index < currentIndex || (isTerminalDone && index === currentIndex)) state = "done";
+    else if (index === currentIndex) state = isRejectedOrCancelled ? "warning" : "active";
+    else state = "pending";
+
+    const dateLabel =
+      state === "done" ? (formatTraceDate(stepDates[index]) ?? "—")
+      : state === "warning" ? (DETAIL_STATUS_LABELS[status] ?? status)
+      : state === "active" ? "En cours"
+      : "—";
+
+    return { ...step, state, dateLabel };
   });
-
-  if (isRejectedOrCancelled) {
-    const finalLabel = DETAIL_STATUS_LABELS[request.status] ?? request.status;
-    steps.push({
-      key: "final",
-      label: finalLabel,
-      state: "warning",
-      actor: finalEvent?.by,
-      date: finalEvent?.at ?? request.updatedAt,
-      detail: `Sortie du workflow : ${finalLabel}`,
-    });
-  } else {
-    steps.push({
-      key: "resolution",
-      label: "Résolution",
-      state: isResolved ? (hasResolutionTrace ? "done" : "warning") : "pending",
-      actor: resolvedEvent?.by ?? (isResolved ? finalActor : undefined),
-      date: resolvedEvent?.at ?? request.resolvedAt,
-      detail: hasResolutionTrace ? (resolvedEvent?.label ?? "Résolution tracée") : "Résolution non encore tracée",
-    });
-    steps.push({
-      key: "closure",
-      label: "Clôture",
-      state: isClosed ? (closedWithoutResolutionTrace ? "warning" : "done") : request.status === "resolved" ? "active" : "pending",
-      actor: closedEvent?.by,
-      date: closedEvent?.at ?? request.closedAt,
-      detail: isClosed ? (closedEvent?.label ?? "Clôture enregistrée") : "Clôture en attente",
-    });
-  }
-
-  return { steps };
 }
 
-function TicketComplianceTrace({
-  request,
-  assigneeName,
-}: {
-  request: RequestItem;
-  assigneeName?: string;
-}) {
-  const trace = buildTicketComplianceTrace(request, assigneeName);
+function TicketLifecycleStepper({ request }: { request: RequestItem }) {
+  const steps = buildFixedLifecycleSteps(request);
 
   return (
-    <section className="border-t border-border/40 bg-muted/10 px-5 py-4 sm:px-6">
-      <div className="overflow-x-auto rounded-2xl border border-border/60 bg-background/35 px-4 py-4">
-        <ol className="flex min-w-max items-start">
-          {trace.steps.map((step, index) => {
-            const isLast = index === trace.steps.length - 1;
-            const StepIcon =
-              step.state === "warning" ? AlertTriangle
-              : step.state === "active" || step.state === "pending" ? Clock
-              : CheckCircle2;
+    <section className="px-3 pb-3 sm:px-5 sm:pb-4">
+      <div className="overflow-hidden rounded-[16px] border border-border/50 bg-background/35 px-2 py-3 shadow-inner sm:px-4 sm:py-3.5">
+        <ol className="grid w-full grid-cols-5 items-start">
+          {steps.map((step, index) => {
+            const isLast = index === steps.length - 1;
             return (
-              <li key={step.key} className="flex items-start">
-                <div className="flex w-28 flex-col items-center text-center">
-                  <span className={cn("grid h-9 w-9 place-items-center rounded-full border text-sm", complianceStepClass(step.state))}>
-                    <StepIcon className="h-4 w-4" />
-                  </span>
-                  <span className="mt-2 text-xs font-semibold">{step.label}</span>
-                  {step.actor && (
-                    <span className="mt-1 max-w-24 truncate text-[11px] text-muted-foreground">
-                      {step.actor}
-                    </span>
-                  )}
-                  {(step.date || step.detail) && (
-                    <span className="mt-0.5 max-w-24 truncate text-[10px] text-muted-foreground">
-                      {formatTraceDate(step.date) ?? step.detail}
-                    </span>
-                  )}
-                </div>
+              <li key={step.key} className="relative min-w-0">
                 {!isLast && (
                   <span className={cn(
-                    "mt-4 h-0.5 w-12 shrink-0 rounded-full",
-                    step.state === "done" ? "bg-emerald-500" : step.state === "warning" ? "bg-amber-500" : "bg-border",
+                    "absolute left-[calc(50%+0.875rem)] right-[calc(-50%+0.875rem)] top-3.5 h-0 border-t-2 sm:left-[calc(50%+1rem)] sm:right-[calc(-50%+1rem)] sm:top-4",
+                    step.state === "done" ? "border-solid border-emerald-500" : "border-dashed border-border",
                   )} />
                 )}
+                <div className="relative z-10 flex min-w-0 flex-col items-center text-center">
+                  <span className={cn(
+                    "grid h-7 w-7 place-items-center rounded-full border text-[11px] font-semibold shadow-sm sm:h-8 sm:w-8 sm:text-xs",
+                    step.state === "done" && "border-emerald-500 bg-emerald-500 text-white shadow-emerald-500/25",
+                    step.state === "active" && "border-primary bg-primary text-primary-foreground shadow-primary/25",
+                    step.state === "warning" && "border-amber-500 bg-amber-500 text-white shadow-amber-500/25",
+                    step.state === "pending" && "border-border/70 bg-background/60 text-muted-foreground",
+                  )}>
+                    {step.state === "done" ? <CheckCircle2 className="h-3.5 w-3.5" /> : index + 1}
+                  </span>
+                  <span className="mt-1.5 max-w-[3.25rem] text-[8px] font-semibold leading-tight text-foreground min-[420px]:max-w-[4.5rem] min-[420px]:text-[9px] sm:max-w-24 sm:text-[11px]">
+                    {step.label}
+                  </span>
+                  <span className="mt-0.5 max-w-[3.25rem] truncate text-[8px] leading-tight text-muted-foreground min-[420px]:max-w-[4.5rem] min-[420px]:text-[9px] sm:max-w-24 sm:text-[10px]">
+                    {step.dateLabel}
+                  </span>
+                </div>
               </li>
             );
           })}
@@ -806,6 +601,8 @@ function RequestDetail() {
 export function RequestDetailPage({ id, context = "requests" }: RequestDetailPageProps) {
   const detailContext = DETAIL_CONTEXTS[context];
   const isPersonalContext = context === "requests";
+  const deepLinkSearch = useSearch({ strict: false }) as { tab?: string };
+  const wantsCommentsDeepLink = deepLinkSearch.tab === "comments";
   const qc = useQueryClient();
   const sessionUser = useUser();
   const authorId = Number(sessionUser?.id ?? 0);
@@ -828,6 +625,9 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   });
 
   const [comment, setComment] = useState("");
+  const [replyTarget, setReplyTarget] = useState<string | null>(null);
+  const [stagedFile, setStagedFile] = useState<File | null>(null);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [isPublic, setIsPublic] = useState(false);
   const [role] = useRole();
   // Dans "Mes demandes", le propriétaire garde la vue demandeur. Dans les espaces
@@ -853,6 +653,19 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const [escalateReason, setEscalateReason] = useState("");
   const attachRef = useRef<HTMLInputElement>(null);
   const commentRef = useRef<HTMLTextAreaElement>(null);
+  const commentsPanelRef = useRef<HTMLElement>(null);
+  const insertEmoji = (emoji: string) => {
+    const textarea = commentRef.current;
+    const start = textarea?.selectionStart ?? comment.length;
+    const end = textarea?.selectionEnd ?? comment.length;
+    setComment((prev) => `${prev.slice(0, start)}${emoji}${prev.slice(end)}`);
+    setEmojiPickerOpen(false);
+    requestAnimationFrame(() => {
+      textarea?.focus();
+      const caret = start + emoji.length;
+      textarea?.setSelectionRange(caret, caret);
+    });
+  };
   const [showPriorityPicker, setShowPriorityPicker] = useState(false);
   const [showRejectConfirm, setShowRejectConfirm] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
@@ -863,12 +676,57 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const [transferDirectionId, setTransferDirectionId] = useState("");
   const [transferReason, setTransferReason] = useState("");
   const [showCircuitDialog, setShowCircuitDialog] = useState(false);
+  const [showClosedRequestDialog, setShowClosedRequestDialog] = useState(false);
+  const [showAppreciationDialog, setShowAppreciationDialog] = useState(false);
+  const [directTreatmentAction, setDirectTreatmentAction] =
+    useState<DirectTreatmentAction | null>(null);
   const [circuitDirectionId, setCircuitDirectionId] = useState("");
   const [circuitUnitId, setCircuitUnitId] = useState("");
+  // Espaces de traitement (queue, boîtes de chef, supervision, direction…) :
+  // on ouvre directement sur "Traitement" puisque c'est là que se trouvent
+  // désormais les actions (déplacées depuis les boutons de la card liste).
+  // Le contexte personnel ("Mes demandes") reste sur la description.
+  const [activeDetailTab, setActiveDetailTab] = useState<DetailTab>(
+    wantsCommentsDeepLink ? "comments" : isPersonalContext ? "journal" : "treatment",
+  );
+  const [showAllParticipants, setShowAllParticipants] = useState(false);
+  const [showAllDetails, setShowAllDetails] = useState(false);
   const [attachmentAction, setAttachmentAction] = useState<{
     id: string;
     mode: "open" | "download";
   } | null>(null);
+  const [previewFile, setPreviewFile] = useState<{
+    url: string;
+    filename: string;
+    mimeType: string;
+  } | null>(null);
+  const [previewZoom, setPreviewZoom] = useState(1);
+
+  useEffect(() => {
+    return () => {
+      if (previewFile) URL.revokeObjectURL(previewFile.url);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!wantsCommentsDeepLink || !r) return;
+    setActiveDetailTab("comments");
+    const frame = requestAnimationFrame(() => {
+      commentsPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      commentRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantsCommentsDeepLink, r]);
+
+  const closePreview = () => {
+    setPreviewFile((current) => {
+      if (current) URL.revokeObjectURL(current.url);
+      return null;
+    });
+    setPreviewZoom(1);
+  };
 
   const invalidate = () => {
     // Détail du ticket (et sous-queries via préfixe)
@@ -894,33 +752,15 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     attachment: RawAttachment,
     mode: "open" | "download",
   ) => {
-    let previewWindow: Window | null = null;
-
-    if (mode === "open") {
-      previewWindow = window.open("about:blank", "_blank");
-      if (!previewWindow) {
-        toast.error("Ouverture bloquée par le navigateur. Autorisez les pop-ups pour prévisualiser le fichier.");
-        return;
-      }
-      previewWindow.document.title = attachment.filename;
-      previewWindow.document.body.innerHTML =
-        "<p style=\"font-family: system-ui, sans-serif; padding: 24px;\">Chargement de la pièce jointe...</p>";
-    }
-
     setAttachmentAction({ id: attachment.id, mode });
 
     try {
-      const { blob, filename } = await fetchAttachmentFile(attachment);
+      const { blob, filename, contentType } = await fetchAttachmentFile(attachment);
       const url = URL.createObjectURL(blob);
 
       if (mode === "open") {
-        if (previewWindow && !previewWindow.closed) {
-          previewWindow.location.href = url;
-          setTimeout(() => URL.revokeObjectURL(url), 60_000);
-          return;
-        }
-        URL.revokeObjectURL(url);
-        toast.error("La fenêtre de prévisualisation a été fermée.");
+        setPreviewZoom(1);
+        setPreviewFile({ url, filename, mimeType: contentType ?? attachment.mime_type });
         return;
       }
 
@@ -932,14 +772,30 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1_000);
     } catch (err) {
-      if (previewWindow && !previewWindow.closed) {
-        previewWindow.close();
-      }
       const message = err instanceof Error ? err.message : undefined;
       toast.error(message ? `Impossible d'accéder à la pièce jointe : ${message}` : "Impossible d'accéder à la pièce jointe.");
     } finally {
       setAttachmentAction(null);
     }
+  };
+
+  const handleTimelineAttachmentOpen = (attachmentRef: { id?: string; filename?: string }) => {
+    setActiveDetailTab("files");
+
+    const attachment =
+      attachments.find((item) => item.id === attachmentRef.id) ??
+      attachments.find((item) => item.filename === attachmentRef.filename);
+
+    if (!attachment) {
+      toast.error(
+        attachmentsLoading
+          ? "Les pièces jointes sont encore en cours de chargement."
+          : "Pièce jointe introuvable dans l'onglet Fichiers.",
+      );
+      return;
+    }
+
+    void handleAttachmentFile(attachment, "open");
   };
 
   const resolveMut = useMutation({
@@ -965,6 +821,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     onSuccess: () => {
       toast.success("Demande marquée comme résolue.");
       setShowResolveForm(false);
+      setDirectTreatmentAction(null);
       setResolutionNote("");
     },
     onError: (_err, _vars, context) => {
@@ -1015,6 +872,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     },
     onSuccess: () => {
       toast.success("Ticket assigné à vous.");
+      setDirectTreatmentAction(null);
     },
     onError: (_err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
@@ -1046,6 +904,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     onSuccess: () => {
       toast.success("Demande de réouverture envoyée — le chef de service sera notifié.");
       setShowReopenForm(false);
+      setShowClosedRequestDialog(false);
       setReopenReason("");
     },
     onError: (err: unknown, _vars, context) => {
@@ -1068,6 +927,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     },
     onSuccess: () => {
       toast.success("Réouverture approuvée — le ticket retourne en traitement.");
+      setDirectTreatmentAction(null);
     },
     onError: (_err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
@@ -1113,6 +973,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     },
     onSuccess: () => {
       toast.success("Demande clôturée — merci pour votre retour.");
+      setDirectTreatmentAction(null);
     },
     onError: (_err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
@@ -1169,7 +1030,10 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       );
       return { previous };
     },
-    onSuccess: () => { toast.success("Ticket pris en charge — traitement en cours."); },
+    onSuccess: () => {
+      toast.success("Ticket pris en charge — traitement en cours.");
+      setDirectTreatmentAction(null);
+    },
     onError: (_err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
       toast.error("Impossible de prendre en charge la demande.");
@@ -1185,7 +1049,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
         body: infoQuestion.trim(),
         is_public: true,
       });
-      return updateRequest(id, { request_status: "pending" });
+      return updateRequest(id, { request_status: "pending", status_reason: "info_request" });
     },
     onMutate: async () => {
       await qc.cancelQueries({ queryKey: requestQueryKey });
@@ -1217,7 +1081,10 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       );
       return { previous };
     },
-    onSuccess: () => { toast.success("Traitement repris."); },
+    onSuccess: () => {
+      toast.success("Traitement repris.");
+      setDirectTreatmentAction(null);
+    },
     onError: (_err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
       toast.error("Impossible de reprendre le traitement.");
@@ -1340,24 +1207,30 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     onSettled: () => invalidate(),
   });
 
-  const attachCommentMut = useMutation({
-    mutationFn: (file: File) => uploadAttachment(id, file),
-    onSuccess: () => {
-      toast.success("Pièce jointe ajoutée au ticket.");
-      if (attachRef.current) attachRef.current.value = "";
-      invalidate();
-    },
-    onError: () => toast.error("Impossible d'ajouter la pièce jointe."),
-  });
-
   const commentMut = useMutation({
-    mutationFn: () =>
-      createComment(id, {
+    mutationFn: async () => {
+      // Envoi combine — le fichier joint (si present) est uploade d'abord, puis
+      // le commentaire est cree en referencant son attachment_id, en un seul
+      // geste utilisateur (comme une pièce jointe + legende sur WhatsApp).
+      let attachmentId: string | undefined;
+      if (stagedFile) {
+        const uploaded = await uploadAttachment(
+          id,
+          stagedFile,
+          sessionUser?.id ? String(sessionUser.id) : undefined,
+          true, // skip l'événement "Pièce jointe ajoutée" — le commentaire portera déjà l'info de la pièce jointe
+        );
+        attachmentId = uploaded.id;
+      }
+      const finalBody = replyTarget ? `@${replyTarget} ${comment.trim()}` : comment.trim();
+      return createComment(id, {
         author_id: authorId,
         author_name: authorName,
-        body: comment.trim(),
+        body: finalBody,
         is_public: isRequesterView ? true : isPublic,
-      }),
+        attachment_id: attachmentId,
+      });
+    },
     onMutate: async () => {
       await qc.cancelQueries({ queryKey: requestQueryKey });
       const previous = qc.getQueryData<RequestItem>(requestQueryKey);
@@ -1365,10 +1238,11 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
         id: `temp-${Date.now()}`,
         authorId: String(authorId),
         author: authorName,
-        body: comment.trim(),
+        body: replyTarget ? `@${replyTarget} ${comment.trim()}` : comment.trim(),
         isPublic: isRequesterView ? true : isPublic,
         isEdited: false,
         createdAt: new Date().toISOString(),
+        attachmentName: stagedFile?.name,
       };
       qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
         old ? { ...old, comments: [...(old.comments ?? []), optimisticComment] } : old,
@@ -1376,12 +1250,33 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       return { previous };
     },
     onSuccess: () => {
-      toast.success("Commentaire ajouté");
+      toast.success(stagedFile ? "Commentaire et pièce jointe envoyés" : "Commentaire ajouté");
       setComment("");
+      setReplyTarget(null);
+      setStagedFile(null);
+      if (attachRef.current) attachRef.current.value = "";
     },
     onError: (_err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
       toast.error("Impossible d'ajouter le commentaire.");
+    },
+    onSettled: () => invalidate(),
+  });
+
+  const deleteCommentMut = useMutation({
+    mutationFn: (commentId: string) => deleteComment(id, commentId),
+    onMutate: async (commentId: string) => {
+      await qc.cancelQueries({ queryKey: requestQueryKey });
+      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
+      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
+        old ? { ...old, comments: old.comments.filter((c) => c.id !== commentId) } : old,
+      );
+      return { previous };
+    },
+    onSuccess: () => toast.success("Commentaire supprimé."),
+    onError: (_err, _vars, context) => {
+      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
+      toast.error("Impossible de supprimer le commentaire.");
     },
     onSettled: () => invalidate(),
   });
@@ -1398,6 +1293,25 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     queryFn: () => fetchUsers({ role: "agent-support", limit: 100 }),
     enabled: !isRequesterView,
     staleTime: 120_000,
+  });
+
+  const commentAuthorIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (r?.requesterId) ids.add(String(r.requesterId));
+    if (r?.assigneeId) ids.add(String(r.assigneeId));
+    for (const item of r?.comments ?? []) {
+      if (item.authorId) ids.add(String(item.authorId));
+    }
+    return Array.from(ids).slice(0, 20);
+  }, [r?.requesterId, r?.assigneeId, r?.comments]);
+
+  const commentAuthorQueries = useQueries({
+    queries: commentAuthorIds.map((authorId) => ({
+      queryKey: ["user", authorId],
+      queryFn: () => fetchUser(authorId),
+      enabled: !!r?.id && !!authorId,
+      staleTime: 300_000,
+    })),
   });
 
   const { data: directions = [] } = useQuery({
@@ -1440,6 +1354,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const slaOver = r.slaHours > 0 && r.slaElapsed > r.slaHours;
   const assignedUnit = units.find((u) => String(u.id) === String(r.serviceId));
   const unitName = assignedUnit?.name ?? "—";
+  const departmentName = assignedUnit?.department_name ?? "—";
   const currentDirectionId = assignedUnit?.direction_id ?? r.directionId ?? r.serviceId;
   const directionName = directions.find(
     (d) => String(d.id) === currentDirectionId,
@@ -1447,6 +1362,13 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const transferDirectionOptions = directions.filter(
     (d) => String(d.id) !== String(currentDirectionId),
   );
+  const requesterUnit = units.find((u) => String(u.id) === String(r.requesterServiceId));
+  const requesterUnitName = requesterUnit?.name ?? "—";
+  const requesterDepartmentName = requesterUnit?.department_name ?? "—";
+  const requesterDirectionId = requesterUnit?.direction_id ?? r.requesterDirectionId;
+  const requesterDirectionName = directions.find(
+    (d) => String(d.id) === String(requesterDirectionId),
+  )?.name ?? "—";
 
   const isArchived = Boolean(r.deletedAt || r.isArchived);
   const isFinal = isArchived || (["resolved", "closed", "rejected", "cancelled"] as const).includes(
@@ -1458,7 +1380,51 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
 
   const visibleComments = isRequesterView ? r.comments.filter((c) => c.isPublic) : r.comments;
   const participants = buildParticipants(r, visibleComments, assigneeUser?.name);
-  const needsUserResponse = isRequesterView && r.status === "pending";
+  const commentAuthorProfiles = new Map<string, AccountUser>();
+  commentAuthorQueries.forEach((query, index) => {
+    const authorId = commentAuthorIds[index];
+    if (authorId && query.data) commentAuthorProfiles.set(authorId, query.data);
+  });
+  for (const account of agentPool) {
+    commentAuthorProfiles.set(String(account.id), account);
+  }
+  if (assigneeUser) {
+    commentAuthorProfiles.set(String(assigneeUser.id), assigneeUser);
+  }
+
+  const profileForComment = (item: RequestItem["comments"][number]) =>
+    item.authorId ? commentAuthorProfiles.get(String(item.authorId)) : undefined;
+  const avatarForComment = (item: RequestItem["comments"][number]) => {
+    const profile = profileForComment(item);
+    const sessionAvatar =
+      item.authorId && isRequester(item.authorId, sessionUser?.id)
+        ? sessionUser?.avatar
+        : undefined;
+    return buildAvatarUrl(profile?.avatar ?? sessionAvatar);
+  };
+  const roleForComment = (item: RequestItem["comments"][number]) => {
+    if (item.authorId && r.requesterId && String(item.authorId) === String(r.requesterId)) {
+      return "Demandeur";
+    }
+    const profile = profileForComment(item);
+    return (
+      participantRoleLabel(profile?.role) ??
+      participantRoleLabel(item.authorRole) ??
+      "Intervenant"
+    );
+  };
+  const canDeleteComment = (item: RequestItem["comments"][number]) => {
+    if (isArchived || r.status === "closed" || r.status === "rejected") return false;
+    if (!sessionUser?.id || !item.authorId) return false;
+    if (String(item.authorId) === String(sessionUser.id)) return true;
+    const isOwnerView = Boolean(r.requesterId && String(sessionUser.id) === String(r.requesterId));
+    return sessionUser.role !== "user" && !isOwnerView;
+  };
+  const lastVisibleComment = visibleComments[visibleComments.length - 1];
+  const lastCommentIsFromRequester = Boolean(
+    lastVisibleComment?.authorId && r.requesterId && String(lastVisibleComment.authorId) === String(r.requesterId),
+  );
+  const needsUserResponse = isRequesterView && r.status === "pending" && !lastCommentIsFromRequester;
   const isAssignedToMe = isRequester(r.assigneeId, sessionUser?.id);
   const hasAssignee = Boolean(r.assigneeId);
   const hasReopenRequest = (r.infos as Record<string, unknown> | undefined)?.reopen_requested === true;
@@ -1511,52 +1477,763 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     hasReopenRequest,
   });
   const canDecideReopen = canApproveReopen || canRejectReopen;
+  const canShowClosedRequestAction = isRequesterView && r.status === "closed";
+  const canOpenAppreciation = isRequesterView && (r.status === "resolved" || r.status === "closed");
+  const assigneeDisplayName = assigneeUser?.name ?? r.assigneeName ?? (r.assigneeId ? "Agent assigné" : "Non assigné");
+  const createdAtLabel = formatTicketDateTime(r.createdAt);
+  const updatedAtLabel = formatTicketDateTime(r.updatedAt);
+  const canShowQuickActions = canEdit || canCancel || canClose || canRequestReopen || canShowClosedRequestAction || canOpenAppreciation;
+  const hasRequestActions = canShowQuickActions;
+  const detailTabs: Array<{ key: DetailTab; label: string; count?: number; icon: LucideIcon }> = [
+    { key: "description", label: "Description", icon: FileText },
+    { key: "journal", label: "Journals", count: r.timeline.length, icon: GitBranch },
+    { key: "comments", label: "Commentaires", count: visibleComments.length, icon: MessageSquare },
+    { key: "files", label: "Fichiers", count: attachments.length, icon: Paperclip },
+    { key: "sla", label: "Délais de traitement", icon: Clock },
+    { key: "treatment", label: "Traitement", icon: Wrench },
+  ];
+  const sideParticipants = participants.slice(0, 4);
+  const canToggleParticipants = participants.length > sideParticipants.length;
+  const sideCardClass = "glass-strong rounded-[18px] p-4 sm:p-5";
+  const directTreatmentActionConfig = (() => {
+    switch (directTreatmentAction) {
+      case "approveReopen":
+        return {
+          icon: RotateCcw,
+          title: "Approuver la réouverture",
+          description: "Le ticket retournera en traitement et le demandeur sera notifié.",
+          confirmLabel: "Approuver",
+          isPending: approveReopenMut.isPending,
+        };
+      case "selfAssign":
+        return {
+          icon: UserCheck,
+          title: "Vous assigner ce ticket",
+          description: "Le ticket vous sera attribué pour prise en charge.",
+          confirmLabel: "M'assigner",
+          isPending: selfAssignMut.isPending,
+        };
+      case "takeOwnership":
+        return {
+          icon: UserCheck,
+          title: "Démarrer le traitement",
+          description: "La demande passera en cours de traitement.",
+          confirmLabel: "Démarrer",
+          isPending: takeOwnershipMut.isPending,
+        };
+      case "resume":
+        return {
+          icon: RotateCcw,
+          title: "Reprendre le traitement",
+          description: "La demande quittera l'attente et repassera en cours de traitement.",
+          confirmLabel: "Reprendre",
+          isPending: resumeMut.isPending,
+        };
+      case "resolve":
+        return {
+          icon: CheckCircle2,
+          title: "Marquer la demande comme résolue",
+          description: "La demande sera indiquée comme résolue, sans note interne supplémentaire.",
+          confirmLabel: "Marquer résolue",
+          isPending: resolveMut.isPending,
+        };
+      case "close":
+        return {
+          icon: CheckCircle2,
+          title: "Confirmer la résolution",
+          description: "La demande sera clôturée et le traitement sera considéré comme terminé.",
+          confirmLabel: "Confirmer",
+          isPending: closeMut.isPending,
+        };
+      default:
+        return null;
+    }
+  })();
+  const confirmDirectTreatmentAction = () => {
+    switch (directTreatmentAction) {
+      case "approveReopen":
+        approveReopenMut.mutate();
+        break;
+      case "selfAssign":
+        selfAssignMut.mutate();
+        break;
+      case "takeOwnership":
+        takeOwnershipMut.mutate();
+        break;
+      case "resume":
+        resumeMut.mutate();
+        break;
+      case "resolve":
+        resolveMut.mutate();
+        break;
+      case "close":
+        closeMut.mutate();
+        break;
+    }
+  };
+
+  const treatmentActionsPanel = !isRequesterView && (
+    (isFinal && !canDecideReopen) ? (
+      <div className="flex w-full flex-wrap items-center gap-2 rounded-full border border-border/40 bg-muted/30 px-4 py-2 text-sm text-muted-foreground">
+        <Lock className="h-3.5 w-3.5" />
+        Ticket {isArchived ? "archivé" : r.status === "closed" ? "clôturé" : r.status === "rejected" ? "rejeté" : "résolu"} — aucune action disponible
+      </div>
+    ) : (
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3" role="group" aria-label="Actions de traitement">
+        {canApproveReopen && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-success/40 bg-success/10 p-3 text-left transition hover:bg-success/15 disabled:opacity-60"
+            onClick={() => setDirectTreatmentAction("approveReopen")}
+            disabled={approveReopenMut.isPending}
+          >
+            {approveReopenMut.isPending
+              ? <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-success" />
+              : <RotateCcw className="mt-0.5 h-4 w-4 shrink-0 text-success" />}
+            <span>
+              <span className="block text-sm font-semibold text-success">Approuver réouverture</span>
+              <span className="text-xs text-muted-foreground">Le ticket retourne en traitement</span>
+            </span>
+          </button>
+        )}
+        {canRejectReopen && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-left transition hover:bg-destructive/15"
+            onClick={() => setShowRejectReopenConfirm(true)}
+          >
+            <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            <span>
+              <span className="block text-sm font-semibold text-destructive">Refuser réouverture</span>
+              <span className="text-xs text-muted-foreground">Le ticket reste dans son état actuel</span>
+            </span>
+          </button>
+        )}
+        {/* Agent — auto-assignation d'un ticket libre de son périmètre */}
+        {canSelfAssign && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-primary/40 bg-primary/10 p-3 text-left transition hover:bg-primary/15 disabled:opacity-60"
+            onClick={() => setDirectTreatmentAction("selfAssign")}
+            disabled={selfAssignMut.isPending || !sessionUser?.id}
+          >
+            {selfAssignMut.isPending
+              ? <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary" />
+              : <UserCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" />}
+            <span>
+              <span className="block text-sm font-semibold text-primary">M'assigner</span>
+              <span className="text-xs text-muted-foreground">Prendre en charge ce ticket</span>
+            </span>
+          </button>
+        )}
+        {/* C1/C9 — Prendre en charge : ASSIGNED, agent seulement */}
+        {canTakeOwnership && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-primary/40 bg-primary/10 p-3 text-left transition hover:bg-primary/15 disabled:opacity-60"
+            onClick={() => setDirectTreatmentAction("takeOwnership")}
+            disabled={takeOwnershipMut.isPending}
+          >
+            {takeOwnershipMut.isPending
+              ? <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary" />
+              : <UserCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" />}
+            <span>
+              <span className="block text-sm font-semibold text-primary">Démarrer traitement</span>
+              <span className="text-xs text-muted-foreground">Passer la demande en cours</span>
+            </span>
+          </button>
+        )}
+        {/* C2 — Demander des informations : IN_PROGRESS, agent seulement */}
+        {canRequestInfo && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-left transition hover:bg-amber-500/10"
+            onClick={() => setShowRequestInfoForm(true)}
+          >
+            <MessageSquareWarning className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+            <span>
+              <span className="block text-sm font-semibold text-amber-500">Demander des infos</span>
+              <span className="text-xs text-muted-foreground">Mettre en attente du demandeur</span>
+            </span>
+          </button>
+        )}
+        {/* C3 — Reprendre le traitement : PENDING, agent seulement */}
+        {canResumeTreatment && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-info/40 bg-info/10 p-3 text-left transition hover:bg-info/15 disabled:opacity-60"
+            onClick={() => setDirectTreatmentAction("resume")}
+            disabled={resumeMut.isPending}
+          >
+            {resumeMut.isPending
+              ? <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-info" />
+              : <RotateCcw className="mt-0.5 h-4 w-4 shrink-0 text-info" />}
+            <span>
+              <span className="block text-sm font-semibold text-info">Reprendre le traitement</span>
+              <span className="text-xs text-muted-foreground">Sortir de l'attente</span>
+            </span>
+          </button>
+        )}
+        {/* C5 — Escalader : agent, chef, directeur, admin seulement */}
+        {canEscalateTicket && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-orange-600/40 bg-orange-600/10 p-3 text-left transition hover:bg-orange-600/15"
+            onClick={() => setShowEscalateForm(true)}
+          >
+            <ArrowUpRight className="mt-0.5 h-4 w-4 shrink-0 text-orange-600" />
+            <span>
+              <span className="block text-sm font-semibold text-orange-600">Escalader</span>
+              <span className="text-xs text-muted-foreground">Transmettre à un niveau supérieur</span>
+            </span>
+          </button>
+        )}
+        {/* C6 — Assigner / réassigner : chef et admin seulement */}
+        {canAssignTicket && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-primary/40 bg-primary/10 p-3 text-left transition hover:bg-primary/15 disabled:opacity-60"
+            onClick={() => setShowReassign(true)}
+            disabled={assignMut.isPending}
+          >
+            <UserCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            <span>
+              <span className="block text-sm font-semibold text-primary">Réassigner</span>
+              <span className="text-xs text-muted-foreground">Choisir un autre agent</span>
+            </span>
+          </button>
+        )}
+        {/* Créer circuit : agent, chef, admin */}
+        {canCreateCircuit && workflows.length === 0 && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-indigo-600/40 bg-indigo-600/10 p-3 text-left transition hover:bg-indigo-600/15"
+            onClick={() => setShowCircuitDialog(true)}
+          >
+            <GitBranch className="mt-0.5 h-4 w-4 shrink-0 text-indigo-600" />
+            <span>
+              <span className="block text-sm font-semibold text-indigo-600">Créer circuit</span>
+              <span className="text-xs text-muted-foreground">Circuit de validation automatique</span>
+            </span>
+          </button>
+        )}
+        {/* Chef + Director: Changer priorité */}
+        {canChangePriority && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-amber-600/40 bg-amber-600/10 p-3 text-left transition hover:bg-amber-600/15 disabled:opacity-60"
+            onClick={() => setShowPriorityPicker(true)}
+            disabled={changePriorityMut.isPending}
+          >
+            <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+            <span>
+              <span className="block text-sm font-semibold text-amber-600">Changer priorité</span>
+              <span className="text-xs text-muted-foreground">Ajuster le niveau d'urgence</span>
+            </span>
+          </button>
+        )}
+        {/* Responsables: Rejeter + Changer service + Transfert direction */}
+        {canRejectTicket && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-left transition hover:bg-destructive/15"
+            onClick={() => setShowRejectConfirm(true)}
+          >
+            <Ban className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            <span>
+              <span className="block text-sm font-semibold text-destructive">Rejeter</span>
+              <span className="text-xs text-muted-foreground">Refuser cette demande</span>
+            </span>
+          </button>
+        )}
+        {canChangeService && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-sky-500/40 bg-sky-500/10 p-3 text-left transition hover:bg-sky-500/15 disabled:opacity-60"
+            onClick={() => setShowServicePicker(true)}
+            disabled={changeServiceMut.isPending}
+          >
+            <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-sky-500" />
+            <span>
+              <span className="block text-sm font-semibold text-sky-500">Changer service</span>
+              <span className="text-xs text-muted-foreground">Réaffecter vers un autre service</span>
+            </span>
+          </button>
+        )}
+        {canTransferDirection && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-violet-600/40 bg-violet-600/10 p-3 text-left transition hover:bg-violet-600/15 disabled:opacity-60"
+            onClick={() => {
+              setTransferDirectionId("");
+              setTransferReason("");
+              setShowDirectionTransfer(true);
+            }}
+            disabled={transferDirectionMut.isPending}
+          >
+            <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-violet-600" />
+            <span>
+              <span className="block text-sm font-semibold text-violet-600">Transférer direction</span>
+              <span className="text-xs text-muted-foreground">Envoyer vers une autre direction</span>
+            </span>
+          </button>
+        )}
+        {/* C4 — Marquer résolue : 1 clic direct, ou avec note optionnelle */}
+        {canResolveTicket && (
+          <>
+            <button
+              type="button"
+              className="flex items-start gap-3 rounded-xl border border-primary/40 bg-primary/5 p-3 text-left transition hover:bg-primary/10 disabled:opacity-60"
+              onClick={() => setShowResolveForm(true)}
+              disabled={resolveMut.isPending}
+            >
+              <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <span>
+                <span className="block text-sm font-semibold text-primary">Ajouter une note</span>
+                <span className="text-xs text-muted-foreground">Avant de marquer résolue</span>
+              </span>
+            </button>
+            <button
+              type="button"
+              className="flex items-start gap-3 rounded-xl border border-success/40 bg-success/10 p-3 text-left transition hover:bg-success/15 disabled:opacity-60"
+              onClick={() => setDirectTreatmentAction("resolve")}
+              disabled={resolveMut.isPending}
+            >
+              {resolveMut.isPending
+                ? <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-success" />
+                : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />}
+              <span>
+                <span className="block text-sm font-semibold text-success">Marquer résolue</span>
+                <span className="text-xs text-muted-foreground">Action de traitement</span>
+              </span>
+            </button>
+          </>
+        )}
+      </div>
+    )
+  );
+
+  const requestActionsPanel = (
+    <section className="min-w-0 rounded-[16px] border border-border/35 bg-background/25" aria-label="Actions disponibles">
+      {hasRequestActions ? (
+        <div className="overflow-hidden">
+          {canEdit && (
+            <button
+              type="button"
+              className="flex w-full items-start gap-3 border-b border-amber-500/40 bg-amber-500/5 px-3 py-3 text-left transition hover:bg-amber-500/10 sm:px-4"
+              onClick={() => {
+                setEditTitle(r.title);
+                setEditDescription(r.description);
+                setShowEditForm(true);
+              }}
+            >
+              <Pencil className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+              <span>
+                <span className="block text-sm font-semibold text-amber-500">Modifier la demande</span>
+                <span className="text-xs text-muted-foreground">Uniquement au début</span>
+              </span>
+            </button>
+          )}
+          {canCancel && (
+            <button
+              type="button"
+              className="flex w-full items-start gap-3 border-b border-destructive/40 bg-destructive/10 px-3 py-3 text-left transition hover:bg-destructive/15 sm:px-4"
+              onClick={() => setShowCancelConfirm(true)}
+            >
+              <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+              <span>
+                <span className="block text-sm font-semibold text-destructive">Annuler la demande</span>
+                <span className="text-xs text-muted-foreground">Uniquement au début</span>
+              </span>
+            </button>
+          )}
+          {canRequestReopen && (
+            <button
+              type="button"
+              className="flex w-full items-start gap-3 border-b border-info/40 bg-info/10 px-3 py-3 text-left transition hover:bg-info/15 sm:px-4"
+              onClick={() => setShowClosedRequestDialog(true)}
+            >
+              <RotateCcw className="mt-0.5 h-4 w-4 shrink-0 text-info" />
+              <span>
+                <span className="block text-sm font-semibold text-info">
+                  {r.status === "closed" ? "Rouvrir la demande" : "Demander une réouverture"}
+                </span>
+                <span className="text-xs text-muted-foreground">Après résolution</span>
+              </span>
+            </button>
+          )}
+          {canShowClosedRequestAction && !canRequestReopen && (
+            <button
+              type="button"
+              className="flex w-full items-start gap-3 border-b border-border/40 bg-muted/10 px-3 py-3 text-left transition hover:bg-muted/20 sm:px-4"
+              onClick={() => setShowClosedRequestDialog(true)}
+            >
+              <Lock className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+              <span>
+                <span className="block text-sm font-semibold">Demande clôturée</span>
+                <span className="text-xs text-muted-foreground">Voir l'état de la demande</span>
+              </span>
+            </button>
+          )}
+          {canClose && (
+            <button
+              type="button"
+              className="flex w-full items-start gap-3 border-b border-success/40 bg-success/10 px-3 py-3 text-left transition hover:bg-success/15 disabled:opacity-60 sm:px-4"
+              onClick={() => setDirectTreatmentAction("close")}
+              disabled={closeMut.isPending}
+            >
+              {closeMut.isPending
+                ? <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-success" />
+                : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />}
+              <span>
+                <span className="block text-sm font-semibold text-success">Confirmer la résolution</span>
+                <span className="text-xs text-muted-foreground">Après traitement</span>
+              </span>
+            </button>
+          )}
+          {canOpenAppreciation && (
+            <button
+              type="button"
+              className="flex w-full items-start gap-3 px-3 py-3 text-left transition hover:bg-foreground/5 sm:px-4"
+              onClick={() => setShowAppreciationDialog(true)}
+            >
+              <Star className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+              <span>
+                <span className="block text-sm font-semibold">Votre avis</span>
+                <span className="text-xs text-muted-foreground">Évaluer la prise en charge</span>
+              </span>
+            </button>
+          )}
+        </div>
+      ) : (
+        <p className="m-4 rounded-2xl border border-dashed border-border/60 bg-background/35 px-4 py-5 text-sm text-muted-foreground">
+          Aucune action disponible dans l'état actuel du ticket.
+        </p>
+      )}
+    </section>
+  );
+
+  const commentsPanel = (
+    <section ref={commentsPanelRef} className="min-w-0">
+      <div>
+        {visibleComments.length === 0 ? (
+          <p className="rounded-2xl border border-dashed border-border/50 bg-background/35 px-4 py-5 text-sm text-muted-foreground">
+            Aucun commentaire pour l'instant.
+          </p>
+        ) : (
+          <ul className="relative space-y-4 pb-1">
+            <span className="absolute left-[18px] top-9 hidden h-[calc(100%-3rem)] w-px bg-border/45 sm:block" aria-hidden />
+            {visibleComments.map((c, index) => {
+              const fullAttachment = c.attachmentName
+                ? attachments.find((a) => a.id === c.attachmentId)
+                : undefined;
+              const authorAvatar = avatarForComment(c);
+              const commentDepth = c.authorId && r.requesterId && String(c.authorId) === String(r.requesterId)
+                ? (index === 0 ? 0 : 2)
+                : 1;
+              const marginLeft = `clamp(0rem, ${Math.min(commentDepth, 2) * 2.75}rem, 18vw)`;
+              const attachmentSize = c.attachmentSize ?? fullAttachment?.size_bytes;
+              const attachmentMime = c.attachmentMime ?? fullAttachment?.mime_type ?? "";
+              // Réponse attendue : dernier commentaire du fil tant que le ticket
+              // est en attente du retour du demandeur (aucune reponse posterieure).
+              const isAwaitingReply = needsUserResponse && index === visibleComments.length - 1;
+
+              return (
+                <li key={c.id} className="relative flex min-w-0 gap-3" style={{ marginLeft }}>
+                  {commentDepth > 0 && (
+                    <span
+                      className="absolute -left-8 top-5 hidden h-8 w-8 rounded-bl-2xl border-b border-l border-border/45 sm:block"
+                      aria-hidden
+                    />
+                  )}
+                  <Avatar className="h-10 w-10 shrink-0 border border-border/60 bg-background shadow-sm">
+                    <AvatarImage src={authorAvatar} alt={c.author} />
+                    <AvatarFallback className="bg-primary/10 text-xs font-bold text-primary">
+                      {initialsFor(c.author)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0 flex-1">
+                    <div className="relative inline-block max-w-full rounded-2xl bg-muted/45 px-3.5 py-2.5 pr-10 shadow-sm">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span className="truncate text-sm font-semibold text-foreground">{c.author}</span>
+                        <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                          {roleForComment(c)}
+                        </span>
+                        {!isRequesterView && (
+                          c.isPublic ? (
+                            <span className="shrink-0 rounded-full bg-info/15 px-2 py-0.5 text-[10px] text-info">
+                              Visible public
+                            </span>
+                          ) : (
+                            <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px]">Interne</span>
+                          )
+                        )}
+                      </div>
+                      <p className="mt-1 whitespace-pre-wrap text-sm leading-5 text-foreground">{c.body}</p>
+                      {c.attachmentName && (
+                        <button
+                          type="button"
+                          className="mt-2 flex w-full max-w-sm items-center gap-3 rounded-xl border border-border/40 bg-background/75 px-2.5 py-2 text-left text-xs transition hover:bg-background disabled:cursor-default"
+                          onClick={() => fullAttachment && void handleAttachmentFile(fullAttachment, "download")}
+                          disabled={!fullAttachment}
+                        >
+                          <span className="grid h-10 w-14 shrink-0 place-items-center rounded-lg border border-border/40 bg-background/80">
+                            <FileText className="h-5 w-5 text-primary" />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate font-semibold text-foreground">{c.attachmentName}</span>
+                            <span className="block text-muted-foreground">
+                              {attachmentSize ? formatAttachmentSize(attachmentSize) : attachmentTypeLabel(attachmentMime)}
+                            </span>
+                          </span>
+                          <Download className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        </button>
+                      )}
+                      {canDeleteComment(c) && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full text-muted-foreground opacity-80 transition hover:bg-background/80 hover:text-foreground"
+                              title="Options du commentaire"
+                            >
+                              <MoreVertical className="h-4 w-4" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              className="text-destructive focus:text-destructive"
+                              onClick={() => deleteCommentMut.mutate(c.id)}
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Supprimer
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 pl-1 text-xs text-muted-foreground">
+                      <span>{formatCommentDate(c.createdAt)}</span>
+                      {!(isArchived || r.status === "closed" || r.status === "rejected") && (
+                        <>
+                          <span aria-hidden>-</span>
+                          <button
+                            type="button"
+                            className={cn(
+                              "rounded-full font-medium transition",
+                              isAwaitingReply
+                                ? "animate-pulse bg-success/20 px-2.5 py-1 text-success ring-1 ring-success/50"
+                                : "hover:text-foreground",
+                            )}
+                            title={isAwaitingReply ? "Une réponse est attendue à ce message" : undefined}
+                            onClick={() => {
+                              setReplyTarget(c.author);
+                              commentRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+                              commentRef.current?.focus();
+                            }}
+                          >
+                            Repondre
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {isArchived || r.status === "closed" || r.status === "rejected" ? (
+          <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/30 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+            <Lock className="h-3.5 w-3.5 shrink-0" />
+            Les commentaires sont desactives - ticket {isArchived ? "archive" : r.status === "closed" ? "cloture" : "rejete"}.
+          </div>
+        ) : (
+          <div className="mt-5 rounded-2xl border border-border/40 bg-background/45 p-2 shadow-sm">
+            {replyTarget && (
+              <div className="mb-2 flex items-center justify-between gap-2 px-2 py-1">
+                <span className="min-w-0 truncate text-sm font-medium text-success">
+                  Répondre à @{replyTarget}
+                </span>
+                <button
+                  type="button"
+                  className="grid h-5 w-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                  title="Annuler la réponse"
+                  onClick={() => setReplyTarget(null)}
+                >
+                  <XCircle className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+            {stagedFile && (
+              <div className="mb-2 ml-0 flex items-center gap-2 rounded-xl border border-border/40 bg-background/70 px-3 py-2 text-xs sm:ml-12">
+                <FileText className="h-3.5 w-3.5 shrink-0 text-primary" />
+                <span className="min-w-0 flex-1 truncate">{stagedFile.name}</span>
+                <button
+                  type="button"
+                  className="grid h-5 w-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                  title="Retirer la piece jointe"
+                  onClick={() => {
+                    setStagedFile(null);
+                    if (attachRef.current) attachRef.current.value = "";
+                  }}
+                >
+                  <XCircle className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+            <div className="flex items-end gap-2">
+              <div className="flex min-w-0 flex-1 items-end gap-1 rounded-xl border border-border/35 bg-background/70 px-3 py-1.5">
+                <Textarea
+                  ref={commentRef}
+                  placeholder={isRequesterView ? "Ecrire un commentaire..." : "Ajouter un commentaire..."}
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  className="max-h-28 min-h-10 resize-none border-0 bg-transparent px-0 py-2 text-sm shadow-none focus-visible:ring-0"
+                />
+                <input
+                  ref={attachRef}
+                  type="file"
+                  accept=".jpg,.jpeg,.png,.webp,.heic,.pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) setStagedFile(f);
+                  }}
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={cn("h-9 w-9 shrink-0 rounded-full", stagedFile && "text-primary")}
+                  title="Joindre un fichier"
+                  onClick={() => attachRef.current?.click()}
+                >
+                  <Paperclip className="h-4 w-4" />
+                </Button>
+                <Popover open={emojiPickerOpen} onOpenChange={setEmojiPickerOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 shrink-0 rounded-full"
+                      title="Ajouter un emoji"
+                    >
+                      <Smile className="h-4 w-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" className="w-64 p-2">
+                    <div className="grid grid-cols-8 gap-1">
+                      {COMMENT_EMOJIS.map((emoji) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          className="grid h-7 w-7 place-items-center rounded-md text-lg transition hover:bg-muted"
+                          onClick={() => insertEmoji(emoji)}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
+              <Button
+                size="sm"
+                className="h-10 rounded-xl gradient-primary px-5"
+                disabled={!comment.trim() || commentMut.isPending}
+                onClick={() => commentMut.mutate()}
+              >
+                {commentMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Envoyer"}
+              </Button>
+            </div>
+            {!isRequesterView && (
+              <div className="mt-2 flex items-center gap-2 pl-0 sm:pl-12">
+                <Switch id="public" checked={isPublic} onCheckedChange={setIsPublic} />
+                <Label htmlFor="public" className="text-sm">
+                  Visible par le demandeur
+                </Label>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </section>
+  );
 
   return (
-    <div className="mx-auto max-w-7xl space-y-4">
-      <div>
+    <div className="mx-auto w-full max-w-[1700px] space-y-5 px-3 pb-24 sm:px-5 lg:px-8">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
         <Button asChild variant="ghost" size="sm" className="-ml-2 rounded-full">
           <Link to={detailContext.backTo}>
             <ArrowLeft className="mr-1 h-4 w-4" /> {detailContext.backLabel}
           </Link>
         </Button>
+        <span className="hidden text-muted-foreground sm:inline">/</span>
+        <span className="hidden rounded-full border border-border/50 bg-background/50 px-3 py-1 text-xs font-medium text-muted-foreground sm:inline-flex">
+          {detailContext.eyebrow} · Détail du ticket
+        </span>
       </div>
 
-      <div className="overflow-hidden rounded-[28px] border border-border/50 bg-card/70 shadow-sm backdrop-blur">
-      <header className="flex flex-wrap items-start justify-between gap-4 p-5 sm:p-6">
-        <div className="min-w-0">
-          <div className="mb-2 inline-flex items-center rounded-full border border-border/60 bg-background/60 px-3 py-1 text-xs font-semibold text-muted-foreground">
-            {detailContext.eyebrow}
+      <div className="grid min-w-0 items-start gap-5 xl:grid-cols-[minmax(0,68fr)_minmax(320px,32fr)] 2xl:gap-6">
+      <div className="min-w-0 space-y-5">
+      <div className="overflow-hidden rounded-[18px] border border-border/50 bg-gradient-to-br from-background/95 via-card/80 to-primary/10 shadow-sm backdrop-blur">
+      <header className="flex flex-col flex-wrap gap-5 p-5 sm:p-6 xl:p-7 lg:flex-row lg:items-stretch lg:justify-between">
+        <div className="flex min-w-0 flex-1 flex-col gap-5 xl:flex-row xl:flex-wrap">
+          <div className="min-w-[14rem] flex-1">
+            <motion.div
+              layoutId={`req-ref-${r.id}`}
+              className="flex max-w-full items-center gap-2 font-mono text-[11px] text-muted-foreground sm:text-xs"
+            >
+              <span className="min-w-0 truncate">{r.ref}</span>
+              <button
+                type="button"
+                title="Copier l'identifiant"
+                className="grid h-6 w-6 place-items-center rounded-lg border border-border/50 bg-background/60 hover:bg-muted"
+                onClick={() => {
+                  void navigator.clipboard.writeText(r.ref);
+                  toast.success("Identifiant copié");
+                }}
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </button>
+            </motion.div>
+            <div className="mt-3 flex min-w-0 items-start gap-2">
+              <h1 className="min-w-0 max-w-4xl break-words text-3xl font-bold leading-tight tracking-tight sm:text-4xl xl:text-5xl">{r.title}</h1>
+              <Star className="mt-1 h-5 w-5 shrink-0 text-muted-foreground" />
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <StatusBadge status={r.status} />
+              <PriorityBadge priority={r.priority} />
+              <span className="inline-flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-xs font-medium capitalize text-muted-foreground">
+                {r.category}
+              </span>
+            </div>
+            <p className="mt-5 text-sm text-muted-foreground">
+              Créée le <span className="text-foreground">{createdAtLabel}</span> par{" "}
+              <span className="text-foreground">{isRequesterView ? "vous" : r.requesterName}</span>
+            </p>
           </div>
-          <motion.div
-            layoutId={`req-ref-${r.id}`}
-            className="font-mono text-xs text-muted-foreground"
-          >
-            {r.ref}
-          </motion.div>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">{r.title}</h1>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <StatusBadge status={r.status} />
-            <PriorityBadge priority={r.priority} />
-            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground">
-              {r.category}
-            </span>
-          </div>
-        </div>
 
-        {needsUserResponse && (
-          <div className="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3">
-            <MessageSquareWarning className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
-            <div className="flex-1">
-              <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">
-                L'agent vous demande des informations complémentaires
-              </p>
-              <p className="mt-0.5 text-sm text-amber-600/80 dark:text-amber-400/70">
-                Répondez via la section commentaires ci-dessous pour que le traitement de votre demande puisse reprendre.
-              </p>
+          <div className="w-full border-t border-border/40 pt-5 xl:w-72 xl:shrink-0 xl:border-l xl:border-t-0 xl:pl-6 xl:pt-0">
+            <div className={cn("flex items-center gap-2 text-sm font-semibold", slaOver ? "text-destructive" : "text-success")}>
+              {slaOver ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+              {slaOver ? "Délai dépassé" : "Délai conforme"}
+            </div>
+            <div className="mt-2 text-3xl font-bold sm:text-4xl">{slaPct}%</div>
+            <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
+              <Clock className="h-4 w-4" />
+              {r.slaHours > 0 ? `${r.slaElapsed}h / ${r.slaHours}h` : "Délai non configuré"}
+            </div>
+            <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
+              <div
+                className={cn("h-full rounded-full", slaOver ? "bg-destructive" : "gradient-primary")}
+                style={{ width: `${slaPct}%` }}
+              />
             </div>
           </div>
-        )}
+        </div>
 
         {isArchived && (
           <div className="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3">
@@ -1572,347 +2249,104 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
           </div>
         )}
 
-        {isRequesterView && (canEdit || canCancel) && (
-          <div className="flex flex-wrap gap-2">
-            {canEdit && (
-              <Button
-                variant="outline"
-                className="rounded-full"
-                onClick={() => {
-                  setEditTitle(r.title);
-                  setEditDescription(r.description);
-                  setShowEditForm(true);
-                }}
-              >
-                <Pencil className="mr-1.5 h-4 w-4" /> Modifier
-              </Button>
-            )}
-            {canCancel && (
-              <Button
-                variant="outline"
-                className="rounded-full border-destructive/40 text-destructive hover:bg-destructive/10 hover:border-destructive/60"
-                onClick={() => setShowCancelConfirm(true)}
-              >
-                <Ban className="mr-1.5 h-4 w-4" /> Annuler la demande
-              </Button>
-            )}
-          </div>
-        )}
+      </header>
 
-        {!isRequesterView && (
-          (isFinal && !canDecideReopen) ? (
-            <div className="flex items-center gap-2 rounded-full border border-border/40 bg-muted/30 px-4 py-2 text-sm text-muted-foreground">
-              <Lock className="h-3.5 w-3.5" />
-              Ticket {isArchived ? "archivé" : r.status === "closed" ? "clôturé" : r.status === "rejected" ? "rejeté" : "résolu"} — aucune action disponible
-            </div>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {canApproveReopen && (
-                <Button
-                  className="rounded-full"
-                  onClick={() => approveReopenMut.mutate()}
-                  disabled={approveReopenMut.isPending}
-                >
-                  {approveReopenMut.isPending
-                    ? <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                    : <RotateCcw className="mr-1 h-4 w-4" />}
-                  Approuver réouverture
-                </Button>
-              )}
-              {canRejectReopen && (
-                <Button
-                  variant="outline"
-                  className="rounded-full border-destructive/40 text-destructive hover:bg-destructive/10"
-                  onClick={() => setShowRejectReopenConfirm(true)}
-                >
-                  <XCircle className="mr-1 h-4 w-4" />
-                  Refuser réouverture
-                </Button>
-              )}
-              {/* Agent — auto-assignation d'un ticket libre de son périmètre */}
-              {canSelfAssign && (
-                <Button
-                  variant="outline"
-                  className="rounded-full"
-                  onClick={() => selfAssignMut.mutate()}
-                  disabled={selfAssignMut.isPending || !sessionUser?.id}
-                >
-                  {selfAssignMut.isPending
-                    ? <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                    : <UserCheck className="mr-1 h-4 w-4" />}
-                  M'assigner
-                </Button>
-              )}
-              {/* C1/C9 — Prendre en charge : ASSIGNED, agent seulement */}
-              {canTakeOwnership && (
-                <Button
-                  variant="outline"
-                  className="rounded-full"
-                  onClick={() => takeOwnershipMut.mutate()}
-                  disabled={takeOwnershipMut.isPending}
-                >
-                  {takeOwnershipMut.isPending
-                    ? <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                    : <UserCheck className="mr-1 h-4 w-4" />}
-                  Démarrer traitement
-                </Button>
-              )}
-              {/* C2 — Demander des informations : IN_PROGRESS, agent seulement */}
-              {canRequestInfo && (
-                <Button
-                  variant="outline"
-                  className="rounded-full"
-                  onClick={() => setShowRequestInfoForm((v) => !v)}
-                >
-                  <MessageSquareWarning className="mr-1 h-4 w-4" />
-                  Demander des infos
-                </Button>
-              )}
-              {/* C3 — Reprendre le traitement : PENDING, agent seulement */}
-              {canResumeTreatment && (
-                <Button
-                  variant="outline"
-                  className="rounded-full"
-                  onClick={() => resumeMut.mutate()}
-                  disabled={resumeMut.isPending}
-                >
-                  {resumeMut.isPending
-                    ? <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                    : <RotateCcw className="mr-1 h-4 w-4" />}
-                  Reprendre le traitement
-                </Button>
-              )}
-              {/* C5 — Escalader : agent, chef, directeur, admin seulement */}
-              {canEscalateTicket && (
-                <Button
-                  variant="outline"
-                  className="rounded-full"
-                  onClick={() => setShowEscalateForm((v) => !v)}
-                >
-                  <ArrowUpRight className="mr-1 h-4 w-4" /> Escalader
-                </Button>
-              )}
-              {/* C6 — Assigner / réassigner : chef et admin seulement */}
-              {canAssignTicket && (
-              <div className="relative">
-                <Button
-                  variant="outline"
-                  className="rounded-full"
-                  onClick={() => setShowReassign((v) => !v)}
-                  disabled={assignMut.isPending}
-                >
-                  <UserCheck className="mr-1 h-4 w-4" />
-                  Réassigner
-                  <ChevronDown className="ml-1 h-3.5 w-3.5" />
-                </Button>
-                {showReassign && (
-                  <div className="absolute right-0 top-10 z-30 min-w-48 rounded-xl border border-border/50 bg-card shadow-xl p-1.5">
-                    <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
-                      Choisir un agent
-                    </p>
-                    {agentPool.length === 0 && (
-                      <p className="px-3 py-2 text-xs text-muted-foreground">Chargement…</p>
-                    )}
-                    {agentPool.map((agent) => (
-                      <button
-                        key={agent.id}
-                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-foreground/5"
-                        onClick={() => assignMut.mutate(agent.id)}
-                      >
-                        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">
-                          {agent.name.slice(0, 2).toUpperCase()}
-                        </span>
-                        {agent.name}
-                        {agent.availability && (
-                          <span className="ml-auto text-[10px] text-muted-foreground">{agent.availability}</span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              )}
-              {/* Créer circuit : agent, chef, admin */}
-              {canCreateCircuit && workflows.length === 0 && (
-                <Button
-                  variant="outline"
-                  className="rounded-full"
-                  onClick={() => setShowCircuitDialog(true)}
-                >
-                  <GitBranch className="mr-1 h-4 w-4" /> Créer circuit
-                </Button>
-              )}
-              {/* Chef + Director: Changer priorité */}
-              {canChangePriority && (
-                <div className="relative">
-                  <Button variant="outline" className="rounded-full" onClick={() => setShowPriorityPicker((v) => !v)} disabled={changePriorityMut.isPending}>
-                    <ChevronDown className="mr-1 h-4 w-4" /> Priorité
-                  </Button>
-                  {showPriorityPicker && (
-                    <div className="absolute right-0 top-10 z-30 min-w-40 rounded-xl border border-border/50 bg-card shadow-xl p-1.5">
-                      {(["low", "medium", "high", "critical"] as const).map((p) => (
-                        <button key={p} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-foreground/5" onClick={() => changePriorityMut.mutate(p)}>
-                          <PriorityBadge priority={p} />
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-              {/* Responsables: Rejeter + Changer service + Transfert direction */}
-              {(canRejectTicket || canChangeService || canTransferDirection) && (
-                <>
-                  {canRejectTicket && (
-                    <Button variant="outline" className="rounded-full border-destructive/40 text-destructive hover:bg-destructive/10 hover:border-destructive/60" onClick={() => setShowRejectConfirm((v) => !v)}>
-                      <Ban className="mr-1 h-4 w-4" /> Rejeter
-                    </Button>
-                  )}
-                  {canChangeService && (
-                    <div className="relative">
-                      <Button variant="outline" className="rounded-full" onClick={() => setShowServicePicker((v) => !v)} disabled={changeServiceMut.isPending}>
-                        <Building2 className="mr-1 h-4 w-4" /> Service
-                      </Button>
-                      {showServicePicker && (
-                        <div className="absolute right-0 top-10 z-30 min-w-52 rounded-xl border border-border/50 bg-card shadow-xl p-1.5">
-                          <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Choisir un service</p>
-                          {availableServices.length === 0 ? (
-                            <p className="px-3 py-2 text-xs text-muted-foreground">Aucun service disponible</p>
-                          ) : availableServices.map((svc) => (
-                            <button key={svc} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs hover:bg-foreground/5" onClick={() => changeServiceMut.mutate(svc)}>
-                              {svc}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {canTransferDirection && (
-                    <Button
-                      variant="outline"
-                      className="rounded-full"
-                      onClick={() => {
-                        setTransferDirectionId("");
-                        setTransferReason("");
-                        setShowDirectionTransfer(true);
-                      }}
-                      disabled={transferDirectionMut.isPending}
-                    >
-                      <Building2 className="mr-1 h-4 w-4" /> Transférer direction
-                    </Button>
-                  )}
-                </>
-              )}
-              {/* C4 — Marquer résolue : 1 clic direct, ou avec note optionnelle */}
-              {canResolveTicket && (
-                <>
+      <TicketLifecycleStepper request={r} />
+
+      </div>
+
+      <div className="min-w-0 space-y-5">
+
+          {directTreatmentActionConfig && (
+            <Dialog
+              open={!!directTreatmentActionConfig}
+              onOpenChange={(open) => {
+                if (!open) setDirectTreatmentAction(null);
+              }}
+            >
+              <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    {(() => {
+                      const Icon = directTreatmentActionConfig.icon;
+                      return <Icon className="h-5 w-5 text-primary" />;
+                    })()}
+                    {directTreatmentActionConfig.title}
+                  </DialogTitle>
+                  <DialogDescription>
+                    {directTreatmentActionConfig.description}
+                  </DialogDescription>
+                </DialogHeader>
+                <DialogFooter className="gap-2">
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     className="rounded-full"
-                    disabled={resolveMut.isPending}
-                    onClick={() => setShowResolveForm((v) => !v)}
+                    onClick={() => setDirectTreatmentAction(null)}
                   >
-                    <MessageSquare className="mr-1 h-4 w-4" />
-                    Ajouter une note
+                    Annuler
                   </Button>
                   <Button
                     className="rounded-full gradient-primary"
-                    disabled={resolveMut.isPending}
-                    onClick={() => resolveMut.mutate()}
+                    disabled={directTreatmentActionConfig.isPending}
+                    onClick={confirmDirectTreatmentAction}
                   >
-                    {resolveMut.isPending
-                      ? <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                      : <CheckCircle2 className="mr-1 h-4 w-4" />}
-                    Marquer résolue
+                    {directTreatmentActionConfig.isPending
+                      ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                      : <CheckCircle2 className="mr-1.5 h-4 w-4" />}
+                    {directTreatmentActionConfig.confirmLabel}
                   </Button>
-                </>
-              )}
-            </div>
-          )
-        )}
-      </header>
-
-      {!isRequesterView && (
-        <TicketComplianceTrace
-          request={r}
-          assigneeName={assigneeUser?.name}
-        />
-      )}
-
-      {isRequesterView && (
-        <section className="border-t border-border/40 bg-muted/10 px-5 py-4 sm:px-6">
-          <h3 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            Avancement de votre demande
-          </h3>
-          <EscalationProgressBar
-            steps={buildRequesterStepsFromStatus(r.status, { rejected: r.status === "rejected" })}
-          />
-        </section>
-      )}
-
-      <div className="grid border-t border-border/40 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="min-w-0 space-y-5 p-4 sm:p-5 lg:p-6">
-
-          {/* P10 — Bandeau PENDING */}
-          {isRequesterView && r.status === "pending" && (
-            <GlassCard className="border-amber-500/30 bg-amber-500/5">
-              <div className="flex items-start gap-3">
-                <MessageSquareWarning className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
-                <div className="min-w-0 flex-1">
-                  <h3 className="font-semibold text-amber-600 dark:text-amber-400">
-                    Votre retour est attendu
-                  </h3>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    L'agent en charge de votre demande attend des informations complémentaires.
-                    Répondez dès que possible pour débloquer le traitement.
-                  </p>
-                  <Button
-                    size="sm"
-                    className="mt-3 rounded-full gradient-primary"
-                    onClick={() => {
-                      commentRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-                      commentRef.current?.focus();
-                    }}
-                  >
-                    Répondre
-                  </Button>
-                </div>
-              </div>
-            </GlassCard>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           )}
 
-          {/* P7 — Formulaire de modification (demandeur, status=new uniquement) */}
-          {showEditForm && canEdit && (
-            <GlassCard className="border-primary/30 bg-primary/5">
-              <h3 className="mb-1 font-semibold">Modifier la demande</h3>
-              <p className="mb-4 text-xs text-muted-foreground">
-                Vous pouvez corriger le titre ou la description tant que la demande n'est pas encore traitée.
-              </p>
-              <div className="space-y-3">
-                <div>
-                  <Label className="text-sm">Titre</Label>
-                  <input
-                    type="text"
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    className="mt-1.5 w-full rounded-xl border border-border/50 bg-background/60 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                  />
+          {canEdit && (
+            <Dialog
+              open={showEditForm}
+              onOpenChange={(open) => {
+                setShowEditForm(open);
+                if (!open) {
+                  setEditTitle("");
+                  setEditDescription("");
+                }
+              }}
+            >
+              <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <Pencil className="h-5 w-5 text-amber-500" />
+                    Modifier la demande
+                  </DialogTitle>
+                  <DialogDescription>
+                    Vous pouvez corriger le titre ou la description tant que la demande n'est pas encore traitée.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3 py-2">
+                  <div>
+                    <Label className="text-sm">Titre</Label>
+                    <input
+                      type="text"
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      className="mt-1.5 w-full rounded-xl border border-border/50 bg-background/60 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-sm">Description détaillée</Label>
+                    <Textarea
+                      value={editDescription}
+                      onChange={(e) => setEditDescription(e.target.value)}
+                      rows={4}
+                      className="mt-1.5 min-h-32 bg-background"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <Label className="text-sm">Description détaillée</Label>
-                  <textarea
-                    value={editDescription}
-                    onChange={(e) => setEditDescription(e.target.value)}
-                    rows={4}
-                    className="mt-1.5 w-full resize-none rounded-xl border border-border/50 bg-background/60 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                  />
-                </div>
-                <div className="flex justify-end gap-2 pt-1">
-                  <Button size="sm" variant="ghost" className="rounded-full"
+                <DialogFooter className="gap-2">
+                  <Button variant="ghost" className="rounded-full"
                     onClick={() => setShowEditForm(false)}>
                     Annuler
                   </Button>
                   <Button
-                    size="sm"
                     className="rounded-full gradient-primary"
                     disabled={
                       !editTitle.trim() ||
@@ -1924,88 +2358,110 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                     {editMut.isPending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-4 w-4" />}
                     Enregistrer
                   </Button>
-                </div>
-              </div>
-            </GlassCard>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           )}
 
-          {/* P7 — Confirmation annulation */}
-          {showCancelConfirm && (
-            <GlassCard className="border-destructive/30 bg-destructive/5">
-              <div className="flex items-start gap-3">
-                <Ban className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
-                <div className="min-w-0 flex-1 space-y-3">
-                  <h3 className="font-semibold text-destructive">Annuler cette demande ?</h3>
-                  <p className="text-sm text-muted-foreground">
+          {canCancel && (
+            <Dialog
+              open={showCancelConfirm}
+              onOpenChange={(open) => {
+                setShowCancelConfirm(open);
+                if (!open) setCancelReason("");
+              }}
+            >
+              <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2 text-destructive">
+                    <Ban className="h-5 w-5" />
+                    Annuler cette demande ?
+                  </DialogTitle>
+                  <DialogDescription>
                     Cette action est irréversible. La demande sera marquée comme annulée et ne sera plus traitée.
-                  </p>
-                  <textarea
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-2 py-2">
+                  <Label>
+                    Motif de l'annulation <span className="text-destructive">*</span>
+                  </Label>
+                  <Textarea
                     value={cancelReason}
                     onChange={(e) => setCancelReason(e.target.value)}
                     placeholder="Motif de l'annulation…"
-                    rows={2}
-                    className="w-full resize-none rounded-xl border border-border/50 bg-background/60 px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-destructive/40"
+                    rows={3}
+                    className="min-h-24 bg-background"
                   />
-                  <div className="flex justify-end gap-2">
-                    <Button size="sm" variant="ghost" className="rounded-full"
-                      onClick={() => { setShowCancelConfirm(false); setCancelReason(""); }}>
-                      Garder la demande
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      className="rounded-full"
-                      disabled={!cancelReason.trim() || cancelMut.isPending}
-                      onClick={() => cancelMut.mutate()}
-                    >
-                      {cancelMut.isPending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Ban className="mr-1.5 h-4 w-4" />}
-                      Confirmer l'annulation
-                    </Button>
-                  </div>
                 </div>
-              </div>
-            </GlassCard>
+                <DialogFooter className="gap-2">
+                  <Button variant="ghost" className="rounded-full"
+                    onClick={() => { setShowCancelConfirm(false); setCancelReason(""); }}>
+                    Garder la demande
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    className="rounded-full"
+                    disabled={!cancelReason.trim() || cancelMut.isPending}
+                    onClick={() => cancelMut.mutate()}
+                  >
+                    {cancelMut.isPending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Ban className="mr-1.5 h-4 w-4" />}
+                    Confirmer l'annulation
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           )}
 
-          {/* C2 — Formulaire demande d'informations */}
-          {!isRequesterView && showRequestInfoForm && (
-            <GlassCard className="border-amber-500/30 bg-amber-500/5">
-              <div className="flex items-start gap-3">
-                <MessageSquareWarning className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
-                <div className="min-w-0 flex-1 space-y-3">
-                  <h3 className="font-semibold text-amber-600 dark:text-amber-400">
+          {/* C2 — Modal demande d'informations */}
+          {!isRequesterView && (
+            <Dialog
+              open={showRequestInfoForm}
+              onOpenChange={(open) => {
+                setShowRequestInfoForm(open);
+                if (!open) setInfoQuestion("");
+              }}
+            >
+              <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+                    <MessageSquareWarning className="h-5 w-5" />
                     Demander des informations complémentaires
-                  </h3>
-                  <p className="text-sm text-muted-foreground">
+                  </DialogTitle>
+                  <DialogDescription>
                     Le demandeur recevra une notification. Le ticket passera en attente jusqu'à sa réponse.
-                  </p>
-                  <textarea
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-2 py-2">
+                  <Label htmlFor="request-info-question">
+                    Question <span className="text-destructive">*</span>
+                  </Label>
+                  <Textarea
+                    id="request-info-question"
                     value={infoQuestion}
                     onChange={(e) => setInfoQuestion(e.target.value)}
                     placeholder="Posez votre question ou décrivez les informations manquantes…"
                     rows={3}
-                    className="w-full resize-none rounded-xl border border-amber-500/30 bg-background/60 px-3 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+                    className="min-h-24 bg-background"
                   />
-                  <div className="flex justify-end gap-2">
-                    <Button size="sm" variant="ghost" className="rounded-full"
-                      onClick={() => { setShowRequestInfoForm(false); setInfoQuestion(""); }}>
-                      Annuler
-                    </Button>
-                    <Button
-                      size="sm"
-                      className="rounded-full bg-amber-500 text-white hover:bg-amber-600"
-                      disabled={!infoQuestion.trim() || requestInfoMut.isPending}
-                      onClick={() => requestInfoMut.mutate()}
-                    >
-                      {requestInfoMut.isPending
-                        ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                        : <MessageSquareWarning className="mr-1.5 h-4 w-4" />}
-                      Envoyer la demande
-                    </Button>
-                  </div>
                 </div>
-              </div>
-            </GlassCard>
+                <DialogFooter className="gap-2">
+                  <Button variant="ghost" className="rounded-full"
+                    onClick={() => { setShowRequestInfoForm(false); setInfoQuestion(""); }}>
+                    Annuler
+                  </Button>
+                  <Button
+                    className="rounded-full bg-amber-500 text-white hover:bg-amber-600"
+                    disabled={!infoQuestion.trim() || requestInfoMut.isPending}
+                    onClick={() => requestInfoMut.mutate()}
+                  >
+                    {requestInfoMut.isPending
+                      ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                      : <MessageSquareWarning className="mr-1.5 h-4 w-4" />}
+                    Envoyer la demande
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           )}
 
           {/* C5 — Modal escalade */}
@@ -2084,63 +2540,95 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             </Dialog>
           )}
 
-          {/* C4 — Note de résolution optionnelle */}
-          {showResolveForm && (
-            <div className="space-y-2 rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3">
-              <Label htmlFor="resolution-note" className="text-sm font-medium">
-                Note de résolution (optionnelle)
-              </Label>
-              <Textarea
-                id="resolution-note"
-                value={resolutionNote}
-                onChange={(e) => setResolutionNote(e.target.value)}
-                placeholder="Décrivez comment la demande a été résolue…"
-                className="min-h-20 bg-background"
-              />
-              <p className="text-xs text-muted-foreground">
-                Cette note sera ajoutée à l'historique des commentaires (visible en interne uniquement).
-              </p>
-              <div className="flex justify-end gap-2">
-                <Button size="sm" variant="ghost" className="h-8 rounded-full px-3 text-xs"
+          {/* C4 — Modal note de résolution optionnelle */}
+          <Dialog
+            open={showResolveForm}
+            onOpenChange={(open) => {
+              setShowResolveForm(open);
+              if (!open) setResolutionNote("");
+            }}
+          >
+            <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <MessageSquare className="h-5 w-5 text-primary" />
+                  Note de résolution
+                </DialogTitle>
+                <DialogDescription>
+                  Cette note sera ajoutée à l'historique des commentaires, visible en interne uniquement.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-2 py-2">
+                <Label htmlFor="resolution-note" className="text-sm font-medium">
+                  Note optionnelle
+                </Label>
+                <Textarea
+                  id="resolution-note"
+                  value={resolutionNote}
+                  onChange={(e) => setResolutionNote(e.target.value)}
+                  placeholder="Décrivez comment la demande a été résolue…"
+                  className="min-h-24 bg-background"
+                />
+              </div>
+              <DialogFooter className="gap-2">
+                <Button variant="ghost" className="rounded-full"
                   onClick={() => { setShowResolveForm(false); setResolutionNote(""); }}>
                   Annuler
                 </Button>
-                <Button size="sm" className="h-8 rounded-full gradient-primary px-4 text-xs"
+                <Button className="rounded-full gradient-primary"
                   disabled={resolveMut.isPending} onClick={() => resolveMut.mutate()}>
                   {resolveMut.isPending
-                    ? <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                    : <CheckCircle2 className="mr-1 h-3 w-3" />}
+                    ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                    : <CheckCircle2 className="mr-1.5 h-4 w-4" />}
                   Confirmer la résolution
                 </Button>
-              </div>
-            </div>
-          )}
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
-          {/* Director — Confirmation rejet inline (1 clic) */}
-          {canRejectTicket && showRejectConfirm && (
-            <div className="space-y-3 rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
-              <div className="flex items-center gap-2">
-                <Ban className="h-4 w-4 shrink-0 text-destructive" />
-                <span className="font-medium text-destructive">Motif du rejet de cette demande</span>
-              </div>
-              <Textarea
-                value={rejectNote}
-                onChange={(e) => setRejectNote(e.target.value)}
-                placeholder="Expliquez clairement pourquoi cette demande est rejetée…"
-                className="min-h-20 bg-background"
-              />
-              <div className="flex justify-end gap-2">
-                <Button size="sm" variant="ghost" className="h-8 rounded-full px-3 text-xs"
-                  onClick={() => { setShowRejectConfirm(false); setRejectNote(""); }}>
-                  Annuler
-                </Button>
-                <Button size="sm" variant="destructive" className="h-8 rounded-full px-3 text-xs"
-                  disabled={!rejectNote.trim() || rejectMut.isPending} onClick={() => rejectMut.mutate()}>
-                  {rejectMut.isPending ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
-                  Rejeter
-                </Button>
-              </div>
-            </div>
+          {/* Director — Modal rejet */}
+          {canRejectTicket && (
+            <Dialog
+              open={showRejectConfirm}
+              onOpenChange={(open) => {
+                setShowRejectConfirm(open);
+                if (!open) setRejectNote("");
+              }}
+            >
+              <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2 text-destructive">
+                    <Ban className="h-5 w-5" />
+                    Rejeter la demande
+                  </DialogTitle>
+                  <DialogDescription>
+                    Expliquez clairement pourquoi cette demande est rejetée.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-2 py-2">
+                  <Label>
+                    Motif du rejet <span className="text-destructive">*</span>
+                  </Label>
+                  <Textarea
+                    value={rejectNote}
+                    onChange={(e) => setRejectNote(e.target.value)}
+                    placeholder="Expliquez clairement pourquoi cette demande est rejetée…"
+                    className="min-h-24 bg-background"
+                  />
+                </div>
+                <DialogFooter className="gap-2">
+                  <Button variant="ghost" className="rounded-full"
+                    onClick={() => { setShowRejectConfirm(false); setRejectNote(""); }}>
+                    Annuler
+                  </Button>
+                  <Button variant="destructive" className="rounded-full"
+                    disabled={!rejectNote.trim() || rejectMut.isPending} onClick={() => rejectMut.mutate()}>
+                    {rejectMut.isPending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
+                    Rejeter
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           )}
 
           {canRejectReopen && (
@@ -2203,13 +2691,179 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
           )}
 
 
-          <div className="overflow-hidden rounded-2xl border border-border/40 bg-background/35">
-            <section className="p-5">
-              <h3 className="mb-2 font-semibold">Description</h3>
-              <p className="text-sm leading-6 text-muted-foreground">{r.description}</p>
+          {canAssignTicket && (
+            <Dialog open={showReassign} onOpenChange={setShowReassign}>
+              <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <UserCheck className="h-5 w-5 text-primary" />
+                    Réassigner le ticket
+                  </DialogTitle>
+                  <DialogDescription>
+                    Sélectionnez l'agent qui prendra la demande en charge.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-2 py-2">
+                  {agentPool.length === 0 ? (
+                    <p className="rounded-xl border border-dashed border-border/60 bg-background/35 px-4 py-5 text-sm text-muted-foreground">
+                      Aucun agent disponible.
+                    </p>
+                  ) : (
+                    <div className="max-h-72 space-y-1 overflow-y-auto pr-1">
+                      {agentPool.map((agent) => (
+                        <button
+                          key={agent.id}
+                          type="button"
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-foreground/5"
+                          onClick={() => assignMut.mutate(agent.id)}
+                          disabled={assignMut.isPending}
+                        >
+                          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">
+                            {agent.name.slice(0, 2).toUpperCase()}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate">{agent.name}</span>
+                          {agent.availability && (
+                            <span className="text-[10px] text-muted-foreground">{agent.availability}</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <DialogFooter>
+                  <Button variant="ghost" className="rounded-full" onClick={() => setShowReassign(false)}>
+                    Fermer
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          )}
+
+          {canChangePriority && (
+            <Dialog open={showPriorityPicker} onOpenChange={setShowPriorityPicker}>
+              <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <ChevronDown className="h-5 w-5 text-primary" />
+                    Changer la priorité
+                  </DialogTitle>
+                  <DialogDescription>
+                    Choisissez la nouvelle priorité de traitement.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="grid gap-2 py-2">
+                  {(["low", "medium", "high", "critical"] as const).map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      className="flex w-full items-center gap-2 rounded-xl border border-border/40 bg-background/35 px-3 py-2 text-left text-sm transition hover:bg-foreground/5"
+                      onClick={() => changePriorityMut.mutate(p)}
+                      disabled={changePriorityMut.isPending}
+                    >
+                      <PriorityBadge priority={p} />
+                    </button>
+                  ))}
+                </div>
+                <DialogFooter>
+                  <Button variant="ghost" className="rounded-full" onClick={() => setShowPriorityPicker(false)}>
+                    Fermer
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          )}
+
+          {canChangeService && (
+            <Dialog open={showServicePicker} onOpenChange={setShowServicePicker}>
+              <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <Building2 className="h-5 w-5 text-primary" />
+                    Changer le service
+                  </DialogTitle>
+                  <DialogDescription>
+                    Sélectionnez le service qui doit reprendre la demande.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-2 py-2">
+                  {availableServices.length === 0 ? (
+                    <p className="rounded-xl border border-dashed border-border/60 bg-background/35 px-4 py-5 text-sm text-muted-foreground">
+                      Aucun service disponible.
+                    </p>
+                  ) : (
+                    <div className="max-h-72 space-y-1 overflow-y-auto pr-1">
+                      {availableServices.map((svc) => (
+                        <button
+                          key={svc}
+                          type="button"
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-foreground/5"
+                          onClick={() => changeServiceMut.mutate(svc)}
+                          disabled={changeServiceMut.isPending}
+                        >
+                          {svc}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <DialogFooter>
+                  <Button variant="ghost" className="rounded-full" onClick={() => setShowServicePicker(false)}>
+                    Fermer
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          )}
+
+          <div className="glass-strong overflow-visible rounded-[18px]">
+            <div className="flex max-w-full items-center gap-0.5 overflow-x-auto border-b border-border/40 bg-background/10 px-2 py-1.5 text-xs sm:px-4 sm:py-2 sm:text-sm">
+                {detailTabs.map((tab) => {
+                  const Icon = tab.icon;
+                  const isActive = activeDetailTab === tab.key;
+                  const startsVisualGroup = tab.key === "comments" || tab.key === "sla";
+
+                  return (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      className={cn(
+                        "inline-flex shrink-0 items-center gap-1.5 border-b-2 px-2 py-1.5 font-medium transition-colors sm:px-2.5",
+                        startsVisualGroup && "relative ml-1 pl-3 before:absolute before:left-0 before:top-1.5 before:h-5 before:border-l before:border-border/30 sm:ml-2 sm:pl-4",
+                        isActive
+                          ? "border-primary text-primary"
+                          : "border-transparent text-muted-foreground hover:text-foreground",
+                      )}
+                      onClick={() => setActiveDetailTab(tab.key)}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      {tab.label}
+                      {typeof tab.count === "number" && (
+                        <span className={cn(
+                          "rounded-full px-1.5 py-0.5 text-[10px]",
+                          isActive ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground",
+                        )}>
+                          {tab.count}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+            </div>
+
+            <div className="flex flex-col">
+            <section className={cn("order-0 p-3 sm:p-4", activeDetailTab !== "description" && "hidden")}>
+              <div className="rounded-2xl border border-border/45 bg-background/35 p-4">
+                <h3 className="mb-3 flex items-center gap-2 font-semibold">
+                  <FileText className="h-4 w-4 text-primary" />
+                  Description de la demande
+                </h3>
+                <p className="whitespace-pre-wrap text-sm leading-7 text-muted-foreground">
+                  {r.description}
+                </p>
+              </div>
             </section>
 
-            <section className="border-t border-border/40 p-5">
+            <section className={cn("order-4 border-t border-border/40 p-3 sm:p-4", activeDetailTab !== "files" && "hidden")}>
               <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h3 className="font-semibold">Pièces jointes</h3>
@@ -2232,7 +2886,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                   Aucune pièce jointe n'a encore été ajoutée à cette demande.
                 </div>
               ) : (
-                <ul className="grid gap-3 md:grid-cols-2">
+                <ul className="grid gap-3 lg:grid-cols-2">
                   {attachments.map((attachment) => {
                     const isOpeningAttachment =
                       attachmentAction?.id === attachment.id && attachmentAction.mode === "open";
@@ -2243,7 +2897,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                     return (
                     <li
                       key={attachment.id}
-                      className="flex min-w-0 items-center gap-3 rounded-2xl border border-border/50 bg-background/55 p-3"
+                      className="flex min-w-0 flex-col gap-3 rounded-2xl border border-border/50 bg-background/55 p-3 sm:flex-row sm:items-center"
                     >
                       <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
                         <FileText className="h-5 w-5" />
@@ -2260,12 +2914,12 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                           </p>
                         )}
                       </div>
-                      <div className="flex shrink-0 items-center gap-1">
+                      <div className="flex w-full shrink-0 items-center justify-end gap-1 sm:w-auto">
                         <Button
                           type="button"
                           variant="ghost"
                           size="sm"
-                          className="h-9 rounded-full px-3"
+                          className="h-9 flex-1 rounded-full px-3 sm:flex-none"
                           disabled={Boolean(isAttachmentBusy)}
                           onClick={() => void handleAttachmentFile(attachment, "open")}
                         >
@@ -2299,108 +2953,70 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
               )}
             </section>
 
-            <section className="border-t border-border/40 p-5">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-                <h3 className="font-semibold">Journal complet</h3>
-                <span className="rounded-full bg-muted px-2.5 py-1 text-[10px] font-medium text-muted-foreground">
-                  Actions · commentaires · statuts
-                </span>
+            <section className={cn("order-1 p-3 sm:p-4", activeDetailTab !== "journal" && "hidden")}>
+              <div className="max-h-[520px] overflow-y-auto pr-1">
+                <WorkflowTimeline events={r.timeline} onOpenAttachment={handleTimelineAttachmentOpen} />
               </div>
-              <WorkflowTimeline events={r.timeline} />
             </section>
 
-            <section className="border-t border-border/40 p-5">
-            <h3 className="mb-4 font-semibold">Commentaires</h3>
-            {visibleComments.length === 0 && (
-              <p className="text-sm text-muted-foreground">Aucun commentaire pour l'instant.</p>
-            )}
-            <ul className="space-y-3">
-              {visibleComments.map((c) => (
-                <li
-                  key={c.id}
-                  className="rounded-2xl border border-border/50 bg-background/60 p-4"
-                >
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>
-                      <strong className="text-foreground">{c.author}</strong> ·{" "}
-                      {formatDistanceToNow(new Date(c.createdAt), { addSuffix: true, locale: fr })}
-                    </span>
-                    {!isRequesterView && (
-                      c.isPublic ? (
-                        <span className="rounded-full bg-info/15 px-2 py-0.5 text-[10px] text-info">
-                          Visible public
-                        </span>
-                      ) : (
-                        <span className="rounded-full bg-muted px-2 py-0.5 text-[10px]">Interne</span>
-                      )
-                    )}
-                  </div>
-                  <p className="mt-2 text-sm">{c.body}</p>
-                </li>
-              ))}
-            </ul>
+            <section className={cn("order-1 border-t border-border/40 p-3 sm:p-4", activeDetailTab !== "comments" && "hidden")}>
+              {commentsPanel}
+            </section>
 
-            {isArchived || r.status === "closed" || r.status === "rejected" ? (
-              <div className="mt-5 flex items-center gap-2 rounded-xl border border-border/30 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
-                <Lock className="h-3.5 w-3.5 shrink-0" />
-                Les commentaires sont désactivés — ticket {isArchived ? "archivé" : r.status === "closed" ? "clôturé" : "rejeté"}.
+            <section className={cn("order-2 border-t border-border/40 p-3 sm:p-4", activeDetailTab !== "sla" && "hidden")}>
+              <div className="mb-4">
+                <h3 className="font-semibold">Activité SLA</h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Lecture basée uniquement sur le SLA et les événements disponibles du ticket.
+                </p>
               </div>
-            ) : (
-              <div className="mt-5 space-y-3 rounded-2xl border border-border/40 bg-background/40 p-4">
-                <Textarea
-                  ref={commentRef}
-                  placeholder={isRequesterView ? "Ajouter une réponse ou un commentaire…" : "Ajouter un commentaire…"}
-                  value={comment}
-                  onChange={(e) => setComment(e.target.value)}
-                  className="min-h-24"
-                />
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  {!isRequesterView ? (
-                    <div className="flex items-center gap-2">
-                      <Switch id="public" checked={isPublic} onCheckedChange={setIsPublic} />
-                      <Label htmlFor="public" className="text-sm">
-                        Visible par le demandeur
-                      </Label>
-                    </div>
-                  ) : <div />}
-                  <div className="flex gap-2">
-                    <input
-                      ref={attachRef}
-                      type="file"
-                      accept=".jpg,.jpeg,.png,.webp,.heic,.pdf"
-                      className="hidden"
-                      onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (f) attachCommentMut.mutate(f);
-                      }}
-                    />
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="rounded-full"
-                      disabled={attachCommentMut.isPending}
-                      onClick={() => attachRef.current?.click()}
-                    >
-                      {attachCommentMut.isPending
-                        ? <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                        : <Paperclip className="mr-1 h-4 w-4" />}
-                      Joindre
-                    </Button>
-                    <Button
-                      size="sm"
-                      className="rounded-full gradient-primary"
-                      disabled={!comment.trim() || commentMut.isPending}
-                      onClick={() => commentMut.mutate()}
-                    >
-                      {commentMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Publier"}
-                    </Button>
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="min-w-0 rounded-2xl border border-border/50 bg-background/55 p-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold">
+                    <Clock className="h-4 w-4 text-primary" />
+                    <span className="truncate">Début SLA</span>
                   </div>
+                  <p className="mt-2 truncate text-sm text-muted-foreground" title={createdAtLabel}>{createdAtLabel}</p>
+                </div>
+                <div className="min-w-0 rounded-2xl border border-border/50 bg-background/55 p-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold">
+                    <AlertTriangle className={cn("h-4 w-4", slaOver ? "text-destructive" : "text-success")} />
+                    <span className="truncate">{slaOver ? "Expiration" : "Temps consommé"}</span>
+                  </div>
+                  <p className={cn("mt-2 truncate text-sm font-medium", slaOver ? "text-destructive" : "text-success")}>
+                    {r.slaHours > 0 ? `${r.slaElapsed}h / ${r.slaHours}h` : "SLA non configuré"}
+                  </p>
+                </div>
+                <div className="min-w-0 rounded-2xl border border-border/50 bg-background/55 p-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold">
+                    <ArrowUpRight className="h-4 w-4 text-amber-500" />
+                    <span className="truncate">Escalade</span>
+                  </div>
+                  <p className="mt-2 truncate text-sm text-muted-foreground">
+                    {r.timeline.some((event) => event.type.includes("escalat"))
+                      ? "Escalade tracée dans le journal."
+                      : "Aucune escalade tracée."}
+                  </p>
+                </div>
+                <div className="min-w-0 rounded-2xl border border-border/50 bg-background/55 p-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold">
+                    <RotateCcw className="h-4 w-4 text-info" />
+                    <span className="truncate">Historique</span>
+                  </div>
+                  <p className="mt-2 truncate text-sm text-muted-foreground">
+                    {r.timeline.length} événement{r.timeline.length > 1 ? "s" : ""} disponible{r.timeline.length > 1 ? "s" : ""}.
+                  </p>
                 </div>
               </div>
-            )}
             </section>
-          </div>
 
+            <section className={cn("order-3 space-y-3 border-t border-border/40 p-3 sm:p-4", activeDetailTab !== "treatment" && "hidden")}>
+              {treatmentActionsPanel}
+              {requestActionsPanel}
+            </section>
+
+          </div>
+          </div>
 
           {/* ── Panneau rejet (demandeur uniquement) ── */}
           {iAmRequester && r.status === "rejected" && (
@@ -2437,7 +3053,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                   <Button
                     variant="outline"
                     className="rounded-full border-destructive/40 text-destructive hover:bg-destructive/10 hover:border-destructive/60"
-                    onClick={() => setShowReopenForm(true)}
+                    onClick={() => setShowClosedRequestDialog(true)}
                   >
                     <RotateCcw className="mr-1.5 h-4 w-4" />
                     Réouvrir la demande
@@ -2529,7 +3145,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                               size="sm"
                               className="rounded-full"
                               disabled={closeMut.isPending}
-                              onClick={() => closeMut.mutate()}
+                              onClick={() => setDirectTreatmentAction("close")}
                             >
                               {closeMut.isPending
                                 ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
@@ -2542,7 +3158,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                               size="sm"
                               variant="outline"
                               className="rounded-full border-destructive/40 text-destructive hover:bg-destructive/10"
-                              onClick={() => setShowReopenForm(true)}
+                              onClick={() => setShowClosedRequestDialog(true)}
                             >
                               <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
                               Le problème persiste — contester
@@ -2592,96 +3208,110 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             </GlassCard>
           )}
 
-          {/* ── Carte fermeture (demandeur uniquement) ── */}
-          {iAmRequester && r.status === "closed" && (
-            <GlassCard className="border-muted/40 bg-muted/5">
-              <div className="flex items-start gap-3">
-                <Lock className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
-                <div className="min-w-0 flex-1 space-y-3">
-                  <div>
-                    <h3 className="font-semibold">Demande clôturée</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {canReopenClosed
+          {isRequesterView && (
+            <Dialog
+              open={showClosedRequestDialog}
+              onOpenChange={(open) => {
+                setShowClosedRequestDialog(open);
+                if (!open) setReopenReason("");
+              }}
+            >
+              <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <Lock className="h-5 w-5 text-muted-foreground" />
+                    {r.status === "closed" ? "Demande clôturée" : "Demander une réouverture"}
+                  </DialogTitle>
+                  <DialogDescription>
+                    {r.status === "closed"
+                      ? canReopenClosed
                         ? "Cette demande a été fermée. Si votre problème persiste, vous pouvez encore la rouvrir."
-                        : "Cette demande est archivée. La fenêtre de réouverture (7 jours) est expirée — créez une nouvelle demande si nécessaire."}
-                    </p>
+                        : "Cette demande est archivée. La fenêtre de réouverture (7 jours) est expirée — créez une nouvelle demande si nécessaire."
+                      : "Expliquez pourquoi la résolution ne répond pas encore à votre besoin."}
+                  </DialogDescription>
+                </DialogHeader>
+
+                {canRequestReopen && (
+                  <div className="space-y-3 py-2">
+                    <div className="space-y-1.5">
+                      <Label>
+                        Motif de réouverture <span className="text-destructive">*</span>
+                      </Label>
+                      <Textarea
+                        value={reopenReason}
+                        onChange={(e) => setReopenReason(e.target.value)}
+                        placeholder="Décrivez précisément ce qui n'a pas été résolu…"
+                        rows={4}
+                      />
+                    </div>
                   </div>
+                )}
+
+                <DialogFooter className="gap-2">
+                  <Button
+                    variant="ghost"
+                    className="rounded-full"
+                    onClick={() => {
+                      setShowClosedRequestDialog(false);
+                      setReopenReason("");
+                    }}
+                  >
+                    Fermer
+                  </Button>
                   {canRequestReopen && (
-                    !showReopenForm ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="rounded-full"
-                        onClick={() => setShowReopenForm(true)}
-                      >
-                        <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-                        Rouvrir la demande
-                      </Button>
-                    ) : (
-                      <div className="space-y-3 rounded-2xl border border-border/40 bg-background/40 p-4">
-                        <p className="text-sm font-medium">
-                          Motif de réouverture <span className="text-destructive">*</span>
-                        </p>
-                        <textarea
-                          value={reopenReason}
-                          onChange={(e) => setReopenReason(e.target.value)}
-                          placeholder="Décrivez précisément ce qui n'a pas été résolu…"
-                          rows={3}
-                          className="w-full resize-none rounded-xl border border-border/50 bg-background/60 px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
-                        />
-                        <div className="flex justify-end gap-2">
-                          <Button size="sm" variant="ghost" className="rounded-full"
-                            onClick={() => { setShowReopenForm(false); setReopenReason(""); }}>
-                            Annuler
-                          </Button>
-                          <Button
-                            size="sm"
-                            className="rounded-full gradient-primary"
-                            disabled={requestReopenMut.isPending || !reopenReason.trim()}
-                            onClick={() => requestReopenMut.mutate(reopenReason.trim())}
-                          >
-                            {requestReopenMut.isPending
-                              ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                              : <RotateCcw className="mr-1.5 h-3.5 w-3.5" />}
-                            Demander la réouverture
-                          </Button>
-                        </div>
-                      </div>
-                    )
+                    <Button
+                      className="rounded-full gradient-primary"
+                      disabled={requestReopenMut.isPending || !reopenReason.trim()}
+                      onClick={() => requestReopenMut.mutate(reopenReason.trim())}
+                    >
+                      {requestReopenMut.isPending
+                        ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                        : <RotateCcw className="mr-1.5 h-4 w-4" />}
+                      Demander la réouverture
+                    </Button>
                   )}
-                </div>
-              </div>
-            </GlassCard>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           )}
 
-          {isRequesterView && (r.status === "resolved" || r.status === "closed") && (
-            <div>
-              <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                Votre avis
-              </h3>
-              <AppreciationForm
-                requestId={r.id}
-                authorType={authorType}
-                existing={localAppreciation ?? r.appreciation}
-                isClosed={r.status === "closed"}
-                onSubmit={(appr) => {
-                  setLocalAppreciation(appr);
-                  invalidate();
-                }}
-                onReopen={() => {
-                  toast.success("Demande rouverte — un agent va la reprendre en charge.");
-                  invalidate();
-                }}
-                onSave={async (data) => {
-                  const hasExisting = !!(localAppreciation ?? r.appreciation);
-                  if (hasExisting) {
-                    await updateRequestAppreciation(r.id, data);
-                  } else {
-                    await submitAppreciation(r.id, data);
-                  }
-                }}
-              />
-            </div>
+          {canOpenAppreciation && (
+            <Dialog open={showAppreciationDialog} onOpenChange={setShowAppreciationDialog}>
+              <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <Star className="h-5 w-5 text-muted-foreground" />
+                    Votre avis
+                  </DialogTitle>
+                  <DialogDescription>
+                    Évaluez la prise en charge de votre demande.
+                  </DialogDescription>
+                </DialogHeader>
+                <AppreciationForm
+                  requestId={r.id}
+                  authorType={authorType}
+                  existing={localAppreciation ?? r.appreciation}
+                  isClosed={r.status === "closed"}
+                  onSubmit={(appr) => {
+                    setLocalAppreciation(appr);
+                    setShowAppreciationDialog(false);
+                    invalidate();
+                  }}
+                  onReopen={() => {
+                    setShowAppreciationDialog(false);
+                    setShowClosedRequestDialog(true);
+                  }}
+                  onSave={async (data) => {
+                    const hasExisting = !!(localAppreciation ?? r.appreciation);
+                    if (hasExisting) {
+                      await updateRequestAppreciation(r.id, data);
+                    } else {
+                      await submitAppreciation(r.id, data);
+                    }
+                  }}
+                />
+              </DialogContent>
+            </Dialog>
           )}
 
           {/* Dialog — Transfert inter-direction */}
@@ -2834,309 +3464,278 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
               </DialogContent>
             </Dialog>
           )}
-        </div>
 
-        <aside className="border-t border-border/40 bg-muted/10 lg:border-l lg:border-t-0">
-          <div className="divide-y divide-border/40">
-          <section className="p-5">
-            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              Suivi SLA
-            </h3>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-2xl font-bold">{slaPct}%</div>
-                <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-                  <Clock className="h-3.5 w-3.5" />
-                  {r.slaHours > 0
-                    ? `${r.slaElapsed}h / ${r.slaHours}h`
-                    : "SLA non configuré"}
-                </div>
+          {/* Dialog — Prévisualisation piece jointe (image zoomable / PDF) */}
+          <Dialog open={!!previewFile} onOpenChange={(open) => { if (!open) closePreview(); }}>
+            <DialogContent className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-4xl">
+              <DialogHeader className="border-b border-border/40 px-5 py-4">
+                <DialogTitle className="truncate pr-8 text-base">{previewFile?.filename}</DialogTitle>
+              </DialogHeader>
+              <div className="flex-1 overflow-auto bg-muted/30">
+                {previewFile && previewFile.mimeType.startsWith("image/") ? (
+                  <div className="flex min-h-full items-center justify-center p-4">
+                    <img
+                      src={previewFile.url}
+                      alt={previewFile.filename}
+                      className="max-h-[70dvh] max-w-full select-none rounded-lg shadow-sm transition-transform duration-150"
+                      style={{ transform: `scale(${previewZoom})`, transformOrigin: "center" }}
+                    />
+                  </div>
+                ) : previewFile && previewFile.mimeType === "application/pdf" ? (
+                  <iframe src={previewFile.url} title={previewFile.filename} className="h-[75dvh] w-full" />
+                ) : (
+                  <div className="flex flex-col items-center justify-center gap-3 p-12 text-center text-sm text-muted-foreground">
+                    <FileText className="h-10 w-10 opacity-50" />
+                    <p>Aperçu non disponible pour ce type de fichier. Utilisez le téléchargement ci-dessous.</p>
+                  </div>
+                )}
               </div>
-              <span
-                className={
-                  "rounded-full px-2.5 py-0.5 text-xs font-medium " +
-                  (slaOver
-                    ? "bg-destructive/15 text-destructive"
-                    : "bg-success/15 text-success")
-                }
-              >
-                {slaOver ? "Dépassé" : "Dans les temps"}
-              </span>
-            </div>
-            <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
-              <div
-                className={"h-full rounded-full " + (slaOver ? "bg-destructive" : "gradient-primary")}
-                style={{ width: slaPct + "%" }}
-              />
-            </div>
-          </section>
+              <DialogFooter className="border-t border-border/40 px-5 py-3">
+                {previewFile && previewFile.mimeType.startsWith("image/") && (
+                  <div className="mr-auto flex items-center gap-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8 rounded-full"
+                      disabled={previewZoom <= 1}
+                      onClick={() => setPreviewZoom((z) => Math.max(1, Number((z - 0.5).toFixed(1))))}
+                    >
+                      <ZoomOut className="h-4 w-4" />
+                    </Button>
+                    <span className="w-12 text-center text-xs text-muted-foreground">{Math.round(previewZoom * 100)}%</span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8 rounded-full"
+                      disabled={previewZoom >= 3}
+                      onClick={() => setPreviewZoom((z) => Math.min(3, Number((z + 0.5).toFixed(1))))}
+                    >
+                      <ZoomIn className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="rounded-full"
+                  onClick={() => {
+                    if (!previewFile) return;
+                    const link = document.createElement("a");
+                    link.href = previewFile.url;
+                    link.download = previewFile.filename;
+                    document.body.appendChild(link);
+                    link.click();
+                    link.remove();
+                  }}
+                >
+                  <Download className="mr-1.5 h-4 w-4" />
+                  Télécharger
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </div>
 
-          {!isRequesterView && <RequesterCard r={r} directions={directions} />}
+        <aside className="min-w-0">
+          <div className="flex flex-col gap-3">
 
-          <section className="p-5">
-            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              Intervenants
-            </h3>
-            {participants.length === 0 ? (
+          <section className={cn("order-2", sideCardClass)}>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-foreground">
+                Intervenants ({participants.length})
+              </h3>
+              {canToggleParticipants && (
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 text-xs font-medium text-primary transition hover:text-primary/80"
+                  onClick={() => setShowAllParticipants(true)}
+                >
+                  Voir tout
+                  <ArrowUpRight className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+            {sideParticipants.length === 0 ? (
               <p className="text-sm text-muted-foreground">Aucun intervenant enregistré.</p>
             ) : (
               <ul className="space-y-3">
-                {participants.map((participant) => (
-                  <li key={participant.key} className="flex items-start gap-3">
-                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-                      {participant.name
-                        .split(" ")
-                        .map((part) => part[0])
-                        .join("")
-                        .slice(0, 2)
-                        .toUpperCase()}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium" title={participant.name}>
-                        {participant.name}
-                      </div>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-                        {participant.role && (
-                          <span className="rounded-full bg-muted px-2 py-0.5">
-                            {participantRoleLabel(participant.role)}
-                          </span>
-                        )}
-                        <span className="truncate" title={participant.detail}>
-                          {participant.detail}
-                        </span>
-                      </div>
-                      {participant.lastAt && (
-                        <div className="mt-0.5 text-[10px] text-muted-foreground">
-                          {formatDistanceToNow(new Date(participant.lastAt), { addSuffix: true, locale: fr })}
-                        </div>
-                      )}
-                    </div>
-                  </li>
+                {sideParticipants.map((participant) => (
+                  <ParticipantRow key={participant.key} participant={participant} />
                 ))}
               </ul>
             )}
           </section>
 
-          <section className="p-5">
-            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              Traitement
-            </h3>
-            <dl className="space-y-3 text-sm">
+          <Dialog open={showAllParticipants} onOpenChange={setShowAllParticipants}>
+            <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Intervenants ({participants.length})</DialogTitle>
+                <DialogDescription>Toutes les personnes liées à cette demande.</DialogDescription>
+              </DialogHeader>
+              <ul className="space-y-3">
+                {participants.map((participant) => (
+                  <ParticipantRow key={participant.key} participant={participant} />
+                ))}
+              </ul>
+            </DialogContent>
+          </Dialog>
 
-              {/* Direction + Service côte à côte */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <dt className="text-xs text-muted-foreground flex items-center gap-1">
-                    <Building2 className="h-3 w-3" /> Direction
-                  </dt>
-                  <dd className="mt-0.5 font-medium truncate" title={directionName}>{directionName}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-muted-foreground">Service</dt>
-                  <dd className="mt-0.5 font-medium truncate" title={unitName}>{unitName}</dd>
-                </div>
+          <section className={cn("order-3", sideCardClass)}>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-foreground">
+                Détails de la demande
+              </h3>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 text-xs font-medium text-primary transition hover:text-primary/80"
+                onClick={() => setShowAllDetails(true)}
+              >
+                Voir tout
+                <ArrowUpRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            <div className="mb-2 flex items-center gap-2">
+              <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-emerald-500/15 text-emerald-500">
+                <User className="h-3.5 w-3.5" />
+              </span>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-500">Demande</h4>
+            </div>
+            <dl className="space-y-0 text-sm">
+              <div className="flex items-center justify-between gap-3 border-b border-border/30 py-3">
+                <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Tag className="h-3.5 w-3.5" /> Catégorie
+                </dt>
+                <dd className="min-w-0 truncate font-medium" title={r.category}>{r.category}</dd>
               </div>
-
-              <div className="border-t border-border/30" />
-
-              {/* Catégorie */}
-              <div>
-                <dt className="text-xs text-muted-foreground">Catégorie</dt>
-                <dd className="mt-0.5">{r.category}</dd>
+              <div className="flex items-center justify-between gap-3 border-b border-border/30 py-3">
+                <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Clock className="h-3.5 w-3.5" /> Créé le
+                </dt>
+                <dd className="text-xs font-medium">{createdAtLabel}</dd>
               </div>
-
-              {/* Agent en charge */}
-              {isRequesterView && (
-                <div>
-                  <dt className="text-xs text-muted-foreground">Agent en charge</dt>
-                  <dd className="mt-0.5 flex items-center gap-1.5">
-                    <UserCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    {r.assigneeId
-                      ? (assigneeUser?.name ?? "En cours d'assignation")
-                      : <span className="italic text-muted-foreground">En attente d'assignation</span>}
-                  </dd>
-                </div>
-              )}
-
-              <div className="border-t border-border/30" />
-
-              {/* Dates : création + fin */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <dt className="text-xs text-muted-foreground flex items-center gap-1">
-                    <Clock className="h-3 w-3" /> Créé le
-                  </dt>
-                  <dd className="mt-0.5 text-xs font-medium">
-                    {format(new Date(r.createdAt), "d MMM yyyy", { locale: fr })}
-                  </dd>
-                  <dd className="text-[10px] text-muted-foreground">
-                    {format(new Date(r.createdAt), "HH:mm", { locale: fr })}
-                  </dd>
-                </div>
-                {["resolved", "closed", "rejected", "cancelled"].includes(r.status) ? (
-                  <div>
-                    <dt className="text-xs text-muted-foreground flex items-center gap-1">
-                      <CheckCircle2 className="h-3 w-3 text-success" />
-                      {r.status === "rejected" ? "Rejeté le" : r.status === "cancelled" ? "Annulé le" : "Résolu le"}
-                    </dt>
-                    <dd className="mt-0.5 text-xs font-medium text-success">
-                      {format(new Date(r.updatedAt), "d MMM yyyy", { locale: fr })}
-                    </dd>
-                    <dd className="text-[10px] text-muted-foreground">
-                      {format(new Date(r.updatedAt), "HH:mm", { locale: fr })}
-                    </dd>
-                  </div>
-                ) : (
-                  <div>
-                    <dt className="text-xs text-muted-foreground flex items-center gap-1">
-                      <Clock className="h-3 w-3" /> Mis à jour
-                    </dt>
-                    <dd className="mt-0.5 text-xs font-medium">
-                      {format(new Date(r.updatedAt), "d MMM yyyy", { locale: fr })}
-                    </dd>
-                    <dd className="text-[10px] text-muted-foreground">
-                      {format(new Date(r.updatedAt), "HH:mm", { locale: fr })}
-                    </dd>
-                  </div>
-                )}
+              <div className="flex items-center justify-between gap-3 border-b border-border/30 py-3">
+                <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Clock className="h-3.5 w-3.5" />
+                  {["resolved", "closed", "rejected", "cancelled"].includes(r.status)
+                    ? (r.status === "rejected" ? "Rejeté le" : r.status === "cancelled" ? "Annulé le" : "Résolu le")
+                    : "Mise à jour"}
+                </dt>
+                <dd className="text-xs font-medium">{updatedAtLabel}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3 border-b border-border/30 py-3">
+                <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <FileText className="h-3.5 w-3.5" /> ID de la demande
+                </dt>
+                <dd className="flex min-w-0 items-center gap-1.5 font-mono text-xs font-medium">
+                  <span className="min-w-0 truncate">{r.ref}</span>
+                  <button
+                    type="button"
+                    className="grid h-5 w-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                    title="Copier l'identifiant"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(r.ref);
+                      toast.success("Identifiant copié");
+                    }}
+                  >
+                    <Copy className="h-3 w-3" />
+                  </button>
+                </dd>
               </div>
             </dl>
           </section>
 
-          {slaOver && (
-            <section className="bg-destructive/5 p-5">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="mt-0.5 h-5 w-5 text-destructive" />
-                <div>
-                  <div className="font-semibold text-destructive">SLA dépassé</div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Cette demande nécessite une attention immédiate ou une escalade.
-                  </p>
+          <Dialog open={showAllDetails} onOpenChange={setShowAllDetails}>
+            <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Détails de la demande</DialogTitle>
+                <DialogDescription>Demandeur, traitement et délai de cette demande.</DialogDescription>
+              </DialogHeader>
+              <div>
+                <div className="mb-2 mt-2 flex items-center gap-2">
+                  <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-sky-500/15 text-sky-500">
+                    <Building2 className="h-3.5 w-3.5" />
+                  </span>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-sky-500">Demandeur</h4>
+                </div>
+                <dl className="space-y-0 text-sm">
+                  {authorType === "internal" && (
+                    <>
+                      <div className="flex items-center justify-between gap-3 border-b border-border/30 py-3">
+                        <dt className="text-xs text-muted-foreground">Direction</dt>
+                        <dd className="truncate font-medium" title={requesterDirectionName}>{requesterDirectionName}</dd>
+                      </div>
+                      <div className="flex items-center justify-between gap-3 border-b border-border/30 py-3">
+                        <dt className="text-xs text-muted-foreground">Département</dt>
+                        <dd className="truncate font-medium" title={requesterDepartmentName}>{requesterDepartmentName}</dd>
+                      </div>
+                      <div className="flex items-center justify-between gap-3 border-b border-border/30 py-3">
+                        <dt className="text-xs text-muted-foreground">Service</dt>
+                        <dd className="truncate font-medium" title={requesterUnitName}>{requesterUnitName}</dd>
+                      </div>
+                    </>
+                  )}
+                  <div className="flex items-center justify-between gap-3 border-b border-border/30 py-3">
+                    <dt className="text-xs text-muted-foreground">Demandeur</dt>
+                    <dd className="truncate font-medium" title={r.requesterName}>{r.requesterName}</dd>
+                  </div>
+                </dl>
+
+                <div className="mb-2 mt-4 flex items-center gap-2">
+                  <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-violet-500/15 text-violet-500">
+                    <UserCog className="h-3.5 w-3.5" />
+                  </span>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-violet-500">Traitement</h4>
+                </div>
+                <dl className="space-y-0 text-sm">
+                  <div className="flex items-center justify-between gap-3 border-b border-border/30 py-3">
+                    <dt className="text-xs text-muted-foreground">Direction en charge</dt>
+                    <dd className="truncate font-medium" title={directionName}>{directionName}</dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 border-b border-border/30 py-3">
+                    <dt className="text-xs text-muted-foreground">Département en charge</dt>
+                    <dd className="truncate font-medium" title={departmentName}>{departmentName}</dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 border-b border-border/30 py-3">
+                    <dt className="text-xs text-muted-foreground">Service en charge</dt>
+                    <dd className="truncate font-medium" title={unitName}>{unitName}</dd>
+                  </div>
+                  {isRequesterView && (
+                    <div className="flex items-center justify-between gap-3 border-b border-border/30 py-3">
+                      <dt className="text-xs text-muted-foreground">Agent en charge</dt>
+                      <dd className="font-medium">
+                        {r.assigneeId
+                          ? assigneeDisplayName
+                          : <span className="italic text-muted-foreground">En attente</span>}
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+
+                <div className="mt-4 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-500">
+                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-amber-500/15 text-amber-500">
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                    </span>
+                    Délai
+                  </div>
+                  <div className={cn("flex items-center gap-1.5 text-sm font-semibold", slaOver ? "text-destructive" : "text-success")}>
+                    {slaOver && <AlertTriangle className="h-3.5 w-3.5" />}
+                    {slaOver ? "Délai dépassé" : "Dans les délais"}
+                  </div>
                 </div>
               </div>
-            </section>
-          )}
+            </DialogContent>
+          </Dialog>
+
           </div>
         </aside>
       </div>
-      </div>
+
     </div>
-  );
-}
-
-function RequesterCard({ r: req, directions }: { r: RequestItem; directions: Direction[] }) {
-  const [role] = useRole();
-  const isAgent = role !== "user";
-  const isInternal = req.requesterType === "internal" || !req.isExternal;
-  const isExternal = req.requesterType === "external" || req.isExternal;
-
-  return (
-    <section className="p-5">
-      <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-        Fiche demandeur
-      </h3>
-
-      <div className="mb-3 flex items-center gap-2">
-        <span className="grid h-8 w-8 place-items-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-          {req.requesterName.split(" ").map((p: string) => p[0]).join("").slice(0, 2)}
-        </span>
-        <div className="min-w-0">
-          <div className="font-semibold leading-none">{req.requesterName}</div>
-          <div className="mt-0.5 flex items-center gap-1.5">
-            {isInternal ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
-                <BadgeCheck className="h-3 w-3" /> Employé EDG
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-semibold text-accent-foreground dark:text-accent">
-                <Users className="h-3 w-3" /> Client externe / citoyen
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <dl className="space-y-2.5 text-sm">
-        {req.requesterPhone && (
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Phone className="h-3.5 w-3.5 shrink-0" />
-            <a href={`tel:${req.requesterPhone}`} className="hover:text-foreground">
-              {req.requesterPhone}
-            </a>
-          </div>
-        )}
-        {req.requesterEmail && (
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Mail className="h-3.5 w-3.5 shrink-0" />
-            <a href={`mailto:${req.requesterEmail}`} className="truncate hover:text-foreground">
-              {req.requesterEmail}
-            </a>
-          </div>
-        )}
-        {req.requesterAddress && (
-          <div className="flex items-start gap-2 text-muted-foreground">
-            <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>{req.requesterAddress}</span>
-          </div>
-        )}
-
-        {isInternal && req.employeeMatricule && (
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <BadgeCheck className="h-3.5 w-3.5 shrink-0 text-primary" />
-            <span>Matricule : <span className="font-mono font-medium text-foreground">{req.employeeMatricule}</span></span>
-          </div>
-        )}
-        {isInternal && req.requesterJob && (
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <User className="h-3.5 w-3.5 shrink-0" />
-            <span>{req.requesterJob}</span>
-          </div>
-        )}
-        {isInternal && req.requesterDirectionId && (
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Building2 className="h-3.5 w-3.5 shrink-0" />
-            <span>{directions.find((d) => String(d.id) === String(req.requesterDirectionId))?.name ?? req.requesterDirectionId}</span>
-          </div>
-        )}
-
-        {isExternal && req.meterNumber && (
-          <div className="text-xs font-mono text-muted-foreground">
-            Compteur : <span className="font-medium text-foreground">{req.meterNumber}</span>
-          </div>
-        )}
-        {isExternal && req.clientRef && (
-          <div className="text-xs font-mono text-muted-foreground">
-            Réf. client : <span className="font-medium text-foreground">{req.clientRef}</span>
-          </div>
-        )}
-        {isExternal && req.siteType && (
-          <div className="text-xs text-muted-foreground">
-            Site :{" "}
-            <span className="font-medium text-foreground">
-              {req.siteType === "domicile" ? "Domicile"
-                : req.siteType === "commerce" ? "Commerce / entreprise"
-                : "Administration / école"}
-            </span>
-          </div>
-        )}
-
-        {isExternal && isAgent && (req.lat != null || req.locationLabel) && (
-          <div className="mt-1 rounded-xl border border-primary/20 bg-primary/5 p-2.5">
-            <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-primary">
-              <MapPin className="h-3 w-3" /> Localisation GPS (confidentiel)
-            </div>
-            {req.locationLabel && (
-              <div className="text-xs text-foreground">{req.locationLabel}</div>
-            )}
-            {req.lat != null && req.lng != null && (
-              <div className="mt-0.5 font-mono text-[10px] text-muted-foreground/70">
-                {req.lat.toFixed(5)}, {req.lng.toFixed(5)}
-              </div>
-            )}
-          </div>
-        )}
-      </dl>
-    </section>
   );
 }
 

@@ -65,6 +65,7 @@ class RequestUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     request_status: Optional[str] = None
+    status_reason: Optional[str] = None
     priority: Optional[str] = None
     category: Optional[str] = None
     in_triage: Optional[bool] = None
@@ -95,6 +96,7 @@ class _RequestCommonFields(BaseResponse):
     assignee_id: Optional[int] = None
     assignee_name: Optional[str] = None
     requester_id: Optional[int] = None
+    requester_unit_id: Optional[int] = None
     merged_into_id: Optional[int] = None
     ref: str
     title: str

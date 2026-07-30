@@ -332,7 +332,8 @@ class RequestRepository(BaseRepository[Request]):
         Calcule la prochaine référence unique pour une base donnée.
 
         Nouvelle forme métier :
-            DIR-UNT-HHMMSSYYYMMDD-SEQ
+            DIR-DEPT-SVC-HHMMSSYYYMMDD-SEQ
+        (direction / département / service du demandeur, résolus via l'organigramme)
 
         La méthode conserve aussi l'ancien appel next_ref(year) par prudence.
         Elle se base sur le MAX du suffixe parmi TOUTES les lignes, y compris

@@ -207,7 +207,7 @@ class TestCreationDemandeBaseline:
         data = body.get("data", body)
         assert "id" in data
         assert "ref" in data
-        assert re.fullmatch(r"[A-Z0-9]{3}-[A-Z0-9]{3}-\d{13}-\d{3}", data["ref"])
+        assert re.fullmatch(r"[A-Z0-9]{3}-[A-Z0-9]{3}-[A-Z0-9]{3}-\d{13}-\d{3}", data["ref"])
         assert "request_status" in data
 
     async def test_creation_statut_initial_est_new(self, auth_client, unity_id):

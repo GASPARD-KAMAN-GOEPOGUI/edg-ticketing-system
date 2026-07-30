@@ -92,7 +92,7 @@ export function NewRequestForm({ onClose }: NewRequestFormProps) {
         description: form.description.trim(),
         category: REQUESTER_DEFAULT_CATEGORY,
         priority: REQUESTER_DEFAULT_PRIORITY,
-        requester_name: sessionUser.name,
+        requester_name: [sessionUser.firstname, sessionUser.name].filter(Boolean).join(" "),
         requester_email: sessionUser.email,
         requester_id: sessionUser.id,
         infos: { auto_route: true },

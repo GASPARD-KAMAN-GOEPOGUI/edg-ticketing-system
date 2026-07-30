@@ -73,6 +73,8 @@ def _check_request_access(actor, req, allowed_dir_unity_ids: set[int] | None = N
 
     Politique d'accès :
       tout rôle        → ses propres demandes en lecture personnelle
+      tout rôle        → les demandes qui lui sont personnellement assignées (assignee_id),
+                         même hors de son unité courante (BR-ROLE-AGENT-001, routage direct)
       user             → uniquement ses propres demandes
       agent-support/chief-service → demandes de leur unité (service) uniquement
       chief-departement → demandes de leur département ET tous ses services (allowed_dir_unity_ids)
@@ -82,6 +84,10 @@ def _check_request_access(actor, req, allowed_dir_unity_ids: set[int] | None = N
     actor_id = getattr(actor, "id", None)
     requester_id = getattr(req, "requester_id", None)
     if actor_id is not None and requester_id is not None and str(requester_id) == str(actor_id):
+        return
+
+    assignee_id = getattr(req, "assignee_id", None)
+    if actor_id is not None and assignee_id is not None and str(assignee_id) == str(actor_id):
         return
 
     role = normalize_role(actor.role)
@@ -237,14 +243,19 @@ async def list_requests(
     svc: RequestService = Depends(_svc),
 ):
     """Liste filtrée et paginée — visibilité restreinte au périmètre de l'utilisateur."""
-    # Vue personnelle : l'acteur demande SES propres demandes en tant que requester.
-    # Dans ce cas, on bypasse le forcing unit_id/direction_id pour tous les rôles.
+    # Vue personnelle : l'acteur demande SES propres demandes en tant que requester,
+    # ou SES propres tickets assignés (BR-ROLE-AGENT-001 — « Mes tickets » filtre
+    # uniquement par assignee_id, sans restriction d'unité : un ticket peut avoir
+    # été assigné directement à l'agent hors de son unité courante, notamment via
+    # le routage dynamique qui permet de cibler un agent sans passer par chef/direction).
+    # Dans ces deux cas, on bypasse le forcing unit_id/direction_id pour tous les rôles.
     is_own_view = requester_id is not None and requester_id == str(actor.id)
+    is_own_assignee_view = assignee_id is not None and assignee_id == str(actor.id)
 
     # Filtrage RBAC — forcé, le client ne peut pas étendre son périmètre (C-N°3)
     actor_role = normalize_role(actor.role)
-    if is_own_view:
-        pass  # requester_id = actor.id suffit ; unit/direction non forcés
+    if is_own_view or is_own_assignee_view:
+        pass  # requester_id/assignee_id = actor.id suffit ; unit/direction non forcés
     elif actor_role == "user":
         requester_id = str(actor.id)           # toujours ses propres demandes
     elif actor_role in {"agent-support", "chief-service"}:
@@ -597,7 +608,7 @@ async def requester_edit(
     actor=Depends(get_current_user),
     svc: RequestService = Depends(_svc),
 ):
-    """Modification personnelle par le demandeur — uniquement titre/description si status=new.
+    """Modification personnelle par le demandeur — uniquement titre/description si status in (new, qualifying).
     Ouvert à tous les rôles : le service valide que l'acteur est bien le demandeur du ticket (C-02)."""
     return await svc.requester_edit(
         id,
@@ -962,6 +973,7 @@ async def escalate_request(
 class _CommentBody(BaseModel):
     body: str
     is_public: bool = False
+    attachment_id: Optional[str] = None
 
 
 @router.get("/{request_id}/comments", response_model=list[WorkflowDetailResponse])
@@ -993,10 +1005,13 @@ async def create_comment(
     req_svc: RequestService = Depends(_svc),
     detail_repo: WorkflowDetailRepository = Depends(_detail_repo),
     wf_repo: WorkflowRepository = Depends(_wf_repo),
+    att_svc: AttachmentService = Depends(_att_svc),
     db: AsyncSession = Depends(get_db),
 ):
     """C-05 — author_id et author_name forcés depuis le JWT.
-    Crée un événement event_type='comment' dans le workflow_detail de la demande."""
+    Crée un événement event_type='comment' dans le workflow_detail de la demande.
+    Un attachment_id optionnel (déjà uploadé sur cette demande) rattache une pièce
+    jointe au commentaire — envoyés en un seul geste comme sur WhatsApp."""
     req = await req_svc.get_by_id(request_id)
     await _resolve_access(actor, req, db)
     wf = await wf_repo.find_active_workflow(request_id)
@@ -1005,6 +1020,22 @@ async def create_comment(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Aucun workflow actif pour cette demande.",
         )
+
+    attachment_infos: dict = {}
+    if body.attachment_id is not None:
+        att = await att_svc.get_by_id(body.attachment_id)
+        if str(att.request_id) != str(request_id):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Cette pièce jointe n'appartient pas à cette demande.",
+            )
+        attachment_infos = {
+            "attachment_id": str(att.id),
+            "filename": att.filename,
+            "mime_type": att.mime_type,
+            "size_bytes": att.size_bytes,
+        }
+
     event = await detail_repo.create_event({
         "workflow_id": str(wf.id),
         "event_type": "comment_added",
@@ -1020,6 +1051,7 @@ async def create_comment(
             "request_status": req.request_status,
             "source_role": actor.role,
             "actor_role": actor.role,
+            **attachment_infos,
         },
     })
 
@@ -1054,6 +1086,11 @@ async def delete_comment(
     """C-05 — ownership : un user ne peut supprimer que ses propres commentaires."""
     req = await req_svc.get_by_id(request_id)
     await _resolve_access(actor, req, db)
+    if req.deleted_at is not None or req.request_status in {"closed", "rejected"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Impossible de supprimer un commentaire : la demande est clôturée, rejetée ou archivée.",
+        )
     entry = await detail_repo.get_by_id(comment_id)
     if entry is None or entry.event_type != "comment_added":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Commentaire introuvable.")
@@ -1134,9 +1171,12 @@ async def list_attachments(
     await _resolve_access(actor, req, db)
     result = await svc.list_by_request(request_id, page=1, limit=100)
     items = result.items if hasattr(result, "items") else []
+    responses = []
     for item in items:
-        item.storage_path = storage.presigned_url(item.storage_path)
-    return items
+        resp = AttachmentResponse.from_orm(item)
+        resp.storage_path = storage.presigned_url(item.storage_path)
+        responses.append(resp)
+    return responses
 
 
 @router.post(
@@ -1147,6 +1187,10 @@ async def list_attachments(
 async def upload_attachment(
     request_id: str,
     file: UploadFile = File(...),
+    skip_timeline_event: bool = Query(
+        False,
+        description="Ne pas créer d'événement `attachment_added` séparé — utilisé quand la pièce jointe est immédiatement rattachée à un commentaire (envoi combiné).",
+    ),
     actor=Depends(get_current_user),
     svc: AttachmentService = Depends(_att_svc),
     req_svc: RequestService = Depends(_svc),
@@ -1218,30 +1262,32 @@ async def upload_attachment(
         "scan_status": scan_db_status, # C-N°2 — résultat ClamAV
     })
 
-    wf = await _timeline_workflow(wf_repo, request_id)
-    if wf is not None:
-        await detail_repo.create_event({
-            "workflow_id": str(wf.id),
-            "event_type": "attachment_added",
-            "label": f"Pièce jointe ajoutée — {att.filename}",
-            "actor_id": actor.id,
-            "actor_name": _actor_display_name(actor) or actor.name,
-            "activated": True,
-            "infos": {
-                "event_status": req.request_status,
-                "request_status": req.request_status,
-                "source_role": actor.role,
-                "actor_role": actor.role,
-                "attachment_id": str(att.id),
-                "filename": att.filename,
-                "mime_type": real_mime,
-                "size_bytes": len(data),
-                "scan_status": scan_db_status,
-            },
-        })
+    if not skip_timeline_event:
+        wf = await _timeline_workflow(wf_repo, request_id)
+        if wf is not None:
+            await detail_repo.create_event({
+                "workflow_id": str(wf.id),
+                "event_type": "attachment_added",
+                "label": f"Pièce jointe ajoutée — {att.filename}",
+                "actor_id": actor.id,
+                "actor_name": _actor_display_name(actor) or actor.name,
+                "activated": True,
+                "infos": {
+                    "event_status": req.request_status,
+                    "request_status": req.request_status,
+                    "source_role": actor.role,
+                    "actor_role": actor.role,
+                    "attachment_id": str(att.id),
+                    "filename": att.filename,
+                    "mime_type": real_mime,
+                    "size_bytes": len(data),
+                    "scan_status": scan_db_status,
+                },
+            })
 
-    att.storage_path = storage.presigned_url(storage_path)
-    return att
+    resp = AttachmentResponse.from_orm(att)
+    resp.storage_path = storage.presigned_url(storage_path)
+    return resp
 
 
 @router.delete("/{request_id}/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)

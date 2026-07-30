@@ -471,7 +471,7 @@ function ProfilePage() {
               <div className="text-2xl font-bold text-primary">
                 {statTotal ? `${slaPercent}%` : <span className="text-base text-muted-foreground">—</span>}
               </div>
-              <div className="mt-0.5 text-[11px] font-medium text-muted-foreground">Respect SLA</div>
+              <div className="mt-0.5 text-[11px] font-medium text-muted-foreground">Respect délai</div>
             </div>
           </div>
         </GlassCard>
@@ -740,7 +740,7 @@ function ProfilePage() {
                   </h4>
                   <div className="space-y-2">
                     <NotifRow label="Toutes les notifications"  desc="Activez ou désactivez toutes les alertes in-app" value={nInApp}      set={setNInApp} />
-                    <NotifRow label="Alertes SLA critiques"     desc="Délais dépassés ou proches d'expiration"         value={nSLA}        set={setNSLA} />
+                    <NotifRow label="Alertes délais critiques"     desc="Délais dépassés ou proches d'expiration"         value={nSLA}        set={setNSLA} />
                     <NotifRow label="Escalades reçues"          desc="Demandes transmises à votre niveau"              value={nEscalade}   set={setNEscalade} />
                     <NotifRow label="Résolution de demandes"    desc="Notification quand une demande est résolue"      value={nResolution} set={setNResolution} />
                   </div>
@@ -751,7 +751,7 @@ function ProfilePage() {
                     <Mail className="h-3.5 w-3.5" />Email
                   </h4>
                   <div className="space-y-2">
-                    <NotifRow label="Alertes SLA par email"  desc="Envoi email pour les délais critiques"         value={nEmail}         set={setNEmail} />
+                    <NotifRow label="Alertes délais par email"  desc="Envoi email pour les délais critiques"         value={nEmail}         set={setNEmail} />
                     <NotifRow label="Nouveaux commentaires"  desc="Réponses sur vos demandes en cours"            value={nEmailComments} set={setNEmailComments} />
                   </div>
                 </div>

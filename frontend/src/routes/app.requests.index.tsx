@@ -5,6 +5,9 @@ import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { GlassCard } from "@/components/glass-card";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { buildAvatarUrl } from "@/lib/api/accounts";
+import { initialsFor } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -87,17 +90,25 @@ const PERSONAL_TERMINAL_STATUSES: RequestStatus[] = ["closed", "cancelled", "rej
 const PERSONAL_TERMINAL_STATUS_SET = new Set<RequestStatus>(PERSONAL_TERMINAL_STATUSES);
 const REQUEST_STATUS_OPTIONS = PERSONAL_ACTIVE_STATUSES;
 
-function RequestCard({ r }: { r: RequestItem }) {
+function RequestCard({ r, requesterAvatar }: { r: RequestItem; requesterAvatar?: string }) {
   const CategoryIcon = getCategoryIcon(r.category);
   const steps = buildRequesterStepsFromStatus(r.status);
   return (
-    <GlassCard className="flex h-full flex-col gap-3 p-4 transition-shadow hover:shadow-xl">
+    <GlassCard className="flex h-full min-h-[196px] flex-col gap-3 p-4 transition-shadow hover:shadow-xl">
       {/* Header */}
       <div className="flex items-start justify-between gap-2">
         <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
           <CategoryIcon className="h-4 w-4" />
         </div>
-        <StatusBadge status={r.status} />
+        <div className="flex items-center gap-1.5">
+          <StatusBadge status={r.status} />
+          <Avatar className="h-6 w-6 border border-border/60">
+            <AvatarImage src={buildAvatarUrl(requesterAvatar)} alt={r.requesterName} />
+            <AvatarFallback className="bg-primary/10 text-[10px] font-bold text-primary">
+              {initialsFor(r.requesterName)}
+            </AvatarFallback>
+          </Avatar>
+        </div>
       </div>
 
       {/* Title */}
@@ -108,11 +119,6 @@ function RequestCard({ r }: { r: RequestItem }) {
         <span className="h-2 w-2 shrink-0 rounded-full bg-current" />
         {priorityLabels[r.priority]}
       </div>
-
-      {/* Description */}
-      {r.description && (
-        <p className="line-clamp-2 text-xs text-muted-foreground">{r.description}</p>
-      )}
 
       {/* Spacer */}
       <div className="flex-1" />
@@ -305,51 +311,54 @@ function RequestsList() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.05 }}
       >
-        <GlassCard className="p-3">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(220px,1fr)_160px_150px_170px_auto]">
             {/* Recherche */}
-            <div className="relative min-w-0 flex-1">
+            <div className="relative min-w-0 rounded-2xl border border-border/50 bg-background/60 shadow-sm backdrop-blur sm:col-span-2 lg:col-span-1">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={q}
                 onChange={handleQChange}
                 placeholder="Rechercher par numéro, titre…"
-                className="h-9 pl-9"
+                className="h-11 border-0 bg-transparent pl-9 shadow-none focus-visible:ring-1"
               />
             </div>
 
             {/* Statut */}
-            <Select value={visibleStatus} onValueChange={setStatus}>
-              <SelectTrigger className="h-9 w-40 shrink-0">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Tous les statuts</SelectItem>
-                {REQUEST_STATUS_OPTIONS.map((s) => (
-                  <SelectItem key={s} value={s}>{statusLabels[s]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            {/* Origine (non-user) */}
-            {!isUser && (
-              <Select value={origin} onValueChange={setOrigin}>
-                <SelectTrigger className="h-9 w-36 shrink-0">
+            <div className="min-w-0 rounded-2xl border border-border/50 bg-background/60 shadow-sm backdrop-blur">
+              <Select value={visibleStatus} onValueChange={setStatus}>
+                <SelectTrigger className="h-11 w-full border-0 bg-transparent shadow-none focus:ring-1">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Toutes origines</SelectItem>
-                  <SelectItem value="internal">Interne</SelectItem>
-                  <SelectItem value="external">Externe</SelectItem>
+                  <SelectItem value="all">Tous les statuts</SelectItem>
+                  {REQUEST_STATUS_OPTIONS.map((s) => (
+                    <SelectItem key={s} value={s}>{statusLabels[s]}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            {/* Origine (non-user) */}
+            {!isUser && (
+              <div className="min-w-0 rounded-2xl border border-border/50 bg-background/60 shadow-sm backdrop-blur">
+                <Select value={origin} onValueChange={setOrigin}>
+                  <SelectTrigger className="h-11 w-full border-0 bg-transparent shadow-none focus:ring-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Toutes origines</SelectItem>
+                    <SelectItem value="internal">Interne</SelectItem>
+                    <SelectItem value="external">Externe</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             )}
 
             {/* Période */}
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex min-w-0 items-center gap-1.5 rounded-2xl border border-border/50 bg-background/60 px-3 shadow-sm backdrop-blur">
               <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
               <Select value={periodPreset} onValueChange={handlePeriodChange}>
-                <SelectTrigger className="h-9 w-40">
+                <SelectTrigger className="h-11 min-w-0 flex-1 border-0 bg-transparent px-1 shadow-none focus:ring-1">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -365,19 +374,19 @@ function RequestsList() {
 
             {/* Dates custom */}
             {periodPreset === "custom" && (
-              <div className="flex items-center gap-1.5 shrink-0">
+              <div className="grid min-w-0 grid-cols-[1fr_auto_1fr] items-center gap-1.5 rounded-2xl border border-border/50 bg-background/60 p-1.5 shadow-sm backdrop-blur sm:col-span-2 lg:col-span-2">
                 <input
                   type="date"
                   value={dateFrom}
                   onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
-                  className="h-9 rounded-lg border border-border/50 bg-background px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  className="h-9 min-w-0 rounded-xl border border-border/40 bg-background/60 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
                 />
                 <span className="text-xs text-muted-foreground">→</span>
                 <input
                   type="date"
                   value={dateTo}
                   onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
-                  className="h-9 rounded-lg border border-border/50 bg-background px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  className="h-9 min-w-0 rounded-xl border border-border/40 bg-background/60 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
                 />
               </div>
             )}
@@ -386,13 +395,12 @@ function RequestsList() {
             {hasDateFilter && (
               <button
                 onClick={clearDates}
-                className="flex shrink-0 items-center gap-1 rounded-full border border-destructive/30 px-2.5 py-1.5 text-xs text-destructive hover:bg-destructive/10 transition-colors"
+                className="flex h-11 shrink-0 items-center justify-center gap-1 rounded-2xl border border-destructive/30 bg-background/60 px-3 text-xs text-destructive shadow-sm transition-colors hover:bg-destructive/10"
               >
                 <X className="h-3 w-3" /> Effacer
               </button>
             )}
           </div>
-        </GlassCard>
       </motion.div>
 
       <AsyncSwap
@@ -441,11 +449,11 @@ function RequestsList() {
                       className="block w-full text-left"
                       onClick={() => setRejectedModalId(r.id)}
                     >
-                      <RequestCard r={r} />
+                      <RequestCard r={r} requesterAvatar={sessionUser?.avatar} />
                     </button>
                   ) : (
                     <Link to="/app/requests/$id" params={{ id: r.id }} className="block">
-                      <RequestCard r={r} />
+                      <RequestCard r={r} requesterAvatar={sessionUser?.avatar} />
                     </Link>
                   )}
                 </motion.div>
@@ -552,11 +560,11 @@ function RequestsList() {
                         className="block h-full w-full text-left"
                         onClick={() => setRejectedModalId(r.id)}
                       >
-                        <RequestCard r={r} />
+                        <RequestCard r={r} requesterAvatar={sessionUser?.avatar} />
                       </button>
                     ) : (
                       <Link to="/app/requests/$id" params={{ id: r.id }} className="block h-full">
-                        <RequestCard r={r} />
+                        <RequestCard r={r} requesterAvatar={sessionUser?.avatar} />
                       </Link>
                     )}
                   </motion.div>

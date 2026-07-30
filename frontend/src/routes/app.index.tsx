@@ -465,7 +465,7 @@ function AgentDashboard() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="En cours" value={inProgress} icon={Clock} tone="accent" loading={loadAssigned} hint="Mes tickets actifs" />
         <Stat label="En attente" value={pendingCount} icon={MessageSquareWarning} tone="warning" loading={loadAssigned} hint="Attente demandeur" />
-        <Stat label="SLA dépassés" value={slaBreachedMine} icon={AlertTriangle} tone="destructive" loading={loadAssigned} hint="Mes tickets en retard" />
+        <Stat label="Délais dépassés" value={slaBreachedMine} icon={AlertTriangle} tone="destructive" loading={loadAssigned} hint="Mes tickets en retard" />
         <Stat label="Réouverts / escaladés" value={reopenedCount + escalatedMine} icon={ArrowUpRight} tone="warning" loading={loadAssigned} />
       </div>
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.55fr)]">
@@ -564,7 +564,7 @@ function ChiefDashboard() {
       </div>
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Stat label="Escaladées"    value={escalated}   icon={AlertTriangle} tone="warning"     loading={isLoading} />
-        <Stat label="SLA dépassés"  value={slaBreached} icon={ArrowUpRight}  tone="destructive" loading={isLoading} hint="Tickets en retard" />
+        <Stat label="Délais dépassés"  value={slaBreached} icon={ArrowUpRight}  tone="destructive" loading={isLoading} hint="Tickets en retard" />
         <Stat label="Réouvertes"    value={reopened}    icon={RotateCcw}     tone="warning"     loading={isLoading} />
         <Stat label="Critiques"     value={critical}    icon={AlertTriangle} tone="destructive" loading={isLoading} hint="Priorité critique active" />
       </div>
@@ -633,7 +633,7 @@ function DirectorDashboard() {
       </div>
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Stat label="Escaladées"    value={escalated}   icon={AlertTriangle} tone="warning"     loading={isLoading} />
-        <Stat label="SLA dépassés"  value={slaBreached} icon={ArrowUpRight}  tone="destructive" loading={isLoading} hint="Tickets en retard" />
+        <Stat label="Délais dépassés"  value={slaBreached} icon={ArrowUpRight}  tone="destructive" loading={isLoading} hint="Tickets en retard" />
         <Stat label="Réouvertes"    value={reopened}    icon={RotateCcw}     tone="warning"     loading={isLoading} />
         <Stat label="Critiques"     value={critical}    icon={AlertTriangle} tone="destructive" loading={isLoading} />
       </div>
@@ -722,7 +722,7 @@ function GlobalDashboard() {
                 <div key={s.id} className={"rounded-2xl border p-4 " + tone}>
                   <div className="text-xs font-medium uppercase tracking-wider opacity-70">{s.id.toUpperCase()}</div>
                   <div className="mt-3 text-2xl font-bold">{s.slaRespect}%</div>
-                  <div className="text-[11px] opacity-70">SLA respecté · {s.total} dem.</div>
+                  <div className="text-[11px] opacity-70">Délai respecté · {s.total} dem.</div>
                 </div>
               );
             })}

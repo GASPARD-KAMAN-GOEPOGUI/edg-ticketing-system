@@ -83,6 +83,7 @@ export async function fetchNotifications(params?: {
   meId?: string;
   unread?: boolean;
   nature?: "annonce" | "demande";
+  archived?: boolean;
   page?: number;
   limit?: number;
 }): Promise<PaginatedNotifications> {
@@ -90,6 +91,7 @@ export async function fetchNotifications(params?: {
   if (params?.meId) qs.set("me_id", params.meId);
   if (params?.unread) qs.set("unread", "true");
   if (params?.nature) qs.set("nature", params.nature);
+  if (params?.archived) qs.set("archived", "true");
   if (params?.page) qs.set("page", String(params.page));
   if (params?.limit) qs.set("limit", String(params.limit));
   const raw = await apiFetch<{
@@ -117,4 +119,11 @@ export async function markAllNotificationsRead(meId?: string): Promise<{ updated
 
 export async function deleteNotification(id: string): Promise<void> {
   await apiFetch<void>(`/notifications/${id}`, { method: "DELETE" });
+}
+
+export async function restoreNotification(id: string): Promise<NotifItem> {
+  const raw = await apiFetch<RawNotification>(`/notifications/${id}/restore`, {
+    method: "POST",
+  });
+  return mapNotification(raw);
 }

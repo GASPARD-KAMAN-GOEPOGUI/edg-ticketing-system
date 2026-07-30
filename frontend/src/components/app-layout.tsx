@@ -601,7 +601,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             onScroll={handleMainScroll}
             className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-none"
           >
-            <div className="mx-auto w-full max-w-7xl px-4 py-5 pb-24 sm:px-6 sm:py-6 md:pb-8">
+            <div className="mx-auto w-full max-w-7xl px-4 py-5 pb-[calc(8rem+env(safe-area-inset-bottom))] sm:px-6 sm:py-6 md:pb-8">
               {children}
             </div>
 
@@ -624,7 +624,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </main>
 
           {/* ── Mobile bottom nav (< md only) ── */}
-          <nav className="fixed bottom-3 left-3 right-3 z-30 md:hidden">
+          <nav className="fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom))] left-3 right-3 z-30 md:hidden">
             <div className="glass-strong flex items-center justify-around rounded-2xl px-2 py-2">
               {(role === "director"
                   ? [

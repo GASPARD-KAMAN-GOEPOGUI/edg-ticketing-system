@@ -3,55 +3,17 @@ import { requireRole } from "@/lib/auth-guard";
 import { useUser } from "@/lib/session";
 import { ticketDetailRouteForList, type TicketDetailRoute } from "@/lib/ticket-navigation";
 import { useState, useMemo } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueries } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { GlassCard } from "@/components/glass-card";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { fetchQueue } from "@/lib/api/requests";
+import { fetchUser, buildAvatarUrl } from "@/lib/api/accounts";
+import { cn, initialsFor } from "@/lib/utils";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
-  fetchQueue,
-  assignRequest,
-  reopenRequest,
-  rejectTicket,
-  reassignService,
-  resolveRequest,
-  escalateRequest,
-} from "@/lib/api/requests";
-import { fetchUsers } from "@/lib/api/accounts";
-import { fetchUnits } from "@/lib/api/directions-units";
-import { cn } from "@/lib/utils";
-import { toast } from "sonner";
-import {
-  ClipboardList, UserPlus, RotateCcw, XCircle,
-  ArrowRightLeft, Clock, Loader2, Inbox,
-  CheckCircle2, AlertTriangle,
+  ClipboardList, UserPlus, RotateCcw,
+  Clock, Inbox, AlertTriangle, Wrench,
 } from "lucide-react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -74,9 +36,6 @@ const TABS: { key: Tab; label: string; icon: typeof ClipboardList; color: string
   { key: "escalated",label: "Escalades",     icon: AlertTriangle,  color: "text-destructive" },
 ];
 
-type ModalType = "assign" | "reassign" | "reject" | "reopen" | "resolve" | "return_director" | null;
-interface ModalState { type: ModalType; ticket: RequestItem | null }
-
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function isToAssign(r: RequestItem): boolean {
@@ -91,26 +50,11 @@ function isEscalated(r: RequestItem): boolean {
 }
 
 // ── Sous-composant : carte ticket ──────────────────────────────────────────────
+// Les actions (affecter, réaffecter, rejeter, résoudre, retour directeur…) ne
+// sont plus des boutons sur la card : toute la card est cliquable et amène sur
+// l'onglet "Traitement" de la fiche détaillée, où elles vivent déjà.
 
-function TicketRow({
-  r,
-  detailRoute,
-  onAssign,
-  onReassign,
-  onReject,
-  onReopen,
-  onResolve,
-  onReturnDirector,
-}: {
-  r: RequestItem;
-  detailRoute: TicketDetailRoute;
-  onAssign: () => void;
-  onReassign: () => void;
-  onReject: () => void;
-  onReopen?: () => void;
-  onResolve?: () => void;
-  onReturnDirector?: () => void;
-}) {
+function TicketRow({ r, detailRoute, requesterAvatar }: { r: RequestItem; detailRoute: TicketDetailRoute; requesterAvatar?: string }) {
   const slaOver = r.slaElapsed > r.slaHours;
   const slaLeft = Math.max(0, r.slaHours - r.slaElapsed);
   const showReopen = r.infos?.reopen_requested === true;
@@ -121,111 +65,71 @@ function TicketRow({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -6 }}
-      className={cn(
-        "flex h-full flex-col gap-3 rounded-2xl border p-4 transition-colors hover:bg-background/50 xl:flex-row xl:items-start",
-        r.priority === "critical" ? "border-destructive/30 bg-destructive/3" :
-        showReopen               ? "border-amber-500/30 bg-amber-500/3"    :
-        r.status === "escalated" ? "border-orange-400/30 bg-orange-500/3" :
-        "border-border/30",
-      )}
     >
-      {/* Infos principales */}
-      <div className="min-w-0 flex-1 space-y-1.5">
-        <div className="flex flex-wrap items-center gap-2">
-          <Link
-            to={detailRoute}
-            params={{ id: r.id }}
-            className="font-mono text-[11px] text-primary hover:underline"
-          >
-            {r.ref}
-          </Link>
-          <PriorityBadge priority={r.priority} />
-          <StatusBadge status={r.status} />
-          {showReopen && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
-              <RotateCcw className="h-2.5 w-2.5" /> Réouverture demandée
-            </span>
-          )}
-          {r.priority === "critical" && (
-            <span className="inline-flex items-center rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-bold text-destructive">
-              CRITIQUE
-            </span>
-          )}
-        </div>
-        <Link
-          to={detailRoute}
-          params={{ id: r.id }}
-          className="block font-semibold leading-snug hover:text-primary"
-        >
-          {r.title}
-        </Link>
-        <div className="text-xs text-muted-foreground">
-          {r.requesterName} · {format(new Date(r.createdAt), "d MMM yyyy", { locale: fr })}
-        </div>
-      </div>
+      <Link to={detailRoute} params={{ id: r.id }} className="block h-full">
+        <GlassCard className={cn(
+          "flex h-full min-h-[196px] flex-col gap-3 p-4 transition-shadow hover:shadow-xl",
+          r.priority === "critical" && "border-destructive/40 bg-destructive/3",
+          showReopen               && "border-amber-500/40 bg-amber-500/3",
+          r.status === "escalated" && "border-orange-400/40 bg-orange-500/3",
+        )}>
+          {/* Infos principales */}
+          <div className="min-w-0 space-y-1.5">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-mono text-[11px] text-primary">{r.ref}</span>
+                <PriorityBadge priority={r.priority} />
+                <StatusBadge status={r.status} />
+                {showReopen && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                    <RotateCcw className="h-2.5 w-2.5" /> Réouverture demandée
+                  </span>
+                )}
+                {r.priority === "critical" && (
+                  <span className="inline-flex items-center rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-bold text-destructive">
+                    CRITIQUE
+                  </span>
+                )}
+              </div>
+              <Avatar className="h-6 w-6 shrink-0 border border-border/60">
+                <AvatarImage src={buildAvatarUrl(requesterAvatar)} alt={r.requesterName} />
+                <AvatarFallback className="bg-primary/10 text-[10px] font-bold text-primary">
+                  {initialsFor(r.requesterName)}
+                </AvatarFallback>
+              </Avatar>
+            </div>
+            <p className="line-clamp-2 font-semibold leading-snug">{r.title}</p>
+            <div className="text-xs text-muted-foreground">
+              {r.requesterName} · {format(new Date(r.createdAt), "d MMM yyyy", { locale: fr })}
+            </div>
+          </div>
 
-      {/* Actions */}
-      <div className="flex shrink-0 flex-col items-end gap-2">
-        <div className={cn("flex items-center gap-1 text-xs font-medium", slaOver ? "text-destructive" : "text-muted-foreground")}>
-          <Clock className="h-3.5 w-3.5" />
-          {slaOver ? "SLA dépassé" : `${slaLeft}h restantes`}
-        </div>
-        <div className="flex flex-wrap justify-end gap-1.5">
-          {showReopen && onReopen && (
-            <Button size="sm" className="h-7 rounded-full px-3 text-xs gradient-primary" onClick={onReopen}>
-              <CheckCircle2 className="mr-1 h-3 w-3" /> Approuver
-            </Button>
-          )}
-          {!showReopen && (
-            <Button size="sm" className="h-7 rounded-full px-3 text-xs gradient-primary" onClick={onAssign}>
-              <UserPlus className="mr-1 h-3 w-3" /> Affecter
-            </Button>
-          )}
-          <Button size="sm" variant="outline" className="h-7 rounded-full px-3 text-xs" onClick={onReassign}>
-            <ArrowRightLeft className="mr-1 h-3 w-3" /> Réaffecter
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 rounded-full px-3 text-xs text-destructive border-destructive/40 hover:bg-destructive/10"
-            onClick={onReject}
-          >
-            <XCircle className="mr-1 h-3 w-3" /> Rejeter
-          </Button>
-          {onResolve && (
-            <Button
-              size="sm"
-              className="h-7 rounded-full px-3 text-xs bg-success text-success-foreground hover:bg-success/90"
-              onClick={onResolve}
-            >
-              <CheckCircle2 className="mr-1 h-3 w-3" /> Résoudre
-            </Button>
-          )}
-          {onReturnDirector && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 rounded-full px-3 text-xs border-warning/40 text-warning hover:bg-warning/10"
-              onClick={onReturnDirector}
-            >
-              <ArrowRightLeft className="mr-1 h-3 w-3" /> Retour directeur
-            </Button>
-          )}
-        </div>
-      </div>
+          <div className="flex-1" />
+
+          {/* Pied de card */}
+          <div className="flex items-center justify-between gap-2 border-t border-border/30 pt-3">
+            <div className={cn("flex items-center gap-1 text-xs font-medium", slaOver ? "text-destructive" : "text-muted-foreground")}>
+              <Clock className="h-3.5 w-3.5" />
+              {slaOver ? "Délai dépassé" : `${slaLeft}h restantes`}
+            </div>
+            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
+              <Wrench className="h-3 w-3" /> Traiter
+            </span>
+          </div>
+        </GlassCard>
+      </Link>
     </motion.div>
   );
 }
 
 // ── Composant principal ────────────────────────────────────────────────────────
 // Partagé par /app/chief-inbox (chief-service) et /app/department-inbox
-// (chief-departement) : deux espaces distincts avec leur propre route, guard de
+// (chief-departement) : deux espaces distincts avec leur propre route, garde de
 // rôle et navigation ticket, mais la même interface — seul le périmètre de
 // données change (service unique vs département entier).
 
 export function ChiefInbox() {
   const sessionUser = useUser();
-  const queryClient = useQueryClient();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isDepartmentSpace = pathname.startsWith("/app/department-inbox");
   const spaceKey = isDepartmentSpace ? "department-inbox" : "chief-inbox";
@@ -233,7 +137,6 @@ export function ChiefInbox() {
   const detailRoute = ticketDetailRouteForList(listRoute);
 
   const [activeTab, setActiveTab] = useState<Tab>("assign");
-  const [modal, setModal] = useState<ModalState>({ type: null, ticket: null });
 
   // ── Données service ──────────────────────────────────────────────────────────
   const { data: queueData, isLoading, isError } = useQuery({
@@ -257,121 +160,21 @@ export function ChiefInbox() {
   };
   const displayed = tabItems[activeTab];
 
-  const listState: "loading" | "empty" | "ready" = isLoading
-    ? "loading" : isError || displayed.length === 0 ? "empty" : "ready";
-
-  // ── Agents du service (pour M1) ───────────────────────────────────────────────
-  // Dans l'espace département, la liste des agents assignables couvre tout le
-  // département (direction_id => élargi via l'organigramme) ; dans l'espace
-  // service, elle reste bornée à l'unité exacte du chef.
-  const { data: agentsData } = useQuery({
-    queryKey: ["service-agents", spaceKey, sessionUser?.unit_id],
-    queryFn: () => fetchUsers({
-      role: "agent-support",
-      ...(isDepartmentSpace
-        ? { direction_id: sessionUser!.unit_id! }
-        : { unit_id: sessionUser!.unit_id! }),
-      limit: 100,
-    }),
-    staleTime: 120_000,
-    enabled: !!sessionUser?.unit_id,
+  // Avatars des demandeurs — un seul fetch par demandeur unique affiché dans l'onglet actif.
+  const requesterIds = [...new Set(displayed.map((r) => r.requesterId).filter(Boolean))];
+  const requesterAvatarQueries = useQueries({
+    queries: requesterIds.map((id) => ({
+      queryKey: ["user", id],
+      queryFn: () => fetchUser(id),
+      staleTime: 300_000,
+    })),
   });
-  const serviceAgents = agentsData?.items ?? [];
-
-  // ── Unités (pour M2) ─────────────────────────────────────────────────────────
-  const { data: unitsData } = useQuery({
-    queryKey: ["units-all"],
-    queryFn: () => fetchUnits(),
-    staleTime: 5 * 60_000,
-  });
-  const currentUnit = (unitsData ?? []).find((u) => u.id === sessionUser?.unit_id);
-  const serviceDirectionId = sessionUser?.direction_id ?? currentUnit?.direction_id;
-  const allUnits = (unitsData ?? []).filter((u) =>
-    u.status &&
-    u.id !== sessionUser?.unit_id &&
-    !!serviceDirectionId &&
-    u.direction_id === serviceDirectionId
+  const requesterAvatarById = new Map(
+    requesterIds.map((id, i) => [id, requesterAvatarQueries[i]?.data]),
   );
 
-  // ── États formulaires modals ──────────────────────────────────────────────────
-  const [assignAgentId, setAssignAgentId]       = useState("");
-  const [reassignUnitId, setReassignUnitId]     = useState("");
-  const [reassignReason, setReassignReason]     = useState("");
-  const [rejectReason, setRejectReason]         = useState("");
-  const [returnReason, setReturnReason]         = useState("");
-
-  const closeModal = () => {
-    setModal({ type: null, ticket: null });
-    setAssignAgentId("");
-    setReassignUnitId("");
-    setReassignReason("");
-    setRejectReason("");
-    setReturnReason("");
-  };
-
-  const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: [spaceKey] });
-    queryClient.invalidateQueries({ queryKey: ["queue"] });
-    queryClient.invalidateQueries({ queryKey: ["requests"] });
-    queryClient.invalidateQueries({ queryKey: ["my-tickets"] });
-    queryClient.invalidateQueries({ queryKey: ["my-tickets-stats"] });
-    queryClient.invalidateQueries({ queryKey: ["escalations"] });
-    queryClient.invalidateQueries({ queryKey: ["stats"] });
-    queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
-  };
-
-  // ── M1 — Affecter ─────────────────────────────────────────────────────────────
-  const assignMut = useMutation({
-    mutationFn: () => assignRequest(modal.ticket!.id, assignAgentId, sessionUser?.id),
-    onSuccess: () => { toast.success("Ticket affecté"); invalidate(); closeModal(); },
-    onError: () => toast.error("Erreur lors de l'affectation"),
-  });
-
-  // ── M2 — Réaffecter service ───────────────────────────────────────────────────
-  const reassignMut = useMutation({
-    mutationFn: () => reassignService(modal.ticket!.id, reassignUnitId, reassignReason.trim()),
-    onSuccess: () => { toast.success("Ticket réaffecté au nouveau service"); invalidate(); closeModal(); },
-    onError: () => toast.error("Erreur lors de la réaffectation"),
-  });
-
-  // ── M3 — Rejeter ──────────────────────────────────────────────────────────────
-  const rejectMut = useMutation({
-    mutationFn: () => rejectTicket(modal.ticket!.id, rejectReason),
-    onSuccess: () => { toast.success("Ticket rejeté"); invalidate(); closeModal(); },
-    onError: () => toast.error("Erreur lors du rejet"),
-  });
-
-  // ── M4 — Approuver réouverture ────────────────────────────────────────────────
-  const reopenMut = useMutation({
-    mutationFn: () => reopenRequest(modal.ticket!.id, undefined, sessionUser?.id),
-    onSuccess: () => { toast.success("Réouverture approuvée"); invalidate(); closeModal(); },
-    onError: () => toast.error("Erreur lors de l'approbation"),
-  });
-
-  // ── M5 — Résoudre directement ─────────────────────────────────────────────────
-  const resolveMut = useMutation({
-    mutationFn: () => resolveRequest(modal.ticket!.id, sessionUser?.id),
-    onSuccess: () => { toast.success("Ticket résolu"); invalidate(); closeModal(); },
-    onError: () => toast.error("Erreur lors de la résolution"),
-  });
-
-  // ── M6 — Retourner au directeur (escalade L2→L3) ──────────────────────────────
-  const returnDirectorMut = useMutation({
-    mutationFn: () => escalateRequest(
-      modal.ticket!.id,
-      {
-        level: "L3",
-        reason: returnReason.trim(),
-        from_agent_name: sessionUser?.name ?? "Chef de service",
-      },
-      sessionUser?.id,
-    ),
-    onSuccess: () => { toast.success("Ticket renvoyé au directeur"); invalidate(); closeModal(); },
-    onError: () => toast.error("Erreur lors du renvoi au directeur"),
-  });
-
-  const openModal = (type: ModalType, ticket: RequestItem) =>
-    setModal({ type, ticket });
+  const listState: "loading" | "empty" | "ready" = isLoading
+    ? "loading" : isError || displayed.length === 0 ? "empty" : "ready";
 
   const scopeLabel = isDepartmentSpace ? "département" : "service";
   const emptyMessages: Record<Tab, string> = {
@@ -511,265 +314,13 @@ export function ChiefInbox() {
                   key={r.id}
                   r={r}
                   detailRoute={detailRoute}
-                  onAssign={() => openModal("assign", r)}
-                  onReassign={() => openModal("reassign", r)}
-                  onReject={() => openModal("reject", r)}
-                  onReopen={r.infos?.reopen_requested ? () => openModal("reopen", r) : undefined}
-                  onResolve={() => openModal("resolve", r)}
-                  onReturnDirector={() => openModal("return_director", r)}
+                  requesterAvatar={requesterAvatarById.get(r.requesterId)?.avatar}
                 />
               ))}
             </AnimatePresence>
           </div>
         </GlassCard>
       </AsyncSwap>
-
-      {/* ── M1 — Affecter à un agent ─────────────────────────────────────────── */}
-      <Dialog open={modal.type === "assign"} onOpenChange={(o) => !o && closeModal()}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <UserPlus className="h-4 w-4 text-primary" /> Affecter le ticket
-            </DialogTitle>
-            <DialogDescription>
-              Sélectionnez un agent de votre service pour ce ticket.
-            </DialogDescription>
-          </DialogHeader>
-          {modal.ticket && (
-            <div className="rounded-xl bg-muted/40 px-4 py-3 text-sm">
-              <p className="font-semibold line-clamp-1">{modal.ticket.title}</p>
-              <p className="mt-0.5 font-mono text-xs text-muted-foreground">{modal.ticket.ref}</p>
-            </div>
-          )}
-          <div className="space-y-1.5">
-            <Label>Agent <span className="text-destructive">*</span></Label>
-            <Select value={assignAgentId} onValueChange={setAssignAgentId}>
-              <SelectTrigger className="h-11">
-                <SelectValue placeholder={serviceAgents.length === 0 ? "Aucun agent disponible" : "Choisir un agent"} />
-              </SelectTrigger>
-              <SelectContent>
-                {serviceAgents.map((a) => (
-                  <SelectItem key={a.id} value={a.id}>
-                    <span className="font-medium">{a.name}</span>
-                    {a.job && <span className="ml-1 text-muted-foreground">— {a.job}</span>}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" className="rounded-full" onClick={closeModal}>Annuler</Button>
-            <Button
-              className="rounded-full gradient-primary"
-              disabled={!assignAgentId || assignMut.isPending}
-              onClick={() => assignMut.mutate()}
-            >
-              {assignMut.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-              Confirmer
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── M2 — Réaffecter à un autre service ───────────────────────────────── */}
-      <Dialog open={modal.type === "reassign"} onOpenChange={(o) => !o && closeModal()}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ArrowRightLeft className="h-4 w-4 text-primary" /> Réaffecter à un autre service
-            </DialogTitle>
-            <DialogDescription>
-              Ce ticket sera transféré au chef du service cible.
-            </DialogDescription>
-          </DialogHeader>
-          {modal.ticket && (
-            <div className="rounded-xl bg-muted/40 px-4 py-3 text-sm">
-              <p className="font-semibold line-clamp-1">{modal.ticket.title}</p>
-              <p className="mt-0.5 font-mono text-xs text-muted-foreground">{modal.ticket.ref}</p>
-            </div>
-          )}
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label>Service cible <span className="text-destructive">*</span></Label>
-              <Select value={reassignUnitId} onValueChange={setReassignUnitId}>
-                <SelectTrigger className="h-11">
-                  <SelectValue placeholder="Choisir un service" />
-                </SelectTrigger>
-                <SelectContent>
-                  {allUnits.map((u) => (
-                    <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Motif <span className="text-destructive">*</span></Label>
-              <Textarea
-                className="resize-none"
-                rows={3}
-                placeholder="Expliquer pourquoi ce ticket est réaffecté…"
-                value={reassignReason}
-                onChange={(e) => setReassignReason(e.target.value)}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" className="rounded-full" onClick={closeModal}>Annuler</Button>
-            <Button
-              className="rounded-full gradient-primary"
-              disabled={!reassignUnitId || !reassignReason.trim() || reassignMut.isPending}
-              onClick={() => reassignMut.mutate()}
-            >
-              {reassignMut.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-              Réaffecter
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── M3 — Rejeter ─────────────────────────────────────────────────────── */}
-      <Dialog open={modal.type === "reject"} onOpenChange={(o) => !o && closeModal()}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-destructive">
-              <XCircle className="h-4 w-4" /> Rejeter le ticket
-            </DialogTitle>
-            <DialogDescription>
-              Le demandeur sera notifié avec le motif de rejet.
-            </DialogDescription>
-          </DialogHeader>
-          {modal.ticket && (
-            <div className="rounded-xl bg-muted/40 px-4 py-3 text-sm">
-              <p className="font-semibold line-clamp-1">{modal.ticket.title}</p>
-              <p className="mt-0.5 font-mono text-xs text-muted-foreground">{modal.ticket.ref}</p>
-            </div>
-          )}
-          <div className="space-y-1.5">
-            <Label>Motif de rejet <span className="text-destructive">*</span></Label>
-            <Textarea
-              className="resize-none"
-              rows={4}
-              placeholder="Expliquer la raison du rejet pour informer le demandeur…"
-              value={rejectReason}
-              onChange={(e) => setRejectReason(e.target.value)}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" className="rounded-full" onClick={closeModal}>Annuler</Button>
-            <Button
-              variant="destructive"
-              className="rounded-full"
-              disabled={!rejectReason.trim() || rejectMut.isPending}
-              onClick={() => rejectMut.mutate()}
-            >
-              {rejectMut.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-              Rejeter le ticket
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── M4 — Approuver réouverture ───────────────────────────────────────── */}
-      <AlertDialog open={modal.type === "reopen"} onOpenChange={(o) => !o && closeModal()}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <RotateCcw className="h-4 w-4 text-amber-500" /> Approuver la réouverture
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {modal.ticket && (
-                <>
-                  Le ticket <strong>{modal.ticket.ref}</strong> sera réouvert et réaffecté pour traitement.
-                  Le demandeur sera notifié.
-                </>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={closeModal}>Annuler</AlertDialogCancel>
-            <AlertDialogAction
-              className="gradient-primary"
-              disabled={reopenMut.isPending}
-              onClick={() => reopenMut.mutate()}
-            >
-              {reopenMut.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-              Approuver
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* ── M5 — Résoudre ────────────────────────────────────────────────────── */}
-      <AlertDialog open={modal.type === "resolve"} onOpenChange={(o) => !o && closeModal()}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2 text-success">
-              <CheckCircle2 className="h-4 w-4" /> Résoudre le ticket
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {modal.ticket && (
-                <>
-                  Confirmez la résolution du ticket <strong>{modal.ticket.ref}</strong>.
-                  Le demandeur pourra confirmer ou demander la réouverture.
-                </>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={closeModal}>Annuler</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-success text-success-foreground hover:bg-success/90"
-              disabled={resolveMut.isPending}
-              onClick={() => resolveMut.mutate()}
-            >
-              {resolveMut.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-              Confirmer la résolution
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* ── M6 — Retour au directeur ─────────────────────────────────────────── */}
-      <Dialog open={modal.type === "return_director"} onOpenChange={(o) => !o && closeModal()}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-warning">
-              <AlertTriangle className="h-4 w-4" /> Renvoyer au directeur
-            </DialogTitle>
-            <DialogDescription>
-              Ce ticket sera escaladé (L3) pour arbitrage par le directeur de la direction.
-            </DialogDescription>
-          </DialogHeader>
-          {modal.ticket && (
-            <div className="rounded-xl bg-muted/40 px-4 py-3 text-sm">
-              <p className="font-semibold line-clamp-1">{modal.ticket.title}</p>
-              <p className="mt-0.5 font-mono text-xs text-muted-foreground">{modal.ticket.ref}</p>
-            </div>
-          )}
-          <div className="space-y-1.5">
-            <Label>Motif du renvoi <span className="text-destructive">*</span></Label>
-            <Textarea
-              className="resize-none"
-              rows={3}
-              placeholder="Expliquer pourquoi ce ticket nécessite un arbitrage de la direction…"
-              value={returnReason}
-              onChange={(e) => setReturnReason(e.target.value)}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" className="rounded-full" onClick={closeModal}>Annuler</Button>
-            <Button
-              className="rounded-full border-warning/40 text-warning hover:bg-warning/10"
-              variant="outline"
-              disabled={!returnReason.trim() || returnDirectorMut.isPending}
-              onClick={() => returnDirectorMut.mutate()}
-            >
-              {returnDirectorMut.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-              Envoyer au directeur
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

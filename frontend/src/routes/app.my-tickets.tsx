@@ -1,11 +1,13 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { requireRole } from "@/lib/auth-guard";
 import { useUser } from "@/lib/session";
 import { useState, useEffect, useCallback } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueries } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { GlassCard } from "@/components/glass-card";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { fetchUser, buildAvatarUrl } from "@/lib/api/accounts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -15,22 +17,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
 import { fetchRequests } from "@/lib/api/requests";
 import { priorityLabels, statusLabels } from "@/lib/mock-data";
 import type { RequestStatus, Priority } from "@/lib/mock-data";
-import { toast } from "sonner";
 import {
-  Ticket, Clock, Search, Inbox, Loader2, ArrowUpRight,
+  Ticket, Clock, Search, Inbox,
   ShieldAlert, AlertTriangle, CheckCircle2, RotateCcw, TrendingUp,
 } from "lucide-react";
 import { LayoutToggle, type LayoutMode } from "@/components/layout-toggle";
@@ -38,13 +29,8 @@ import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { PaginationBar } from "@/components/pagination-bar";
 import { AsyncSwap } from "@/components/async-states";
-import {
-  EscalationProgressBar,
-  DEFAULT_LEVELS,
-} from "@/components/escalation-progress-bar";
-import { apiFetch } from "@/lib/api/client";
 import { useSessionState } from "@/lib/use-session-state";
-import { cn } from "@/lib/utils";
+import { cn, initialsFor } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/my-tickets")({
   beforeLoad: () => requireRole("agent-support", "chief-service", "admin"),
@@ -66,7 +52,7 @@ const priorityDotClass: Record<Priority, string> = {
 
 function MyTicketsPage() {
   const sessionUser = useUser();
-  const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const [filterStatus, setFilterStatus] = useSessionState<string>("mt:status", "all");
   const [filterPriority, setFilterPriority] = useSessionState<string>("mt:priority", "all");
@@ -111,6 +97,19 @@ function MyTicketsPage() {
   const total = data?.total ?? 0;
   const totalPages = data?.pages ?? 1;
 
+  // Avatars des demandeurs — un seul fetch par demandeur unique visible sur la page courante.
+  const requesterIds = [...new Set(paged.map((r) => r.requesterId).filter(Boolean))];
+  const requesterAvatarQueries = useQueries({
+    queries: requesterIds.map((id) => ({
+      queryKey: ["user", id],
+      queryFn: () => fetchUser(id),
+      staleTime: 300_000,
+    })),
+  });
+  const requesterAvatarById = new Map(
+    requesterIds.map((id, i) => [id, requesterAvatarQueries[i]?.data]),
+  );
+
   const assignedTickets = statsData?.items ?? [];
   const activeAssignedTickets = assignedTickets.filter((r) => ACTIVE_STATUSES.includes(r.status));
   const resolvedTickets = assignedTickets.filter((r) => r.status === "resolved" || r.status === "closed");
@@ -147,41 +146,15 @@ function MyTicketsPage() {
     [setSearch],
   );
 
-  // ── Dialog escalade ───────────────────────────────────────────────────────
-  const [escalateOpen, setEscalateOpen] = useState(false);
-  const [escalateId, setEscalateId] = useState<string>("");
-  const [escalateLevel, setEscalateLevel] = useState<string>(DEFAULT_LEVELS[3]);
-  const [escalateReason, setEscalateReason] = useState("");
-
-  const openEscalade = (id: string) => {
-    setEscalateId(id);
-    setEscalateLevel(DEFAULT_LEVELS[3]);
-    setEscalateReason("");
-    setEscalateOpen(true);
-  };
-
-  const escalateMut = useMutation({
-    mutationFn: () =>
-      apiFetch(`/requests/${escalateId}/escalate${sessionUser?.id ? `?actor_id=${sessionUser.id}` : ""}`, {
-        method: "POST",
-        body: JSON.stringify({
-          level: escalateLevel,
-          reason: escalateReason || "Escalade depuis Mes tickets",
-          from_agent_name: sessionUser?.name ?? "",
-        }),
-      }),
-    onSuccess: () => {
-      toast.success("Ticket escaladé");
-      setEscalateOpen(false);
-      queryClient.invalidateQueries({ queryKey: ["my-tickets"] });
-      queryClient.invalidateQueries({ queryKey: ["my-tickets-stats"] });
-      queryClient.invalidateQueries({ queryKey: ["queue"] });
-      queryClient.invalidateQueries({ queryKey: ["requests"] });
-      queryClient.invalidateQueries({ queryKey: ["escalations"] });
-      queryClient.invalidateQueries({ queryKey: ["stats"] });
-    },
-    onError: () => toast.error("Erreur lors de l'escalade"),
-  });
+  const openTicketDetail = useCallback((id: string) => {
+    navigate({ to: "/app/my-tickets/tickets/$id", params: { id } });
+  }, [navigate]);
+  const openTicketDetailFromKeyboard = useCallback((event: React.KeyboardEvent, id: string) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openTicketDetail(id);
+    }
+  }, [openTicketDetail]);
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -228,7 +201,7 @@ function MyTicketsPage() {
           </span>
           <div>
             <div className={cn("text-2xl font-bold leading-none", kpiBreached > 0 && "text-destructive")}>{kpiBreached}</div>
-            <div className="mt-0.5 text-xs text-muted-foreground">SLA dépassé</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">Délai dépassé</div>
           </div>
         </GlassCard>
 
@@ -268,7 +241,7 @@ function MyTicketsPage() {
             <div className="text-2xl font-bold leading-none">
               {kpiSlaRate != null ? `${kpiSlaRate}%` : "—"}
             </div>
-            <div className="mt-0.5 text-xs text-muted-foreground">Taux SLA respecté</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">Taux de délai respecté</div>
           </div>
         </GlassCard>
 
@@ -372,8 +345,12 @@ function MyTicketsPage() {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -6 }}
                       transition={{ duration: 0.3, delay: i * 0.03 }}
+                      role="link"
+                      tabIndex={0}
+                      onClick={() => openTicketDetail(r.id)}
+                      onKeyDown={(event) => openTicketDetailFromKeyboard(event, r.id)}
                       className={cn(
-                        "flex items-start gap-4 border-b px-5 py-4 last:border-0 transition-colors hover:bg-background/50",
+                        "flex cursor-pointer items-start gap-4 border-b px-5 py-4 last:border-0 transition-colors hover:bg-background/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
                         r.priority === "critical"
                           ? "border-destructive/30 bg-destructive/3"
                           : r.status === "reopened"
@@ -423,27 +400,7 @@ function MyTicketsPage() {
                       <div className="flex shrink-0 flex-col items-end gap-2">
                         <div className={cn("flex items-center gap-1 text-xs font-medium", slaOver ? "text-destructive" : "text-muted-foreground")}>
                           <Clock className="h-3.5 w-3.5" />
-                          {slaOver ? "SLA dépassé" : `${slaLeft}h restantes`}
-                        </div>
-                        <div className="flex gap-1.5">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 rounded-full px-3 text-xs"
-                            onClick={() => openEscalade(r.id)}
-                          >
-                            <ArrowUpRight className="mr-1 h-3 w-3" />
-                            Escalader
-                          </Button>
-                          <Button
-                            asChild
-                            size="sm"
-                            className="h-7 rounded-full px-3 text-xs gradient-primary"
-                          >
-                            <Link to="/app/my-tickets/tickets/$id" params={{ id: r.id }}>
-                              Traiter
-                            </Link>
-                          </Button>
+                          {slaOver ? "Délai dépassé" : `${slaLeft}h restantes`}
                         </div>
                       </div>
                     </motion.div>
@@ -469,10 +426,15 @@ function MyTicketsPage() {
                       whileHover={{ y: -3 }}
                     >
                       <GlassCard className={cn(
-                        "flex flex-col gap-3 p-4 transition-shadow hover:shadow-xl",
+                        "flex h-full min-h-[196px] cursor-pointer flex-col gap-3 p-4 transition-shadow hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
                         r.priority === "critical" && "border-destructive/40 bg-destructive/3",
                         r.status === "reopened"   && "border-amber-500/40 bg-amber-500/3",
-                      )}>
+                      )}
+                        role="link"
+                        tabIndex={0}
+                        onClick={() => openTicketDetail(r.id)}
+                        onKeyDown={(event) => openTicketDetailFromKeyboard(event, r.id)}
+                      >
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <StatusBadge status={r.status} />
@@ -482,9 +444,17 @@ function MyTicketsPage() {
                               </span>
                             )}
                           </div>
-                          <div className={cn("flex items-center gap-1 text-xs font-medium shrink-0", slaOver ? "text-destructive" : "text-muted-foreground")}>
-                            <Clock className="h-3 w-3" />
-                            {slaOver ? "SLA !" : `${slaLeft}h`}
+                          <div className="flex flex-col items-end gap-1">
+                            <Avatar className="h-6 w-6 border border-border/60">
+                              <AvatarImage src={buildAvatarUrl(requesterAvatarById.get(r.requesterId)?.avatar)} alt={r.requesterName} />
+                              <AvatarFallback className="bg-primary/10 text-[10px] font-bold text-primary">
+                                {initialsFor(r.requesterName)}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div className={cn("flex items-center gap-1 text-xs font-medium shrink-0", slaOver ? "text-destructive" : "text-muted-foreground")}>
+                              <Clock className="h-3 w-3" />
+                              {slaOver ? "Délai !" : `${slaLeft}h`}
+                            </div>
                           </div>
                         </div>
 
@@ -495,9 +465,6 @@ function MyTicketsPage() {
                           <span className="h-2 w-2 shrink-0 rounded-full bg-current" />
                           {priorityLabels[r.priority]}
                         </div>
-                        {r.description && (
-                          <p className="line-clamp-2 text-xs text-muted-foreground">{r.description}</p>
-                        )}
 
                         <div className="flex-1" />
                         <div className="space-y-1">
@@ -508,20 +475,6 @@ function MyTicketsPage() {
                           <p className="font-mono text-[11px] text-muted-foreground/60">Réf. {r.ref}</p>
                         </div>
 
-                        <div className="flex gap-2 border-t border-border/30 pt-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="flex-1 rounded-full text-xs"
-                            onClick={() => openEscalade(r.id)}
-                          >
-                            <ArrowUpRight className="mr-1 h-3 w-3" />
-                            Escalader
-                          </Button>
-                          <Button asChild size="sm" className="flex-1 rounded-full text-xs gradient-primary">
-                            <Link to="/app/my-tickets/tickets/$id" params={{ id: r.id }}>Traiter</Link>
-                          </Button>
-                        </div>
                       </GlassCard>
                     </motion.div>
                   );
@@ -540,56 +493,6 @@ function MyTicketsPage() {
           />
         </>
       </AsyncSwap>
-
-      {/* ── Dialog escalade ─────────────────────────────────────────────── */}
-      <Dialog open={escalateOpen} onOpenChange={setEscalateOpen}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Escalader le ticket</DialogTitle>
-            <DialogDescription>
-              Transmettre ce ticket à un niveau supérieur avec une justification.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-1">
-            <div className="space-y-1.5">
-              <Label>Niveau cible <span className="text-destructive">*</span></Label>
-              <Select value={escalateLevel} onValueChange={setEscalateLevel}>
-                <SelectTrigger className="h-11">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {DEFAULT_LEVELS.slice(3, 6).map((l) => (
-                    <SelectItem key={l} value={l}>{l}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Raison <span className="text-destructive">*</span></Label>
-              <Textarea
-                className="resize-none"
-                rows={3}
-                placeholder="Décrivez pourquoi ce ticket doit être escaladé…"
-                value={escalateReason}
-                onChange={(e) => setEscalateReason(e.target.value)}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" className="rounded-full" onClick={() => setEscalateOpen(false)}>
-              Annuler
-            </Button>
-            <Button
-              className="rounded-full gradient-primary"
-              disabled={!escalateReason.trim() || escalateMut.isPending}
-              onClick={() => escalateMut.mutate()}
-            >
-              {escalateMut.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-              Confirmer l'escalade
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

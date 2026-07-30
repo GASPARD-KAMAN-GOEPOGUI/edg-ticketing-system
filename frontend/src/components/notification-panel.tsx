@@ -50,6 +50,15 @@ function isQualificationNotification(n: PanelNotif): boolean {
   );
 }
 
+function isInfoRequestNotification(n: PanelNotif): boolean {
+  const target = `${n.title} ${n.body}`.toLowerCase();
+  return (
+    target.includes("information complémentaire") ||
+    target.includes("information complementaire") ||
+    target.includes("attend votre retour")
+  );
+}
+
 const iconFor = (t: NotifType, source?: Source) => {
   if (source === "announcement") return Megaphone;
   if (t === "success") return CheckCircle2;
@@ -224,7 +233,7 @@ export function NotificationPanel({
       setReqNotifs((p) => p.filter((n) => n.id !== id));
       deleteNotifMut.mutate(id);
     }
-    toast.success("Notification supprimée");
+    toast.success("Notification archivée");
   };
 
   const markAll = () => {
@@ -236,7 +245,11 @@ export function NotificationPanel({
   const openTicketFromNotification = (n: PanelNotif) => {
     if (!n.requestId) return;
     onClose();
-    navigate({ to: ticketDetailRouteForNotification(n.actionUrl, role), params: { id: n.requestId } });
+    navigate({
+      to: ticketDetailRouteForNotification(n.actionUrl, role),
+      params: { id: n.requestId },
+      search: isInfoRequestNotification(n) ? { tab: "comments" } : undefined,
+    });
   };
 
   const handleClick = (n: PanelNotif) => {
@@ -302,7 +315,7 @@ export function NotificationPanel({
         <div className="flex shrink-0 gap-2 border-b border-border/30 px-5 py-3">
           {[
             { label: "Non lues", value: unread, tone: "bg-primary/10 text-primary" },
-            { label: "Alertes SLA", value: reqNotifs.filter((n) => n.type === "warning").length, tone: "bg-warning/15 text-warning-foreground dark:text-warning" },
+            { label: "Alertes délais", value: reqNotifs.filter((n) => n.type === "warning").length, tone: "bg-warning/15 text-warning-foreground dark:text-warning" },
             { label: "Escalades", value: reqNotifs.filter((n) => n.title.toLowerCase().includes("escalade")).length, tone: "bg-destructive/10 text-destructive" },
             { label: "Annonces", value: annNotifs.length, tone: "bg-primary/10 text-primary" },
           ].map(({ label, value, tone }) => (

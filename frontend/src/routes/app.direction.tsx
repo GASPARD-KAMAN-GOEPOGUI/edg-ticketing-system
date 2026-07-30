@@ -404,7 +404,7 @@ function DirectionView() {
             </GlassCard>
             <GlassCard className="flex flex-col gap-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Hors délai SLA</span>
+                <span className="text-sm text-muted-foreground">Hors délai</span>
                 <span className="grid h-9 w-9 place-items-center rounded-xl bg-destructive/15 text-destructive">
                   <AlertTriangle className="h-4 w-4" />
                 </span>
@@ -514,7 +514,7 @@ function DirectionView() {
                         <span className="font-mono text-xs font-medium">{esc.requestRef}</span>
                       )}
                       <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-semibold text-destructive">
-                        +{esc.slaOverHours}h SLA
+                        +{esc.slaOverHours}h délai
                       </span>
                       <span className={cn(
                         "rounded-full px-2 py-0.5 text-[10px] font-semibold",
@@ -572,7 +572,7 @@ function DirectionView() {
                   <th className="pb-2.5 text-left font-semibold">Chef de Service</th>
                   <th className="pb-2.5 text-center font-semibold">Ouvertes</th>
                   <th className="pb-2.5 text-center font-semibold">Résolues</th>
-                  <th className="pb-2.5 text-center font-semibold">SLA dépassé</th>
+                  <th className="pb-2.5 text-center font-semibold">Délai dépassé</th>
                   <th className="hidden pb-2.5 text-center font-semibold sm:table-cell">Taux résolution</th>
                 </tr>
               </thead>

@@ -122,7 +122,7 @@ const TICKET_ACTION_ROLES: Record<TicketAction, Role[]> = {
 };
 
 const TICKET_ACTION_STATUSES: Record<TicketAction, RequestStatus[]> = {
-  requester_edit: ["new"],
+  requester_edit: ["new", "qualifying"],
   self_assign: ["new", "qualifying", "qualified", "reopened"],
   take_ownership: ["assigned", "qualifying", "qualified", "pending"],
   request_info: ["in_progress", "assigned"],

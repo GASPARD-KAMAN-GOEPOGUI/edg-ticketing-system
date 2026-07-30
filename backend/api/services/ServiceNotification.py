@@ -19,6 +19,7 @@ class NotificationService(BaseService):
         actor_role: str = "user",
         unread_only: bool = False,
         nature: str | None = None,
+        archived: bool = False,
         page: int = 1,
         limit: int = 30,
     ):
@@ -28,6 +29,7 @@ class NotificationService(BaseService):
             actor_role=actor_role,
             unread_only=unread_only,
             nature=nature,
+            archived=archived,
             page=page,
             limit=limit,
         )
@@ -58,8 +60,8 @@ class NotificationService(BaseService):
     async def count_unread(self, recipient_id: str, *, actor_role: str = "user") -> int:
         return await self.repo.count_unread(recipient_id, actor_role=actor_role)
 
-    async def get_by_id(self, id: str):
-        obj = await self.repo.get_by_id(id)
+    async def get_by_id(self, id: str, *, include_deleted: bool = False):
+        obj = await self.repo.get_by_id(id, include_deleted=include_deleted)
         if obj is None:
             raise self.not_found("Notification introuvable")
         return obj
@@ -85,5 +87,13 @@ class NotificationService(BaseService):
         return await self.repo.mark_all_read(recipient_id)
 
     async def delete(self, id: str) -> bool:
+        """Archive la notification — soft-delete uniquement (deleted_at), jamais de suppression physique."""
         await self.get_by_id(id)
         return await self.repo.delete(id)
+
+    async def restore(self, id: str):
+        """Restaure une notification archivée — visible à nouveau dans la vue active."""
+        ok = await self.repo.restore(id)
+        if not ok:
+            raise self.not_found("Notification introuvable")
+        return await self.repo.get_by_id(id)

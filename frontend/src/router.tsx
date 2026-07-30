@@ -7,11 +7,11 @@ export const getRouter = () => {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
-        staleTime: 10_000,       // données fraîches pendant 10s
-        gcTime: 120_000,         // cache conservé 2min
-        retry: 1,                // 1 seule tentative en cas d'erreur
-        refetchOnWindowFocus: true,
-        refetchOnReconnect: true,
+        staleTime: 60_000,       // données fraîches pendant 1min pour éviter les rechargements visibles
+        gcTime: 10 * 60_000,     // cache conservé 10min pour une navigation retour instantanée
+        retry: 0,                // échec rapide si le backend ne répond pas
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
       },
       mutations: {
         retry: 0,
@@ -23,10 +23,11 @@ export const getRouter = () => {
     routeTree,
     context: { queryClient },
     scrollRestoration: true,
-    defaultPreloadStaleTime: 0,
+    defaultPreloadStaleTime: 30_000,
     defaultPreload: "intent",    // précharge au survol des liens
     defaultPendingComponent: RoutePendingFallback,
-    defaultPendingMs: 0,         // affiche immédiatement (pas de délai artificiel)
+    defaultPendingMs: 300,       // évite le splash pour les micro-chargements
+    defaultPendingMinMs: 120,
   });
 
   return router;

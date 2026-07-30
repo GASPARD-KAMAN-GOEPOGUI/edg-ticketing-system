@@ -24,6 +24,7 @@ import {
   markNotificationRead,
   markAllNotificationsRead,
   deleteNotification,
+  restoreNotification,
 } from "@/lib/api/notifications";
 import { closeRequest, requestReopen } from "@/lib/api/requests";
 import { cn } from "@/lib/utils";
@@ -157,6 +158,8 @@ function NotifListCard({
   onCardClick,
   onToggleRead,
   onRemove,
+  onRestore,
+  archived,
   navigate,
   role,
   onActionToast,
@@ -167,6 +170,8 @@ function NotifListCard({
   onCardClick: (n: Notif) => void;
   onToggleRead: (id: string) => void;
   onRemove: (id: string, title: string) => void;
+  onRestore: (id: string, title: string) => void;
+  archived: boolean;
   navigate: ReturnType<typeof useNavigate>;
   role: Role;
   onActionToast: (msg: string) => void;
@@ -261,13 +266,23 @@ function NotifListCard({
         >
           {n.read ? <Mail className="h-3.5 w-3.5" /> : <MailOpen className="h-3.5 w-3.5" />}
         </button>
-        <button
-          onClick={() => onRemove(n.id, n.title)}
-          className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-          title="Supprimer"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
+        {archived ? (
+          <button
+            onClick={() => onRestore(n.id, n.title)}
+            className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-success/10 hover:text-success"
+            title="Restaurer"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+          </button>
+        ) : (
+          <button
+            onClick={() => onRemove(n.id, n.title)}
+            className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+            title="Archiver"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
     </GlassCard>
   );
@@ -279,6 +294,8 @@ function NotifGridCard({
   onCardClick,
   onToggleRead,
   onRemove,
+  onRestore,
+  archived,
   navigate,
   role,
   onActionToast,
@@ -289,6 +306,8 @@ function NotifGridCard({
   onCardClick: (n: Notif) => void;
   onToggleRead: (id: string) => void;
   onRemove: (id: string, title: string) => void;
+  onRestore: (id: string, title: string) => void;
+  archived: boolean;
   navigate: ReturnType<typeof useNavigate>;
   role: Role;
   onActionToast: (msg: string) => void;
@@ -325,13 +344,23 @@ function NotifGridCard({
           >
             {n.read ? <Mail className="h-3 w-3" /> : <MailOpen className="h-3 w-3" />}
           </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); onRemove(n.id, n.title); }}
-            className="rounded-md p-1 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
-            title="Supprimer"
-          >
-            <X className="h-3 w-3" />
-          </button>
+          {archived ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); onRestore(n.id, n.title); }}
+              className="rounded-md p-1 text-muted-foreground transition hover:bg-success/10 hover:text-success"
+              title="Restaurer"
+            >
+              <RotateCcw className="h-3 w-3" />
+            </button>
+          ) : (
+            <button
+              onClick={(e) => { e.stopPropagation(); onRemove(n.id, n.title); }}
+              className="rounded-md p-1 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
+              title="Archiver"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -404,10 +433,13 @@ function Notifications() {
   const meId = sessionUser?.id;
   const qc = useQueryClient();
 
+  const [filter, setFilter] = useState<"all" | "unread" | "archived">("all");
+  const isArchivedView = filter === "archived";
+
   /* ── Notifications API — rafraîchissement auto toutes les 30 s ── */
   const { data: apiData } = useQuery({
-    queryKey: ["notifications", meId],
-    queryFn: () => fetchNotifications({ meId, limit: 100 }),
+    queryKey: ["notifications", meId, isArchivedView],
+    queryFn: () => fetchNotifications({ meId, limit: 100, archived: isArchivedView }),
     enabled: !!meId,
     staleTime: 10_000,
     refetchInterval: 30_000,
@@ -428,7 +460,13 @@ function Notifications() {
 
   const deleteNotifMut = useMutation({
     mutationFn: deleteNotification,
-    onError: () => toast.error("Impossible de supprimer la notification"),
+    onError: () => toast.error("Impossible d'archiver la notification"),
+  });
+
+  const restoreNotifMut = useMutation({
+    mutationFn: restoreNotification,
+    onError: () => toast.error("Impossible de restaurer la notification"),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
   });
 
   const markAllReadMut = useMutation({
@@ -465,10 +503,11 @@ function Notifications() {
       announcementId: a.id,
     }));
 
-  /* ── Liste combinée pour l'affichage ── */
-  const notifs: Notif[] = [...reqNotifs, ...annNotifs];
+  /* ── Liste combinée pour l'affichage ──
+     Les annonces n'ont pas d'équivalent "archivé" côté backend (masquage
+     purement client, hors périmètre MOD-NOTIF) — exclues de la vue Archivées. */
+  const notifs: Notif[] = isArchivedView ? reqNotifs : [...reqNotifs, ...annNotifs];
 
-  const [filter, setFilter] = useState<"all" | "unread">("all");
   const [sourceFilter, setSourceFilter] = useState<"all" | "request" | "announcement">("all");
   const [layout, setLayout] = useState<LayoutMode>("list");
   const navigate = useNavigate();
@@ -516,7 +555,13 @@ function Notifications() {
       setReqNotifs((p) => p.filter((n) => n.id !== id));
       deleteNotifMut.mutate(id);
     }
-    toast.success("Notification supprimée", { description: title });
+    toast.success("Notification archivée", { description: title });
+  };
+
+  const restore = (id: string, title: string) => {
+    setReqNotifs((p) => p.filter((n) => n.id !== id));
+    restoreNotifMut.mutate(id);
+    toast.success("Notification restaurée", { description: title });
   };
 
   const markAllRead = () => {
@@ -558,6 +603,8 @@ function Notifications() {
     onCardClick: handleCardClick,
     onToggleRead: toggleRead,
     onRemove: remove,
+    onRestore: restore,
+    archived: isArchivedView,
     navigate,
     role,
     onActionToast: handleActionToast,
@@ -593,7 +640,7 @@ function Notifications() {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
         {[
           { label: "Non lues", value: unread, icon: Bell, tone: "text-primary bg-primary/10" },
-          { label: "Alertes SLA", value: slaCount, icon: AlertTriangle, tone: "text-warning-foreground dark:text-warning bg-warning/15" },
+          { label: "Alertes délais", value: slaCount, icon: AlertTriangle, tone: "text-warning-foreground dark:text-warning bg-warning/15" },
           { label: "Escalades", value: escCount, icon: ShieldAlert, tone: "text-destructive bg-destructive/10" },
           { label: "Résolues", value: resCount, icon: CheckCircle2, tone: "text-success bg-success/12" },
           { label: "Annonces", value: annCount, icon: Megaphone, tone: "text-primary bg-primary/10" },
@@ -613,7 +660,7 @@ function Notifications() {
       {/* ── Barre de filtres ── */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex gap-1 rounded-2xl border border-border/40 bg-card/40 p-1">
-          {(["all", "unread"] as const).map((f) => (
+          {(["all", "unread", "archived"] as const).map((f) => (
             <button
               key={f}
               onClick={() => { setFilter(f); setPage(1); }}
@@ -624,7 +671,11 @@ function Notifications() {
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
-              {f === "all" ? `Toutes (${notifs.length})` : `Non lues${unread > 0 ? ` (${unread})` : ""}`}
+              {f === "all"
+                ? isArchivedView ? "Toutes" : `Toutes (${notifs.length})`
+                : f === "unread"
+                  ? `Non lues${!isArchivedView && unread > 0 ? ` (${unread})` : ""}`
+                  : "Archivées"}
             </button>
           ))}
         </div>
@@ -655,7 +706,11 @@ function Notifications() {
         <GlassCard className="py-20 text-center">
           <BellOff className="mx-auto h-10 w-10 text-muted-foreground/40" />
           <p className="mt-3 font-semibold text-muted-foreground">
-            {filter === "unread" ? "Aucune notification non lue" : "Aucune notification"}
+            {filter === "unread"
+              ? "Aucune notification non lue"
+              : filter === "archived"
+                ? "Aucune notification archivée"
+                : "Aucune notification"}
           </p>
           {filter === "unread" && (
             <button

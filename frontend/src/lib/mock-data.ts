@@ -231,9 +231,14 @@ export type RequestItem = {
     id: string;
     authorId: string;
     author: string;
+    authorRole?: string;
     body: string;
     isPublic: boolean;
     createdAt: string;
+    attachmentId?: string;
+    attachmentName?: string;
+    attachmentMime?: string;
+    attachmentSize?: number;
   }[];
   timeline: TimelineEvent[];
   appreciation?: Appreciation;

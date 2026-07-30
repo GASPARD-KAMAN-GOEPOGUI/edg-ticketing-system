@@ -27,13 +27,18 @@ class NotificationRepository(BaseRepository[Notification]):
         actor_role: str = "user",
         unread_only: bool = False,
         nature: str | None = None,
+        archived: bool = False,
         page: int = 1,
         limit: int = 30,
     ) -> tuple[list[Notification], int]:
-        """Liste les notifications d'un destinataire avec filtres read/nature/visibility."""
+        """Liste les notifications d'un destinataire avec filtres read/nature/visibility.
+
+        `archived=True` bascule vers les notifications archivées (deleted_at renseigné)
+        — jamais supprimées physiquement, juste masquées de la vue active par défaut.
+        """
         base = [
             Notification.recipient_id == recipient_id,
-            Notification.deleted_at.is_(None),
+            Notification.deleted_at.isnot(None) if archived else Notification.deleted_at.is_(None),
         ]
         if not _is_admin_role(actor_role):
             base.append(Notification.visibility == "public")

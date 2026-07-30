@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ title }}</title>
+<style>
+@media only screen and (max-width: 520px) {
+    .email-shell { width: 100% !important; border-radius: 10px !important; }
+    .email-pad { padding-left: 14px !important; padding-right: 14px !important; }
+    .email-header-left,
+    .email-header-right,
+    .email-footer-left,
+    .email-footer-right {
+        display: block !important;
+        width: 100% !important;
+        text-align: left !important;
+    }
+    .email-header-right { padding-top: 10px !important; }
+    .email-footer-right { padding-top: 12px !important; }
+    .email-title { font-size: 18px !important; }
+    .email-subtitle { font-size: 12px !important; }
+    .email-detail-label,
+    .email-detail-value {
+        display: block !important;
+        width: auto !important;
+        padding-left: 12px !important;
+        padding-right: 12px !important;
+        border-bottom: 0 !important;
+    }
+    .email-detail-label { padding-bottom: 2px !important; }
+    .email-detail-value { padding-top: 0 !important; border-bottom: 1px solid #edf2ef !important; }
+}
+</style>
+</head>
+<body style="margin:0;padding:0;background:#f6faf7;font-family:Arial,Helvetica,sans-serif;color:#102015;">
+<table width="100%" cellpadding="0" cellspacing="0" style="padding:18px;background:#f6faf7;">
+    <tr>
+        <td align="center">
+            <table width="100%" cellpadding="0" cellspacing="0" class="email-shell"
+                   style="max-width:640px;background:#ffffff;border:1px solid #e3eee7;border-radius:16px;overflow:hidden;box-shadow:0 14px 38px rgba(16,32,21,0.08);">
+                <tr>
+                    <td class="email-pad" style="padding:18px 22px;border-bottom:1px solid #edf4ef;background:#ffffff;">
+                        <table width="100%" cellpadding="0" cellspacing="0">
+                            <tr>
+                                <td class="email-header-left" style="vertical-align:middle;">
+                                    <img src="cid:edg-logo" alt="EDG" width="48" height="48"
+                                         style="display:inline-block;vertical-align:middle;border-radius:6px;">
+                                    <span style="display:inline-block;vertical-align:middle;margin-left:10px;">
+                                        <strong style="display:block;color:#007a22;font-size:20px;line-height:1;">EDG-SUP</strong>
+                                        <span style="display:block;color:#7b8b83;font-size:11px;letter-spacing:3px;margin-top:4px;">EDG SUPPORT</span>
+                                    </span>
+                                </td>
+                                <td align="right" class="email-header-right" style="vertical-align:middle;color:#516158;font-size:11px;">
+                                    Plateforme de gestion des demandes
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="background:{{ soft_color }};height:42px;line-height:42px;text-align:right;padding-right:22px;">
+                        {% if number %}
+                        <span style="display:inline-block;background:{{ color }};color:#ffffff;border-radius:8px;padding:4px 9px;font-size:13px;font-weight:700;line-height:1;">
+                            {{ number }}
+                        </span>
+                        {% endif %}
+                    </td>
+                </tr>
+                <tr>
+                    <td class="email-pad" style="padding:10px 28px 24px;text-align:center;">
+                        <div style="display:inline-block;width:54px;height:54px;border-radius:50%;background:{{ color }};color:#ffffff;font-size:28px;font-weight:700;line-height:54px;text-align:center;">
+                            {{ icon | safe }}
+                        </div>
+                        <h1 class="email-title" style="margin:18px 0 8px;color:{{ color }};font-size:20px;line-height:1.35;font-weight:800;">
+                            {{ headline }}
+                        </h1>
+                        <p class="email-subtitle" style="margin:0 auto 22px;max-width:440px;color:#45574e;font-size:13px;line-height:1.55;">
+                            {{ subtitle }}
+                        </p>
+                        <table width="100%" cellpadding="0" cellspacing="0"
+                               style="margin:0 auto 22px;max-width:500px;border:1px solid #e6eee9;border-radius:12px;background:#ffffff;">
+                            {% for label, value in details.items() %}
+                            {% if value %}
+                            <tr>
+                                <td class="email-detail-label" style="padding:8px 16px;color:#53655c;font-size:12px;font-weight:700;text-align:left;width:45%;{% if not loop.last %}border-bottom:1px solid #edf2ef;{% endif %}">
+                                    {{ label }}
+                                </td>
+                                <td class="email-detail-value" style="padding:8px 16px;color:#17241d;font-size:12px;text-align:left;word-break:break-word;overflow-wrap:anywhere;{% if not loop.last %}border-bottom:1px solid #edf2ef;{% endif %}">
+                                    : {{ value }}
+                                </td>
+                            </tr>
+                            {% endif %}
+                            {% endfor %}
+                        </table>
+                        {% if action_url %}
+                        <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px;">
+                            <tr>
+                                <td align="center">
+                                    <a href="{{ action_url }}"
+                                       style="display:inline-block;background:#008D24;color:#ffffff;text-decoration:none;border-radius:6px;padding:11px 22px;font-size:13px;font-weight:800;">
+                                        {{ action_label }} &nbsp;&#8594;
+                                    </a>
+                                </td>
+                            </tr>
+                        </table>
+                        {% endif %}
+                        <p style="margin:0;color:#607069;font-size:11px;">Merci de votre confiance.</p>
+                    </td>
+                </tr>
+                <tr>
+                    <td class="email-pad" style="padding:14px 22px;border-top:1px solid #edf4ef;background:#fbfdfb;">
+                        <table width="100%" cellpadding="0" cellspacing="0">
+                            <tr>
+                                <td class="email-footer-left" style="vertical-align:top;color:#53655c;font-size:11px;line-height:1.45;">
+                                    <strong style="color:#007a22;">EDG-SUP - EDG Support</strong><br>
+                                    Ce message est automatique, merci de ne pas y repondre.
+                                </td>
+                                <td align="right" class="email-footer-right" style="vertical-align:top;color:#53655c;font-size:11px;line-height:1.45;">
+                                    <strong>Besoin d'aide ?</strong><br>
+                                    {{ support_email }}<br>
+                                    {{ support_phone }}
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+            </table>
+            <p style="margin:12px 0 0;color:#7b8b83;font-size:11px;">
+                &copy; {{ year }} EDG-SUP. Tous droits reserves.
+            </p>
+        </td>
+    </tr>
+</table>
+</body>
+</html>

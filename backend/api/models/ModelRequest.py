@@ -167,7 +167,19 @@ class Request(Base, BaseColumns):
 
     @property
     def assignee_name(self) -> Optional[str]:
-        return self.assignee.name if self.assignee else None
+        """Nom complet (prenom + nom) — aligne sur ServiceRequest._account_display_name,
+        deja utilise pour les evenements timeline (target_user_name de l'assignation)."""
+        if not self.assignee:
+            return None
+        parts = [p for p in (self.assignee.firstname, self.assignee.name) if p]
+        return " ".join(parts) if parts else None
+
+    @property
+    def requester_unit_id(self) -> Optional[int]:
+        """Unite d'appartenance du demandeur (Account.unity_id), pour affichage
+        Direction/Departement/Service du demandeur cote frontend (resolu via la
+        liste des unites deja chargee, meme pattern que Request.direction_id)."""
+        return self.requester.unity_id if self.requester else None
 
     @property
     def timelines(self):

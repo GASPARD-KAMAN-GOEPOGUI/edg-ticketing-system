@@ -48,11 +48,11 @@ Chemins probables: `app.my-tickets.tsx`, `capabilities.ts`, `ticket-navigation.t
 Identifiant: FEATURE-QUEUE-QUALIFICATION
 Nom: File d'attente et demandes a qualifier
 Module: MOD-AGENT / MOD-CHIEF
-Description: deux vues seulement: `A prendre` pour les tickets non assignes disponibles dans le perimetre agent/chef, et `A qualifier` pour les demandes a orienter ou a prendre en charge par l'utilisateur connecte.
+Description: une seule vue — `A qualifier`, pour les demandes a orienter ou a prendre en charge par l'utilisateur connecte. L'ancien onglet `A prendre` (tickets non assignes du perimetre agent/chef, `unassigned_only=true`) a ete retire le 2026-07-29 (voir BR-ROLE-AGENT-001, note retrait onglet) pour tous les roles ayant acces a la page. Le formulaire d'assignation (bouton `Assigner`) impose depuis le 2026-07-29 une hierarchie stricte Direction -> Departement -> Service -> Personne, chaque niveau filtre aux entites actives et cascade sur le parent choisi (voir BR-TICKET-QUALIFY-001, note formulaire 4 niveaux).
 Roles concernes: agent, chief.
 Route frontend: `/app/queue`, `/app/queue/tickets/$id`.
 Page principale: `frontend/src/routes/app.queue.tsx`, `frontend/src/routes/app.queue_.tickets.$id.tsx`.
-Endpoint backend: `GET /api/v1/requests/queue?unassigned_only=true`, `GET /api/v1/requests/triage`, `POST /api/v1/requests/{id}/qualify`.
+Endpoint backend: `GET /api/v1/requests/triage`, `POST /api/v1/requests/{id}/qualify`.
 Regles metier: BR-TICKET-QUALIFY-001, BR-SCOPE-001.
 Chemins probables: `app.queue.tsx`, `requests.ts`, `RouteRequest.py`, `ServiceRequest.py`.
 
@@ -80,6 +80,7 @@ Page principale: `frontend/src/routes/app.supervision.tsx`, `frontend/src/routes
 Endpoint backend: principalement `GET /api/v1/requests` avec filtres, actions ticket via `RouteRequest.py`.
 Regles metier: BR-NAV-001, BR-ROLE-CHIEF-001, BR-ROLE-DIRECTOR-001.
 Chemins probables: `app.supervision.tsx`, `ticket-navigation.ts`, `app-layout.tsx`, `RouteRequest.py`, `ServiceRequest.py`.
+Note chief-departement: la liste supervision charge le perimetre departemental avec `direction_id=<department unity_id>` pour reutiliser l'expansion backend departement + services, tandis que chief-service reste en `unit_id` exact.
 
 ## FEATURE-DIRECTION
 
@@ -142,6 +143,7 @@ Service frontend: `frontend/src/lib/api/notifications.ts`, `frontend/src/lib/rea
 Endpoint backend: `GET/PATCH/POST /api/v1/notifications/*`, actions ticket qui appellent `NotificationEmitter.py`.
 Route backend: `backend/api/routes/RouteNotification.py`, `backend/api/routes/RouteSSE.py`.
 Service backend: `backend/api/services/ServiceNotification.py`, `backend/api/services/NotificationEmitter.py`.
+Email backend: `backend/api/core/mailer.py`, templates HTML dans `backend/templates/`.
 Tables: `notification`, `workflow_detail`, `request`, `account`.
 Regles metier: BR-NOTIF-001, BR-NAV-001.
 Chemins probables: `notification-panel.tsx`, `notifications.ts`, `NotificationEmitter.py`, `ServiceRequest.py`, `RouteNotification.py`, `RepositoryNotification.py`, `event_bus.py`.

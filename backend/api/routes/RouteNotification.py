@@ -41,6 +41,7 @@ def _check_recipient_access(actor, recipient_id: str) -> None:
 async def list_notifications(
     unread: bool = Query(False, alias="unread"),
     nature: Optional[str] = Query(None, description="annonce | demande"),
+    archived: bool = Query(False, description="Notifications archivées (masquées, jamais supprimées)"),
     page: int = Query(1, ge=1),
     limit: int = Query(30, ge=1, le=100),
     actor=Depends(get_current_user),
@@ -52,6 +53,7 @@ async def list_notifications(
         actor_role=actor.role,
         unread_only=unread,
         nature=nature,
+        archived=archived,
         page=page,
         limit=limit,
     )
@@ -84,9 +86,22 @@ async def delete_notification(
     actor=Depends(get_current_user),
     svc: NotificationService = Depends(_svc),
 ):
+    """Archive la notification (deleted_at) — jamais de suppression physique, récupérable via /restore."""
     notif = await svc.get_by_id(id)
     _check_recipient_access(actor, str(notif.recipient_id))
     await svc.delete(id)
+
+
+@router.post("/{id}/restore", response_model=NotificationResponse)
+async def restore_notification(
+    id: str,
+    actor=Depends(get_current_user),
+    svc: NotificationService = Depends(_svc),
+):
+    """Restaure une notification archivée dans la vue active de l'utilisateur."""
+    notif = await svc.get_by_id(id, include_deleted=True)
+    _check_recipient_access(actor, str(notif.recipient_id))
+    return await svc.restore(id)
 
 
 # ── Endpoints backward-compat ─────────────────────────────────────────────────

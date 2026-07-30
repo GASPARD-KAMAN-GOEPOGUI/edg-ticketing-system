@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { requireRole } from "@/lib/auth-guard";
 import { GlassCard } from "@/components/glass-card";
 import { Button } from "@/components/ui/button";
@@ -138,15 +138,19 @@ type EscalationFilter = "active" | "all" | EscalationItem["status"];
 
 function SupervisionPage() {
   const [role] = useRole();
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const sessionUser = useUser();
   const isChiefRole = role === "chief-service" || role === "chief-departement";
   const isChiefService = role === "chief-service";
+  const isChiefDepartment = role === "chief-departement";
   const unitId = isChiefRole ? sessionUser?.unit_id : undefined;
   const directionId = role === "director"
     ? (sessionUser?.direction_id ?? sessionUser?.unit_id)
     : sessionUser?.direction_id;
   const hasOperationalScope = isChiefRole ? !!unitId : !!directionId;
+  const scopeLabel = isChiefDepartment ? "département" : "service";
+  const scopeTitle = isChiefDepartment ? "Supervision du département" : "Supervision du service";
   const [teamMsg, setTeamMsg] = useState("");
   const teamMsgMut = useMutation({
     mutationFn: () => apiFetch("/announcements/team-message", {
@@ -186,6 +190,16 @@ function SupervisionPage() {
   const canReassignEscalation = isChiefRole || role === "admin";
   const canTakeOverEscalation = role === "admin";
   const canTransferToDirector = isChiefRole || role === "admin";
+  const openSupervisionTicket = useCallback((id: string) => {
+    navigate({ to: "/app/supervision/tickets/$id", params: { id } });
+  }, [navigate]);
+  const openSupervisionTicketFromKeyboard = useCallback((event: React.KeyboardEvent, id?: string) => {
+    if (!id) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openSupervisionTicket(id);
+    }
+  }, [openSupervisionTicket]);
 
   // ── Queries ────────────────────────────────────────────────────────────────
   const { data: dirsData = [] } = useQuery({
@@ -204,9 +218,15 @@ function SupervisionPage() {
 
   const { data: agentsData, isLoading: loadAgents, isError: agentsError } = useQuery({
     queryKey: ["agents-supervision", role, unitId, directionId],
-    queryFn: () => isChiefRole
-      ? fetchUsers({ role: "agent-support", unit_id: unitId, limit: 100 })
-      : fetchUsers({ role: "agent-support", direction_id: directionId, limit: 100 }),
+    queryFn: () => {
+      if (isChiefService) {
+        return fetchUsers({ role: "agent-support", unit_id: unitId, limit: 100 });
+      }
+      if (isChiefDepartment) {
+        return fetchUsers({ role: "agent-support", direction_id: unitId, limit: 100 });
+      }
+      return fetchUsers({ role: "agent-support", direction_id: directionId, limit: 100 });
+    },
     enabled: hasOperationalScope,
     staleTime: 60_000,
     refetchInterval: 45_000,
@@ -231,9 +251,15 @@ function SupervisionPage() {
 
   const { data: ticketsData, isLoading: loadTickets, isError: ticketsError } = useQuery({
     queryKey: ["tickets-supervision", role, unitId, directionId],
-    queryFn: () => isChiefRole
-      ? fetchRequests({ unit_id: unitId, limit: 500 })
-      : fetchRequests({ direction_id: directionId, limit: 500 }),
+    queryFn: () => {
+      if (isChiefService) {
+        return fetchRequests({ unit_id: unitId, limit: 500 });
+      }
+      if (isChiefDepartment) {
+        return fetchRequests({ direction_id: unitId, limit: 500 });
+      }
+      return fetchRequests({ direction_id: directionId, limit: 500 });
+    },
     enabled: hasOperationalScope,
     staleTime: 30_000,
     refetchInterval: 30_000,
@@ -421,10 +447,10 @@ function SupervisionPage() {
             <ShieldAlert className="h-3 w-3" /> Pilotage opérationnel
           </div>
           <h1 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">
-            Supervision du service
+            {scopeTitle}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Charge, SLA agent par agent et escalades en cours — mis à jour en continu.
+            Charge, délai agent par agent et escalades en cours — mis à jour en continu.
           </p>
         </div>
         <Button
@@ -475,7 +501,7 @@ function SupervisionPage() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Kpi label="Escalades ouvertes"  value={kpis.escalationsOpen}  tone="destructive" icon={AlertTriangle} hint={`${esc.length} au total`}               loading={loadEsc} />
         <Kpi label="Demandes en charge"  value={kpis.totalOpen}        tone="primary"     icon={Activity}     hint={`${agentStats.length} agents actifs`}     loading={loadingStats} />
-        <Kpi label="SLA dépassés"        value={kpis.slaBreachedTotal} tone="warning"     icon={Clock}        hint="Tickets en retard sur le service"          loading={loadingStats} />
+        <Kpi label="Délais dépassés"        value={kpis.slaBreachedTotal} tone="warning"     icon={Clock}        hint={`Tickets en retard sur le ${scopeLabel}`}  loading={loadingStats} />
         <Kpi label="Agents surchargés"   value={kpis.overloadCount}    tone="warning"     icon={Users2}       hint="≥ 8 tickets ouverts"                       loading={loadingStats} />
       </div>
 
@@ -485,7 +511,7 @@ function SupervisionPage() {
           <div className="mb-4 flex items-center justify-between">
             <div>
               <h3 className="font-semibold">Charge & retards par agent</h3>
-              <p className="text-xs text-muted-foreground">Tickets ouverts vs SLA dépassés</p>
+              <p className="text-xs text-muted-foreground">Tickets ouverts vs délais dépassés</p>
             </div>
           </div>
           {loadingStats ? (
@@ -494,7 +520,7 @@ function SupervisionPage() {
             </div>
           ) : chartData.length === 0 ? (
             <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
-              Aucun agent dans le service
+              Aucun agent dans le {scopeLabel}
             </div>
           ) : (
             <div className="h-64">
@@ -512,7 +538,7 @@ function SupervisionPage() {
                     }}
                   />
                   <Bar dataKey="ouverts" name="Ouverts"       fill="var(--chart-1)" radius={[6, 6, 0, 0]} />
-                  <Bar dataKey="retards" name="SLA dépassés"  fill="var(--chart-4)" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="retards" name="Délais dépassés"  fill="var(--chart-4)" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -548,7 +574,7 @@ function SupervisionPage() {
           <div>
             <h3 className="font-semibold">Escalades en cours</h3>
             <p className="text-xs text-muted-foreground">
-              {visibleEsc.length} résultat(s) — triées par urgence SLA décroissante
+              {visibleEsc.length} résultat(s) — triées par urgence délai décroissante
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -617,7 +643,7 @@ function SupervisionPage() {
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-2">
                   <div className="text-right">
-                    <div className="text-xs text-muted-foreground">SLA dépassé</div>
+                    <div className="text-xs text-muted-foreground">Délai dépassé</div>
                     <div className="text-sm font-semibold text-destructive">+{e.slaOverHours}h</div>
                   </div>
                   {e.status !== "resolved" && (
@@ -691,7 +717,17 @@ function SupervisionPage() {
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {visibleEsc.map((e) => (
-              <GlassCard key={e.id} className="flex flex-col gap-2 p-4">
+              <GlassCard
+                key={e.id}
+                className={cn(
+                  "flex flex-col gap-2 p-4 transition hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                  e.requestId && "cursor-pointer",
+                )}
+                role={e.requestId ? "link" : undefined}
+                tabIndex={e.requestId ? 0 : undefined}
+                onClick={() => { if (e.requestId) openSupervisionTicket(e.requestId); }}
+                onKeyDown={(event) => openSupervisionTicketFromKeyboard(event, e.requestId)}
+              >
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={cn("rounded-full px-2.5 py-0.5 text-[10px] font-bold tracking-wider", levelTone[e.level])}>
                     {levelLabel[e.level] ?? e.level}
@@ -718,7 +754,7 @@ function SupervisionPage() {
                     <div className="flex flex-wrap gap-1">
                       {e.status === "open" && (
                         <Button size="sm" variant="outline" className="h-6 rounded-full px-2 text-[10px]"
-                          disabled={reviewMut.isPending} onClick={() => reviewMut.mutate(e.id)}>
+                          disabled={reviewMut.isPending} onClick={(event) => { event.stopPropagation(); reviewMut.mutate(e.id); }}>
                           En revue
                         </Button>
                       )}
@@ -726,24 +762,24 @@ function SupervisionPage() {
                         <>
                           {canReassignEscalation && (
                             <Button size="sm" variant="outline" className="h-6 rounded-full px-2 text-[10px]"
-                              onClick={() => { setReassignEsc(e); setReassignAgentId(""); setReassignOpen(true); }}>
+                              onClick={(event) => { event.stopPropagation(); setReassignEsc(e); setReassignAgentId(""); setReassignOpen(true); }}>
                               <UserPlus className="h-2.5 w-2.5" />
                             </Button>
                           )}
                           <Button size="sm" variant="outline" className="h-6 rounded-full px-2 text-[10px]"
-                            disabled={returnToAgentMut.isPending} onClick={() => returnToAgentMut.mutate(e)}>
+                            disabled={returnToAgentMut.isPending} onClick={(event) => { event.stopPropagation(); returnToAgentMut.mutate(e); }}>
                             <RotateCcw className="h-2.5 w-2.5" />
                           </Button>
                           {canTakeOverEscalation && (
                             <Button size="sm" variant="outline" className="h-6 rounded-full px-2 text-[10px]"
-                              disabled={takeOverMut.isPending} onClick={() => takeOverMut.mutate(e)}>
+                              disabled={takeOverMut.isPending} onClick={(event) => { event.stopPropagation(); takeOverMut.mutate(e); }}>
                               <ArrowRight className="h-2.5 w-2.5" />
                             </Button>
                           )}
                           {canTransferToDirector && (
                             <Button size="sm"
                               className="h-6 rounded-full px-2 text-[10px] gradient-primary text-background"
-                              onClick={() => { setTransferEsc(e); setTransferReason(""); setTransferOpen(true); }}>
+                              onClick={(event) => { event.stopPropagation(); setTransferEsc(e); setTransferReason(""); setTransferOpen(true); }}>
                               <ArrowUpRight className="h-2.5 w-2.5" />
                             </Button>
                           )}
@@ -751,7 +787,7 @@ function SupervisionPage() {
                       )}
                       <Button size="sm"
                         className="h-6 rounded-full px-2 text-[10px] gradient-primary text-background"
-                        disabled={resolveMut.isPending} onClick={() => resolveMut.mutate(e.id)}>
+                        disabled={resolveMut.isPending} onClick={(event) => { event.stopPropagation(); resolveMut.mutate(e.id); }}>
                         Clôturer
                       </Button>
                     </div>
@@ -795,7 +831,7 @@ function SupervisionPage() {
         ) : agTotal === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
             {agents.length === 0
-              ? "Aucun agent trouvé pour ce service."
+              ? `Aucun agent trouvé pour ce ${scopeLabel}.`
               : "Aucun résultat."}
           </p>
         ) : agentLayout === "list" ? (
@@ -807,7 +843,7 @@ function SupervisionPage() {
                   <th className="px-5 py-3 text-right font-semibold">Ouverts</th>
                   <th className="px-5 py-3 text-right font-semibold">En cours</th>
                   <th className="px-5 py-3 text-right font-semibold">En attente</th>
-                  <th className="px-5 py-3 text-right font-semibold">SLA dépassés</th>
+                  <th className="px-5 py-3 text-right font-semibold">Délais dépassés</th>
                   <th className="px-5 py-3 text-right font-semibold">Critiques</th>
                   <th className="px-5 py-3 text-right font-semibold">Disponibilité</th>
                 </tr>
@@ -1265,7 +1301,7 @@ function DirectorSupervisionCenter({
             Centre de supervision de la direction
           </h1>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            Vue consolidée des services rattachés, des charges, SLA, escalades et tickets critiques. Les données restent limitées au périmètre de votre direction.
+            Vue consolidée des services rattachés, des charges, délais, escalades et tickets critiques. Les données restent limitées au périmètre de votre direction.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -1317,7 +1353,7 @@ function DirectorSupervisionCenter({
         <DirectorMetricCard label="Fermés" value={statusCount.closed ?? 0} icon={Flag} tone="success" loading={loading} />
         <DirectorMetricCard label="Réouverts" value={reopenedTickets} icon={RefreshCw} tone="warning" loading={loading} />
         <DirectorMetricCard label="Escaladés" value={activeEscalations.length || (statusCount.escalated ?? 0)} icon={ArrowUpRight} tone="destructive" loading={loading} />
-        <DirectorMetricCard label="En retard SLA" value={lateTickets} icon={Clock} tone="destructive" loading={loading} />
+        <DirectorMetricCard label="En retard délai" value={lateTickets} icon={Clock} tone="destructive" loading={loading} />
         <DirectorMetricCard label="Critiques" value={criticalTickets} icon={AlertTriangle} tone="destructive" loading={loading} />
         <DirectorMetricCard label="Moy. résolution" value={avgResolution == null ? "—" : `${avgResolution}h`} icon={Gauge} tone="primary" loading={loading} />
         <DirectorMetricCard label="Services suivis" value={serviceStats.length} icon={Layers} tone="primary" loading={loading} />
@@ -1399,7 +1435,7 @@ function DirectorSupervisionCenter({
                   <th className="pb-3 text-right font-semibold">Critiques</th>
                   <th className="pb-3 text-right font-semibold">Moy. résol.</th>
                   <th className="pb-3 text-right font-semibold">Taux résol.</th>
-                  <th className="pb-3 text-right font-semibold">Dép. SLA</th>
+                  <th className="pb-3 text-right font-semibold">Dép. délai</th>
                   <th className="pb-3 text-right font-semibold">Agents</th>
                   <th className="pb-3 text-right font-semibold">Charge</th>
                 </tr>
@@ -1512,7 +1548,7 @@ function DirectorSupervisionCenter({
                 ))}
 
                 <SelectSeparator />
-                <QuickFilterGroupLabel>SLA</QuickFilterGroupLabel>
+                <QuickFilterGroupLabel>Délai</QuickFilterGroupLabel>
                 <SelectItem value={quickFilterValue("sla", "late")}>En retard</SelectItem>
                 <SelectItem value={quickFilterValue("sla", "ok")}>Dans le délai</SelectItem>
 
@@ -1559,7 +1595,7 @@ function DirectorSupervisionCenter({
                   <th className="px-4 py-3 text-left font-semibold">Demandeur</th>
                   <th className="px-4 py-3 text-left font-semibold">Création</th>
                   <th className="px-4 py-3 text-left font-semibold">Mise à jour</th>
-                  <th className="px-4 py-3 text-left font-semibold">Échéance SLA</th>
+                  <th className="px-4 py-3 text-left font-semibold">Échéance délai</th>
                   <th className="px-4 py-3 text-left font-semibold">Escalade</th>
                   <th className="px-4 py-3 text-left font-semibold">Retard</th>
                   <th className="px-4 py-3 text-right font-semibold">Action</th>
@@ -1603,7 +1639,7 @@ function DirectorSupervisionCenter({
                       </td>
                       <td className="px-4 py-3">
                         {late ? (
-                          <Badge className="rounded-full bg-destructive/15 text-destructive">SLA dépassé</Badge>
+                          <Badge className="rounded-full bg-destructive/15 text-destructive">Délai dépassé</Badge>
                         ) : (
                           <Badge variant="outline" className="rounded-full text-success">Dans délai</Badge>
                         )}

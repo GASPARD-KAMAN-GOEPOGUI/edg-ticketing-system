@@ -82,7 +82,7 @@ export type RawRequest = {
   unity_id?: number | null;
   unit_id?: number | string | null;   // alias backend de unity_id
   direction_id?: number | string | null; // réservé (null depuis le backend)
-  assignee_id?: string;
+  assignee_id?: number | string | null;
   assignee_name?: string;
   in_triage: boolean;
   is_external: boolean;
@@ -98,7 +98,7 @@ export type RawRequest = {
   lat?: number;
   lng?: number;
   location_label?: string;
-  requester_id?: string;
+  requester_id?: number | string | null;
   employee_matricule?: string;
   requester_job?: string;
   requester_direction_id?: string;
@@ -165,7 +165,7 @@ export function mapRequest(raw: RawRequest): RequestItem {
     category: raw.category,
     directionId: raw.direction_id != null ? String(raw.direction_id) : "",
     serviceId: raw.unit_id != null ? String(raw.unit_id) : (raw.unity_id != null ? String(raw.unity_id) : undefined),
-    requesterId: raw.requester_id ?? "",
+    requesterId: raw.requester_id != null ? String(raw.requester_id) : "",
     requesterName: raw.requester_name,
     requesterType: raw.requester_type as "internal" | "external" | undefined,
     requesterPhone: raw.requester_phone ?? undefined,
@@ -182,7 +182,7 @@ export function mapRequest(raw: RawRequest): RequestItem {
     lng: raw.lng ?? undefined,
     locationLabel: raw.location_label ?? undefined,
     inTriage: raw.in_triage,
-    assigneeId: raw.assignee_id ?? undefined,
+    assigneeId: raw.assignee_id != null ? String(raw.assignee_id) : undefined,
     assigneeName: raw.assignee_name ?? undefined,
     isExternal: raw.is_external,
     createdAt: raw.created_at,
@@ -199,6 +199,7 @@ export function mapRequest(raw: RawRequest): RequestItem {
         id: t.id,
         authorId: asString(t.infos?.actor_id) ?? (t.agent_id ? String(t.agent_id) : ""),
         author: t.actor_name ?? "Système",
+        authorRole: asString(t.infos?.actor_role ?? t.infos?.source_role),
         body: t.comment ?? t.label ?? "",
         isPublic: t.infos?.is_public === true,
         isEdited: false,
@@ -246,6 +247,10 @@ export function mapComment(t: RawTimeline) {
     isPublic: t.infos?.is_public === true,
     isEdited: false,
     createdAt: t.created_at,
+    attachmentId: asString(t.infos?.attachment_id),
+    attachmentName: typeof t.infos?.filename === "string" ? t.infos.filename : undefined,
+    attachmentMime: typeof t.infos?.mime_type === "string" ? t.infos.mime_type : undefined,
+    attachmentSize: typeof t.infos?.size_bytes === "number" ? t.infos.size_bytes : undefined,
   };
 }
 
@@ -391,7 +396,7 @@ export async function submitExternalRequest(
 
 export async function updateRequest(
   id: string,
-  data: Partial<RawRequest>,
+  data: Partial<RawRequest> & { status_reason?: string },
 ): Promise<RequestItem> {
   const raw = await apiFetch<RawRequest>(`/requests/${id}`, {
     method: "PATCH",
@@ -564,6 +569,7 @@ export type CreateCommentData = {
   author_name: string;
   body: string;
   is_public: boolean;
+  attachment_id?: string;
 };
 
 export async function fetchComments(requestId: string, publicOnly = false) {
@@ -578,9 +584,22 @@ export async function createComment(
 ) {
   const raw = await apiFetch<RawTimeline>(`/requests/${requestId}/comments`, {
     method: "POST",
-    body: JSON.stringify({ body: data.body, is_public: data.is_public }),
+    body: JSON.stringify({
+      body: data.body,
+      is_public: data.is_public,
+      ...(data.attachment_id ? { attachment_id: data.attachment_id } : {}),
+    }),
   });
   return mapComment(raw);
+}
+
+export async function deleteComment(
+  requestId: string,
+  commentId: string,
+): Promise<void> {
+  await apiFetch<void>(`/requests/${requestId}/comments/${commentId}`, {
+    method: "DELETE",
+  });
 }
 
 // ── API : Pièces jointes ──────────────────────────────────────────────────────
@@ -596,12 +615,16 @@ export async function uploadAttachment(
   requestId: string,
   file: File,
   uploaderId?: string,
+  skipTimelineEvent?: boolean,
 ): Promise<RawAttachment> {
   const form = new FormData();
   form.append("file", file);
-  const params = uploaderId ? `?uploader_id=${uploaderId}` : "";
+  const params = new URLSearchParams();
+  if (uploaderId) params.set("uploader_id", uploaderId);
+  if (skipTimelineEvent) params.set("skip_timeline_event", "true");
+  const query = params.toString();
   return apiFetch<RawAttachment>(
-    `/requests/${requestId}/attachments${params}`,
+    `/requests/${requestId}/attachments${query ? `?${query}` : ""}`,
     {
       method: "POST",
       body: form,

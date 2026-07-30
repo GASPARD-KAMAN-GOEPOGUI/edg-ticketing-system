@@ -359,7 +359,7 @@ function ReportsPage() {
                 <Download className="h-4 w-4" /> Par service
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => handleExport("sla")}>
-                <Download className="h-4 w-4" /> SLA
+                <Download className="h-4 w-4" /> Délai
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => handleExport("csat")}>
                 <Download className="h-4 w-4" /> CSAT
@@ -429,7 +429,7 @@ function ReportsPage() {
           )}
         </GlassCard>
         <GlassCard>
-          <div className="text-sm text-muted-foreground">Taux SLA (actif)</div>
+          <div className="text-sm text-muted-foreground">Taux délai (actif)</div>
           {isLoading ? (
             <Loader2 className="mt-2 h-6 w-6 animate-spin text-muted-foreground" />
           ) : (

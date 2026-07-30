@@ -229,7 +229,7 @@ function AuditPage() {
               <div className="mt-1 text-xl font-bold text-emerald-500">{globalKpis.resolution_rate}%</div>
             </GlassCard>
             <GlassCard className="py-3">
-              <div className="text-xs text-muted-foreground">SLA dépassées</div>
+              <div className="text-xs text-muted-foreground">Délais dépassés</div>
               <div className={cn("mt-1 text-xl font-bold", globalKpis.sla_breached > 0 ? "text-destructive" : "text-emerald-500")}>
                 {globalKpis.sla_breached}
               </div>

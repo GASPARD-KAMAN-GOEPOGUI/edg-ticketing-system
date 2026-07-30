@@ -88,6 +88,8 @@ frontend/src/components/notification-panel.tsx
 -> backend/api/routes/RouteNotification.py
 -> backend/api/services/ServiceNotification.py
 -> backend/api/services/NotificationEmitter.py pour les notifications creees par les actions ticket
+-> backend/api/core/mailer.py pour l'envoi SMTP optionnel
+-> backend/templates/*.html pour le rendu des emails
 -> ModelNotification.py
 -> notification
 ```

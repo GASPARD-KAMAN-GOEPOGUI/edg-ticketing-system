@@ -545,7 +545,7 @@ function GlobalView() {
           )}
         </GlassCard>
         <GlassCard className="space-y-1">
-          <div className="text-sm text-muted-foreground">Respect SLA global</div>
+          <div className="text-sm text-muted-foreground">Respect délai global</div>
           {loadReq ? <Loader2 className="h-7 w-7 animate-spin text-muted-foreground/40" /> : (
             <div
               className={cn(
@@ -638,7 +638,7 @@ function GlobalView() {
             <p className="text-xs text-muted-foreground">
               {loadEsc
                 ? "Chargement…"
-                : `${sortedEsc.length} escalade${sortedEsc.length !== 1 ? "s" : ""} — triées par urgence SLA décroissante`}
+                : `${sortedEsc.length} escalade${sortedEsc.length !== 1 ? "s" : ""} — triées par urgence délai décroissante`}
             </p>
           </div>
         </div>
@@ -693,7 +693,7 @@ function GlobalView() {
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-2">
                   <div className="text-right">
-                    <div className="text-xs text-muted-foreground">SLA dépassé</div>
+                    <div className="text-xs text-muted-foreground">Délai dépassé</div>
                     <div className="text-sm font-semibold text-destructive">+{e.slaOverHours}h</div>
                   </div>
                   {e.status !== "resolved" && (
@@ -811,7 +811,7 @@ function GlobalView() {
 
       {/* Carte thermique SLA par direction */}
       <GlassCard>
-        <h2 className="mb-4 font-semibold">Carte thermique SLA par direction</h2>
+        <h2 className="mb-4 font-semibold">Carte thermique des délais par direction</h2>
         {loadReq ? (
           <div className="flex h-24 items-center justify-center">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground/40" />

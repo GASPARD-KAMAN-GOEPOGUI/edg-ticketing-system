@@ -9,6 +9,15 @@
  *  - Redirection vers /login si le refresh échoue
  */
 
+import {
+  AUTH_DISABLED,
+  clearSession,
+  getAccessToken,
+  getRefreshToken,
+  isTokenExpired,
+  updateAccessToken,
+} from "../session";
+
 const API_BASE =
   import.meta.env.VITE_API_URL ??
   (import.meta.env.DEV ? "http://localhost:8000/api/v1" : "/api/v1");
@@ -43,8 +52,6 @@ async function _attemptRefresh(): Promise<string | null> {
 
   _refreshPromise = (async () => {
     try {
-      // Lazy import pour éviter les imports circulaires
-      const { getRefreshToken, updateAccessToken, clearSession } = await import("../session");
       const refreshToken = getRefreshToken();
       if (!refreshToken) {
         clearSession();
@@ -74,7 +81,6 @@ async function _attemptRefresh(): Promise<string | null> {
       updateAccessToken(access_token, expires_in);
       return access_token;
     } catch {
-      const { clearSession } = await import("../session");
       clearSession();
       if (typeof window !== "undefined") {
         window.location.href = "/login";
@@ -102,8 +108,6 @@ export async function apiFetch<T>(
 
   // Injection automatique du JWT
   if (!skipAuth) {
-    const { getAccessToken, isTokenExpired, getRefreshToken, AUTH_DISABLED } = await import("../session");
-
     if (!AUTH_DISABLED) {
       let token = getAccessToken();
 
@@ -226,8 +230,6 @@ export async function apiFetchBlob(
   const headers: Record<string, string> = {};
 
   if (!skipAuth) {
-    const { getAccessToken, isTokenExpired, getRefreshToken, AUTH_DISABLED } = await import("../session");
-
     if (!AUTH_DISABLED) {
       let token = getAccessToken();
       if (token && isTokenExpired()) {

@@ -5,6 +5,9 @@ import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { GlassCard } from "@/components/glass-card";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { buildAvatarUrl } from "@/lib/api/accounts";
+import { initialsFor } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -83,11 +86,19 @@ const priorityDotClass: Record<Priority, string> = {
   critical: "text-destructive",
 };
 
-function HistoryCard({ r }: { r: RequestItem }) {
+function HistoryCard({ r, requesterAvatar }: { r: RequestItem; requesterAvatar?: string }) {
   return (
-    <GlassCard className="flex h-full flex-col gap-3 p-4 transition-shadow hover:shadow-xl">
+    <GlassCard className="flex h-full min-h-[196px] flex-col gap-3 p-4 transition-shadow hover:shadow-xl">
       <div className="flex items-start justify-between gap-2">
-        <StatusBadge status={r.status} />
+        <div className="flex items-center gap-1.5">
+          <StatusBadge status={r.status} />
+          <Avatar className="h-6 w-6 border border-border/60">
+            <AvatarImage src={buildAvatarUrl(requesterAvatar)} alt={r.requesterName} />
+            <AvatarFallback className="bg-primary/10 text-[10px] font-bold text-primary">
+              {initialsFor(r.requesterName)}
+            </AvatarFallback>
+          </Avatar>
+        </div>
         <span className="font-mono text-[11px] text-muted-foreground/60 shrink-0">{r.ref}</span>
       </div>
       <p className="line-clamp-2 font-semibold leading-snug">{r.title}</p>
@@ -97,9 +108,6 @@ function HistoryCard({ r }: { r: RequestItem }) {
         <span className="h-2 w-2 shrink-0 rounded-full bg-current" />
         {priorityLabels[r.priority]}
       </div>
-      {r.description && (
-        <p className="line-clamp-2 text-xs text-muted-foreground">{r.description}</p>
-      )}
       <div className="flex-1" />
       <div className="border-t border-border/30 pt-2 space-y-1">
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -387,7 +395,7 @@ function RequestHistory() {
                   whileHover={{ y: -3 }}
                 >
                   <Link to="/app/requests/$id" params={{ id: r.id }} className="block">
-                    <HistoryCard r={r} />
+                    <HistoryCard r={r} requesterAvatar={sessionUser?.avatar} />
                   </Link>
                 </motion.div>
               ))}
@@ -468,7 +476,7 @@ function RequestHistory() {
                     whileHover={{ y: -3 }}
                   >
                     <Link to="/app/requests/$id" params={{ id: r.id }} className="block h-full">
-                      <HistoryCard r={r} />
+                      <HistoryCard r={r} requesterAvatar={sessionUser?.avatar} />
                     </Link>
                   </motion.div>
                 ))}
