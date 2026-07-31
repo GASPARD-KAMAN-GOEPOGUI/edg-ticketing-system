@@ -43,7 +43,9 @@ ACTION_ALLOWED_ROLES: dict[str, set[str]] = {
     "reopen": {"chief-service", "chief-departement", "director", "admin"},
     "reject_reopen": {"chief-service", "chief-departement", "director", "admin"},
     "cancel": {"user", "agent-support", "chief-service", "chief-departement", "director", "admin"},
-    "reassign": {"chief-service", "chief-departement", "director", "admin"},
+    # Lot 2.5 : "Changer de service" retire a chief-service — reste chief-departement
+    # (pilotage multi-services), director (transfert au sein de sa direction) et admin.
+    "reassign": {"chief-departement", "director", "admin"},
     "transfer_direction": {"director", "admin"},
     "reject": {"chief-service", "chief-departement", "admin"},
     "escalate": {"agent-support", "chief-service", "chief-departement", "director", "admin"},
@@ -187,6 +189,27 @@ def assert_ticket_scope(
     )
 
 
+def assert_qualify_target_allowed(
+    actor_role: str | None,
+    actor_id: str | int | None,
+    assignee_id: str | int | None,
+) -> None:
+    """Lot 2.4 : un agent-support ne peut qualifier qu'en s'auto-assignant ("Prendre la
+    demande") — le routage vers une personne precise ("Assigner", hierarchie Direction ->
+    Departement -> Service -> Personne) reste reserve aux chefs et a l'admin. Masquer le
+    bouton cote frontend ne suffit pas : sans cette garde, un agent-support pourrait
+    toujours router vers un tiers via un appel direct a l'API.
+    """
+    role = normalize_role(actor_role)
+    if role != "agent-support" or not assignee_id:
+        return
+    if str(assignee_id) != str(actor_id):
+        raise ForbiddenException(
+            "Un agent-support ne peut qualifier une demande qu'en s'auto-assignant.",
+            error_code=ErrorCode.FORBIDDEN,
+        )
+
+
 def assert_assignment_allowed(
     actor: Any,
     request: Any,
@@ -282,7 +305,8 @@ def assert_service_reassignment_allowed(
 ) -> None:
     """
     Regle metier transfert service :
-      - chief : transfert uniquement dans la direction du ticket.
+      - chief-departement : transfert uniquement dans la direction du ticket (Lot 2.5 —
+        chief-service n'a plus acces a cette action, cf. ACTION_ALLOWED_ROLES["reassign"]).
       - director : transfert uniquement dans sa direction.
       - admin : transfert global.
     """
@@ -293,7 +317,7 @@ def assert_service_reassignment_allowed(
     if role in GLOBAL_SCOPE_ROLES:
         return
 
-    if role in {"chief-service", "chief-departement"}:
+    if role == "chief-departement":
         clean_reason = reason.strip() if isinstance(reason, str) else ""
         if not clean_reason:
             raise BusinessException(
@@ -332,6 +356,22 @@ def assert_service_reassignment_allowed(
         "Votre role ne permet pas de transferer un ticket.",
         error_code=ErrorCode.FORBIDDEN,
     )
+
+
+def assert_exceptional_resolve_reason(actor_role: str | None, reason: str | None) -> None:
+    """Lot 2.6 : la resolution par chief-service devient "exceptionnelle" — un motif
+    est desormais obligatoire, meme mecanique que assert_service_reassignment_allowed
+    pour reassign. Les autres roles autorises a resoudre (agent-support, director,
+    admin) ne sont pas concernes (chief-departement retire de `resolve` au Lot 3)."""
+    role = normalize_role(actor_role)
+    if role != "chief-service":
+        return
+    clean_reason = reason.strip() if isinstance(reason, str) else ""
+    if not clean_reason:
+        raise BusinessException(
+            "Un motif est obligatoire pour resoudre un ticket en tant que chef de service.",
+            error_code=ErrorCode.MISSING_REQUIRED_FIELD,
+        )
 
 
 def assert_escalation_allowed(actor: Any, request: Any) -> None:

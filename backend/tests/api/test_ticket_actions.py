@@ -320,10 +320,13 @@ def test_chief_departement_can_assign_across_department_scope():
 
 
 def test_service_reassignment_is_limited_by_role_scope():
+    # Lot 2.5 : "Changer de service" retire a chief-service — seul chief-departement
+    # (parmi les chefs) conserve cette action ; les cas ci-dessous utilisent donc
+    # chief-departement pour tester la logique de perimetre/motif elle-meme.
     current_ticket = ticket(status="qualified", unity_id=10, direction_id=1)
 
     assert_service_reassignment_allowed(
-        actor("chief", id=3, unity_id=10),
+        actor("chief-departement", id=3, unity_id=10),
         current_ticket,
         target_unity_id=11,
         target_direction_id=1,
@@ -344,7 +347,7 @@ def test_service_reassignment_is_limited_by_role_scope():
 
     with pytest.raises(ForbiddenException):
         assert_service_reassignment_allowed(
-            actor("chief", id=3, unity_id=10),
+            actor("chief-departement", id=3, unity_id=10),
             current_ticket,
             target_unity_id=99,
             target_direction_id=2,
@@ -352,7 +355,7 @@ def test_service_reassignment_is_limited_by_role_scope():
         )
 
     assert_service_reassignment_allowed(
-        actor("chief", id=3, unity_id=10),
+        actor("chief-departement", id=3, unity_id=10),
         ticket(status="qualified", unity_id=10, direction_id=None),
         target_unity_id=11,
         target_direction_id=1,
@@ -370,7 +373,7 @@ def test_service_reassignment_is_limited_by_role_scope():
 
     with pytest.raises(ForbiddenException):
         assert_service_reassignment_allowed(
-            actor("chief", id=3, unity_id=10),
+            actor("chief-departement", id=3, unity_id=10),
             ticket(status="qualified", unity_id=10, direction_id=None),
             target_unity_id=99,
             target_direction_id=2,
@@ -379,8 +382,8 @@ def test_service_reassignment_is_limited_by_role_scope():
         )
 
 
-@pytest.mark.parametrize("chief_role", ["chief", "chief-service", "chief-departement"])
-def test_chief_service_reassignment_requires_reason(chief_role):
+@pytest.mark.parametrize("chief_role", ["chief-departement"])
+def test_chief_departement_reassignment_requires_reason(chief_role):
     with pytest.raises(BusinessException):
         assert_service_reassignment_allowed(
             actor(chief_role, id=3, unity_id=10),
@@ -388,6 +391,23 @@ def test_chief_service_reassignment_requires_reason(chief_role):
             target_unity_id=11,
             target_direction_id=1,
             reason="  ",
+        )
+
+
+@pytest.mark.parametrize("chief_role", ["chief", "chief-service"])
+def test_chief_service_can_no_longer_reassign(chief_role):
+    """Lot 2.5 (narrowing valide) : chief-service (et son alias legacy 'chief') ne
+    peut plus changer le service d'un ticket, quel que soit le motif fourni."""
+    assert_action_allowed("chief-departement", "reassign")  # regression : toujours autorise
+    with pytest.raises(ForbiddenException):
+        assert_action_allowed(chief_role, "reassign")
+    with pytest.raises(ForbiddenException):
+        assert_service_reassignment_allowed(
+            actor(chief_role, id=3, unity_id=10),
+            ticket(status="qualified", unity_id=10, direction_id=1),
+            target_unity_id=11,
+            target_direction_id=1,
+            reason="Motif valide fourni malgre tout",
         )
 
 

@@ -25,6 +25,22 @@ async def _create_ticket(client, unity_id: int, title_suffix: str) -> str:
     return str(resp.json()["data"]["id"])
 
 
+async def _create_assigned_ticket(auth_client, unity_id: int, title_suffix: str, assignee_id: int) -> str:
+    """Cree un ticket (role user) puis le fait passer en statut 'assigned' (seule source
+    valide pour la transition 'in_progress' selon ALLOWED_TRANSITIONS) via qualify (role admin).
+    Deux blocs `async with` SEQUENTIELS (pas combines) : l'override de get_current_user est un
+    etat global de l'app — les ouvrir simultanement fait gagner le dernier partout."""
+    async with auth_client("user") as user_client:
+        request_id = await _create_ticket(user_client, unity_id, title_suffix)
+    async with auth_client("admin") as admin_client:
+        resp = await admin_client.post(
+            f"/api/v1/requests/{request_id}/qualify",
+            json={"category": "panne", "priority": "medium", "unit_id": unity_id, "assignee_id": assignee_id},
+        )
+        assert resp.status_code == 200, resp.text
+    return request_id
+
+
 async def test_patch_blocks_staff_outside_perimeter(auth_client, unity_id):
     """Lot 2.1 : PATCH /requests/{id} verifiait uniquement require_roles — un agent-support
     hors perimetre pouvait modifier n'importe quel ticket. _resolve_access doit maintenant
@@ -50,8 +66,7 @@ async def test_patch_allows_in_scope_staff_to_transition_status(auth_client, uni
     continuer a fonctionner pour un staff DANS son perimetre — c'est le seul usage front
     reel de cette route generique (5 appels verifies : app.supervision.tsx, app.requests.$id.tsx,
     app.direction.tsx, tous limites a request_status/status_reason)."""
-    async with auth_client("user") as user_client:
-        request_id = await _create_ticket(user_client, unity_id, "in-scope-status")
+    request_id = await _create_assigned_ticket(auth_client, unity_id, "in-scope-status", 556)
 
     def _agent_dep():
         return SimpleNamespace(id=556, role="agent-support", unity_id=unity_id, direction_id=None)
@@ -98,8 +113,7 @@ async def test_patch_director_status_transition_unaffected(auth_client, unity_id
     """Point d'attention explicite : director n'utilise cette route que pour
     request_status=in_progress (app.direction.tsx) — la restriction aux champs
     {request_status, status_reason} ne change donc rien pour ce role."""
-    async with auth_client("user") as user_client:
-        request_id = await _create_ticket(user_client, unity_id, "director-status")
+    request_id = await _create_assigned_ticket(auth_client, unity_id, "director-status", 559)
 
     def _director_dep():
         return SimpleNamespace(id=558, role="director", unity_id=unity_id, direction_id=None)

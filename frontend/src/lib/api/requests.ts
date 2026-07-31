@@ -262,6 +262,18 @@ export async function fetchRequestStats(): Promise<RequestStats> {
   return apiFetch<RequestStats>("/requests/stats/by-status");
 }
 
+export type AgentWorkload = { assigneeId: string; activeCount: number };
+
+export async function fetchWorkloadByUnit(unitId: string): Promise<AgentWorkload[]> {
+  const raw = await apiFetch<{ assignee_id: number | string; active_count: number }[]>(
+    `/requests/workload-by-unit?unit_id=${encodeURIComponent(unitId)}`,
+  );
+  return (raw ?? []).map((row) => ({
+    assigneeId: String(row.assignee_id),
+    activeCount: row.active_count,
+  }));
+}
+
 export async function fetchRequests(
   filters?: RequestFilters,
 ): Promise<{ items: RequestItem[]; total: number; page: number; pages: number; pageSize: number }> {

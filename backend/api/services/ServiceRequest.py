@@ -19,6 +19,8 @@ from api.core.ticket_actions import (
     TERMINAL_STATUSES,
     assert_assignment_allowed,
     assert_action_allowed,
+    assert_exceptional_resolve_reason,
+    assert_qualify_target_allowed,
     assert_role_specific_action_constraints,
     assert_service_reassignment_allowed,
     assert_ticket_scope,
@@ -556,6 +558,7 @@ class RequestService(BaseService):
         patch["in_triage"] = False
 
         assignee_id = data.get("assignee_id")
+        assert_qualify_target_allowed(actor_role, actor_id, assignee_id)
         if assignee_id:
             patch["assignee_id"] = int(assignee_id)
             patch["request_status"] = "assigned"
@@ -1386,7 +1389,12 @@ class RequestService(BaseService):
         actor_name: Optional[str] = None,
         actor_role: Optional[str] = None,
         actor=None,
+        reason: Optional[str] = None,
     ):
+        clean_reason = reason.strip() if isinstance(reason, str) else ""
+        # Lot 2.6 : resolution "exceptionnelle" pour chief-service — motif obligatoire,
+        # meme mecanique que assert_service_reassignment_allowed pour reassign.
+        assert_exceptional_resolve_reason(actor_role, clean_reason)
         current = await self._guard_ticket_action(
             id,
             "resolve",
@@ -1406,7 +1414,7 @@ class RequestService(BaseService):
         await self.detail_repo.create_event({
             "workflow_id": wf_id_res,
             "event_type": "resolved",
-            "label": "Demande résolue",
+            "label": "Demande résolue" + (f" — {clean_reason}" if clean_reason else ""),
             "actor_id": actor_id,
             "actor_name": actor_name,
             "activated": True,
@@ -1416,6 +1424,7 @@ class RequestService(BaseService):
                 "actor_role": actor_role,
                 "old_status": current.request_status,
                 "new_status": "resolved",
+                **({"reason": clean_reason} if clean_reason else {}),
             }),
         })
         await emit_notif(

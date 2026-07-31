@@ -692,19 +692,26 @@ async def assign_request(
     )
 
 
+class ResolveBody(BaseModel):
+    reason: Optional[str] = None
+
+
 @router.post("/{id}/resolve", response_model=RequestResponse)
 async def resolve_request(
     id: str,
+    body: Optional[ResolveBody] = None,
     actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "director", "admin")),
     svc: RequestService = Depends(_svc),
 ):
-    """Resolution — reserve agent-support, chief-service, chief-departement, directeur, admin."""
+    """Resolution — reserve agent-support, chief-service, chief-departement, directeur, admin.
+    `reason` obligatoire pour chief-service uniquement (resolution exceptionnelle, Lot 2.6)."""
     return await svc.resolve(
         id,
         actor_id=str(actor.id),
         actor_name=_actor_display_name(actor),
         actor_role=actor.role,
         actor=actor,
+        reason=body.reason if body else None,
     )
 
 
@@ -888,10 +895,11 @@ class ReassignBody(BaseModel):
 async def reassign_request(
     id: str,
     body: ReassignBody,
-    actor=Depends(require_roles("chief-service", "chief-departement", "director", "admin")),
+    actor=Depends(require_roles("chief-departement", "director", "admin")),
     svc: RequestService = Depends(_svc),
 ):
-    """Réaffectation d'un ticket à un autre service."""
+    """Réaffectation d'un ticket à un autre service — chief-departement, director, admin
+    (Lot 2.5 : chief-service n'a plus accès à cette action, cf. ticket_actions.py)."""
     return await svc.reassign_service(
         id,
         body.target_unity_id,

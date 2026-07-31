@@ -115,7 +115,9 @@ const TICKET_ACTION_ROLES: Record<TicketAction, Role[]> = {
   reject: ["chief-service", "chief-departement", "admin"],
   escalate: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
   change_priority: ["chief-service", "chief-departement", "director", "admin"],
-  change_service: ["chief-service", "chief-departement", "director", "admin"],
+  // Lot 2.5 : chief-service n'a plus accès à "Changer de service" (reste chief-departement,
+  // director, admin) — cf. ticket_actions.ACTION_ALLOWED_ROLES["reassign"] côté backend.
+  change_service: ["chief-departement", "director", "admin"],
   transfer_direction: ["director", "admin"],
   create_circuit: ["agent-support", "chief-service", "chief-departement", "admin"],
   accept_workflow_step: ["agent-support", "chief-service", "chief-departement", "director", "admin"],

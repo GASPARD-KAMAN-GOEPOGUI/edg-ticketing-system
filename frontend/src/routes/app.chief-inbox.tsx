@@ -8,12 +8,12 @@ import { AnimatePresence, motion } from "framer-motion";
 import { GlassCard } from "@/components/glass-card";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { fetchQueue } from "@/lib/api/requests";
-import { fetchUser, buildAvatarUrl } from "@/lib/api/accounts";
+import { fetchQueue, fetchWorkloadByUnit } from "@/lib/api/requests";
+import { fetchUser, fetchUsers, buildAvatarUrl } from "@/lib/api/accounts";
 import { cn, initialsFor } from "@/lib/utils";
 import {
   ClipboardList, UserPlus, RotateCcw,
-  Clock, Inbox, AlertTriangle, Wrench,
+  Clock, Inbox, AlertTriangle, Wrench, Users,
 } from "lucide-react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -39,7 +39,10 @@ const TABS: { key: Tab; label: string; icon: typeof ClipboardList; color: string
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function isToAssign(r: RequestItem): boolean {
-  return ["new", "qualifying", "qualified", "assigned"].includes(r.status) &&
+  // "assigned" est volontairement exclu (Lot 2.3) : un ticket deja affecte a un agent
+  // ne doit plus rester visible dans l'onglet "A affecter" — il disparait des qu'il
+  // quitte les statuts non-encore-affectes, meme comportement que /app/queue.
+  return ["new", "qualifying", "qualified"].includes(r.status) &&
     !r.infos?.reopen_requested;
 }
 function isReopenPending(r: RequestItem): boolean {
@@ -173,6 +176,28 @@ export function ChiefInbox() {
     requesterIds.map((id, i) => [id, requesterAvatarQueries[i]?.data]),
   );
 
+  // ── Charge par agent (Lot 2.2 — Centre de répartition) ────────────────────────
+  // Le backend force le périmètre réel depuis le rôle de l'acteur (unité exacte pour
+  // chief-service, département élargi pour chief-departement) — le paramètre unit_id
+  // envoyé ici n'est qu'indicatif pour les autres rôles (admin).
+  const { data: workload } = useQuery({
+    queryKey: [spaceKey, "workload", sessionUser?.unit_id],
+    queryFn: () => fetchWorkloadByUnit(sessionUser!.unit_id!),
+    enabled: !!sessionUser?.unit_id,
+    staleTime: 30_000,
+  });
+  const { data: agentsData } = useQuery({
+    queryKey: [spaceKey, "agents", sessionUser?.unit_id],
+    queryFn: () => fetchUsers({ role: "agent-support", unit_id: sessionUser!.unit_id!, limit: 100 }),
+    enabled: !!sessionUser?.unit_id,
+    staleTime: 60_000,
+  });
+  const activeCountByAgent = new Map((workload ?? []).map((w) => [w.assigneeId, w.activeCount]));
+  const agentWorkloads = (agentsData?.items ?? [])
+    .map((agent) => ({ agent, activeCount: activeCountByAgent.get(String(agent.id)) ?? 0 }))
+    .sort((a, b) => b.activeCount - a.activeCount);
+  const maxActiveCount = Math.max(1, ...agentWorkloads.map((a) => a.activeCount));
+
   const listState: "loading" | "empty" | "ready" = isLoading
     ? "loading" : isError || displayed.length === 0 ? "empty" : "ready";
 
@@ -247,6 +272,50 @@ export function ChiefInbox() {
           );
         })}
       </motion.div>
+
+      {/* ── Charge par agent (Centre de répartition) ────────────────────────── */}
+      {agentWorkloads.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.06 }}
+        >
+          <GlassCard className="p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <Users className="h-4 w-4 text-primary" />
+              <h2 className="text-sm font-semibold">Charge par agent</h2>
+              <span className="text-xs text-muted-foreground">
+                — tickets actifs actuellement assignés, {scopeLabel}
+              </span>
+            </div>
+            <div className="space-y-2.5">
+              {agentWorkloads.map(({ agent, activeCount }) => (
+                <div key={agent.id} className="flex items-center gap-3">
+                  <Avatar className="h-7 w-7 shrink-0 border border-border/60">
+                    <AvatarImage src={buildAvatarUrl(agent.avatar)} alt={agent.name} />
+                    <AvatarFallback className="bg-primary/10 text-[10px] font-bold text-primary">
+                      {initialsFor(agent.name)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="w-32 shrink-0 truncate text-sm">{agent.name}</span>
+                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className={cn(
+                        "h-full rounded-full",
+                        activeCount === 0 ? "bg-muted-foreground/20" : "bg-primary/70",
+                      )}
+                      style={{ width: `${(activeCount / maxActiveCount) * 100}%` }}
+                    />
+                  </div>
+                  <span className="w-6 shrink-0 text-right text-sm font-semibold tabular-nums">
+                    {activeCount}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </GlassCard>
+        </motion.div>
+      )}
 
       {/* ── Onglets ──────────────────────────────────────────────────────────── */}
       <motion.div

@@ -89,6 +89,12 @@ function QueuePage() {
 function QualifyTab() {
   const sessionUser = useUser();
   const queryClient = useQueryClient();
+  // Lot 2.4 : un agent-support ne peut plus router une demande vers un tiers via le
+  // formulaire hiérarchique (Direction→Département→Service→Personne) — seule
+  // l'auto-assignation ("Prendre la demande") reste disponible pour ce rôle. Le
+  // même correctif est appliqué côté backend (qualify_triage) pour éviter tout
+  // contournement par appel direct à l'API.
+  const canUseAssignForm = sessionUser?.role !== "agent-support";
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["qualify"],
@@ -400,142 +406,148 @@ function QualifyTab() {
                       </div>
                     </div>
 
-                    {/* Suggestion routage */}
-                    {form.category && suggestion && (
-                      <div className="flex items-start gap-3 rounded-xl border border-info/25 bg-info/8 px-3 py-2.5 text-sm">
-                        <Zap className="mt-0.5 h-4 w-4 shrink-0 text-info" />
-                        <p>
-                          <span className="font-semibold text-info">Routage suggéré :</span>
-                          {" "}{suggestion.targetDirection} → {suggestion.targetService}{" "}
-                          <button
-                            className="ml-1 font-medium text-info underline underline-offset-2 hover:no-underline"
-                            onClick={() => {
-                              const dir = realDirections.find((d) => d.name === suggestion.targetDirection);
-                              patchForm(req.id, {
-                                directionId: dir ? String(dir.id) : "",
+                    {/* Suggestion routage + hiérarchie d'assignation — réservées aux rôles
+                        pouvant router vers un tiers (chief-service, admin) ; un agent-support
+                        ne peut que s'auto-assigner via "Prendre la demande" (Lot 2.4). */}
+                    {canUseAssignForm && (
+                      <>
+                        {form.category && suggestion && (
+                          <div className="flex items-start gap-3 rounded-xl border border-info/25 bg-info/8 px-3 py-2.5 text-sm">
+                            <Zap className="mt-0.5 h-4 w-4 shrink-0 text-info" />
+                            <p>
+                              <span className="font-semibold text-info">Routage suggéré :</span>
+                              {" "}{suggestion.targetDirection} → {suggestion.targetService}{" "}
+                              <button
+                                className="ml-1 font-medium text-info underline underline-offset-2 hover:no-underline"
+                                onClick={() => {
+                                  const dir = realDirections.find((d) => d.name === suggestion.targetDirection);
+                                  patchForm(req.id, {
+                                    directionId: dir ? String(dir.id) : "",
+                                    departmentId: "",
+                                    unitId: "",
+                                    personId: "",
+                                  });
+                                }}
+                              >
+                                Appliquer
+                              </button>
+                            </p>
+                          </div>
+                        )}
+                        {form.category && !suggestion && routingRulesData.length > 0 && (
+                          <div className="flex items-start gap-3 rounded-xl border border-warning/25 bg-warning/8 px-3 py-2.5 text-sm">
+                            <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-warning-foreground dark:text-warning" />
+                            <p className="text-warning-foreground dark:text-warning">
+                              <span className="font-semibold">Aucune règle de routage</span> ne correspond à cette catégorie — sélectionnez manuellement la direction cible.
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Hiérarchie d'assignation — Direction → Département → Service → Personne */}
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <div>
+                            <Label>Direction cible <span className="text-destructive">*</span></Label>
+                            <Select
+                              value={form.directionId}
+                              onValueChange={(v) => patchForm(req.id, {
+                                directionId: v,
                                 departmentId: "",
                                 unitId: "",
                                 personId: "",
-                              });
-                            }}
-                          >
-                            Appliquer
-                          </button>
-                        </p>
-                      </div>
+                              })}
+                            >
+                              <SelectTrigger className="mt-1.5 h-11">
+                                <SelectValue placeholder="Sélectionner" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {realDirections.map((d) => (
+                                  <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {realDirections.length === 0 && (
+                              <p className="mt-1 text-xs text-muted-foreground">Aucune direction active disponible.</p>
+                            )}
+                          </div>
+                          <div>
+                            <Label>Département cible <span className="text-destructive">*</span></Label>
+                            <Select
+                              value={form.departmentId}
+                              onValueChange={(v) => patchForm(req.id, {
+                                departmentId: v,
+                                unitId: "",
+                                personId: "",
+                              })}
+                              disabled={!form.directionId}
+                            >
+                              <SelectTrigger className="mt-1.5 h-11">
+                                <SelectValue placeholder={
+                                  !form.directionId ? "Choisir d'abord une direction" : "Sélectionner"
+                                } />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {departments.map((dep) => (
+                                  <SelectItem key={dep.id} value={String(dep.id)}>{dep.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {form.directionId && departments.length === 0 && (
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                Aucun département actif disponible pour cette direction.
+                              </p>
+                            )}
+                          </div>
+                          <div>
+                            <Label>Service cible <span className="text-destructive">*</span></Label>
+                            <Select
+                              value={form.unitId}
+                              onValueChange={(v) => patchForm(req.id, { unitId: v, personId: "" })}
+                              disabled={!form.departmentId}
+                            >
+                              <SelectTrigger className="mt-1.5 h-11">
+                                <SelectValue placeholder={
+                                  !form.departmentId ? "Choisir d'abord un département" : "Sélectionner"
+                                } />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {services.map((s) => (
+                                  <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {form.departmentId && services.length === 0 && (
+                              <p className="mt-1 text-xs text-muted-foreground">Aucun service actif disponible.</p>
+                            )}
+                          </div>
+                          <div>
+                            <Label>Personne cible <span className="text-destructive">*</span></Label>
+                            <Select
+                              value={form.personId}
+                              onValueChange={(v) => patchForm(req.id, { personId: v })}
+                              disabled={!form.unitId}
+                            >
+                              <SelectTrigger className="mt-1.5 h-11">
+                                <SelectValue placeholder={
+                                  !form.unitId ? "Choisir d'abord un service" : "Sélectionner"
+                                } />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {people.map((p) => (
+                                  <SelectItem key={p.id} value={String(p.id)}>
+                                    {p.name}{p.role ? ` · ${p.role}` : ""}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {form.unitId && people.length === 0 && (
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                Aucun employé autorisé à traiter dans ce service.
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </>
                     )}
-                    {form.category && !suggestion && routingRulesData.length > 0 && (
-                      <div className="flex items-start gap-3 rounded-xl border border-warning/25 bg-warning/8 px-3 py-2.5 text-sm">
-                        <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-warning-foreground dark:text-warning" />
-                        <p className="text-warning-foreground dark:text-warning">
-                          <span className="font-semibold">Aucune règle de routage</span> ne correspond à cette catégorie — sélectionnez manuellement la direction cible.
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Hiérarchie d'assignation — Direction → Département → Service → Personne */}
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div>
-                        <Label>Direction cible <span className="text-destructive">*</span></Label>
-                        <Select
-                          value={form.directionId}
-                          onValueChange={(v) => patchForm(req.id, {
-                            directionId: v,
-                            departmentId: "",
-                            unitId: "",
-                            personId: "",
-                          })}
-                        >
-                          <SelectTrigger className="mt-1.5 h-11">
-                            <SelectValue placeholder="Sélectionner" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {realDirections.map((d) => (
-                              <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {realDirections.length === 0 && (
-                          <p className="mt-1 text-xs text-muted-foreground">Aucune direction active disponible.</p>
-                        )}
-                      </div>
-                      <div>
-                        <Label>Département cible <span className="text-destructive">*</span></Label>
-                        <Select
-                          value={form.departmentId}
-                          onValueChange={(v) => patchForm(req.id, {
-                            departmentId: v,
-                            unitId: "",
-                            personId: "",
-                          })}
-                          disabled={!form.directionId}
-                        >
-                          <SelectTrigger className="mt-1.5 h-11">
-                            <SelectValue placeholder={
-                              !form.directionId ? "Choisir d'abord une direction" : "Sélectionner"
-                            } />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {departments.map((dep) => (
-                              <SelectItem key={dep.id} value={String(dep.id)}>{dep.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {form.directionId && departments.length === 0 && (
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            Aucun département actif disponible pour cette direction.
-                          </p>
-                        )}
-                      </div>
-                      <div>
-                        <Label>Service cible <span className="text-destructive">*</span></Label>
-                        <Select
-                          value={form.unitId}
-                          onValueChange={(v) => patchForm(req.id, { unitId: v, personId: "" })}
-                          disabled={!form.departmentId}
-                        >
-                          <SelectTrigger className="mt-1.5 h-11">
-                            <SelectValue placeholder={
-                              !form.departmentId ? "Choisir d'abord un département" : "Sélectionner"
-                            } />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {services.map((s) => (
-                              <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {form.departmentId && services.length === 0 && (
-                          <p className="mt-1 text-xs text-muted-foreground">Aucun service actif disponible.</p>
-                        )}
-                      </div>
-                      <div>
-                        <Label>Personne cible <span className="text-destructive">*</span></Label>
-                        <Select
-                          value={form.personId}
-                          onValueChange={(v) => patchForm(req.id, { personId: v })}
-                          disabled={!form.unitId}
-                        >
-                          <SelectTrigger className="mt-1.5 h-11">
-                            <SelectValue placeholder={
-                              !form.unitId ? "Choisir d'abord un service" : "Sélectionner"
-                            } />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {people.map((p) => (
-                              <SelectItem key={p.id} value={String(p.id)}>
-                                {p.name}{p.role ? ` · ${p.role}` : ""}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {form.unitId && people.length === 0 && (
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            Aucun employé autorisé à traiter dans ce service.
-                          </p>
-                        )}
-                      </div>
-                    </div>
 
                     {/* Actions */}
                     <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
@@ -561,23 +573,26 @@ function QualifyTab() {
                           Prendre la demande
                         </Button>
 
-                        {/* Assigner — nécessite les 4 niveaux : direction, département, service, personne */}
-                        <Button
-                          size="sm"
-                          className={cn(
-                            "rounded-full px-5",
-                            canAssign
-                              ? "gradient-primary text-background shadow-md shadow-primary/30"
-                              : "bg-muted text-muted-foreground",
-                          )}
-                          disabled={!canAssign || isPending}
-                          onClick={() => qualifyMut.mutate({ id: req.id, form })}
-                        >
-                          {isPending
-                            ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Assignation…</>
-                            : <><CheckCircle2 className="mr-1.5 h-4 w-4" /> Assigner</>
-                          }
-                        </Button>
+                        {/* Assigner — nécessite les 4 niveaux : direction, département, service, personne.
+                            Réservé aux rôles pouvant router vers un tiers (Lot 2.4). */}
+                        {canUseAssignForm && (
+                          <Button
+                            size="sm"
+                            className={cn(
+                              "rounded-full px-5",
+                              canAssign
+                                ? "gradient-primary text-background shadow-md shadow-primary/30"
+                                : "bg-muted text-muted-foreground",
+                            )}
+                            disabled={!canAssign || isPending}
+                            onClick={() => qualifyMut.mutate({ id: req.id, form })}
+                          >
+                            {isPending
+                              ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Assignation…</>
+                              : <><CheckCircle2 className="mr-1.5 h-4 w-4" /> Assigner</>
+                            }
+                          </Button>
+                        )}
                       </div>
                     </div>
                   </div>
