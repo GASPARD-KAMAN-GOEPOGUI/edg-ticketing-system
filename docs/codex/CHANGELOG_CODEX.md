@@ -1,5 +1,27 @@
 # Changelog Codex
 
+## 2026-07-31 - Escalade : plus de choix manuel de niveau, routage automatique vers le chef hiérarchique
+
+Demande: "pour les escalde, on a pas besoin de faire un choix, on doit juste remplir la partie motif, puis le systeme envoie uniquement au chef hierarchie de celui qui fait le traitement uniquement" — retirer le selecteur "Niveau cible" de la modale d'escalade et faire en sorte que le systeme determine seul le destinataire (chef hierarchique de la personne qui traite le ticket), sans choix manuel.
+
+Module: MOD-AGENT / MOD-CHIEF / MOD-DIRECTION (BR-ESCALATE-AUTO-CHIEF-001).
+
+Fichiers modifies:
+- `backend/api/routes/RouteRequest.py`
+- `backend/api/services/ServiceEscalade.py`
+- `frontend/src/routes/app.requests.$id.tsx`
+- `frontend/src/lib/api/requests.ts`
+- `docs/codex/BUSINESS_RULES.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Cause: la modale "Escalader la demande" exigeait de choisir un "Niveau cible" (`Chef de service`/`Directeur`/`Résolution`, valeurs figées de `DEFAULT_LEVELS.slice(3, 6)`) qui n'était de toute façon jamais reliée à un vrai compte destinataire — l'API acceptait ce libellé comme simple texte et ne réassignait jamais le ticket à qui que ce soit de concret.
+
+Correction: `EscalateBody` est réduit à `{ reason }`. La route `POST /requests/{id}/escalate` détermine désormais elle-même le destinataire : la personne qui traite le ticket (`assignee_id`, ou l'acteur lui-même si non assigné), puis remonte à son chef hiérarchique via la nouvelle fonction partagée `find_hierarchical_chief` (`ServiceEscalade.py`) — chef dans la même unité (hors le traitant lui-même, pour le cas où un chef escalade son propre ticket), sinon remontée de l'organigramme vers l'unité parente à la recherche d'un chef ou d'un directeur. Si personne n'est trouvé, 422 explicite au lieu d'une escalade dans le vide. Le ticket est réassigné au chef trouvé (même schéma que l'escalade automatique SLA) et celui-ci est notifié. `EscaladeService._find_chief` (auto-SLA) délègue maintenant à cette même fonction, ce qui corrige au passage un bug préexistant (recherche d'un role littéral `"chief"` invalide dans l'enum). Côté frontend, la modale ne demande plus que le motif ; le Select "Niveau cible", l'état `escalateLevel`, l'import `DEFAULT_LEVELS` et les imports `Select*` désormais inutilisés sont retirés.
+
+Verification: `npx tsc --noEmit` — même baseline préexistante (12 erreurs, aucune imputable) ; `npx eslint` — même warning préexistant `unused eslint-disable directive`, zéro nouvelle erreur ; `python -m py_compile` sur les 2 fichiers backend modifiés — OK ; comparaison `git stash` des tests `TestAssignationEscaladeRoles` avant/après ce changement — mêmes 9 échecs/6 succès des deux côtés (échecs préexistants, dus à une erreur 500 sur `/assign` en environnement de test SQLite, sans lien avec cette modification).
+
+Effet de bord assumé: `app.supervision.tsx` (bouton "Transférer au Directeur" d'une escalade déjà en cours, via `escalations.ts`) appelle le même endpoint et bénéficie désormais de la même résolution automatique — il réassigne réellement le ticket au directeur trouvé (avant, cette action ne réassignait jamais personne en pratique). Comportement jugé cohérent avec l'intitulé du bouton ; aucun changement de code sur ce fichier.
+
 ## 2026-07-29 - Onglet Traitement : boutons d'action en grille 3 colonnes (au lieu de l'empilement liste)
 
 Demande: apres le passage en liste empilee (entree precedente), retour utilisateur explicite avec capture d'ecran montrant les 5 actions visibles empilees verticalement : "je ne veut pas voir cet empilement, je veux les affichage cote a cote en trois trois" — les actions de traitement doivent s'afficher en grille de 3 colonnes plutot qu'en pile verticale.

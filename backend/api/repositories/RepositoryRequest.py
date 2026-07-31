@@ -327,6 +327,29 @@ class RequestRepository(BaseRepository[Request]):
         rows = (await self.session.execute(stmt)).all()
         return {row[0]: row[1] for row in rows}
 
+    async def count_active_by_assignee(
+        self,
+        unity_ids: list[int],
+        *,
+        exclude_statuses: list[str],
+    ) -> dict[int, int]:
+        """Nombre de tickets non terminaux par agent assigné, pour le périmètre donné."""
+        if not unity_ids:
+            return {}
+        stmt = (
+            select(Request.assignee_id, func.count(Request.id))
+            .join(RequestStatus, Request.request_status_id == RequestStatus.id)
+            .where(
+                Request.deleted_at.is_(None),
+                Request.unity_id.in_(unity_ids),
+                Request.assignee_id.isnot(None),
+                RequestStatus.code.notin_(exclude_statuses),
+            )
+            .group_by(Request.assignee_id)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return {int(row[0]): row[1] for row in rows}
+
     async def next_ref(self, base: str | int) -> str:
         """
         Calcule la prochaine référence unique pour une base donnée.

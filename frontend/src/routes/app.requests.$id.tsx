@@ -13,18 +13,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
 import type { RequestItem, Appreciation } from "@/lib/mock-data";
 import { AppreciationForm } from "@/components/appreciation-form";
-import {
-  DEFAULT_LEVELS,
-} from "@/components/escalation-progress-bar";
 import { cn } from "@/lib/utils";
 import { useRole, useUser } from "@/lib/session";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -649,7 +639,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const [showResolveForm, setShowResolveForm] = useState(false);
   const [resolutionNote, setResolutionNote] = useState("");
   const [showEscalateForm, setShowEscalateForm] = useState(false);
-  const [escalateLevel, setEscalateLevel] = useState<string>(DEFAULT_LEVELS[3] ?? "Chef de service");
   const [escalateReason, setEscalateReason] = useState("");
   const attachRef = useRef<HTMLInputElement>(null);
   const commentRef = useRef<HTMLTextAreaElement>(null);
@@ -1184,7 +1173,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
 
   const escalateMut = useMutation({
     mutationFn: () => escalateRequest(id, {
-      level: escalateLevel,
       reason: escalateReason.trim() || "Escalade manuelle",
     }),
     onMutate: async () => {
@@ -1196,7 +1184,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       return { previous };
     },
     onSuccess: () => {
-      toast.success(`Demande escaladée vers ${escalateLevel}.`);
+      toast.success("Demande escaladée au chef hiérarchique.");
       setShowEscalateForm(false);
       setEscalateReason("");
     },
@@ -1326,8 +1314,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     enabled: !!r?.serviceId,
     staleTime: 5 * 60_000,
   });
-
-  const escalationLevelsRef: { label: string }[] = [];
 
   if (isLoading) {
     return (
@@ -2479,29 +2465,12 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                     Escalader la demande
                   </DialogTitle>
                   <DialogDescription>
-                    Transférez cette demande à un niveau hiérarchique supérieur.
-                    Le motif sera enregistré dans l'historique.
+                    Cette demande sera transmise au chef hiérarchique de la personne en charge
+                    du traitement. Le motif sera enregistré dans l'historique.
                   </DialogDescription>
                 </DialogHeader>
 
                 <div className="space-y-4 py-2">
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium">Niveau cible</label>
-                    <Select value={escalateLevel} onValueChange={setEscalateLevel}>
-                      <SelectTrigger className="h-10">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(escalationLevelsRef.length > 0
-                          ? escalationLevelsRef.map((l) => l.label)
-                          : DEFAULT_LEVELS.slice(3, 6)
-                        ).map((l) => (
-                          <SelectItem key={l} value={l}>{l}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium">
                       Motif <span className="text-destructive">*</span>

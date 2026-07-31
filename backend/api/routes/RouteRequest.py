@@ -340,6 +340,47 @@ async def stats_by_status(_=_staff, svc: RequestService = Depends(_svc)):
     return await svc.count_by_status()
 
 
+_workload_staff = Depends(require_roles("chief-service", "chief-departement", "admin"))
+
+
+@router.get("/workload-by-unit")
+async def workload_by_unit(
+    unit_id: Optional[str] = Query(None, description="Admin uniquement — ignoré pour chief-service/chief-departement"),
+    direction_id: Optional[str] = Query(None, description="Admin uniquement — expanse departement+services"),
+    actor=Depends(get_current_user),
+    _staff_guard=_workload_staff,
+    db: AsyncSession = Depends(get_db),
+    svc: RequestService = Depends(_svc),
+):
+    """Charge actuelle (tickets non terminaux) par agent assigné — Centre de répartition (Lot 2/3)."""
+    actor_role = normalize_role(actor.role)
+    if actor_role == "chief-service":
+        if not actor.unity_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Compte non rattaché à une unité. Contactez un administrateur.",
+            )
+        unity_ids = {int(actor.unity_id)}
+    elif actor_role == "chief-departement":
+        if not actor.unity_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Compte non rattaché à une unité. Contactez un administrateur.",
+            )
+        unity_ids = await _get_dir_unity_ids(db, int(actor.unity_id))
+    else:  # admin — filtres client acceptés
+        if unit_id:
+            unity_ids = {int(unit_id)}
+        elif direction_id:
+            unity_ids = await _get_dir_unity_ids(db, int(direction_id))
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="unit_id ou direction_id requis pour le rôle admin.",
+            )
+    return await svc.workload_by_unit(list(unity_ids))
+
+
 @router.get("/search", response_model=PaginatedResponse[RequestListItemResponse])
 async def search_requests(
     q: str = Query(..., min_length=1),
@@ -564,15 +605,24 @@ async def create_request(
 
 # ── Modifications ─────────────────────────────────────────────────────────────
 
+_STAFF_UPDATE_FIELDS = {"request_status", "status_reason"}
+
+
 @router.patch("/{id}", response_model=RequestResponse)
 async def update_request(
     id: str,
     body: RequestUpdate,
     actor=Depends(require_roles("user", "agent-support", "chief-service", "chief-departement", "director", "admin")),
     svc: RequestService = Depends(_svc),
+    db: AsyncSession = Depends(get_db),
 ):
     data = body.dict(exclude_unset=True)
     req = await svc.get_by_id(id)
+    # Verification de perimetre — absente jusqu'ici sur cette route generique (correctif
+    # securite Lot 2.1) : un acteur staff ne pouvait modifier n'importe quel champ d'un
+    # ticket hors de son unite/direction, la seule garde etant require_roles. `_resolve_access`
+    # bypasse deja demandeur/assignee/admin (voir `_check_request_access`).
+    await _resolve_access(actor, req, db)
     if str(req.requester_id) == str(actor.id):
         # Quand l'acteur est le demandeur, il garde uniquement les droits demandeur.
         # Les actions metier sensibles passent par leurs routes dediees.
@@ -584,6 +634,12 @@ async def update_request(
             raise HTTPException(status_code=403, detail="Vous ne pouvez modifier que vos propres demandes.")
         allowed = {"title", "description"}
         data = {k: v for k, v in data.items() if k in allowed}
+    elif actor.role != "admin":
+        # Staff non-admin : seule la transition de statut (in_progress/pending — take_ownership,
+        # resume, request_info) passe par cette route generique. Tout le reste (categorie,
+        # priorite, assignee_id, unity_id, sla_*...) a sa route dediee (qualify/assign/priority/
+        # reassign) avec ses propres garde-fous — pas de bypass via PATCH generique.
+        data = {k: v for k, v in data.items() if k in _STAFF_UPDATE_FIELDS}
     return await svc.update(
         id,
         data,
@@ -883,13 +939,7 @@ async def delete_request(
 # ── Escalade ──────────────────────────────────────────────────────────────────
 
 class EscalateBody(BaseModel):
-    level: str
     reason: str
-    from_agent_name: str = ""
-    to_agent_name: str = ""
-    from_user_id: Optional[str] = None
-    to_user_id: Optional[str] = None
-    sla_over_hours: int = 0
 
 
 @router.post("/{id}/escalate", response_model=EscalationResponse, status_code=status.HTTP_201_CREATED)
@@ -902,7 +952,17 @@ async def escalate_request(
     wf_repo: WorkflowRepository = Depends(_wf_repo),
     db: AsyncSession = Depends(get_db),
 ):
-    """Escalade d'une demande — enregistrée comme événement workflow_detail (event_type='escalation_manual')."""
+    """Escalade d'une demande — enregistrée comme événement workflow_detail (event_type='escalation_manual').
+
+    Le niveau cible n'est plus choisi manuellement : le système détermine seul le
+    chef hiérarchique de la personne qui traite le ticket (assignee, ou l'acteur
+    lui-même si le ticket n'est pas encore assigné) et lui réassigne le ticket.
+    """
+    from sqlalchemy import select as sa_select
+    from api.models.ModelAccount import Account
+    from api.services.ServiceEscalade import find_hierarchical_chief
+    from api.services.NotificationEmitter import emit as emit_notif
+
     actor_id = str(actor.id)
     req = await svc.get_by_id(id)
     await _resolve_access(actor, req, db)
@@ -919,51 +979,70 @@ async def escalate_request(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Aucun workflow actif pour cette demande — impossible d'escalader.",
         )
+
+    handler_id = int(req.assignee_id) if req.assignee_id else int(actor.id)
+    if req.assignee_id and str(req.assignee_id) != str(actor.id):
+        handler_row = await db.execute(
+            sa_select(Account.unity_id).where(Account.id == handler_id)
+        )
+        handler_unity_id = handler_row.scalar_one_or_none()
+    else:
+        handler_unity_id = actor.unity_id
+
+    chief_id = await find_hierarchical_chief(db, handler_unity_id, exclude_account_id=handler_id)
+    if chief_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Aucun chef hiérarchique trouvé pour escalader cette demande automatiquement.",
+        )
+
+    chief_row = await db.execute(
+        sa_select(Account.name, Account.firstname, Account.role).where(Account.id == chief_id)
+    )
+    chief_name_raw, chief_firstname, chief_role = chief_row.first()
+    chief_name = f"{chief_firstname} {chief_name_raw}".strip() if chief_firstname else chief_name_raw
+
     event = await detail_repo.create_event({
         "workflow_id": str(wf.id),
         "event_type": "escalation_manual",
-        "label": f"Escalade {body.level} — {req.ref}",
-        "actor_id": body.from_user_id or actor_id,
-        "actor_name": body.from_agent_name or actor.name,
+        "label": f"Escalade vers {chief_name} — {req.ref}",
+        "actor_id": actor_id,
+        "actor_name": actor.name,
         "comment": body.reason.strip(),
         "activated": True,
         "infos": {
-            "level": body.level,
-            "to_user_id": body.to_user_id,
-            "to_agent_name": body.to_agent_name,
-            "sla_over_hours": body.sla_over_hours,
+            "to_user_id": str(chief_id),
+            "to_agent_name": chief_name,
             "priority": req.priority,
             "status": "open",
             "event_status": "escalated",
             "source_role": actor.role,
             "actor_role": actor.role,
-            "target_user_id": body.to_user_id,
-            "target_user_name": body.to_agent_name,
-            "target_role": body.level,
+            "target_user_id": str(chief_id),
+            "target_user_name": chief_name,
+            "target_role": chief_role,
             "old_status": req.request_status,
             "new_status": "escalated",
         },
     })
     await svc.update(
         id,
-        {"request_status": "escalated"},
+        {"request_status": "escalated", "assignee_id": str(chief_id)},
         actor_id=actor_id,
         actor_name=_actor_display_name(actor),
         actor_role=actor.role,
     )
 
-    if body.to_user_id:
-        from api.services.NotificationEmitter import emit as emit_notif
-        await emit_notif(
-            svc.session,
-            recipient_id=body.to_user_id,
-            title=f"Escalade {body.level} — {req.ref}",
-            body=f"La demande {req.ref} a été escaladée par {body.from_agent_name or actor.name} : {body.reason.strip()[:100]}",
-            type="warning",
-            request_id=str(req.id),
-            action_label="Voir la demande",
-            action_url=f"/app/requests/{req.id}",
-        )
+    await emit_notif(
+        svc.session,
+        recipient_id=str(chief_id),
+        title=f"Ticket escaladé — {req.ref}",
+        body=f"Le ticket {req.ref} vous a été escaladé par {actor.name} : {body.reason.strip()[:100]}",
+        type="warning",
+        request_id=str(req.id),
+        action_label="Voir le ticket",
+        action_url=f"/app/requests/{req.id}",
+    )
 
     return EscalationResponse.from_detail(event, int(req.id), req.ref)
 

@@ -70,16 +70,24 @@ def _do_export(
     return build_response(data, fmt, filename)
 
 
-def _apply_decision_scope(
+async def _apply_decision_scope(
     actor,
     direction_id: Optional[int],
-    unity_id: Optional[int],
-) -> tuple[Optional[int], Optional[int]]:
+    unity_id: Optional[int] | list[int],
+    svc: ReportService,
+) -> tuple[Optional[int], Optional[int] | list[int]]:
     role = normalize_role(getattr(actor, "role", None))
     if role == "director":
         actor_direction_id = getattr(actor, "direction_id", None)
         direction_id = int(actor_direction_id) if actor_direction_id else -1
-    elif role in {"chief-service", "chief-departement"}:
+    elif role == "chief-departement":
+        # Perimetre elargi au departement entier (departement + services rattaches),
+        # cf. BR-ROLE-CHIEF-DEPARTEMENT-001 deja applique ailleurs (ticket_actions.py,
+        # RouteRequest.py) — sans quoi la vue agregee par service (Lot 3) ne remonterait
+        # que le seul service du chef-departement au lieu de tout son departement.
+        actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
+        unity_id = await svc._scoped_unity_ids(int(actor_unity_id)) if actor_unity_id else [-1]
+    elif role == "chief-service":
         actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
         unity_id = int(actor_unity_id) if actor_unity_id else -1
     return direction_id, unity_id
@@ -259,12 +267,12 @@ async def decision_report(
     svc: ReportService = Depends(_svc),
 ):
     """Moteur décisionnel EDG → direction → service → agent → ticket."""
-    direction_id, unity_id = _apply_decision_scope(actor, direction_id, unity_id)
+    scoped_direction_id, scoped_unity_id = await _apply_decision_scope(actor, direction_id, unity_id, svc)
     return await svc.decision_report(
         start,
         end,
-        direction_id=direction_id,
-        unity_id=unity_id,
+        direction_id=scoped_direction_id,
+        unity_id=scoped_unity_id,
         assignee_id=assignee_id,
         status=status,
         category=category,
@@ -306,12 +314,12 @@ async def export_decision_report(
     svc: ReportService = Depends(_svc),
 ):
     """Export du rapport décisionnel avec les filtres appliqués."""
-    direction_id, unity_id = _apply_decision_scope(actor, direction_id, unity_id)
+    scoped_direction_id, scoped_unity_id = await _apply_decision_scope(actor, direction_id, unity_id, svc)
     data = await svc.decision_report(
         start,
         end,
-        direction_id=direction_id,
-        unity_id=unity_id,
+        direction_id=scoped_direction_id,
+        unity_id=scoped_unity_id,
         assignee_id=assignee_id,
         status=status,
         category=category,

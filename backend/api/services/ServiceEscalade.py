@@ -24,6 +24,63 @@ logger = logging.getLogger(__name__)
 _TERMINAL = ("resolved", "closed", "cancelled", "rejected", "escalated")
 
 
+async def find_hierarchical_chief(
+    session: AsyncSession, unity_id: int | None, exclude_account_id: int | None = None,
+) -> int | None:
+    """Chef hierarchique le plus proche pour une unite donnee.
+
+    Cherche d'abord un chef (chief-service/chief-departement) dans la meme unite
+    (en excluant exclude_account_id, utile quand la personne qui traite le ticket
+    est elle-meme un chef — on doit alors remonter au niveau superieur), sinon
+    remonte l'organigramme jusqu'a trouver un chef ou un directeur dans l'unite
+    parente.
+    """
+    if not unity_id:
+        return None
+
+    filters = [
+        Account.unity_id == unity_id,
+        Account.role.in_(("chief-service", "chief-departement")),
+        Account.account_status == "active",
+        Account.deleted_at.is_(None),
+    ]
+    if exclude_account_id is not None:
+        filters.append(Account.id != exclude_account_id)
+    row = await session.execute(select(Account.id).where(*filters).limit(1))
+    chief_id = row.scalar_one_or_none()
+    if chief_id:
+        return chief_id
+
+    # Remonte a l'unite parente via l'organigramme
+    parent_org_row = await session.execute(
+        select(Organigram.parent_id)
+        .where(Organigram.unity_id == unity_id, Organigram.deleted_at.is_(None))
+        .limit(1)
+    )
+    parent_org_id = parent_org_row.scalar_one_or_none()
+    if not parent_org_id:
+        return None
+
+    parent_unity_row = await session.execute(
+        select(Organigram.unity_id)
+        .where(Organigram.id == parent_org_id, Organigram.deleted_at.is_(None))
+    )
+    parent_unity_id = parent_unity_row.scalar_one_or_none()
+    if not parent_unity_id:
+        return None
+
+    filters = [
+        Account.unity_id == parent_unity_id,
+        Account.role.in_(("chief-service", "chief-departement", "director")),
+        Account.account_status == "active",
+        Account.deleted_at.is_(None),
+    ]
+    if exclude_account_id is not None:
+        filters.append(Account.id != exclude_account_id)
+    row = await session.execute(select(Account.id).where(*filters).limit(1))
+    return row.scalar_one_or_none()
+
+
 class EscaladeService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -156,61 +213,8 @@ class EscaladeService:
         return wf.id
 
     async def _find_chief(self, unity_id: int | None) -> int | None:
-        """Chef dans la même unité ; sinon directeur dans l'unité parente."""
-        if not unity_id:
-            return None
-
-        # 1. Chef de service dans la même unité
-        row = await self.session.execute(
-            select(Account.id)
-            .where(
-                Account.unity_id == unity_id,
-                Account.role.in_(("chief-service", "chief-departement")),
-                Account.account_status == "active",
-                Account.deleted_at.is_(None),
-            )
-            .limit(1)
-        )
-        chief_id = row.scalar_one_or_none()
-        if chief_id:
-            return chief_id
-
-        # 2. Remonte à l'unité parente via l'organigramme
-        parent_org_row = await self.session.execute(
-            select(Organigram.parent_id)
-            .where(
-                Organigram.unity_id == unity_id,
-                Organigram.deleted_at.is_(None),
-            )
-            .limit(1)
-        )
-        parent_org_id = parent_org_row.scalar_one_or_none()
-        if not parent_org_id:
-            return None
-
-        parent_unity_row = await self.session.execute(
-            select(Organigram.unity_id)
-            .where(
-                Organigram.id == parent_org_id,
-                Organigram.deleted_at.is_(None),
-            )
-        )
-        parent_unity_id = parent_unity_row.scalar_one_or_none()
-        if not parent_unity_id:
-            return None
-
-        # 3. Chef ou directeur dans l'unité parente
-        row = await self.session.execute(
-            select(Account.id)
-            .where(
-                Account.unity_id == parent_unity_id,
-                Account.role.in_(["chief", "director"]),
-                Account.account_status == "active",
-                Account.deleted_at.is_(None),
-            )
-            .limit(1)
-        )
-        return row.scalar_one_or_none()
+        """Chef dans la même unité ; sinon chef/directeur dans l'unité parente."""
+        return await find_hierarchical_chief(self.session, unity_id)
 
     async def _notify(
         self,

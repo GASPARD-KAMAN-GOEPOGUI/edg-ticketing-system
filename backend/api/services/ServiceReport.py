@@ -188,7 +188,7 @@ class ReportService(BaseService):
         end: date,
         *,
         direction_id: Optional[int] = None,
-        unity_id: Optional[int] = None,
+        unity_id: Optional[int] | list[int] = None,
         assignee_id: Optional[int] = None,
         status: Optional[str] = None,
         category: Optional[str] = None,
@@ -220,8 +220,14 @@ class ReportService(BaseService):
             conditions.append("(u.id = :direction_id OR u.parent_direction_id = :direction_id)")
             params["direction_id"] = int(direction_id)
         if unity_id is not None:
-            conditions.append("r.unity_id = :unity_id")
-            params["unity_id"] = int(unity_id)
+            if isinstance(unity_id, (list, set, tuple)):
+                ids = [int(v) for v in unity_id] or [-1]
+                placeholders = [f":unity_id_{i}" for i in range(len(ids))]
+                params.update({f"unity_id_{i}": v for i, v in enumerate(ids)})
+                conditions.append(f"r.unity_id IN ({', '.join(placeholders)})")
+            else:
+                conditions.append("r.unity_id = :unity_id")
+                params["unity_id"] = int(unity_id)
         if assignee_id is not None:
             conditions.append("r.assignee_id = :assignee_id")
             params["assignee_id"] = int(assignee_id)
@@ -247,7 +253,7 @@ class ReportService(BaseService):
         end: date,
         *,
         direction_id: Optional[int] = None,
-        unity_id: Optional[int] = None,
+        unity_id: Optional[int] | list[int] = None,
         assignee_id: Optional[int] = None,
         status: Optional[str] = None,
         category: Optional[str] = None,
@@ -1062,7 +1068,7 @@ class ReportService(BaseService):
         end_date: Optional[date] = None,
         *,
         direction_id: Optional[int] = None,
-        unity_id: Optional[int] = None,
+        unity_id: Optional[int] | list[int] = None,
         assignee_id: Optional[int] = None,
         status: Optional[str] = None,
         category: Optional[str] = None,

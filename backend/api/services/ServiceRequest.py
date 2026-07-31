@@ -2292,6 +2292,16 @@ class RequestService(BaseService):
     async def count_by_status(self) -> dict[str, int]:
         return await self.repo.count_by_status()
 
+    async def workload_by_unit(self, unity_ids: list[int]) -> list[dict[str, Any]]:
+        """Charge actuelle (tickets non terminaux) par agent, pour le Centre de répartition."""
+        counts = await self.repo.count_active_by_assignee(
+            unity_ids, exclude_statuses=list(TERMINAL_STATUSES)
+        )
+        return [
+            {"assignee_id": assignee_id, "active_count": count}
+            for assignee_id, count in counts.items()
+        ]
+
     async def search(self, q: str, *, page: int = 1, limit: int = 20):
         items, total = await self.repo.search(q, page=page, limit=limit)
         return self.paginate(self._serialize(items), total, page, limit)

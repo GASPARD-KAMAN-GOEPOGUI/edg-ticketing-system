@@ -693,11 +693,9 @@ export async function transferDirection(
 
 export async function escalateRequest(
   id: string,
-  data: { level: string; reason: string; from_agent_name?: string },
-  actorId?: string,
+  data: { reason: string },
 ): Promise<void> {
-  const params = actorId ? `?actor_id=${encodeURIComponent(actorId)}` : "";
-  await apiFetch<RawTimeline>(`/requests/${id}/escalate${params}`, {
+  await apiFetch<RawTimeline>(`/requests/${id}/escalate`, {
     method: "POST",
     body: JSON.stringify(data),
   });
