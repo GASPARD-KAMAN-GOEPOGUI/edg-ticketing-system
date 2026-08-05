@@ -20,7 +20,8 @@ import { fetchSlaReopenStats, fetchInterventionStats } from "@/lib/api/reports";
 import type { RequestItem, RequestStatus } from "@/lib/mock-data";
 import { requireRole } from "@/lib/auth-guard";
 import { useRole, useUser } from "@/lib/session";
-import { fetchDirections, fetchUnits } from "@/lib/api/directions-units";
+import { fetchDirections, fetchUnit, fetchUnits } from "@/lib/api/directions-units";
+import type { Unit } from "@/lib/api/directions-units";
 
 export const Route = createFileRoute("/app/sla-center")({
   beforeLoad: () => requireRole("chief-service", "chief-departement", "director", "admin"),
@@ -161,14 +162,53 @@ function SlaCenterPage() {
     () => Object.fromEntries(directionsData.map((d) => [d.id, d.name])),
     [directionsData],
   );
-  const serviceLookup = useMemo(
-    () => Object.fromEntries(unitsData.map((u) => [u.id, u.name])),
+  const baseServiceLookup = useMemo(
+    () => Object.fromEntries(unitsData.map((u) => [String(u.id), u.name])),
     [unitsData],
   );
 
   const allItems = data?.items ?? [];
 
   const active = useMemo(() => allItems.filter(isActive), [allItems]);
+
+  const visibleServiceIds = useMemo(
+    () => Array.from(new Set(active.map((r) => r.serviceId).filter(Boolean) as string[])),
+    [active],
+  );
+
+  const missingServiceIds = useMemo(
+    () => visibleServiceIds.filter((id) => !baseServiceLookup[String(id)]),
+    [baseServiceLookup, visibleServiceIds],
+  );
+
+  const { data: missingUnits = [] } = useQuery({
+    queryKey: ["sla-center-missing-units", missingServiceIds],
+    queryFn: async () => {
+      const results = await Promise.all(
+        missingServiceIds.map(async (id) => {
+          try {
+            return await fetchUnit(id);
+          } catch {
+            return null;
+          }
+        }),
+      );
+      return results.filter((unit): unit is Unit => unit !== null);
+    },
+    enabled: missingServiceIds.length > 0,
+    staleTime: 5 * 60_000,
+  });
+
+  const serviceLookup = useMemo(
+    () => ({
+      ...baseServiceLookup,
+      ...Object.fromEntries(missingUnits.map((u) => [String(u.id), u.name])),
+    }),
+    [baseServiceLookup, missingUnits],
+  );
+
+  const serviceLabel = (serviceId?: string) =>
+    serviceId ? (serviceLookup[String(serviceId)] ?? serviceId) : "—";
 
   const breachedList = useMemo(
     () =>
@@ -205,7 +245,7 @@ function SlaCenterPage() {
         return {
           id,
           label: (isDirector || isChief)
-            ? (serviceLookup[id] ?? id)
+            ? serviceLabel(id)
             : (directionLookup[id] ?? id),
           total: items.length,
           compliant,
@@ -214,7 +254,7 @@ function SlaCenterPage() {
         };
       })
       .sort((a, b) => a.rate - b.rate);
-  }, [active, isDirector, isChief]);
+  }, [active, isDirector, isChief, directionLookup, serviceLookup]);
 
   if (isLoading) {
     return (
@@ -516,8 +556,8 @@ function SlaCenterPage() {
                       <PriorityBadge priority={r.priority} />
                     </td>
                     <td className="py-2.5 pr-3 text-sm text-muted-foreground">
-                      {isDirector
-                        ? (serviceLookup[r.serviceId ?? ""] ?? r.serviceId ?? "—")
+                      {isDirector || isChief
+                        ? serviceLabel(r.serviceId)
                         : (directionLookup[r.directionId] ?? r.directionId)}
                     </td>
                     <td className="py-2.5 pr-3 text-right font-semibold tabular-nums text-destructive">

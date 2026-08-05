@@ -47,9 +47,9 @@ Chemins probables: `app.my-tickets.tsx`, `capabilities.ts`, `ticket-navigation.t
 
 Identifiant: FEATURE-QUEUE-QUALIFICATION
 Nom: File d'attente et demandes a qualifier
-Module: MOD-AGENT / MOD-CHIEF
-Description: une seule vue — `A qualifier`, pour les demandes a orienter ou a prendre en charge par l'utilisateur connecte. L'ancien onglet `A prendre` (tickets non assignes du perimetre agent/chef, `unassigned_only=true`) a ete retire le 2026-07-29 (voir BR-ROLE-AGENT-001, note retrait onglet) pour tous les roles ayant acces a la page. Le formulaire d'assignation (bouton `Assigner`) impose depuis le 2026-07-29 une hierarchie stricte Direction -> Departement -> Service -> Personne, chaque niveau filtre aux entites actives et cascade sur le parent choisi (voir BR-TICKET-QUALIFY-001, note formulaire 4 niveaux).
-Roles concernes: agent, chief.
+Module: MOD-AGENT / MOD-CHIEF / MOD-DIRECTION
+Description: une seule vue — `A qualifier`, pour les demandes a orienter ou a prendre en charge par l'utilisateur connecte. L'ancien onglet `A prendre` (tickets non assignes du perimetre agent/chef, `unassigned_only=true`) a ete retire le 2026-07-29 (voir BR-ROLE-AGENT-001, note retrait onglet) pour tous les roles ayant acces a la page. Depuis le 2026-08-05, tous les roles operationnels (`agent-support`, `chief-service`, `chief-departement`, `director`, `admin`) peuvent prendre un ticket depuis la File d'attente et assigner vers un intervenant operationnel autorise (`dg` exclu ; destinataire admin reserve a admin). Le formulaire d'assignation (bouton `Assigner`) impose depuis le 2026-07-29 une hierarchie stricte Direction -> Departement -> Service -> Personne, chaque niveau filtre aux entites actives et cascade sur le parent choisi (voir BR-TICKET-QUALIFY-001, note formulaire 4 niveaux).
+Roles concernes: agent-support, chief-service, chief-departement, director, admin.
 Route frontend: `/app/queue`, `/app/queue/tickets/$id`.
 Page principale: `frontend/src/routes/app.queue.tsx`, `frontend/src/routes/app.queue_.tickets.$id.tsx`.
 Endpoint backend: `GET /api/v1/requests/triage`, `POST /api/v1/requests/{id}/qualify`.

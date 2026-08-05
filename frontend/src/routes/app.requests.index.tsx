@@ -25,7 +25,6 @@ import {
   Plus, Search, Inbox, MapPin, Calendar, CheckCircle2,
   Wrench, Zap, FileText, Shield, Plug, CreditCard,
   HardHat, Briefcase, BarChart2, MessageCircle,
-  X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { LayoutToggle, type LayoutMode } from "@/components/layout-toggle";
@@ -206,7 +205,6 @@ function RequestsList() {
     else { applyQuickDate(val as "today" | "week" | "month" | "year"); }
   }, [clearDates, applyQuickDate, setPeriodPreset]);
 
-  const hasDateFilter = !!dateFrom || !!dateTo;
   const visibleStatus = PERSONAL_TERMINAL_STATUS_SET.has(status as RequestStatus) ? "all" : status;
 
   const filters = {
@@ -389,16 +387,6 @@ function RequestsList() {
                   className="h-9 min-w-0 rounded-xl border border-border/40 bg-background/60 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
                 />
               </div>
-            )}
-
-            {/* Effacer */}
-            {hasDateFilter && (
-              <button
-                onClick={clearDates}
-                className="flex h-11 shrink-0 items-center justify-center gap-1 rounded-2xl border border-destructive/30 bg-background/60 px-3 text-xs text-destructive shadow-sm transition-colors hover:bg-destructive/10"
-              >
-                <X className="h-3 w-3" /> Effacer
-              </button>
             )}
           </div>
       </motion.div>

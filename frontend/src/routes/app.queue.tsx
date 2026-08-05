@@ -18,7 +18,7 @@ import { fetchUsers } from "@/lib/api/accounts";
 import { fetchDirections, fetchDepartments, fetchUnits } from "@/lib/api/directions-units";
 import { fetchRoutingRules, fetchRequestCategories } from "@/lib/api/admin-config";
 import { priorityLabels } from "@/lib/mock-data";
-import type { Priority } from "@/lib/mock-data";
+import type { Priority, Role } from "@/lib/mock-data";
 import { toast } from "sonner";
 import {
   CheckCircle2, ChevronDown, ChevronUp, History,
@@ -54,9 +54,12 @@ function normalizeQueueStatus(status?: string) {
 }
 
 const PRIORITIES: Priority[] = ["low", "medium", "high", "critical"];
+const OPERATIONAL_ROLES: Role[] = ["agent-support", "chief-service", "chief-departement", "director", "admin"];
 
 export const Route = createFileRoute("/app/queue")({
-  beforeLoad: () => requireRole("agent-support", "chief-service", "admin"),
+  // Philosophie collaborative : tous les rôles opérationnels peuvent prendre un
+  // ticket de la file d'attente ou devenir l'intervenant courant.
+  beforeLoad: () => requireRole("agent-support", "chief-service", "chief-departement", "director", "admin"),
   head: () => ({ meta: [{ title: "File d'attente — EDG Support" }] }),
   component: QueuePage,
 });
@@ -90,12 +93,12 @@ function QueuePage() {
 function QualifyTab() {
   const sessionUser = useUser();
   const queryClient = useQueryClient();
-  // Lot 2.4 : un agent-support ne peut plus router une demande vers un tiers via le
-  // formulaire hiérarchique (Direction→Département→Service→Personne) — seule
-  // l'auto-assignation ("Prendre la demande") reste disponible pour ce rôle. Le
-  // même correctif est appliqué côté backend (qualify_triage) pour éviter tout
-  // contournement par appel direct à l'API.
-  const canUseAssignForm = sessionUser?.role !== "agent-support";
+  const isOperationalRole = Boolean(sessionUser?.role && OPERATIONAL_ROLES.includes(sessionUser.role));
+  const canUseAssignForm = isOperationalRole;
+  const canTakeRole = isOperationalRole;
+  const assignableRoles = sessionUser?.role === "admin"
+    ? OPERATIONAL_ROLES
+    : OPERATIONAL_ROLES.filter((role) => role !== "admin");
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["qualify"],
@@ -170,22 +173,21 @@ function QualifyTab() {
     staleTime: 5 * 60_000,
   });
 
-  // Employés pouvant recevoir un ticket dans le service sélectionné :
-  // actifs (filtre only_active déjà applique côté backend), et disposant
-  // du role habilité à traiter des demandes (agent-support ou chief-service).
+  // Intervenants pouvant recevoir un ticket dans la direction sélectionnée :
+  // tous les rôles opérationnels, actifs (filtre déjà appliqué côté backend).
   const { data: unitPeopleData } = useQuery({
-    queryKey: ["people-by-unit", expandedUnitId],
+    queryKey: ["people-by-direction", expandedDirectionId, expandedUnitId, sessionUser?.role],
     queryFn: async () => {
-      const [agents, chiefs] = await Promise.all([
-        fetchUsers({ role: "agent-support", unit_id: expandedUnitId, limit: 100 }),
-        fetchUsers({ role: "chief-service", unit_id: expandedUnitId, limit: 100 }),
-      ]);
+      const scope = expandedDirectionId ? { direction_id: expandedDirectionId } : { unit_id: expandedUnitId };
+      const results = await Promise.all(
+        assignableRoles.map((role) => fetchUsers({ role, ...scope, limit: 100 })),
+      );
       const byId = new Map(
-        [...agents.items, ...chiefs.items].map((person) => [person.id, person]),
+        results.flatMap((result) => result.items).map((person) => [person.id, person]),
       );
       return Array.from(byId.values());
     },
-    enabled: !!expandedUnitId,
+    enabled: (!!expandedDirectionId || !!expandedUnitId) && assignableRoles.length > 0,
     staleTime: 5 * 60_000,
   });
   const unitPeople = unitPeopleData ?? [];
@@ -321,10 +323,10 @@ function QualifyTab() {
             const isPending = qualifyMut.isPending && qualifyMut.variables?.id === req.id;
             const takeDirectionId = form.directionId || req.directionId || sessionUser?.direction_id || undefined;
             const takeUnitId = form.unitId || sessionUser?.unit_id || req.serviceId || undefined;
-            const takeCategory = form.category || req.category || "";
+            const takeCategory = form.category || req.category || "autre";
             const status = normalizeQueueStatus(req.status);
-            const canTake = QUALIFIABLE_STATUSES.has(status) && !TERMINAL_STATUSES.has(status);
-            const takeData = canTake && sessionUser?.id && takeCategory && (takeDirectionId || takeUnitId)
+            const canTake = canTakeRole && QUALIFIABLE_STATUSES.has(status) && !TERMINAL_STATUSES.has(status);
+            const takeData = canTake && sessionUser?.id
               ? {
                   category: takeCategory,
                   priority: form.priority || req.priority,
@@ -455,9 +457,7 @@ function QualifyTab() {
                       </div>
                     </div>
 
-                    {/* Suggestion routage + hiérarchie d'assignation — réservées aux rôles
-                        pouvant router vers un tiers (chief-service, admin) ; un agent-support
-                        ne peut que s'auto-assigner via "Prendre la demande" (Lot 2.4). */}
+                    {/* Suggestion routage + hiérarchie d'assignation */}
                     {canUseAssignForm && (
                       <>
                         {form.category && suggestion && (
@@ -608,22 +608,23 @@ function QualifyTab() {
                       >
                         Fermer
                       </Button>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="rounded-full border-success/40 text-success hover:bg-success/10"
-                          disabled={!canTake || !takeData || isTaking}
-                          onClick={() => takeData && takeMut.mutate({ id: req.id, data: takeData })}
-                        >
-                          {isTaking
-                            ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                            : <UserPlus className="mr-1.5 h-3.5 w-3.5" />}
-                          Prendre le ticket
-                        </Button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {canTakeRole && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="rounded-full border-success/40 text-success hover:bg-success/10"
+                            disabled={!canTake || !takeData || isTaking}
+                            onClick={() => takeData && takeMut.mutate({ id: req.id, data: takeData })}
+                          >
+                            {isTaking
+                              ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                              : <UserPlus className="mr-1.5 h-3.5 w-3.5" />}
+                            Prendre le ticket
+                          </Button>
+                        )}
 
-                        {/* Assigner — nécessite les 4 niveaux : direction, département, service, personne.
-                            Réservé aux rôles pouvant router vers un tiers (Lot 2.4). */}
+                        {/* Assigner — nécessite les 4 niveaux : direction, département, service, personne. */}
                         {canUseAssignForm && (
                           <Button
                             size="sm"

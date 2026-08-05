@@ -743,6 +743,10 @@ class RequestService(BaseService):
         items, total = await self.repo.list_sla_breached(page=page, limit=limit)
         return self.paginate(self._serialize(items), total, page, limit)
 
+    async def list_transmitted_by_me(self, actor_id: str, *, page: int = 1, limit: int = 20):
+        items, total = await self.repo.list_transmitted_by_actor(actor_id, page=page, limit=limit)
+        return self.paginate(self._serialize(items), total, page, limit)
+
     async def list_queue(
         self,
         *,
@@ -797,13 +801,33 @@ class RequestService(BaseService):
         else:
             patch["request_status"] = "qualifying"
 
-        await self._guard_ticket_action(
+        current = await self._guard_ticket_action(
             id,
             "qualify",
             target_status=patch["request_status"],
             actor=actor,
             actor_role=actor_role,
         )
+        if assignee_id and actor is not None:
+            row = await self.session.execute(
+                select(Account.unity_id, Account.role)
+                .where(Account.id == int(assignee_id))
+            )
+            assignee_row = row.first()
+            if assignee_row is None:
+                raise self.not_found("Cet intervenant n'existe pas.", error_code=ErrorCode.ACCOUNT_NOT_FOUND)
+            assignee_unity_id, assignee_role = assignee_row
+            allowed_scope_unity_ids = None
+            if normalize_role(str(getattr(actor, "role", actor_role or "") or "")) in {"chief-departement", "director"}:
+                allowed_scope_unity_ids = await self._direction_unity_ids(getattr(actor, "unity_id", None))
+            assert_assignment_allowed(
+                actor,
+                current,
+                assignee_id,
+                target_unity_id=assignee_unity_id,
+                target_role=assignee_role,
+                allowed_scope_unity_ids=allowed_scope_unity_ids,
+            )
         return await self.update(
             id,
             patch,
@@ -1510,7 +1534,7 @@ class RequestService(BaseService):
 
         if actor is not None:
             allowed_scope_unity_ids = None
-            if normalize_role(str(getattr(actor, "role", actor_role or "") or "")) == "chief-departement":
+            if normalize_role(str(getattr(actor, "role", actor_role or "") or "")) in {"chief-departement", "director"}:
                 allowed_scope_unity_ids = await self._direction_unity_ids(getattr(actor, "unity_id", None))
             assert_assignment_allowed(
                 actor,

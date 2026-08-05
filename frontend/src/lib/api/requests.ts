@@ -428,6 +428,30 @@ export async function fetchTriage(
   };
 }
 
+export async function fetchTransmittedByMe(
+  filters?: { page?: number; limit?: number },
+): Promise<{ items: RequestItem[]; total: number; page: number; pages: number; pageSize: number }> {
+  const params = new URLSearchParams();
+  if (filters) {
+    for (const [k, v] of Object.entries(filters)) {
+      if (v !== undefined && v !== null) {
+        const value = String(v);
+        if (value !== "") params.set(k, value);
+      }
+    }
+  }
+  const raw = await apiFetch<RawPaginated<RawRequest>>(
+    `/requests/transmitted?${params.toString()}`,
+  );
+  return {
+    items: raw.items.map(mapRequest),
+    total: raw.total,
+    page: raw.page,
+    pages: raw.pages,
+    pageSize: raw.page_size,
+  };
+}
+
 export async function fetchRequest(
   id: string,
   options?: { includeDeleted?: boolean },

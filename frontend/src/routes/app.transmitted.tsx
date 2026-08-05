@@ -1,48 +1,30 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { requireRole } from "@/lib/auth-guard";
-import { useUser } from "@/lib/session";
-import { useState, useEffect, useCallback } from "react";
+import { useRole } from "@/lib/session";
+import { useState, useCallback } from "react";
 import { useQuery, useQueries } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { GlassCard } from "@/components/glass-card";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { fetchUser, buildAvatarUrl } from "@/lib/api/accounts";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { fetchRequests } from "@/lib/api/requests";
-import { priorityLabels, statusLabels } from "@/lib/mock-data";
-import type { RequestItem, RequestStatus, Priority } from "@/lib/mock-data";
-import {
-  Ticket, Clock, Search, Inbox,
-  ShieldAlert, AlertTriangle, CheckCircle2, RotateCcw, TrendingUp,
-} from "lucide-react";
+import { fetchTransmittedByMe } from "@/lib/api/requests";
+import { priorityLabels } from "@/lib/mock-data";
+import type { Priority } from "@/lib/mock-data";
+import { Send, Clock, AlertTriangle, RotateCcw } from "lucide-react";
 import { LayoutToggle, type LayoutMode } from "@/components/layout-toggle";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { PaginationBar } from "@/components/pagination-bar";
 import { AsyncSwap } from "@/components/async-states";
-import { useSessionState } from "@/lib/use-session-state";
 import { cn, initialsFor } from "@/lib/utils";
+import { ticketDetailRouteForSource } from "@/lib/ticket-navigation";
 
-export const Route = createFileRoute("/app/my-tickets")({
+export const Route = createFileRoute("/app/transmitted")({
   beforeLoad: () => requireRole("agent-support", "chief-service", "chief-departement", "director", "admin"),
-  head: () => ({ meta: [{ title: "Mes tickets — EDG Support" }] }),
-  component: MyTicketsPage,
+  head: () => ({ meta: [{ title: "Tickets transmis — EDG Support" }] }),
+  component: TransmittedTicketsPage,
 });
-
-const ACTIVE_STATUSES: RequestStatus[] = [
-  "new", "qualifying", "qualified", "assigned",
-  "in_progress", "pending", "escalated", "reopened",
-];
-const TERMINAL_STATUSES = "resolved,closed,cancelled,rejected";
 
 const priorityDotClass: Record<Priority, string> = {
   low: "text-muted-foreground",
@@ -51,70 +33,25 @@ const priorityDotClass: Record<Priority, string> = {
   critical: "text-destructive",
 };
 
-function MyTicketsPage() {
-  const sessionUser = useUser();
+function TransmittedTicketsPage() {
+  const [role] = useRole();
   const navigate = useNavigate();
+  // Aucune source de liste dédiée dans ticket-navigation.ts pour cette page —
+  // repli volontaire sur le détail par défaut du rôle (un ticket transmis peut
+  // ne plus être dans le périmètre courant du visualiseur).
+  const detailRoute = ticketDetailRouteForSource(null, role);
 
-  const [filterStatus, setFilterStatus] = useSessionState<string>("mt:status", "all");
-  const [filterPriority, setFilterPriority] = useSessionState<string>("mt:priority", "all");
-  const [search, setSearch] = useSessionState<string>("mt:q", "");
-  const [debouncedSearch, setDebouncedSearch] = useState(search);
-  const [layout, setLayout] = useState<LayoutMode>("grid");
+  const [layout, setLayout] = useState<LayoutMode>("list");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const currentUserId = sessionUser?.id ? String(sessionUser.id) : "";
 
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(search), 400);
-    return () => clearTimeout(t);
-  }, [search]);
-  useEffect(() => { setPage(1); }, [filterStatus, filterPriority, debouncedSearch]);
-
-  // Ancien raccourci "Réouvertures" : il écrivait mt:status=reopened en session.
-  // Depuis son retrait, l'ouverture normale de Ma boîte doit revenir à tous les statuts.
-  useEffect(() => {
-    const status = new URLSearchParams(window.location.search).get("status");
-    if (status) {
-      setFilterStatus(status);
-      return;
-    }
-    const cleanupKey = "mt:reopened-shortcut-cleaned";
-    if (filterStatus === "reopened" && sessionStorage.getItem(cleanupKey) !== "1") {
-      setFilterStatus("all");
-      sessionStorage.setItem(cleanupKey, "1");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const baseFilters = {
-    assignee_id: currentUserId,
-    exclude_status: TERMINAL_STATUSES,
-    ...(filterPriority !== "all" && { priority: filterPriority }),
-    ...(filterStatus !== "all" && { request_status: filterStatus }),
-    ...(debouncedSearch && { search: debouncedSearch }),
-  };
-
-  // Requête principale : paginée pour l'affichage
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["my-tickets", baseFilters, page, pageSize],
-    queryFn: () => fetchRequests({ ...baseFilters, page, limit: pageSize }),
+    queryKey: ["transmitted-by-me", page, pageSize],
+    queryFn: () => fetchTransmittedByMe({ page, limit: pageSize }),
     staleTime: 30_000,
-    enabled: !!currentUserId,
   });
 
-  // Requête stats : workload affectée à l'agent connecté.
-  const { data: statsData } = useQuery({
-    queryKey: ["my-tickets-stats", currentUserId],
-    queryFn: () => fetchRequests({ assignee_id: currentUserId, exclude_status: TERMINAL_STATUSES, limit: 1000 }),
-    staleTime: 60_000,
-    enabled: !!currentUserId,
-  });
-
-  const onlyMyAssignedTickets = (items?: RequestItem[]) =>
-    (items ?? []).filter((r) => r.assigneeId === currentUserId);
-  const allItems = onlyMyAssignedTickets(data?.items);
-  const paged = allItems;
-
+  const paged = data?.items ?? [];
   const total = data?.total ?? 0;
   const totalPages = data?.pages ?? 1;
 
@@ -131,45 +68,15 @@ function MyTicketsPage() {
     requesterIds.map((id, i) => [id, requesterAvatarQueries[i]?.data]),
   );
 
-  const assignedTickets = onlyMyAssignedTickets(statsData?.items);
-  const activeAssignedTickets = assignedTickets.filter((r) => ACTIVE_STATUSES.includes(r.status));
-  const resolvedTickets = assignedTickets.filter((r) => r.status === "resolved" || r.status === "closed");
-  const measuredSlaTickets = assignedTickets.filter((r) => r.slaHours > 0);
-  const resolutionDurations = resolvedTickets
-    .map((r) => {
-      const end = r.resolvedAt ?? r.closedAt ?? r.updatedAt;
-      const startMs = new Date(r.createdAt).getTime();
-      const endMs = end ? new Date(end).getTime() : Number.NaN;
-      return Number.isFinite(startMs) && Number.isFinite(endMs)
-        ? Math.max(0, (endMs - startMs) / 3_600_000)
-        : null;
-    })
-    .filter((value): value is number => value != null);
-  const kpiInProgress = assignedTickets.filter((r) => r.status === "in_progress").length;
-  const kpiBreached = activeAssignedTickets.filter((r) => r.slaHours > 0 && r.slaElapsed > r.slaHours).length;
-  const kpiCritical = activeAssignedTickets.filter((r) => r.priority === "critical").length;
-  const kpiResolved = resolvedTickets.length;
-  const kpiSlaRate = measuredSlaTickets.length > 0
-    ? Math.round((measuredSlaTickets.filter((r) => r.slaElapsed <= r.slaHours).length / measuredSlaTickets.length) * 100)
-    : null;
-  const kpiAvgResolution = resolutionDurations.length > 0
-    ? Math.round((resolutionDurations.reduce((sum, value) => sum + value, 0) / resolutionDurations.length) * 10) / 10
-    : null;
-
   const listState: "loading" | "empty" | "ready" = isLoading
     ? "loading"
     : isError || paged.length === 0
     ? "empty"
     : "ready";
 
-  const handleSearch = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value),
-    [setSearch],
-  );
-
   const openTicketDetail = useCallback((id: string) => {
-    navigate({ to: "/app/my-tickets/tickets/$id", params: { id } });
-  }, [navigate]);
+    navigate({ to: detailRoute, params: { id } });
+  }, [navigate, detailRoute]);
   const openTicketDetailFromKeyboard = useCallback((event: React.KeyboardEvent, id: string) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
@@ -189,138 +96,15 @@ function MyTicketsPage() {
       >
         <div>
           <div className="flex items-center gap-2">
-            <Ticket className="h-6 w-6 text-primary" />
-            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Mes tickets</h1>
+            <Send className="h-6 w-6 text-primary" />
+            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Tickets transmis</h1>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            Tickets qui vous sont personnellement assignés.
+            Tickets dont vous avez personnellement transmis le traitement — quel que soit le porteur actuel.
           </p>
         </div>
         <LayoutToggle layout={layout} onChange={setLayout} />
       </motion.header>
-
-      {/* ── KPI row ────────────────────────────────────────────────────────── */}
-      <motion.div
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.04 }}
-        className="grid grid-cols-1 gap-3 sm:grid-cols-3"
-      >
-        <GlassCard className="flex items-center gap-3 p-4">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10">
-            <Ticket className="h-4 w-4 text-primary" />
-          </span>
-          <div>
-            <div className="text-2xl font-bold leading-none">{kpiInProgress}</div>
-            <div className="mt-0.5 text-xs text-muted-foreground">En cours</div>
-          </div>
-        </GlassCard>
-
-        <GlassCard className={cn("flex items-center gap-3 p-4", kpiBreached > 0 && "border-destructive/40 bg-destructive/3")}>
-          <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl", kpiBreached > 0 ? "bg-destructive/15" : "bg-muted")}>
-            <AlertTriangle className={cn("h-4 w-4", kpiBreached > 0 ? "text-destructive" : "text-muted-foreground")} />
-          </span>
-          <div>
-            <div className={cn("text-2xl font-bold leading-none", kpiBreached > 0 && "text-destructive")}>{kpiBreached}</div>
-            <div className="mt-0.5 text-xs text-muted-foreground">Délai dépassé</div>
-          </div>
-        </GlassCard>
-
-        <GlassCard className={cn("flex items-center gap-3 p-4", kpiCritical > 0 && "border-orange-500/40 bg-orange-500/3")}>
-          <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl", kpiCritical > 0 ? "bg-orange-500/15" : "bg-muted")}>
-            <ShieldAlert className={cn("h-4 w-4", kpiCritical > 0 ? "text-orange-500" : "text-muted-foreground")} />
-          </span>
-          <div>
-            <div className={cn("text-2xl font-bold leading-none", kpiCritical > 0 && "text-orange-500")}>{kpiCritical}</div>
-            <div className="mt-0.5 text-xs text-muted-foreground">Critiques</div>
-          </div>
-        </GlassCard>
-      </motion.div>
-
-      {/* ── KPI performance personnelle ─────────────────────────────────────── */}
-      <motion.div
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.06 }}
-        className="grid grid-cols-1 gap-3 sm:grid-cols-3"
-      >
-        <GlassCard className="flex items-center gap-3 p-4">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-green-500/10">
-            <CheckCircle2 className="h-4 w-4 text-green-500" />
-          </span>
-          <div>
-            <div className="text-2xl font-bold leading-none">{kpiResolved}</div>
-            <div className="mt-0.5 text-xs text-muted-foreground">Total résolus</div>
-          </div>
-        </GlassCard>
-
-        <GlassCard className="flex items-center gap-3 p-4">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10">
-            <TrendingUp className="h-4 w-4 text-primary" />
-          </span>
-          <div>
-            <div className="text-2xl font-bold leading-none">
-              {kpiSlaRate != null ? `${kpiSlaRate}%` : "—"}
-            </div>
-            <div className="mt-0.5 text-xs text-muted-foreground">Taux de délai respecté</div>
-          </div>
-        </GlassCard>
-
-        <GlassCard className="flex items-center gap-3 p-4">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-muted">
-            <Clock className="h-4 w-4 text-muted-foreground" />
-          </span>
-          <div>
-            <div className="text-2xl font-bold leading-none">
-              {kpiAvgResolution != null ? `${kpiAvgResolution}h` : "—"}
-            </div>
-            <div className="mt-0.5 text-xs text-muted-foreground">Délai moyen résolution</div>
-          </div>
-        </GlassCard>
-      </motion.div>
-
-      {/* ── Filtres ────────────────────────────────────────────────────────── */}
-      <motion.div
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.08 }}
-      >
-        <GlassCard className="p-4">
-          <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={handleSearch}
-                placeholder="Rechercher par référence, titre, demandeur…"
-                className="h-11 pl-9"
-              />
-            </div>
-            <Select value={filterStatus} onValueChange={setFilterStatus}>
-              <SelectTrigger className="h-11 w-full sm:w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Tous les statuts</SelectItem>
-                {ACTIVE_STATUSES.map((s) => (
-                  <SelectItem key={s} value={s}>{statusLabels[s]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={filterPriority} onValueChange={setFilterPriority}>
-              <SelectTrigger className="h-11 w-full sm:w-36">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Toutes priorités</SelectItem>
-                {(["critical", "high", "medium", "low"] as Priority[]).map((p) => (
-                  <SelectItem key={p} value={p}>{priorityLabels[p]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </GlassCard>
-      </motion.div>
 
       {/* ── Liste / Grille ─────────────────────────────────────────────────── */}
       <AsyncSwap
@@ -336,16 +120,16 @@ function MyTicketsPage() {
               {isError ? (
                 <AlertTriangle className="h-6 w-6 text-muted-foreground" />
               ) : (
-                <CheckCircle2 className="h-6 w-6 text-emerald-500" />
+                <Send className="h-6 w-6 text-muted-foreground" />
               )}
             </motion.div>
             <h3 className="font-semibold">
-              {isError ? "Erreur de chargement" : "Aucun ticket en cours"}
+              {isError ? "Erreur de chargement" : "Aucun ticket transmis"}
             </h3>
             <p className="mt-1 text-sm text-muted-foreground">
               {isError
-                ? "Impossible de charger vos tickets."
-                : "Vous n'avez aucun ticket actif assigné pour le moment."}
+                ? "Impossible de charger vos tickets transmis."
+                : "Vous n'avez encore transmis le traitement d'aucun ticket."}
             </p>
           </GlassCard>
         }
@@ -384,7 +168,7 @@ function MyTicketsPage() {
                       <div className="min-w-0 flex-1 space-y-1.5">
                         <div className="flex flex-wrap items-center gap-2">
                           <Link
-                            to="/app/my-tickets/tickets/$id"
+                            to={detailRoute}
                             params={{ id: r.id }}
                             className="font-mono text-[11px] text-primary hover:underline"
                           >
@@ -397,14 +181,9 @@ function MyTicketsPage() {
                               <RotateCcw className="h-2.5 w-2.5" /> Réouvert
                             </span>
                           )}
-                          {r.priority === "critical" && (
-                            <span className="inline-flex items-center rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-bold text-destructive">
-                              CRITIQUE
-                            </span>
-                          )}
                         </div>
                         <Link
-                          to="/app/my-tickets/tickets/$id"
+                          to={detailRoute}
                           params={{ id: r.id }}
                           className="block font-semibold leading-snug hover:text-primary"
                         >
@@ -479,7 +258,7 @@ function MyTicketsPage() {
                           </div>
                         </div>
 
-                        <Link to="/app/my-tickets/tickets/$id" params={{ id: r.id }} className="hover:text-primary">
+                        <Link to={detailRoute} params={{ id: r.id }} className="hover:text-primary">
                           <p className="line-clamp-2 font-semibold leading-snug">{r.title}</p>
                         </Link>
                         <div className={cn("flex items-center gap-1.5 text-xs font-medium", priorityDotClass[r.priority])}>

@@ -20,6 +20,7 @@ import { Route as AppRouteImport } from './routes/app'
 import { Route as AdminLoginRouteImport } from './routes/admin-login'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppIndexRouteImport } from './routes/app.index'
+import { Route as AppTransmittedRouteImport } from './routes/app.transmitted'
 import { Route as AppSupervisionRouteImport } from './routes/app.supervision'
 import { Route as AppStrategicDashboardRouteImport } from './routes/app.strategic-dashboard'
 import { Route as AppSlaCenterRouteImport } from './routes/app.sla-center'
@@ -117,6 +118,11 @@ const IndexRoute = IndexRouteImport.update({
 const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppTransmittedRoute = AppTransmittedRouteImport.update({
+  id: '/transmitted',
+  path: '/transmitted',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSupervisionRoute = AppSupervisionRouteImport.update({
@@ -362,6 +368,7 @@ export interface FileRoutesByFullPath {
   '/app/sla-center': typeof AppSlaCenterRoute
   '/app/strategic-dashboard': typeof AppStrategicDashboardRoute
   '/app/supervision': typeof AppSupervisionRoute
+  '/app/transmitted': typeof AppTransmittedRoute
   '/app/': typeof AppIndexRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/communication': typeof AppAdminCommunicationRoute
@@ -417,6 +424,7 @@ export interface FileRoutesByTo {
   '/app/sla-center': typeof AppSlaCenterRoute
   '/app/strategic-dashboard': typeof AppStrategicDashboardRoute
   '/app/supervision': typeof AppSupervisionRoute
+  '/app/transmitted': typeof AppTransmittedRoute
   '/app': typeof AppIndexRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/communication': typeof AppAdminCommunicationRoute
@@ -474,6 +482,7 @@ export interface FileRoutesById {
   '/app/sla-center': typeof AppSlaCenterRoute
   '/app/strategic-dashboard': typeof AppStrategicDashboardRoute
   '/app/supervision': typeof AppSupervisionRoute
+  '/app/transmitted': typeof AppTransmittedRoute
   '/app/': typeof AppIndexRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/communication': typeof AppAdminCommunicationRoute
@@ -532,6 +541,7 @@ export interface FileRouteTypes {
     | '/app/sla-center'
     | '/app/strategic-dashboard'
     | '/app/supervision'
+    | '/app/transmitted'
     | '/app/'
     | '/app/admin/audit'
     | '/app/admin/communication'
@@ -587,6 +597,7 @@ export interface FileRouteTypes {
     | '/app/sla-center'
     | '/app/strategic-dashboard'
     | '/app/supervision'
+    | '/app/transmitted'
     | '/app'
     | '/app/admin/audit'
     | '/app/admin/communication'
@@ -643,6 +654,7 @@ export interface FileRouteTypes {
     | '/app/sla-center'
     | '/app/strategic-dashboard'
     | '/app/supervision'
+    | '/app/transmitted'
     | '/app/'
     | '/app/admin/audit'
     | '/app/admin/communication'
@@ -764,6 +776,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/app/'
       preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/transmitted': {
+      id: '/app/transmitted'
+      path: '/transmitted'
+      fullPath: '/app/transmitted'
+      preLoaderRoute: typeof AppTransmittedRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/supervision': {
@@ -1139,6 +1158,7 @@ interface AppRouteChildren {
   AppSlaCenterRoute: typeof AppSlaCenterRoute
   AppStrategicDashboardRoute: typeof AppStrategicDashboardRoute
   AppSupervisionRoute: typeof AppSupervisionRoute
+  AppTransmittedRoute: typeof AppTransmittedRoute
   AppIndexRoute: typeof AppIndexRoute
   AppRequestsIdRoute: typeof AppRequestsIdRoute
   AppRequestsHistoryRoute: typeof AppRequestsHistoryRoute
@@ -1169,6 +1189,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppSlaCenterRoute: AppSlaCenterRoute,
   AppStrategicDashboardRoute: AppStrategicDashboardRoute,
   AppSupervisionRoute: AppSupervisionRoute,
+  AppTransmittedRoute: AppTransmittedRoute,
   AppIndexRoute: AppIndexRoute,
   AppRequestsIdRoute: AppRequestsIdRoute,
   AppRequestsHistoryRoute: AppRequestsHistoryRoute,

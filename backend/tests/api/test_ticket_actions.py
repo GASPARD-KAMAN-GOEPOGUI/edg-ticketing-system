@@ -223,7 +223,7 @@ def test_agent_scope_accepts_explicit_queue_unity_scope_only():
         )
 
 
-def test_agent_can_only_self_assign_free_ticket():
+def test_agent_can_assign_any_operational_handler_in_scope():
     current_actor = actor("agent", id=2, unity_id=1)
     current_ticket = ticket(status="new", unity_id=1, assignee_id=None)
 
@@ -234,19 +234,34 @@ def test_agent_can_only_self_assign_free_ticket():
         target_status="assigned",
     )
     assert_assignment_allowed(current_actor, current_ticket, assignee_id=2)
+    assert_assignment_allowed(
+        current_actor,
+        current_ticket,
+        assignee_id=3,
+        target_unity_id=1,
+        target_role="chief-service",
+    )
 
     with pytest.raises(ForbiddenException):
-        assert_assignment_allowed(current_actor, current_ticket, assignee_id=3)
-
-    with pytest.raises(BusinessException):
         assert_assignment_allowed(
             current_actor,
-            ticket(status="assigned", unity_id=1, assignee_id=3),
-            assignee_id=2,
+            current_ticket,
+            assignee_id=3,
+            target_unity_id=2,
+            target_role="chief-service",
+        )
+
+    with pytest.raises(ForbiddenException):
+        assert_assignment_allowed(
+            current_actor,
+            current_ticket,
+            assignee_id=6,
+            target_unity_id=None,
+            target_role="admin",
         )
 
 
-def test_chief_and_admin_can_assign_other_agents():
+def test_chief_and_admin_can_assign_operational_handlers():
     current_ticket = ticket(status="qualified", unity_id=1, assignee_id=None)
 
     assert_assignment_allowed(
@@ -254,14 +269,14 @@ def test_chief_and_admin_can_assign_other_agents():
         current_ticket,
         assignee_id=2,
         target_unity_id=1,
-        target_role="agent",
+        target_role="director",
     )
     assert_assignment_allowed(
         actor("admin", id=6, unity_id=None),
         current_ticket,
         assignee_id=2,
         target_unity_id=99,
-        target_role="chief",
+        target_role="admin",
     )
 
     with pytest.raises(ForbiddenException):
@@ -279,36 +294,38 @@ def test_chief_and_admin_can_assign_other_agents():
             current_ticket,
             assignee_id=2,
             target_unity_id=1,
-            target_role="chief",
+            target_role="user",
         )
 
 
-def test_chief_departement_can_no_longer_assign():
-    """Lot 3.1 (narrowing valide) : chief-departement ne peut plus affecter/reaffecter
-    un agent, quel que soit le perimetre fourni — il pilote plusieurs services mais
-    ne descend plus au niveau assignation individuelle."""
+def test_department_chief_and_director_can_assign_within_scope():
+    """Philosophie collaborative : chief-departement et director sont des
+    intervenants operationnels et peuvent assigner dans leur perimetre."""
     current_ticket = ticket(status="qualified", unity_id=2, assignee_id=None)
 
-    with pytest.raises(ForbiddenException):
-        assert_action_allowed("chief-departement", "assign")
+    assert_action_allowed("chief-departement", "assign")
+    assert_assignment_allowed(
+        actor("chief-departement", id=3, unity_id=1),
+        current_ticket,
+        assignee_id=2,
+        target_unity_id=2,
+        target_role="agent-support",
+        allowed_scope_unity_ids={1, 2, 3},
+    )
+    assert_action_allowed("director", "assign")
+    assert_assignment_allowed(
+        actor("director", id=4, unity_id=1),
+        current_ticket,
+        assignee_id=5,
+        target_unity_id=3,
+        target_role="chief-departement",
+        allowed_scope_unity_ids={1, 2, 3},
+    )
 
     with pytest.raises(ForbiddenException):
         assert_assignment_allowed(
             actor("chief-departement", id=3, unity_id=1),
-            current_ticket,
-            assignee_id=2,
-            target_unity_id=2,
-            target_role="agent-support",
-            allowed_scope_unity_ids={1, 2, 3},
-        )
-
-    # Regression : chief-service reste fonctionnel, borne a sa propre unite (le
-    # parametre allowed_scope_unity_ids, meme fourni par erreur, n'a plus d'effet).
-    assert_action_allowed("chief-service", "assign")
-    with pytest.raises(ForbiddenException):
-        assert_assignment_allowed(
-            actor("chief-service", id=3, unity_id=1),
-            current_ticket,
+            ticket(status="qualified", unity_id=99, assignee_id=None),
             assignee_id=2,
             target_unity_id=2,
             target_role="agent-support",

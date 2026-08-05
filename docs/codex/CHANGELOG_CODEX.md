@@ -1,5 +1,157 @@
 # Changelog Codex
 
+## 2026-08-05 - Correctif affichage : noms de services dans Centre SLA
+
+Demande: dans `/app/sla-center`, afficher les noms des services plutot que les valeurs/id bruts dans "SLA par service" et "Tickets en depassement SLA".
+
+Correction: `app.sla-center.tsx` resout les libelles de services via `/units`, complete les unites manquantes par `GET /units/{id}` si necessaire, et utilise le libelle service aussi pour `chief-service`/`chief-departement` dans le tableau des tickets en depassement.
+
+Fichiers modifiés:
+- `frontend/src/routes/app.sla-center.tsx`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Verification: `npm run build` dans `frontend/` OK. Warnings Vite/Rollup habituels sur taille de chunks/imports externes inutilises, sans echec de build.
+
+## 2026-08-05 - Mise en conformite : File d'attente collaborative
+
+Demande: aligner la File d'attente avec la philosophie de traitement collaboratif : tous les roles operationnels peuvent prendre un ticket, etre destinataires d'une assignation et devenir intervenant courant.
+
+Module: MOD-AGENT / MOD-CHIEF / MOD-DIRECTION — File d'attente (`/app/queue`) et Ma boite de traitement (`/app/my-tickets`).
+
+Correction:
+- backend: `qualify` et `assign` autorisent desormais `agent-support`, `chief-service`, `chief-departement`, `director`, `admin`.
+- backend: l'assignation valide que le destinataire porte un role operationnel et reste dans le perimetre organisationnel de l'acteur non-admin ; `dg` reste explicitement exclu et un destinataire `admin` ne peut etre choisi que par un `admin`.
+- frontend: le Directeur n'est plus en lecture seule dans la File d'attente ; le bouton "Prendre le ticket" et le formulaire "Assigner" sont disponibles pour les roles operationnels.
+- frontend: la liste "Personne cible" inclut les roles operationnels de la direction selectionnee.
+
+Fichiers modifiés:
+- `backend/api/core/ticket_actions.py`
+- `backend/api/routes/RouteRequest.py`
+- `backend/api/services/ServiceRequest.py`
+- `frontend/src/routes/app.queue.tsx`
+- `frontend/src/lib/capabilities.ts`
+- `docs/codex/API_INDEX.md`
+- `docs/codex/BUSINESS_RULES.md`
+- `docs/codex/FEATURE_INDEX.md`
+- `docs/codex/ROLE_INDEX.md`
+- `docs/codex/ROUTE_INDEX.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Verification: `python -m compileall backend\api\core\ticket_actions.py backend\api\routes\RouteRequest.py backend\api\services\ServiceRequest.py` OK ; `backend\venv\Scripts\pytest.exe backend\tests\api\test_ticket_actions.py backend\tests\api\test_qualify_narrowing.py backend\tests\api\test_lot3_narrowing.py -q` OK (79 passed, 1 warning Starlette/python_multipart) ; `npm run build` dans `frontend/` OK.
+
+## 2026-08-05 - Correctif : Ma boite limitee aux tickets assignes a l'utilisateur courant
+
+Demande: `Ma boite de traitement` doit afficher uniquement les tickets que l'utilisateur connecte a pris depuis la File d'attente ou qui lui ont ete assignes/transmis.
+
+Module: MOD-AGENT / MOD-CHIEF — Ma boite de traitement (`/app/my-tickets`).
+
+Correction: la requete principale et les KPI envoient explicitement `assignee_id=<utilisateur courant>` et excluent les statuts terminaux (`resolved`, `closed`, `cancelled`, `rejected`). Une garde d'affichage cote frontend filtre aussi les lignes dont `assigneeId` ne correspond pas a l'utilisateur courant, afin d'eviter tout affichage par simple perimetre service/departement/direction.
+
+Fichiers modifiés:
+- `frontend/src/routes/app.my-tickets.tsx`
+- `docs/codex/BUSINESS_RULES.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Verification: `npm run build` dans `frontend/` reussi. Warnings Vite/Rollup habituels sur taille de chunks/imports externes inutilises, sans echec de build.
+
+## 2026-08-05 - Correctif : Ma boite masque les tickets pris apres retrait de "Reouvertures"
+
+Demande: apres avoir pris un ticket depuis la File d'attente, il n'apparaissait pas dans "Ma boite de traitement" pour poursuivre le traitement.
+
+Module: MOD-AGENT / MOD-CHIEF — Ma boite de traitement (`/app/my-tickets`).
+
+Cause: l'ancien raccourci menu "Reouvertures" ouvrait `/app/my-tickets?status=reopened` et persistait ce filtre dans `sessionStorage` (`mt:status`). Apres suppression du menu, une session utilisateur pouvait conserver `mt:status="reopened"` ; Ma boite chargeait alors uniquement les tickets reouverts et masquait le ticket fraichement pris, qui passe normalement en `assigned`.
+
+Correction: au chargement normal de `/app/my-tickets` sans parametre `status`, un nettoyage de compatibilite remet une seule fois le filtre legacy `reopened` a `all`. Les tickets `reopened` restent dans la liste principale quand le filtre est `all`, et le filtre manuel par statut reste disponible ensuite.
+
+Fichiers modifiés:
+- `frontend/src/routes/app.my-tickets.tsx`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Verification: `npm run build` dans `frontend/` reussi. Warnings Vite/Rollup habituels sur taille de chunks/imports externes inutilises, sans echec de build.
+
+## 2026-08-05 - Navigation : suppression du raccourci "Reouvertures"
+
+Demande: supprimer l'entree de menu "Reouvertures" tout en conservant les tickets au statut `reopened` dans "Ma boite de traitement".
+
+Module: navigation transverse (`app-layout.tsx`) / MOD-AGENT-MOD-CHIEF.
+
+Correction: retrait des trois items de navigation "Reouvertures" (`/app/my-tickets?status=reopened`, `/app/chief-inbox?tab=reopen`, `/app/department-inbox?tab=reopen`). Aucun filtre de donnees n'est modifie: `/app/my-tickets` conserve deja `reopened` dans ses statuts actifs et continue donc d'afficher ces tickets dans la boite principale.
+
+Fichiers modifiés:
+- `frontend/src/components/app-layout.tsx`
+- `docs/codex/ROUTE_INDEX.md`
+- `docs/codex/ROLE_INDEX.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Verification: `rg "Réouvertures|Reouvertures|RotateCcw" frontend/src/components/app-layout.tsx` ne retourne plus d'occurrence ; `npm run build` dans `frontend/` — succès. Warnings Vite/Rollup existants sur taille de chunks/imports externes inutilisés, sans échec de build.
+
+## 2026-08-05 - Correctif : prise de ticket vers Ma boîte de traitement
+
+Demande: quand un utilisateur prend un ticket depuis la File d'attente, le ticket doit sortir du triage et apparaître dans "Ma boîte de traitement" (`/app/my-tickets`) pour pouvoir être traité.
+
+Module: MOD-AGENT / MOD-CHIEF — File d'attente et boîte de traitement personnelle.
+
+Cause: côté frontend, le bouton "Prendre le ticket" construisait la payload seulement si une direction ou un service était déjà disponible sur la carte (`takeDirectionId || takeUnitId`). Or un ticket en triage peut légitimement ne pas porter encore cette orientation complète ; dans ce cas l'auto-prise restait bloquée côté UI alors que le backend sait qualifier avec `assignee_id` seul, sortir le ticket du triage et le rendre visible via `/requests?assignee_id=<moi>`.
+
+Correction: `app.queue.tsx` autorise l'auto-prise dès que l'utilisateur est connecté et que le statut est qualifiable, avec fallback catégorie `autre` si la carte n'a pas de catégorie. Les champs `direction_id`/`unit_id` restent envoyés quand ils existent, mais ne bloquent plus la prise en charge.
+
+Fichiers modifiés:
+- `frontend/src/routes/app.queue.tsx`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Vérification: `npm run build` dans `frontend/` — succès. Warnings Vite/Rollup existants sur taille de chunks/imports externes inutilisés, sans échec de build.
+
+## 2026-08-05 - Fonctionnalité "Tickets transmis" (BR-TRANSMIT-001)
+
+Demande: rendre fonctionnel l'item de menu "Tickets transmis" (jusqu'ici préparé mais désactivé) — une liste personnelle de tous les tickets que l'utilisateur connecté a lui-même transmis à quelqu'un d'autre à un moment de leur historique, peu importe qui les détient aujourd'hui ou leur statut actuel.
+
+Module: MOD-WORKFLOW / MOD-AGENT / MOD-CHIEF / MOD-DIRECTION (lecture seule, complète BR-TRANSMIT-001 sans le reconstruire).
+
+Cause/analyse préalable: quand `transmit_treatment()` écrit l'événement `workflow_detail` (`event_type="treatment_transmitted"`), `RepositoryWorkflowDetail.create_event()` réaffecte la colonne réelle `agent_id` au **destinataire** (`dest_id`), jamais à l'émetteur — l'identité de l'émetteur ne vit que dans le JSON `infos.actor_id`, sans colonne dédiée ni index. Aucune méthode de requête existante ne filtrait sur ce champ pour une liste (seul précédent : requêtes SQL brutes `JSON_EXTRACT`/`JSON_UNQUOTE` dans `ServiceStats.py`, pour des agrégats).
+
+Correctif: requête SQL brute (même précédent que `ServiceStats.py`) trouvant les `request_id` distincts ayant un événement `treatment_transmitted` avec `infos.actor_id = <moi>`, dédupliqués par ticket (un ticket transmis plusieurs fois par la même personne à travers différents cycles n'apparaît qu'une fois, triée par transmission la plus récente), puis hydratation via le pipeline standard existant (`RequestRepository.list(filters={"id": [...]})`) — aucun nouveau schéma de réponse, réutilise `RequestListItemResponse` tel quel.
+
+Fichiers modifiés:
+- `backend/api/repositories/RepositoryRequest.py` (`list_transmitted_by_actor`, import `text`)
+- `backend/api/services/ServiceRequest.py` (`list_transmitted_by_me`)
+- `backend/api/routes/RouteRequest.py` (`GET /requests/transmitted`, inséré avant le catch-all `/{id}`, scope `agent-support/chief-service/chief-departement/director/admin`)
+- `frontend/src/lib/api/requests.ts` (`fetchTransmittedByMe`)
+- `frontend/src/routes/app.transmitted.tsx` (nouvelle page dédiée — pas un 4e onglet greffé sur `app.my-tickets.tsx`, dont le garde de rôle est plus étroit et les KPI sémantiquement liés à "assigné à moi", disjoint de "j'ai transmis")
+- `frontend/src/components/app-layout.tsx` (item de nav "Tickets transmis" activé, `disabled` retiré, pointe vers `/app/transmitted`)
+
+Verification: `npx tsc --noEmit` et `npm run build` — 0 nouvelle erreur. Test manuel réel sur le backend en cours d'exécution : `GET /requests/transmitted` authentifié en tant que Fatoumata Conté (agent-support ayant transmis plusieurs tickets lors de recettes précédentes) → 8 tickets retournés correctement, pagination vérifiée (page 2/limit 3 → bon offset, bon total/pages). Aucune migration Alembic, aucun fichier `ticket_actions.py`/RBAC touché.
+
+Point signalé (non bloquant, chantier séparé) : requête `JSON_EXTRACT` non indexée sur `workflow_detail` (même style que l'existant `ServiceStats.py`, pas de nouveau risque introduit) — un index composite `(event_type, deleted_at)` accélérerait cette requête et les agrégats existants si le volume le justifie un jour. Risque de 403 au clic sur un ticket dont l'unité a changé depuis la transmission — limitation préexistante de `_check_request_access`, non introduite ni aggravée par cette fonctionnalité.
+
+## 2026-08-05 - Refonte de la navigation par rôle — "Mon travail" (philosophie du traitement collaboratif)
+
+Demande: faire évoluer l'organisation des menus pour refléter la philosophie "le traitement d'un ticket n'est plus l'apanage d'un rôle hiérarchique — tous les rôles opérationnels sont des intervenants potentiels ; ce qui les différencie est leur niveau de responsabilité en supervision/pilotage/analyse/administration, pas leur capacité à traiter." Le groupe de menu "Traitement" devient "Mon travail" avec un socle commun (Ma boîte de traitement, File d'attente, Réouvertures, Tickets transmis) pour agent-support, chief-service, chief-departement, director et admin.
+
+Module: navigation transverse (`app-layout.tsx`) + pages de traitement (`app.queue.tsx`, `app.my-tickets.tsx`, `app.chief-inbox.tsx`/`app.department-inbox.tsx`, `app.direction.tsx`, `app.supervision.tsx`).
+
+Analyse préalable (3 agents d'exploration en parallèle, cf. plan approuvé avant implémentation) : deux décisions produit ont été prises AVANT tout codage — (1) le Directeur ne reçoit aucune nouvelle capacité RBAC : les règles backend `BR-TRANSMIT-001` (`ticket_actions.py`) qui l'excluent aujourd'hui de `qualify`/`assign` restent inchangées ; (2) on réorganise l'existant en priorité — aucune nouvelle page n'est construite pour les éléments sans équivalent actuel ("Tickets transmis", "Activité du service/département", accès Directions/Départements/Services pour le Directeur, scission Statistiques/Rapports).
+
+Correctif:
+- **Ré-étiquetage et recatégorisation** (`app-layout.tsx`) : groupe "Traitement" → "Mon travail" ; "Centre de répartition"/"Centre de pilotage" reclassés vers "Pilotage" (ce sont des outils de répartition/supervision, pas du traitement personnel) ; "Rapports" reclassé vers un nouveau groupe "Analyse" (4 entrées distinctes "Rapports Service/Département/Direction"/"Rapports" remplaçant l'ancien ternaire de libellé conditionnel) ; "Vue direction" → "Ma boîte de traitement" (c'est déjà l'outil de traitement du directeur) ; "Tableau de bord stratégique" → "Tableau de bord DSI" ; "Vue globale" → "Supervision globale".
+- **Correctif d'accès frontend** (même classe de bug que celui corrigé plus tôt le 2026-08-05 pour chief-service/`/app/my-tickets`) : `chief-departement` gagne l'accès à `/app/my-tickets` et `/app/queue` — le backend autorisait déjà ce rôle sur l'action `qualify` et le bypass de périmètre triage (`ticket_actions.py`), seul le garde-fou frontend (`beforeLoad`) l'excluait artificiellement.
+- **Accès lecture seule pour `director`** : `/app/queue` lui est désormais ouvert (le backend autorise déjà `GET /requests/queue` pour ce rôle), mais les actions "Prendre le ticket"/"Assigner" sont masquées spécifiquement pour lui (`canTakeRole`, `canUseAssignForm` dans `app.queue.tsx`) — le backend les bloque de toute façon (`qualify`/`assign` n'incluent pas `director` dans `ACTION_ALLOWED_ROLES`) ; masquer évite une erreur 403 confuse sans accorder de nouvelle capacité.
+- **Deep-links additifs vers des filtres/onglets déjà existants** (aucune nouvelle vue de données) : "Réouvertures" → `/app/my-tickets?status=reopened` (agent-support/admin) ou `/app/chief-inbox?tab=reopen` / `/app/department-inbox?tab=reopen` (chief-service/chief-departement, onglet déjà existant) ; "Escalades" → même mécanisme `?tab=escalated`, ou ancre `?section=escalades-l3` vers la section déjà existante de `/app/direction` (director) ; "Mon équipe" → ancre `?section=equipe` vers la section "Charge par agent" déjà existante de `/app/supervision`. Lecture des paramètres via `URLSearchParams(window.location.search)` dans un `useEffect` au montage (aucun `validateSearch` TanStack Router préexistant dans le projet — cohérent avec le style déjà utilisé ailleurs, ex. `public-layout.tsx`).
+- **"Tickets transmis"** : préparé mais désactivé (item grisé, non cliquable, tooltip "bientôt disponible") — même traitement que le bouton "Exporter le journal" du Journal d'intervention (précédent déjà validé) ; aucune vue "tickets que j'ai personnellement transmis" n'existe côté données, différé à un chantier séparé.
+
+Fichiers modifiés:
+- `frontend/src/components/app-layout.tsx` (navItems, menu mobile, rendu des items désactivés/deep-link)
+- `frontend/src/routes/app.queue.tsx`, `app.queue_.tickets.$id.tsx` (rôles + lecture seule director)
+- `frontend/src/routes/app.my-tickets.tsx`, `app.my-tickets_.tickets.$id.tsx` (rôles + deep-link `?status=`)
+- `frontend/src/routes/app.chief-inbox.tsx` (deep-link `?tab=`, couvre aussi `app.department-inbox.tsx` qui réutilise ce composant)
+- `frontend/src/routes/app.direction.tsx` (ancre `escalades-l3`)
+- `frontend/src/routes/app.supervision.tsx` (ancre `equipe`)
+- `docs/codex/ROLE_INDEX.md` (pages pro par rôle mises à jour)
+
+Verification: `npx tsc --noEmit` et `npm run build` — 0 nouvelle erreur sur les 9 fichiers modifiés (les erreurs pré-existantes dans `app.supervision.tsx`/`app.requests.index.tsx`/`app.sla-center.tsx` restent identiques en nombre, non liées à ce chantier). `git diff --stat backend/` vide — aucune règle de sécurité/RBAC backend modifiée, conformément à la décision produit.
+
+Éléments différés (chantier séparé, non construits) : "Tickets transmis" (nécessite une vraie requête backend), "Activité du service/département" (aucune page ne correspond), accès Directions/Départements/Services pour le Directeur (pages admin-only, décision de permissions séparée), scission Statistiques/Rapports en deux pages distinctes, "Réouvertures"/"Escalades" pour le Directeur (aucune vue filtrée n'existe, non créée pour rester cohérent avec la décision RBAC).
+
 ## 2026-08-05 - Uniformisation terminologique "Demande" → "Ticket" (UI/UX + documentation utilisateur)
 
 Demande: uniformiser le vocabulaire métier principal de l'application sur le terme ITSM standard "Ticket", en remplaçant "Demande" partout où ce mot désigne l'objet principal traité par le système (menus, titres, boutons, pages, modales, notifications, messages de succès/erreur, infobulles, libellés de formulaires, breadcrumbs, exports, base de connaissance) — à l'exclusion des routes API, tables SQL, modèles backend, colonnes, endpoints, DTO et migrations (non renommés), et à l'exclusion des usages où "demande"/"demandeur" désigne une catégorie métier distincte ("Demande de service", "Demande de réouverture", "Demande d'informations") ou le rôle de la personne (le "demandeur").

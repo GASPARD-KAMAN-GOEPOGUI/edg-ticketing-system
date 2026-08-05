@@ -364,6 +364,20 @@ async def list_sla_breached(
     return await svc.list_sla_breached(page=page, limit=limit)
 
 
+@router.get("/transmitted", response_model=PaginatedResponse[RequestListItemResponse])
+async def list_transmitted_by_me(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    actor=_staff,
+    svc: RequestService = Depends(_svc),
+):
+    """BR-TRANSMIT-001 — tickets que l'acteur courant a personnellement transmis
+    à un moment de leur historique (peu importe le porteur actuel ou le statut).
+    Lecture seule, scope = ses propres actions passées ; ne touche à aucune
+    règle de qualification/assignation/transmission."""
+    return await svc.list_transmitted_by_me(str(actor.id), page=page, limit=limit)
+
+
 @router.get("/stats/by-status")
 async def stats_by_status(_=_staff, svc: RequestService = Depends(_svc)):
     return await svc.count_by_status()
@@ -480,10 +494,10 @@ class QualifyTriageBody(BaseModel):
 async def qualify_triage(
     id: str,
     body: QualifyTriageBody,
-    actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "admin")),
+    actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "director", "admin")),
     svc: RequestService = Depends(_svc),
 ):
-    """Qualifie une demande de triage — reserve agent-support, chief-service, chief-departement, admin."""
+    """Qualifie une demande de triage — reserve aux roles operationnels."""
     return await svc.qualify_triage(
         id,
         body.dict(exclude_none=True),
@@ -707,11 +721,10 @@ async def requester_edit(
 async def assign_request(
     id: str,
     assignee_id: str = Query(...),
-    actor=Depends(require_roles("agent-support", "chief-service", "admin")),
+    actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "director", "admin")),
     svc: RequestService = Depends(_svc),
 ):
-    """Assignation d'une demande — roles autorises : agent-support, chief-service, admin
-    (Lot 3.1 : chief-departement n'a plus acces a cette action, cf. ticket_actions.py)."""
+    """Assignation d'une demande — roles operationnels, perimetre controle par le service."""
     return await svc.assign(
         id,
         assignee_id,

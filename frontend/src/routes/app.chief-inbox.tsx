@@ -2,7 +2,7 @@ import { createFileRoute, Link, useRouterState } from "@tanstack/react-router";
 import { requireRole } from "@/lib/auth-guard";
 import { useUser } from "@/lib/session";
 import { ticketDetailRouteForList, type TicketDetailRoute } from "@/lib/ticket-navigation";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useQueries } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { GlassCard } from "@/components/glass-card";
@@ -148,6 +148,14 @@ export function ChiefInbox({ filterUnitId, onBackToOverview }: ChiefInboxProps =
   const detailRoute = ticketDetailRouteForList(listRoute);
 
   const [activeTab, setActiveTab] = useState<Tab>("assign");
+
+  // Deep-link depuis le menu "Mon travail"/"Pilotage" (Réouvertures, Escalades) —
+  // ?tab=reopen|escalated pré-sélectionne l'onglet déjà existant, sans nouvelle vue.
+  useEffect(() => {
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    if (tab === "reopen" || tab === "escalated" || tab === "assign") setActiveTab(tab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Données service ──────────────────────────────────────────────────────────
   const { data: queueData, isLoading, isError } = useQuery({
@@ -323,7 +331,7 @@ export function ChiefInbox({ filterUnitId, onBackToOverview }: ChiefInboxProps =
                       {initialsFor(agent.name)}
                     </AvatarFallback>
                   </Avatar>
-                  <span className="w-32 shrink-0 truncate text-sm">{agent.name}</span>
+                  <span className="shrink-0 whitespace-nowrap text-sm" title={agent.name}>{agent.name}</span>
                   <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
                     <div
                       className={cn(

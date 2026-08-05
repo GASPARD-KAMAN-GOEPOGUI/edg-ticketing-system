@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { requireRole } from "@/lib/auth-guard";
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { PaginationBar, usePagination } from "@/components/pagination-bar";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { GlassCard } from "@/components/glass-card";
@@ -82,6 +82,15 @@ function DirectionView() {
   const [resolveSummary, setResolveSummary]   = useState("");
   const [resolveSolution, setResolveSolution] = useState("");
   const [resolveWorkDone, setResolveWorkDone] = useState("");
+
+  // Deep-link "Escalades" (menu "Pilotage") — ?section=escalades-l3 fait défiler
+  // vers la section déjà existante, sans nouvelle vue.
+  useEffect(() => {
+    const section = new URLSearchParams(window.location.search).get("section");
+    if (!section) return;
+    document.getElementById(section)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const closeTicketModal = () => {
     setTicketModal({ type: null, ticket: null });
@@ -480,7 +489,7 @@ function DirectionView() {
       </div>
 
       {/* L3 Escalations — C3 */}
-      <GlassCard>
+      <GlassCard id="escalades-l3">
         <div className="mb-4 flex items-center gap-3">
           <h2 className="font-semibold">Escalades L3 — Arbitrage Direction</h2>
           {loadEsc ? (

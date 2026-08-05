@@ -6,6 +6,7 @@ from httpx import ASGITransport, AsyncClient
 
 from api.dependencies import get_current_user
 from api.main import app
+from tests.api.test_requests_baseline import _ensure_test_account
 
 _REQUEST_PAYLOAD_BASE = {
     "description": "Description de test pour le narrowing chief-departement (Lot 3).",
@@ -26,6 +27,7 @@ async def _create_ticket(auth_client, unity_id: int, title_suffix: str) -> str:
 
 
 async def _assign_via_admin(auth_client, request_id: str, unity_id: int, assignee_id: int) -> None:
+    await _ensure_test_account(assignee_id, unity_id=unity_id, role="agent-support")
     async with auth_client("admin") as admin_client:
         resp = await admin_client.post(
             f"/api/v1/requests/{request_id}/qualify",
@@ -43,14 +45,17 @@ async def _call_as(role_dep, method: str, url: str, json: dict | None = None):
         app.dependency_overrides.pop(get_current_user, None)
 
 
-async def test_chief_departement_cannot_call_assign_route(auth_client, unity_id):
-    request_id = await _create_ticket(auth_client, unity_id, "assign-blocked")
+async def test_chief_departement_can_call_assign_route(auth_client, unity_id):
+    """Philosophie collaborative : la porte de role laisse passer chief-departement.
+    L'assignee_id fictif peut echouer ensuite sur "compte introuvable", mais plus sur
+    l'autorisation."""
+    request_id = await _create_ticket(auth_client, unity_id, "assign-allowed")
 
     def _dept_dep():
         return SimpleNamespace(id=901, role="chief-departement", unity_id=unity_id, direction_id=None)
 
     resp = await _call_as(_dept_dep, "POST", f"/api/v1/requests/{request_id}/assign?assignee_id=902")
-    assert resp.status_code == 403, resp.text
+    assert resp.status_code != 403, resp.text
 
 
 async def test_chief_service_can_still_call_assign_route(auth_client, unity_id):

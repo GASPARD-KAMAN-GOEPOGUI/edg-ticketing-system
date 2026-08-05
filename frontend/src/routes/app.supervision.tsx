@@ -28,7 +28,7 @@ import { fetchDirections, fetchUnits } from "@/lib/api/directions-units";
 import type { Direction, Unit } from "@/lib/api/directions-units";
 import type { EscalationItem, RequestItem } from "@/lib/mock-data";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { usePagination, PaginationBar } from "@/components/pagination-bar";
 import { useUser, useRole } from "@/lib/session";
@@ -151,6 +151,15 @@ function SupervisionPage() {
   const hasOperationalScope = isChiefRole ? !!unitId : !!directionId;
   const scopeLabel = isChiefDepartment ? "département" : "service";
   const scopeTitle = isChiefDepartment ? "Supervision du département" : "Supervision du service";
+
+  // Deep-link "Mon équipe" (menu "Pilotage", chief-service) — ?section=equipe
+  // fait défiler vers la section "Charge par agent" déjà existante.
+  useEffect(() => {
+    const section = new URLSearchParams(window.location.search).get("section");
+    if (!section) return;
+    document.getElementById(section)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [teamMsg, setTeamMsg] = useState("");
   const teamMsgMut = useMutation({
     mutationFn: () => apiFetch("/announcements/team-message", {
@@ -800,7 +809,7 @@ function SupervisionPage() {
       </GlassCard>
 
       {/* ── Charge par agent (C3 : suppression mock, données réelles) ── */}
-      <GlassCard className="overflow-hidden p-0">
+      <GlassCard id="equipe" className="overflow-hidden p-0">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/40 p-5">
           <div>
             <h3 className="font-semibold">Charge par agent</h3>

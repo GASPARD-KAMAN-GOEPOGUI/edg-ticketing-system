@@ -13,6 +13,7 @@ import {
   Settings,
   BarChart3,
   Users2,
+  Users,
   BookOpen,
   ListChecks,
   TrendingUp,
@@ -42,6 +43,8 @@ import {
   Flag,
   FolderTree,
   Compass,
+  AlertTriangle,
+  Send,
 } from "lucide-react";
 import { useState, useRef, useCallback, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -76,6 +79,10 @@ type NavItem = {
   icon: typeof LayoutDashboard;
   roles: Role[];
   group?: string;
+  /** Paramètres de recherche optionnels — deep-link vers un filtre/onglet déjà existant sur la page cible. */
+  search?: Record<string, string>;
+  /** Item préparé mais pas encore fonctionnel (ex. "Tickets transmis") — affiché grisé, non cliquable. */
+  disabled?: boolean;
 };
 
 const HEADER_ROLE_LABEL: Record<Role, string> = {
@@ -118,22 +125,33 @@ const navItems: NavItem[] = [
   { to: "/app/requests",         label: "Mes tickets",      icon: Inbox,   roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Mon espace" },
   { to: "/app/requests/history", label: "Historique",        icon: History, roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Mon espace" },
 
-  // ── Agent / Chef ─────────────────────────────────────────────────────────
-  { to: "/app/chief-inbox",      label: "Centre de répartition", icon: ClipboardList, roles: ["chief-service"],                   group: "Traitement" },
-  { to: "/app/department-inbox", label: "Centre de pilotage",   icon: ClipboardList, roles: ["chief-departement"],                group: "Traitement" },
-  { to: "/app/my-tickets",  label: "Mes tickets",          icon: Ticket,          roles: ["agent-support"],                   group: "Traitement" },
-  { to: "/app/queue",       label: "File d'attente",       icon: ListChecks,      roles: ["agent-support", "chief-service"], group: "Traitement" },
+  // ── Mon travail — socle commun de traitement, identique pour tous les rôles
+  //    opérationnels (le traitement n'est plus différenciateur, cf. philosophie
+  //    du workflow collaboratif dynamique). "Ma boîte de traitement" pointe vers
+  //    la page où CE rôle traite concrètement des tickets aujourd'hui — pour le
+  //    directeur c'est déjà /app/direction (arbitrage/résolution), pas my-tickets.
+  { to: "/app/my-tickets",  label: "Ma boîte de traitement", icon: Ticket,       roles: ["agent-support", "chief-service", "chief-departement", "admin"], group: "Mon travail" },
+  { to: "/app/direction",   label: "Ma boîte de traitement", icon: Ticket,       roles: ["director"],                                                     group: "Mon travail" },
+  { to: "/app/queue",       label: "File d'attente",         icon: ListChecks,   roles: ["agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Mon travail" },
+  { to: "/app/transmitted", label: "Tickets transmis", icon: Send, roles: ["agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Mon travail" },
 
-  // ── Chef de service ───────────────────────────────────────────────────────
+  // ── Pilotage — supervision/répartition, distinct du traitement personnel ──
+  { to: "/app/chief-inbox",      label: "Centre de répartition", icon: ClipboardList, roles: ["chief-service"],                   group: "Pilotage" },
+  { to: "/app/department-inbox", label: "Centre de pilotage",    icon: ClipboardList, roles: ["chief-departement"],                group: "Pilotage" },
   { to: "/app/supervision", label: "Supervision", icon: ShieldAlert, roles: ["chief-service", "chief-departement", "director"], group: "Pilotage" },
-
-  // ── Direction / pilotage global ───────────────────────────────────────────
-  { to: "/app/direction",  label: "Vue direction", icon: Building2,  roles: ["director"],                          group: "Pilotage" },
-  // Lot 4 — additif, ne retire aucun accès existant à director.
-  { to: "/app/strategic-dashboard", label: "Tableau de bord stratégique", icon: Compass, roles: ["director"],      group: "Pilotage" },
-  { to: "/app/dg",         label: "Vue globale",   icon: TrendingUp, roles: ["admin"],                             group: "Pilotage" },
+  { to: "/app/supervision", label: "Mon équipe", icon: Users, roles: ["chief-service"], group: "Pilotage", search: { section: "equipe" } },
+  { to: "/app/chief-inbox",      label: "Escalades", icon: AlertTriangle, roles: ["chief-service"],     group: "Pilotage", search: { tab: "escalated" } },
+  { to: "/app/department-inbox", label: "Escalades", icon: AlertTriangle, roles: ["chief-departement"], group: "Pilotage", search: { tab: "escalated" } },
+  { to: "/app/direction",        label: "Escalades", icon: AlertTriangle, roles: ["director"],          group: "Pilotage", search: { section: "escalades-l3" } },
+  { to: "/app/strategic-dashboard", label: "Tableau de bord DSI", icon: Compass, roles: ["director"],   group: "Pilotage" },
+  { to: "/app/dg",         label: "Supervision globale", icon: TrendingUp, roles: ["admin"],            group: "Pilotage" },
   { to: "/app/sla-center", label: "Centre SLA",    icon: AlarmClock, roles: ["chief-service", "chief-departement", "director", "admin"],       group: "Pilotage" },
-  { to: "/app/reports",    label: "Rapports",      icon: BarChart3,  roles: ["chief-service", "chief-departement", "director", "admin"],       group: "Pilotage" },
+
+  // ── Analyse — rapports/statistiques, séparé du pilotage opérationnel ──────
+  { to: "/app/reports", label: "Rapports Service",     icon: BarChart3, roles: ["chief-service"],      group: "Analyse" },
+  { to: "/app/reports", label: "Rapports Département", icon: BarChart3, roles: ["chief-departement"],  group: "Analyse" },
+  { to: "/app/reports", label: "Rapports Direction",   icon: BarChart3, roles: ["director"],           group: "Analyse" },
+  { to: "/app/reports", label: "Rapports",             icon: BarChart3, roles: ["admin"],               group: "Analyse" },
 
   // ── Admin — Utilisateurs ──────────────────────────────────────────────────
   { to: "/app/admin/users", label: "Utilisateurs & Rôles", icon: Users2, roles: ["admin"], group: "Utilisateurs" },
@@ -175,6 +193,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
     : sessionUser?.name;
   const realtimeStatus = useRealtimeStatus();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const currentSearch = useRouterState({ select: (s) => s.location.search }) as Record<string, unknown>;
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -217,15 +236,31 @@ export function AppLayout({ children }: { children: ReactNode }) {
   }, {});
   const groupKeys = Object.keys(grouped);
 
-  // Selectionne uniquement l'item le plus spécifique qui correspond au pathname
-  // (évite que /app/requests soit actif en même temps que /app/requests/history)
-  const activeNavTo = items.reduce<string | null>((best, item) => {
+  // Sélectionne uniquement l'item le plus spécifique qui correspond au pathname
+  // (évite que /app/requests soit actif en même temps que /app/requests/history).
+  const bestTo = items.reduce<string | null>((best, item) => {
     const matches =
       pathname === item.to ||
       (item.to !== "/app" && pathname.startsWith(item.to + "/"));
     if (!matches) return best;
     return !best || item.to.length > best.length ? item.to : best;
   }, null);
+
+  // Plusieurs items ("Escalades", "Mon équipe"…) pointent volontairement
+  // vers la même route qu'un autre item (deep-link ?tab=/?status=/
+  // ?section= vers un onglet/filtre déjà existant) — départager avec le pathname
+  // seul allumerait tous les items partageant ce "to" en même temps. On ne
+  // retient donc actif que celui dont les paramètres de recherche (s'il en a)
+  // correspondent exactement à l'URL courante ; à défaut, l'item "par défaut"
+  // (sans search) de cette route.
+  const matchesSearch = (item: NavItem) =>
+    !item.search || Object.entries(item.search).every(([k, v]) => String(currentSearch?.[k] ?? "") === v);
+  const sameToItems = items.filter((i) => i.to === bestTo);
+  const activeItem =
+    sameToItems.find((i) => i.search && matchesSearch(i)) ??
+    sameToItems.find((i) => !i.search) ??
+    null;
+  const activeNavKey = activeItem ? `${activeItem.to}-${activeItem.label}` : null;
 
   return (
     <TooltipProvider delayDuration={120}>
@@ -303,11 +338,26 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
                   <ul className="space-y-0.5">
                     {list.map((item) => {
-                      const active = activeNavTo === item.to;
+                      const active = !item.disabled && activeNavKey === `${item.to}-${item.label}`;
 
-                      const link = (
+                      const link = item.disabled ? (
+                        <span
+                          className={cn(
+                            "group relative flex cursor-not-allowed items-center rounded-xl py-2.5 text-sm font-medium opacity-45",
+                            "justify-center px-2",
+                            !collapsed && "xl:justify-start xl:gap-3 xl:px-3",
+                            "text-foreground/70",
+                          )}
+                        >
+                          <item.icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          {!collapsed && (
+                            <span className="hidden xl:block truncate">{item.label}</span>
+                          )}
+                        </span>
+                      ) : (
                         <Link
                           to={item.to}
+                          search={item.search}
                           className={cn(
                             "group relative flex items-center rounded-xl py-2.5 text-sm font-medium transition-colors",
                             // Default: icon-only centered (md always, xl when collapsed)
@@ -327,19 +377,17 @@ export function AppLayout({ children }: { children: ReactNode }) {
                           />
                           {/* Label: only rendered when not collapsed; hidden on md–xl */}
                           {!collapsed && (
-                            <span className="hidden xl:block truncate">
-                              {item.to === "/app/reports" && role === "director" ? "Rapports Direction" : item.label}
-                            </span>
+                            <span className="hidden xl:block truncate">{item.label}</span>
                           )}
                         </Link>
                       );
 
                       return (
-                        <li key={item.to}>
+                        <li key={`${item.to}-${item.label}`}>
                           <Tooltip>
                             <TooltipTrigger asChild>{link}</TooltipTrigger>
                             <TooltipContent side="right" className="text-xs">
-                              {item.to === "/app/reports" && role === "director" ? "Rapports Direction" : item.label}
+                              {item.disabled ? `${item.label} — bientôt disponible` : item.label}
                             </TooltipContent>
                           </Tooltip>
                         </li>
@@ -389,27 +437,35 @@ export function AppLayout({ children }: { children: ReactNode }) {
                       </div>
                       <ul className="space-y-0.5">
                         {list.map((item) => {
-                          const active = activeNavTo === item.to;
+                          const active = !item.disabled && activeNavKey === `${item.to}-${item.label}`;
                           return (
-                            <li key={item.to}>
-                              <Link
-                                to={item.to}
-                                onClick={() => setMobileOpen(false)}
-                                className={cn(
-                                  "flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium transition-colors",
-                                  active
-                                    ? "bg-primary text-background font-bold"
-                                    : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground",
-                                )}
-                              >
-                                <item.icon
+                            <li key={`${item.to}-${item.label}`}>
+                              {item.disabled ? (
+                                <span className="flex cursor-not-allowed items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium text-foreground/70 opacity-45">
+                                  <item.icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                  {item.label}
+                                </span>
+                              ) : (
+                                <Link
+                                  to={item.to}
+                                  search={item.search}
+                                  onClick={() => setMobileOpen(false)}
                                   className={cn(
-                                    "h-4 w-4 shrink-0",
-                                    active ? "text-background" : "text-muted-foreground",
+                                    "flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium transition-colors",
+                                    active
+                                      ? "bg-primary text-background font-bold"
+                                      : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground",
                                   )}
-                                />
-                                {item.label}
-                              </Link>
+                                >
+                                  <item.icon
+                                    className={cn(
+                                      "h-4 w-4 shrink-0",
+                                      active ? "text-background" : "text-muted-foreground",
+                                    )}
+                                  />
+                                  {item.label}
+                                </Link>
+                              )}
                             </li>
                           );
                         })}
@@ -646,6 +702,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
                       ]
                     : role === "chief-departement"
                       ? [
+                          { to: "/app/queue",              icon: ListChecks,      label: "File att." },
                           { to: "/app/supervision",       icon: ShieldAlert,     label: "Superviser" },
                           { to: "/app/department-inbox",  icon: ClipboardList,   label: "Pilotage", primary: true },
                           { to: "/app/notifications",     icon: Bell,            label: "Alertes" },

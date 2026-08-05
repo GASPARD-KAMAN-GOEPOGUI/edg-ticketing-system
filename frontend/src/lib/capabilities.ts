@@ -107,8 +107,7 @@ const TICKET_ACTION_ROLES: Record<TicketAction, Role[]> = {
   take_ownership: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
   request_info: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
   resume: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
-  // Lot 3.1 : chief-departement n'a plus accès à "Affecter/Réaffecter" un agent.
-  assign: ["chief-service", "admin"],
+  assign: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
   // BR-TRANSMIT-001 (remplace Lot 3.2) : "Terminer le traitement" est réservé à
   // l'intervenant actuel (isAssignedToMe, voir canTicketAction ci-dessous) — chief-
   // departement redevient éligible dès lors qu'il est devenu intervenant actuel via

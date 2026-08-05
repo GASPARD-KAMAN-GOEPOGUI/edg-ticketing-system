@@ -33,6 +33,8 @@ OWN_REQUEST_ALLOWED_ACTIONS = frozenset({"close", "cancel", "request_reopen"})
 # son intervention reste possible mais exceptionnelle (bypass séparé, cf.
 # assert_is_current_handler) plutôt qu'un traitement normal.
 TREATING_ROLES = frozenset({"agent-support", "chief-service", "chief-departement", "director"})
+QUEUE_HANDLER_ROLES = frozenset({"agent-support", "chief-service", "chief-departement", "director", "admin"})
+QUEUE_HANDLER_DENY_RAW_ROLES = frozenset({"dg"})
 # Statuts compatibles avec une transmission ou une terminaison de traitement — un
 # ticket doit déjà être pris en charge activement. Identique à ALLOWED_TRANSITIONS["resolved"].
 COLLABORATIVE_STATUSES = frozenset({"assigned", "in_progress", "pending", "escalated"})
@@ -45,10 +47,11 @@ TERMINAL_STATUSES = frozenset({"cancelled", "closed", "resolved", "rejected"})
 QUALIFIABLE_STATUSES = frozenset({"new", "qualifying", "qualified", "reopened"})
 
 ACTION_ALLOWED_ROLES: dict[str, set[str]] = {
-    "qualify": {"agent-support", "chief-service", "chief-departement", "admin"},
-    # Lot 3.1 : "Affecter/Reaffecter" retire a chief-departement — reste agent-support
-    # (auto-assignation), chief-service (son propre service), admin (global).
-    "assign": {"agent-support", "chief-service", "admin"},
+    "qualify": set(QUEUE_HANDLER_ROLES),
+    # Philosophie collaborative : tous les rôles opérationnels peuvent prendre ou
+    # assigner un ticket de file d'attente ; le périmètre est contrôlé dans
+    # assert_ticket_scope/assert_assignment_allowed.
+    "assign": set(QUEUE_HANDLER_ROLES),
     # BR-TRANSMIT-001 (remplace Lot 3.2) : "Terminer le traitement" est desormais ouvert
     # a chief-departement — la restriction "un chef de departement ne traite jamais
     # lui-meme" ne s'applique plus des lors qu'il est devenu intervenant actuel via une
@@ -89,7 +92,13 @@ def _value(obj: Any, name: str) -> Any:
 
 def assert_action_allowed(actor_role: str | None, action: str) -> None:
     allowed = ACTION_ALLOWED_ROLES.get(action)
+    raw_role = (actor_role or "").strip().lower()
     role = normalize_role(actor_role)
+    if action in {"qualify", "assign"} and raw_role in QUEUE_HANDLER_DENY_RAW_ROLES:
+        raise ForbiddenException(
+            "Vous n'etes pas autorise a effectuer cette action sur le ticket.",
+            error_code=ErrorCode.FORBIDDEN,
+        )
     if allowed is None or role not in allowed:
         raise ForbiddenException(
             "Vous n'etes pas autorise a effectuer cette action sur le ticket.",
@@ -126,6 +135,7 @@ def assert_ticket_scope(
     allowed_dir_unity_ids: set[int] | None = None,
 ) -> None:
     role = normalize_role(_value(actor, "role"))
+    raw_role = str(_value(actor, "role") or "").strip().lower()
     actor_id = _value(actor, "id")
     actor_unity_id = _value(actor, "unity_id")
     request_unity_id = _value(request, "unity_id")
@@ -171,7 +181,8 @@ def assert_ticket_scope(
     if (
         action in TRIAGE_SCOPE_ACTIONS
         and _value(request, "in_triage") is True
-        and role in {"agent-support", "chief-service", "chief-departement"}
+        and role in QUEUE_HANDLER_ROLES
+        and raw_role not in QUEUE_HANDLER_DENY_RAW_ROLES
     ):
         return
 
@@ -217,20 +228,11 @@ def assert_qualify_target_allowed(
     actor_id: str | int | None,
     assignee_id: str | int | None,
 ) -> None:
-    """Lot 2.4 : un agent-support ne peut qualifier qu'en s'auto-assignant ("Prendre la
-    demande") — le routage vers une personne precise ("Assigner", hierarchie Direction ->
-    Departement -> Service -> Personne) reste reserve aux chefs et a l'admin. Masquer le
-    bouton cote frontend ne suffit pas : sans cette garde, un agent-support pourrait
-    toujours router vers un tiers via un appel direct a l'API.
+    """Compatibilite API : la qualification vers un assignee est autorisee pour
+    tous les roles operationnels. La validation du role cible et du perimetre se
+    fait dans le service, ou le compte destinataire est disponible.
     """
-    role = normalize_role(actor_role)
-    if role != "agent-support" or not assignee_id:
-        return
-    if str(assignee_id) != str(actor_id):
-        raise ForbiddenException(
-            "Un agent-support ne peut qualifier une demande qu'en s'auto-assignant.",
-            error_code=ErrorCode.FORBIDDEN,
-        )
+    return
 
 
 def assert_assignment_allowed(
@@ -243,77 +245,57 @@ def assert_assignment_allowed(
     allowed_scope_unity_ids: set[int] | None = None,
 ) -> None:
     """
-    Regle metier assignation :
-      - agent : auto-assignation uniquement, sur un ticket libre de son perimetre.
-      - chief-service : assignation a un agent de son propre service.
-      - chief-departement : assignation a un agent de n'importe quel service de son
-        departement (allowed_scope_unity_ids = departement + services rattaches).
-      - admin : assignation globale.
+    Regle metier assignation collaborative :
+      - tous les roles operationnels peuvent devenir intervenant courant ;
+      - admin garde un perimetre global ;
+      - les autres roles assignent uniquement dans leur perimetre organisationnel.
     """
     role = normalize_role(_value(actor, "role"))
+    raw_role = str(_value(actor, "role") or "").strip().lower()
     actor_id = _value(actor, "id")
     actor_unity_id = _value(actor, "unity_id")
-    current_assignee_id = _value(request, "assignee_id")
     request_unity_id = _value(request, "unity_id")
     target_role_name = normalize_role(target_role)
 
-    if role == "agent-support":
-        if str(assignee_id) != str(actor_id):
-            raise ForbiddenException(
-                "Un agent peut seulement s'auto-assigner un ticket.",
-                error_code=ErrorCode.FORBIDDEN,
-            )
-        if current_assignee_id is not None and str(current_assignee_id) != str(actor_id):
-            raise BusinessException(
-                "Ce ticket est deja assigne a un autre agent.",
-                error_code=ErrorCode.INVALID_STATUS_TRANSITION,
-            )
-        if (
-            target_unity_id is not None
-            and actor_unity_id is not None
-            and str(target_unity_id) != str(actor_unity_id)
-        ):
-            raise ForbiddenException(
-                "Un agent peut seulement s'auto-assigner un ticket de son unite.",
-                error_code=ErrorCode.FORBIDDEN,
-            )
-        if current_assignee_id is not None:
-            raise BusinessException(
-                "Ce ticket vous est deja assigne.",
-                error_code=ErrorCode.INVALID_STATUS_TRANSITION,
-            )
-        return
+    if target_role is None and str(assignee_id) == str(actor_id):
+        target_role_name = role
+        target_unity_id = actor_unity_id
 
-    if role == "chief-service":
-        if target_role_name != "agent-support":
-            raise ForbiddenException(
-                "Un chef peut assigner uniquement un agent de son service.",
-                error_code=ErrorCode.FORBIDDEN,
-            )
-        # Lot 3.1 : chief-departement retire d'ACTION_ALLOWED_ROLES["assign"] — cette
-        # branche n'est plus atteignable que par chief-service, borne a sa propre unite.
-        scope_ids: set[str] = set()
-        if actor_unity_id is not None:
-            scope_ids.add(str(actor_unity_id))
-        if target_unity_id is None or str(target_unity_id) not in scope_ids:
-            raise ForbiddenException(
-                "Un chef ne peut pas assigner un agent hors de son perimetre.",
-                error_code=ErrorCode.FORBIDDEN,
-            )
-        if request_unity_id is not None and str(request_unity_id) not in scope_ids:
-            raise ForbiddenException(
-                "Un chef ne peut assigner que les tickets de son perimetre.",
-                error_code=ErrorCode.FORBIDDEN,
-            )
-        return
+    if raw_role in QUEUE_HANDLER_DENY_RAW_ROLES or role not in QUEUE_HANDLER_ROLES:
+        raise ForbiddenException(
+            "Votre role ne permet pas d'assigner un ticket.",
+            error_code=ErrorCode.FORBIDDEN,
+        )
+
+    if target_role_name not in QUEUE_HANDLER_ROLES:
+        raise ForbiddenException(
+            "Le destinataire doit etre un role operationnel habilite au traitement.",
+            error_code=ErrorCode.FORBIDDEN,
+        )
 
     if role == "admin":
         return
 
-    raise ForbiddenException(
-        "Votre role ne permet pas d'assigner un ticket.",
-        error_code=ErrorCode.FORBIDDEN,
-    )
+    if target_role_name == "admin":
+        raise ForbiddenException(
+            "Seul un administrateur peut assigner un ticket a un administrateur.",
+            error_code=ErrorCode.FORBIDDEN,
+        )
+
+    scope_ids: set[str] = {str(v) for v in (allowed_scope_unity_ids or set())}
+    if actor_unity_id is not None:
+        scope_ids.add(str(actor_unity_id))
+
+    if target_unity_id is not None and scope_ids and str(target_unity_id) not in scope_ids:
+        raise ForbiddenException(
+            "Le destinataire n'appartient pas a votre perimetre operationnel.",
+            error_code=ErrorCode.FORBIDDEN,
+        )
+    if request_unity_id is not None and scope_ids and str(request_unity_id) not in scope_ids:
+        raise ForbiddenException(
+            "Ce ticket n'appartient pas a votre perimetre operationnel.",
+            error_code=ErrorCode.FORBIDDEN,
+        )
 
 
 def assert_service_reassignment_allowed(

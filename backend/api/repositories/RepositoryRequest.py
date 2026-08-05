@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import noload
 
@@ -254,6 +254,74 @@ class RequestRepository(BaseRepository[Request]):
             limit=limit,
             load_options=_SKIP_UNUSED_RELS,
         )
+
+    async def list_transmitted_by_actor(
+        self, actor_id: str, *, page: int = 1, limit: int = 20
+    ) -> tuple[list[Request], int]:
+        """
+        BR-TRANSMIT-001 — tickets où `actor_id` a personnellement transmis le
+        traitement (event_type='treatment_transmitted') à un moment de
+        l'historique, indépendamment du porteur actuel ou du statut courant.
+
+        L'émetteur ne vit que dans infos.actor_id (JSON) : create_event() écrit
+        dest_id (destinataire) dans la colonne réelle agent_id quand dest_id est
+        fourni, jamais l'émetteur (cf. RepositoryWorkflowDetail.create_event()).
+        Un ticket peut avoir été transmis plusieurs fois par le même acteur
+        (cycles différents) — dédupliqué ici (GROUP BY), classé par la
+        transmission la plus récente. Même style de requête JSON brute déjà
+        utilisé par ServiceStats.py (escalation_stats/global_kpis).
+        """
+        params = {"actor_id": str(actor_id)}
+
+        count_stmt = text("""
+            SELECT COUNT(*) FROM (
+                SELECT wf.request_id
+                FROM workflow_detail wd
+                JOIN workflow wf ON wf.id = wd.workflow_id
+                JOIN request r   ON r.id = wf.request_id AND r.deleted_at IS NULL
+                WHERE wd.event_type = 'treatment_transmitted'
+                  AND wd.deleted_at IS NULL
+                  AND JSON_UNQUOTE(JSON_EXTRACT(wd.infos, '$.actor_id')) = :actor_id
+                GROUP BY wf.request_id
+            ) t
+        """)
+        total = (await self.session.execute(count_stmt, params)).scalar_one() or 0
+        if not total:
+            return [], 0
+
+        ids_stmt = text("""
+            SELECT wf.request_id AS request_id, MAX(wd.created_at) AS last_transmitted_at
+            FROM workflow_detail wd
+            JOIN workflow wf ON wf.id = wd.workflow_id
+            JOIN request r   ON r.id = wf.request_id AND r.deleted_at IS NULL
+            WHERE wd.event_type = 'treatment_transmitted'
+              AND wd.deleted_at IS NULL
+              AND JSON_UNQUOTE(JSON_EXTRACT(wd.infos, '$.actor_id')) = :actor_id
+            GROUP BY wf.request_id
+            ORDER BY last_transmitted_at DESC
+            LIMIT :limit OFFSET :offset
+        """)
+        rows = (await self.session.execute(
+            ids_stmt,
+            {**params, "limit": limit, "offset": max(0, (page - 1) * limit)},
+        )).all()
+        ordered_ids = [int(row.request_id) for row in rows]
+        if not ordered_ids:
+            return [], total
+
+        # Hydratation via le pipeline standard (mêmes load_options que les
+        # autres listes) — pagination déjà faite ci-dessus, limit=len(ids) suffit.
+        # L'ordre pertinent est celui de la dernière transmission (ci-dessus),
+        # pas le tri par défaut de .list() — réordonné en Python juste après.
+        items, _ = await self.list(
+            filters={"id": ordered_ids},
+            limit=len(ordered_ids),
+            page=1,
+            load_options=_SKIP_UNUSED_RELS,
+        )
+        by_id = {item.id: item for item in items}
+        ordered_items = [by_id[i] for i in ordered_ids if i in by_id]
+        return ordered_items, total
 
     async def list_by_requester(
         self, requester_id: str, *, page: int = 1, limit: int = 20
