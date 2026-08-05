@@ -143,7 +143,7 @@ function AuditPage() {
           </div>
           <h1 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">Audit système</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            État du backend, statistiques des demandes et données organisationnelles.
+            État du backend, statistiques des tickets et données organisationnelles.
           </p>
         </div>
         <Button variant="outline" className="rounded-full gap-2" onClick={refreshAll}>
@@ -200,7 +200,7 @@ function AuditPage() {
           <Database className="h-4 w-4" /> Inventaire
         </h2>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard icon={Inbox}   label="Demandes totales" value={reqLoading ? "…" : totalRequests} sub={globalKpis ? `${globalKpis.in_triage} en triage` : undefined} color="primary" />
+          <StatCard icon={Inbox}   label="Tickets totaux" value={reqLoading ? "…" : totalRequests} sub={globalKpis ? `${globalKpis.in_triage} en triage` : undefined} color="primary" />
           <StatCard icon={Users2}  label="Utilisateurs"      value={usersLoading ? "…" : totalUsers}  color="info" />
           <StatCard icon={Network} label="Directions"         value={dirsLoading ? "…" : directions.length} color="success" />
           <StatCard icon={Layers}  label="Services & Unités"  value={unitsLoading ? "…" : units.length} color="warning" />
@@ -209,7 +209,7 @@ function AuditPage() {
         {reqStats && (
           <GlassCard className="p-0 overflow-hidden">
             <div className="border-b border-border/40 px-5 py-3">
-              <h3 className="text-sm font-semibold">Demandes par statut</h3>
+              <h3 className="text-sm font-semibold">Tickets par statut</h3>
             </div>
             <div className="flex flex-wrap gap-0 divide-x divide-border/40">
               {Object.entries(reqStats).map(([status, count]) => (

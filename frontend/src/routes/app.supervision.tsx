@@ -500,7 +500,7 @@ function SupervisionPage() {
       {/* ── KPI (données réelles) ── */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Kpi label="Escalades ouvertes"  value={kpis.escalationsOpen}  tone="destructive" icon={AlertTriangle} hint={`${esc.length} au total`}               loading={loadEsc} />
-        <Kpi label="Demandes en charge"  value={kpis.totalOpen}        tone="primary"     icon={Activity}     hint={`${agentStats.length} agents actifs`}     loading={loadingStats} />
+        <Kpi label="Tickets en charge"  value={kpis.totalOpen}        tone="primary"     icon={Activity}     hint={`${agentStats.length} agents actifs`}     loading={loadingStats} />
         <Kpi label="Délais dépassés"        value={kpis.slaBreachedTotal} tone="warning"     icon={Clock}        hint={`Tickets en retard sur le ${scopeLabel}`}  loading={loadingStats} />
         <Kpi label="Agents surchargés"   value={kpis.overloadCount}    tone="warning"     icon={Users2}       hint="≥ 8 tickets ouverts"                       loading={loadingStats} />
       </div>
@@ -1404,7 +1404,7 @@ function DirectorSupervisionCenter({
         </GlassCard>
         <GlassCard className="p-5 xl:col-span-2">
           <h2 className="font-semibold">Répartition par catégorie</h2>
-          <p className="mb-4 text-xs text-muted-foreground">Catégories réelles issues des demandes</p>
+          <p className="mb-4 text-xs text-muted-foreground">Catégories réelles issues des tickets</p>
           <DistributionBars data={categoryDistribution.slice(0, 10)} total={tickets.length} emptyLabel="Aucune catégorie à afficher." />
         </GlassCard>
       </section>

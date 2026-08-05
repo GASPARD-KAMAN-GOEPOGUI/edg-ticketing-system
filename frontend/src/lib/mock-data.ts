@@ -182,6 +182,52 @@ export type TimelineEvent = {
   infos?: Record<string, unknown>;
 };
 
+// BR-SLA-REOPEN-001 — un cycle SLA (premier traitement ou après réouverture).
+export type SlaCycle = {
+  cycleNumber: number;
+  startedAt?: string;
+  endedAt?: string;
+  slaHours?: number;
+  elapsedHours?: number;
+  responseHours?: number;
+  breached?: boolean;
+  resolvedBy?: string;
+  reopenReason?: string;
+  closed: boolean;
+};
+
+// BR-TRACE-001 — une intervention (conteneur logique du travail complet d'un
+// intervenant, jusqu'à sa transmission ou sa résolution).
+export type Intervention = {
+  interventionId: string;
+  cycleNumber: number;
+  interventionOrder?: number;
+  actorId?: string;
+  actorName?: string;
+  actorRole?: string;
+  actorMatricule?: string;
+  actorDirectionLabel?: string;
+  actorDepartmentLabel?: string;
+  actorServiceLabel?: string;
+  startedAt?: string;
+  endedAt?: string;
+  durationSeconds?: number;
+  workDone?: string;
+  instruction?: string;
+  transmissionReason?: string;
+  decision?: "transmission" | "resolution";
+  destinationId?: string;
+  destinationName?: string;
+  summary?: string;
+  solution?: string;
+  recommendations?: string;
+  slaHours?: number;
+  slaBreached?: boolean;
+  commentCount: number;
+  attachmentCount: number;
+  eventIds: string[];
+};
+
 export type RequestItem = {
   id: string;
   ref: string;
@@ -226,6 +272,11 @@ export type RequestItem = {
   closedAt?: string;
   slaHours: number;
   slaElapsed: number;
+  // BR-SLA-REOPEN-001 — cycles SLA (détail ticket uniquement, absent des listes).
+  slaCycles?: SlaCycle[];
+  reopenCount?: number;
+  // BR-TRACE-001 — interventions (détail ticket uniquement, absent des listes).
+  interventions?: Intervention[];
   infos?: Record<string, unknown>;
   comments: {
     id: string;
@@ -234,6 +285,8 @@ export type RequestItem = {
     authorRole?: string;
     body: string;
     isPublic: boolean;
+    isDirective?: boolean;
+    replyToId?: string;
     createdAt: string;
     attachmentId?: string;
     attachmentName?: string;
@@ -285,7 +338,7 @@ export const requests: RequestItem[] = [
       },
     ],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(6) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(6) },
       { id: "t2", type: "routed", label: "Routée vers Direction Réseau", at: h(6) },
       { id: "t3", type: "assigned", label: "Assignée à Sékou Condé", at: h(5), by: "Fatoumata Bah" },
       { id: "t4", type: "progress", label: "Prise en charge sur site", at: h(2) },
@@ -311,7 +364,7 @@ export const requests: RequestItem[] = [
     slaElapsed: 20,
     comments: [],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(20) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(20) },
       { id: "t2", type: "assigned", label: "Assignée à Hadja Sylla", at: h(8) },
     ],
   },
@@ -351,7 +404,7 @@ export const requests: RequestItem[] = [
       },
     ],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(72) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(72) },
       { id: "t2", type: "assigned", label: "Assignée · Agent support — DSI", at: h(70) },
       { id: "t3", type: "resolved", label: "Résolue", at: h(48), by: "Agent support — DSI" },
     ],
@@ -374,7 +427,7 @@ export const requests: RequestItem[] = [
     slaHours: 72,
     slaElapsed: 3,
     comments: [],
-    timeline: [{ id: "t1", type: "created", label: "Demande créée", at: h(3) }],
+    timeline: [{ id: "t1", type: "created", label: "Ticket créé", at: h(3) }],
   },
   {
     id: "r5",
@@ -396,7 +449,7 @@ export const requests: RequestItem[] = [
     slaElapsed: 30,
     comments: [],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(30) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(30) },
       { id: "t2", type: "pending", label: "En attente du demandeur", at: h(12) },
     ],
   },
@@ -419,7 +472,7 @@ export const requests: RequestItem[] = [
     slaElapsed: 50,
     comments: [],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(50) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(50) },
       { id: "t2", type: "escalated", label: "Escaladée — SLA dépassé", at: h(4) },
     ],
   },
@@ -443,7 +496,7 @@ export const requests: RequestItem[] = [
     slaElapsed: 18,
     comments: [],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(120) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(120) },
       { id: "t2", type: "closed", label: "Clôturée", at: h(96) },
     ],
   },
@@ -467,7 +520,7 @@ export const requests: RequestItem[] = [
     slaElapsed: 2,
     comments: [],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(2) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(2) },
       { id: "t2", type: "qualifying", label: "En cours de qualification", at: h(1) },
     ],
   },
@@ -490,7 +543,7 @@ export const requests: RequestItem[] = [
     slaElapsed: 18,
     comments: [],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(18) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(18) },
       { id: "t2", type: "qualified", label: "Qualifiée — attente d'affectation", at: h(4) },
     ],
   },
@@ -515,7 +568,7 @@ export const requests: RequestItem[] = [
       { id: "c1", authorId: "u2", author: "Ousmane Camara", body: "Demande hors périmètre — veuillez contacter votre DRH.", isPublic: true, createdAt: h(36) },
     ],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(48) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(48) },
       { id: "t2", type: "rejected", label: "Rejetée — hors périmètre", at: h(36) },
     ],
   },
@@ -542,9 +595,9 @@ export const requests: RequestItem[] = [
       { id: "c2", authorId: "u1", author: "Mariama Diallo", body: "Le bulletin est toujours introuvable dans mon espace.", isPublic: true, createdAt: h(8) },
     ],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(96) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(96) },
       { id: "t2", type: "resolved", label: "Marquée résolue", at: h(72) },
-      { id: "t3", type: "reopened", label: "Réouverte par le demandeur", at: h(8) },
+      { id: "t3", type: "reopened", label: "Réouvert par le demandeur", at: h(8) },
     ],
   },
   {
@@ -566,7 +619,7 @@ export const requests: RequestItem[] = [
     slaElapsed: 10,
     comments: [],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(10) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(10) },
       { id: "t2", type: "qualifying", label: "Qualification en cours", at: h(5) },
     ],
   },
@@ -590,7 +643,7 @@ export const requests: RequestItem[] = [
     slaElapsed: 20,
     comments: [],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(40) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(40) },
       { id: "t2", type: "assigned", label: "Assignée à Lansana Diallo", at: h(30) },
       { id: "t3", type: "progress", label: "Traitement en cours", at: h(6) },
     ],
@@ -613,7 +666,7 @@ export const requests: RequestItem[] = [
     slaHours: 72,
     slaElapsed: 1,
     comments: [],
-    timeline: [{ id: "t1", type: "created", label: "Demande créée", at: h(1) }],
+    timeline: [{ id: "t1", type: "created", label: "Ticket créé", at: h(1) }],
   },
   {
     id: "r15",
@@ -635,7 +688,7 @@ export const requests: RequestItem[] = [
     slaElapsed: 14,
     comments: [],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(14) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(14) },
       { id: "t2", type: "assigned", label: "Assignée à Mamadou Diallo", at: h(3) },
     ],
   },
@@ -659,7 +712,7 @@ export const requests: RequestItem[] = [
     slaElapsed: 24,
     comments: [],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(24) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(24) },
       { id: "t2", type: "assigned", label: "Assignée · Agent — RH", at: h(20) },
       { id: "t3", type: "progress", label: "En cours de validation", at: h(4) },
     ],
@@ -686,7 +739,7 @@ export const requests: RequestItem[] = [
       { id: "c1", authorId: "u11", author: "Mamadou Barry", body: "En attente de la disponibilité de l'équipe externe.", isPublic: false, createdAt: h(20) },
     ],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(60) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(60) },
       { id: "t2", type: "assigned", label: "Assignée à Mamadou Barry", at: h(50) },
       { id: "t3", type: "pending", label: "En attente prestataire", at: h(20) },
     ],
@@ -713,7 +766,7 @@ export const requests: RequestItem[] = [
       { id: "c1", authorId: "u23", author: "Ousmane Bah", body: "VPN configuré et testé avec succès.", isPublic: false, createdAt: h(40) },
     ],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(56) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(56) },
       { id: "t2", type: "assigned", label: "Assignée · Agent support — DSI", at: h(54) },
       { id: "t3", type: "resolved", label: "Résolue", at: h(40), by: "Agent support — DSI" },
     ],
@@ -738,7 +791,7 @@ export const requests: RequestItem[] = [
     slaElapsed: 36,
     comments: [],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(200) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(200) },
       { id: "t2", type: "resolved", label: "Résolue", at: h(170), by: "Hadja Sylla" },
       { id: "t3", type: "closed", label: "Clôturée", at: h(160) },
     ],
@@ -765,7 +818,7 @@ export const requests: RequestItem[] = [
       { id: "c1", authorId: "u7", author: "Sékou Condé", body: "Pièce de remplacement en attente de livraison.", isPublic: true, createdAt: h(10) },
     ],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(18) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(18) },
       { id: "t2", type: "assigned", label: "Assignée à Sékou Condé", at: h(16) },
       { id: "t3", type: "escalated", label: "Escaladée — SLA critique dépassé", at: h(2) },
     ],
@@ -790,7 +843,7 @@ export const requests: RequestItem[] = [
     slaElapsed: 72,
     comments: [],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(72) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(72) },
       { id: "t2", type: "assigned", label: "Assignée à Sékou Condé", at: h(60) },
       { id: "t3", type: "progress", label: "Pose du câblage en cours", at: h(12) },
     ],
@@ -814,7 +867,7 @@ export const requests: RequestItem[] = [
     slaElapsed: 80,
     comments: [],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(80) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(80) },
       { id: "t2", type: "qualified", label: "Qualifiée — en attente de la commission", at: h(24) },
     ],
   },
@@ -836,7 +889,7 @@ export const requests: RequestItem[] = [
     slaHours: 96,
     slaElapsed: 1,
     comments: [],
-    timeline: [{ id: "t1", type: "created", label: "Demande créée", at: h(0.5) }],
+    timeline: [{ id: "t1", type: "created", label: "Ticket créé", at: h(0.5) }],
   },
   {
     id: "r24",
@@ -858,7 +911,7 @@ export const requests: RequestItem[] = [
     slaElapsed: 7,
     comments: [],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(22) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(22) },
       { id: "t2", type: "assigned", label: "Assignée · Agent support — DSI", at: h(6) },
     ],
   },
@@ -881,7 +934,7 @@ export const requests: RequestItem[] = [
     slaElapsed: 5,
     comments: [],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(5) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(5) },
       { id: "t2", type: "qualifying", label: "Vérification du compteur en cours", at: h(3) },
     ],
   },
@@ -907,7 +960,7 @@ export const requests: RequestItem[] = [
       { id: "c1", authorId: "u11", author: "Mamadou Barry", body: "Maintenance effectuée, rapport joint.", isPublic: false, createdAt: h(120) },
     ],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(150) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(150) },
       { id: "t2", type: "assigned", label: "Assignée à Mamadou Barry", at: h(145) },
       { id: "t3", type: "resolved", label: "Résolue", at: h(120), by: "Mamadou Barry" },
     ],
@@ -935,9 +988,9 @@ export const requests: RequestItem[] = [
       { id: "c2", authorId: "u9", author: "Alpha Diaby", body: "Nouvelle coupure ce matin, problème non résolu.", isPublic: true, createdAt: h(4) },
     ],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(36) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(36) },
       { id: "t2", type: "resolved", label: "Marquée résolue", at: h(24) },
-      { id: "t3", type: "reopened", label: "Réouverte par le demandeur", at: h(4) },
+      { id: "t3", type: "reopened", label: "Réouvert par le demandeur", at: h(4) },
     ],
   },
   {
@@ -962,7 +1015,7 @@ export const requests: RequestItem[] = [
       { id: "c1", authorId: "u18", author: "Fatoumata Konaté", body: "En attente de la validation du fichier de paie par le directeur.", isPublic: false, createdAt: h(18) },
     ],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(42) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(42) },
       { id: "t2", type: "assigned", label: "Assignée à Fatoumata Konaté", at: h(38) },
       { id: "t3", type: "pending", label: "En attente validation direction", at: h(18) },
     ],
@@ -988,7 +1041,7 @@ export const requests: RequestItem[] = [
       { id: "c1", authorId: "u28", author: "Lansana Diallo", body: "Accès refusé — habilitation auditeur externe non signée.", isPublic: false, createdAt: h(144) },
     ],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(168) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(168) },
       { id: "t2", type: "rejected", label: "Rejetée — habilitation manquante", at: h(144) },
     ],
   },
@@ -1018,7 +1071,7 @@ export const requests: RequestItem[] = [
     slaHours: 4,
     slaElapsed: 0,
     comments: [],
-    timeline: [{ id: "t1", type: "created", label: "Demande déposée sans compte (citoyen)", at: h(0.3) }],
+    timeline: [{ id: "t1", type: "created", label: "Ticket déposé sans compte (citoyen)", at: h(0.3) }],
   },
   {
     id: "rtriage2",
@@ -1046,7 +1099,7 @@ export const requests: RequestItem[] = [
     slaHours: 48,
     slaElapsed: 2,
     comments: [],
-    timeline: [{ id: "t1", type: "created", label: "Demande déposée sans compte (citoyen)", at: h(1.5) }],
+    timeline: [{ id: "t1", type: "created", label: "Ticket déposé sans compte (citoyen)", at: h(1.5) }],
   },
   {
     id: "rtriage3",
@@ -1072,7 +1125,7 @@ export const requests: RequestItem[] = [
     slaHours: 72,
     slaElapsed: 3,
     comments: [],
-    timeline: [{ id: "t1", type: "created", label: "Demande déposée sans compte (citoyen)", at: h(3) }],
+    timeline: [{ id: "t1", type: "created", label: "Ticket déposé sans compte (citoyen)", at: h(3) }],
   },
   {
     id: "r30",
@@ -1094,7 +1147,7 @@ export const requests: RequestItem[] = [
     slaElapsed: 20,
     comments: [],
     timeline: [
-      { id: "t1", type: "created", label: "Demande créée", at: h(240) },
+      { id: "t1", type: "created", label: "Ticket créé", at: h(240) },
       { id: "t2", type: "resolved", label: "Résolue — remboursement émis", at: h(210) },
       { id: "t3", type: "closed", label: "Clôturée", at: h(200) },
     ],
@@ -1194,7 +1247,7 @@ export const priorityDefinitions: PriorityDefinition[] = [
     id: "pd1",
     slug: "low",
     label: "Basse",
-    description: "Demandes non urgentes, traitement dans les délais standards.",
+    description: "Tickets non urgents, traitement dans les délais standards.",
     color: "slate",
     order: 1,
     active: true,
@@ -1204,7 +1257,7 @@ export const priorityDefinitions: PriorityDefinition[] = [
     id: "pd2",
     slug: "medium",
     label: "Moyenne",
-    description: "Demandes courantes nécessitant un suivi normal.",
+    description: "Tickets courants nécessitant un suivi normal.",
     color: "blue",
     order: 2,
     active: true,
@@ -1214,7 +1267,7 @@ export const priorityDefinitions: PriorityDefinition[] = [
     id: "pd3",
     slug: "high",
     label: "Haute",
-    description: "Demandes urgentes impactant plusieurs utilisateurs ou services.",
+    description: "Tickets urgents impactant plusieurs utilisateurs ou services.",
     color: "orange",
     order: 3,
     active: true,
@@ -1378,15 +1431,15 @@ export type ActivityLog = {
 const ua = "Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36";
 export const activityLogs: ActivityLog[] = [
   { id: "l1", at: h(0.2), actor: "Mohamed Touré", actorRole: "admin", action: "Modification du rôle utilisateur", category: "admin", target: "u3 → chief-service", ip: "196.207.84.12", userAgent: ua, status: "success", metadata: { from: "agent-support", to: "chief-service", user_id: "u3", reason: "Promotion service", approved_by: "Directeur" } },
-  { id: "l2", at: h(0.5), actor: "Sékou Condé", actorRole: "agent-support", action: "Mise à jour du statut demande", category: "request", target: "EDG-2026-0421", ip: "10.12.3.44", userAgent: ua, status: "success", metadata: { ref: "EDG-2026-0421", previous_status: "qualifying", new_status: "in_progress", sla_ok: true } },
+  { id: "l2", at: h(0.5), actor: "Sékou Condé", actorRole: "agent-support", action: "Mise à jour du statut ticket", category: "request", target: "EDG-2026-0421", ip: "10.12.3.44", userAgent: ua, status: "success", metadata: { ref: "EDG-2026-0421", previous_status: "qualifying", new_status: "in_progress", sla_ok: true } },
   { id: "l3", at: h(0.7), actor: "system", actorRole: "admin", action: "Escalade automatique", category: "system", target: "EDG-2026-0416", ip: "—", userAgent: "edg-engine/1.4", status: "warning", metadata: { rule: "SLA dépassé > 24h", level: "L3", sla_breach_h: 31.5, escalated_to: "Fatoumata Bah" } },
   { id: "l4", at: h(1.1), actor: "Aïssatou Barry", actorRole: "director", action: "Connexion réussie", category: "auth", target: "—", ip: "41.83.12.7", userAgent: ua, status: "success", metadata: { mfa: true, session_id: "sess_8f2a3c" } },
   { id: "l5", at: h(1.4), actor: "anon", actorRole: "public", action: "Échec d'authentification", category: "security", target: "admin@edg.gn", ip: "185.34.220.18", userAgent: "curl/8.4", status: "error", metadata: { attempts: 5, blocked: true, ip_country: "RU", lockout_min: 30 } },
-  { id: "l6", at: h(2.2), actor: "Fatoumata Bah", actorRole: "chief-service", action: "Assignation de demande", category: "request", target: "EDG-2026-0420 → Hadja Sylla", ip: "10.12.7.89", userAgent: ua, status: "success", metadata: { ref: "EDG-2026-0420", assigned_to: "u7", agent_name: "Hadja Sylla", team: "Service client" } },
+  { id: "l6", at: h(2.2), actor: "Fatoumata Bah", actorRole: "chief-service", action: "Assignation de ticket", category: "request", target: "EDG-2026-0420 → Hadja Sylla", ip: "10.12.7.89", userAgent: ua, status: "success", metadata: { ref: "EDG-2026-0420", assigned_to: "u7", agent_name: "Hadja Sylla", team: "Service client" } },
   { id: "l7", at: h(3.0), actor: "Mohamed Touré", actorRole: "admin", action: "Modification SLA", category: "admin", target: "Panne réseau · critical", ip: "196.207.84.12", userAgent: ua, status: "success", metadata: { responseH: 1, resolutionH: 4, previous_responseH: 2, previous_resolutionH: 8 } },
-  { id: "l8", at: h(4.5), actor: "Alpha Diaby", actorRole: "user", action: "Création de demande", category: "request", target: "EDG-2026-0418", ip: "102.130.45.7", userAgent: "EDG-Mobile/2.1", status: "success", metadata: { ref: "EDG-2026-0418", channel: "mobile", attachments: 2 } },
+  { id: "l8", at: h(4.5), actor: "Alpha Diaby", actorRole: "user", action: "Création de ticket", category: "request", target: "EDG-2026-0418", ip: "102.130.45.7", userAgent: "EDG-Mobile/2.1", status: "success", metadata: { ref: "EDG-2026-0418", channel: "mobile", attachments: 2 } },
   { id: "l9", at: h(6.8), actor: "system", actorRole: "admin", action: "Sauvegarde quotidienne", category: "system", target: "PostgreSQL", ip: "—", userAgent: "edg-backup/2.0", status: "success", metadata: { size_mb: 412, tables: 18, success: true, compressed: true, duration_min: 4 } },
-  { id: "l10", at: h(8.2), actor: "Ousmane Camara", actorRole: "agent-support", action: "Clôture de demande", category: "request", target: "EDG-2026-0419", ip: "10.12.3.55", userAgent: ua, status: "success", metadata: { ref: "EDG-2026-0419", resolution_h: 22, csat_rating: 4, sla_ok: true } },
+  { id: "l10", at: h(8.2), actor: "Ousmane Camara", actorRole: "agent-support", action: "Clôture de ticket", category: "request", target: "EDG-2026-0419", ip: "10.12.3.55", userAgent: ua, status: "success", metadata: { ref: "EDG-2026-0419", resolution_h: 22, csat_rating: 4, sla_ok: true } },
   { id: "l11", at: h(9.3), actor: "Mohamed Touré", actorRole: "admin", action: "Création règle de routage", category: "admin", target: "Mots-clés SAP/ERP", ip: "196.207.84.12", userAgent: ua, status: "success", metadata: { rule_id: "r5", keywords: ["SAP", "ERP", "SIRH"], target_service: "DSI" } },
   { id: "l12", at: h(14.0), actor: "system", actorRole: "admin", action: "Indisponibilité partielle", category: "system", target: "module notifications", ip: "—", userAgent: "edg-monitor/1.0", status: "warning", metadata: { duration_min: 7, affected_users: 43, auto_recovered: true } },
   { id: "l13", at: h(22.5), actor: "Mariama Diallo", actorRole: "user", action: "Connexion réussie", category: "auth", target: "—", ip: "102.130.55.2", userAgent: ua, status: "success", metadata: { mfa: false, device: "web" } },
@@ -1412,7 +1465,7 @@ export const knowledgeFull: KnowledgeArticle[] = [
     id: "k1",
     title: "Comment signaler une coupure d'électricité ?",
     excerpt: "Guide pas-à-pas pour déclarer une panne et suivre l'intervention en temps réel.",
-    body: "1. Connectez-vous à votre espace EDG Support.\n2. Cliquez sur « Nouvelle demande » puis sélectionnez « Panne réseau ».\n3. Renseignez l'adresse exacte et le type d'incident.\n4. Joignez si possible une photo du compteur ou de la zone.\n5. Validez. Un numéro de suivi vous sera attribué — un agent terrain est dispatché sous 1h pour les pannes critiques.",
+    body: "1. Connectez-vous à votre espace EDG Support.\n2. Cliquez sur « Nouveau ticket » puis sélectionnez « Panne réseau ».\n3. Renseignez l'adresse exacte et le type d'incident.\n4. Joignez si possible une photo du compteur ou de la zone.\n5. Validez. Un numéro de suivi vous sera attribué — un agent terrain est dispatché sous 1h pour les pannes critiques.",
     category: "Pannes",
     readTime: 3,
     author: "Direction Réseau",
@@ -1423,7 +1476,7 @@ export const knowledgeFull: KnowledgeArticle[] = [
     id: "k2",
     title: "Obtenir une attestation de consommation",
     excerpt: "Documents requis, délais de traitement et téléchargement en ligne.",
-    body: "Munissez-vous de votre numéro de compteur, d'une pièce d'identité et d'une facture récente. Soumettez la demande depuis l'onglet Services → Documents administratifs. Délai indicatif : 48h ouvrées. Le document signé est téléchargeable depuis votre espace.",
+    body: "Munissez-vous de votre numéro de compteur, d'une pièce d'identité et d'une facture récente. Soumettez le ticket depuis l'onglet Services → Documents administratifs. Délai indicatif : 48h ouvrées. Le document signé est téléchargeable depuis votre espace.",
     category: "Documents",
     readTime: 2,
     author: "Service Clients",
@@ -1467,7 +1520,7 @@ export const knowledgeFull: KnowledgeArticle[] = [
 
 export const logCategoryLabels: Record<ActivityLog["category"], string> = {
   auth: "Authentification",
-  request: "Demandes",
+  request: "Tickets",
   admin: "Administration",
   system: "Système",
   security: "Sécurité",
@@ -1774,7 +1827,7 @@ export const announcements: Announcement[] = [
   {
     id: "ann2",
     title: "Mise à jour du système SAP ERP — samedi 14 juin",
-    description: "Une mise à jour majeure du module SAP FI/CO sera déployée le samedi 14 juin de 8h à 18h. L'accès aux applications métier sera indisponible. Merci de planifier vos activités en conséquence et de traiter toutes les demandes urgentes avant le vendredi 13 juin.",
+    description: "Une mise à jour majeure du module SAP FI/CO sera déployée le samedi 14 juin de 8h à 18h. L'accès aux applications métier sera indisponible. Merci de planifier vos activités en conséquence et de traiter tous les tickets urgents avant le vendredi 13 juin.",
     category: "system_update",
     priority: "high",
     publishedAt: h(12),

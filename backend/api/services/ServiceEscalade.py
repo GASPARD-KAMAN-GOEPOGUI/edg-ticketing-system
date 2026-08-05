@@ -81,6 +81,56 @@ async def find_hierarchical_chief(
     return row.scalar_one_or_none()
 
 
+async def find_director_for_department(
+    session: AsyncSession, department_unity_id: int | None,
+) -> int | None:
+    """Directeur de la direction rattachee a un departement — Lot 3.3, "Escalade
+    exceptionnelle". Contrairement a find_hierarchical_chief (chef le plus proche,
+    quel que soit son role), cette fonction cible strictement un compte role="director",
+    en remontant l'organigramme depuis le departement jusqu'a la direction. Utilisee
+    pour l'action "Escalader au Directeur" qui court-circuite volontairement la
+    hierarchie normale (chief-departement -> chief le plus proche).
+    """
+    if not department_unity_id:
+        return None
+
+    current_unity_id = department_unity_id
+    for _ in range(5):  # borne de securite, la hierarchie reelle a 3 niveaux
+        row = await session.execute(
+            select(Account.id)
+            .where(
+                Account.unity_id == current_unity_id,
+                Account.role == "director",
+                Account.account_status == "active",
+                Account.deleted_at.is_(None),
+            )
+            .limit(1)
+        )
+        director_id = row.scalar_one_or_none()
+        if director_id:
+            return director_id
+
+        parent_org_row = await session.execute(
+            select(Organigram.parent_id)
+            .where(Organigram.unity_id == current_unity_id, Organigram.deleted_at.is_(None))
+            .limit(1)
+        )
+        parent_org_id = parent_org_row.scalar_one_or_none()
+        if not parent_org_id:
+            return None
+
+        parent_unity_row = await session.execute(
+            select(Organigram.unity_id)
+            .where(Organigram.id == parent_org_id, Organigram.deleted_at.is_(None))
+        )
+        parent_unity_id = parent_unity_row.scalar_one_or_none()
+        if not parent_unity_id or parent_unity_id == current_unity_id:
+            return None
+        current_unity_id = parent_unity_id
+
+    return None
+
+
 class EscaladeService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -265,13 +315,28 @@ class EscaladeService:
         """
         Met à jour sla_breached et sla_elapsed (heures écoulées) sur tous les tickets actifs.
         Appelé avant run_auto_escalation pour synchroniser les flags (CDC §6.1).
+
+        BR-SLA-REOPEN-001 : l'ancre du calcul n'est plus systématiquement `created_at`
+        — un ticket déjà réouvert au moins une fois mesure son cycle SLA courant depuis
+        sa dernière réouverture (`workflow_detail.event_type='reopened'` le plus récent),
+        jamais depuis la création d'origine. Le premier cycle SLA n'est jamais recalculé :
+        cette requête ne touche que les compteurs "live" (`sla_elapsed`/`sla_breached`),
+        le cycle précédent restant gelé dans l'événement `treatment_completed`
+        correspondant (`ServiceRequest._sla_cycle_snapshot`).
         """
         # Mise à jour de sla_elapsed sur tous les tickets actifs (pas uniquement breached)
         await self.session.execute(
             text("""
                 UPDATE request r
                 JOIN request_status rs ON rs.id = r.request_status_id
-                SET r.sla_elapsed = TIMESTAMPDIFF(HOUR, r.created_at, NOW())
+                LEFT JOIN (
+                    SELECT w.request_id, MAX(wd.created_at) AS last_reopened_at
+                    FROM workflow_detail wd
+                    JOIN workflow w ON w.id = wd.workflow_id
+                    WHERE wd.event_type = 'reopened' AND wd.deleted_at IS NULL
+                    GROUP BY w.request_id
+                ) rw ON rw.request_id = r.id
+                SET r.sla_elapsed = TIMESTAMPDIFF(HOUR, COALESCE(rw.last_reopened_at, r.created_at), NOW())
                 WHERE r.deleted_at IS NULL
                   AND r.sla_hours > 0
                   AND rs.code NOT IN ('resolved', 'closed', 'cancelled', 'rejected')
@@ -282,11 +347,18 @@ class EscaladeService:
             text("""
                 UPDATE request r
                 JOIN request_status rs ON rs.id = r.request_status_id
+                LEFT JOIN (
+                    SELECT w.request_id, MAX(wd.created_at) AS last_reopened_at
+                    FROM workflow_detail wd
+                    JOIN workflow w ON w.id = wd.workflow_id
+                    WHERE wd.event_type = 'reopened' AND wd.deleted_at IS NULL
+                    GROUP BY w.request_id
+                ) rw ON rw.request_id = r.id
                 SET r.sla_breached = 1
                 WHERE r.deleted_at IS NULL
                   AND r.sla_hours > 0
                   AND r.sla_breached = 0
-                  AND TIMESTAMPDIFF(HOUR, r.created_at, NOW()) >= r.sla_hours
+                  AND TIMESTAMPDIFF(HOUR, COALESCE(rw.last_reopened_at, r.created_at), NOW()) >= r.sla_hours
                   AND rs.code NOT IN ('resolved', 'closed', 'cancelled', 'rejected', 'escalated')
             """)
         )

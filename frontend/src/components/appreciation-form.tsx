@@ -92,7 +92,7 @@ export function AppreciationForm({ existing, isClosed, authorType, onSubmit, onR
 
   return (
     <div className="rounded-xl border border-border/50 bg-card/60 backdrop-blur-sm p-4 flex flex-col gap-4">
-      <p className="font-medium text-sm">Évaluez la prise en charge de votre demande</p>
+      <p className="font-medium text-sm">Évaluez la prise en charge de votre ticket</p>
 
       {/* Star rating */}
       <div className="flex flex-col gap-1">
@@ -162,12 +162,12 @@ export function AppreciationForm({ existing, isClosed, authorType, onSubmit, onR
         {resolved === false && onReopen && (
           <div className="flex items-center gap-2 rounded-lg bg-orange-500/10 border border-orange-500/30 p-3 text-sm text-orange-300">
             <RotateCcw className="h-4 w-4 shrink-0" />
-            <span>Votre demande n'est pas résolue ?</span>
+            <span>Votre ticket n'est pas résolu ?</span>
             <button
               onClick={onReopen}
               className="ml-auto underline underline-offset-2 hover:text-orange-200 whitespace-nowrap"
             >
-              Rouvrir la demande
+              Rouvrir le ticket
             </button>
           </div>
         )}

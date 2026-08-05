@@ -8,7 +8,7 @@ import { useTheme } from "@/lib/use-theme";
 
 const navLinks = [
   { to: "/", label: "Accueil" },
-  { to: "/track", label: "Suivre ma demande" },
+  { to: "/track", label: "Suivre mon ticket" },
   { to: "/knowledge", label: "Base de connaissance" },
   { to: "/help", label: "Aide" },
 ];
@@ -198,7 +198,7 @@ export function PublicLayout({ children }: { children: ReactNode }) {
             <div className="flex flex-col gap-3">
               <Logo />
               <p className="max-w-[280px] text-sm leading-relaxed text-muted-foreground">
-                Plateforme interne de gestion des demandes pour les employés d'Électricité de Guinée.
+                La plateforme officielle de gestion des tickets de la Direction des Systèmes d'Information d'Électricité de Guinée.
               </p>
             </div>
 
@@ -216,7 +216,7 @@ export function PublicLayout({ children }: { children: ReactNode }) {
                 <ul className="space-y-2">
                   {[
                     { label: "Espace employé", to: "/login" },
-                    { label: "Suivre une demande", to: "/track" },
+                    { label: "Suivre un ticket", to: "/track" },
                     { label: "Base de connaissance", to: "/knowledge" },
                   ].map((l) => (
                     <li key={l.to}>
@@ -240,7 +240,7 @@ export function PublicLayout({ children }: { children: ReactNode }) {
                   {[
                     { label: "Connexion", to: "/login" },
                     { label: "Notifications", to: "/login" },
-                    { label: "Demandes", to: "/login" },
+                    { label: "Tickets", to: "/login" },
                     { label: "Aide", to: "/help" },
                   ].map((l) => (
                     <li key={l.label}>

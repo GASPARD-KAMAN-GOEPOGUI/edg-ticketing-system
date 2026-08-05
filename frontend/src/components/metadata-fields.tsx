@@ -40,7 +40,7 @@ const KEY_LABELS: Record<string, string> = {
   from: "De",
   to: "Vers",
   user_id: "Utilisateur",
-  ref: "Référence demande",
+  ref: "Référence ticket",
   ip: "Adresse IP",
   mfa: "Authentification MFA",
   attempts: "Tentatives échouées",

@@ -51,12 +51,12 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "Plateforme interne de gestion des demandes pour les employés d'Électricité de Guinée. Soumettez, suivez et résolvez vos incidents.",
+          "Plateforme interne de gestion des tickets pour les employés d'Électricité de Guinée. Soumettez, suivez et résolvez vos incidents.",
       },
       { property: "og:title", content: "EDG Connect" },
       {
         property: "og:description",
-        content: "L'espace numérique des employés EDG — demandes, suivi, support, en un seul endroit.",
+        content: "L'espace numérique des employés EDG — tickets, suivi, support, en un seul endroit.",
       },
     ],
   }),
@@ -100,7 +100,7 @@ function ServicesSection() {
           Tout ce dont vous avez besoin
         </h2>
         <p className="mt-3 text-sm text-muted-foreground sm:text-base">
-          Un outil unique pour gérer toutes vos demandes internes, de la soumission à la résolution.
+          Un outil unique pour gérer tous vos tickets internes, de la soumission à la résolution.
         </p>
       </Reveal>
 
@@ -114,23 +114,23 @@ function ServicesSection() {
         {[
           {
             icon: Bolt,
-            title: "Signaler un incident",
-            desc: "Panne, court-circuit, équipement défectueux. Signalez et suivez l'intervention en temps réel.",
-            cta: "Signaler",
+            title: "Ticket d'incident",
+            desc: "Panne, court-circuit, équipement défectueux : ouvrez un ticket et suivez son traitement en temps réel.",
+            cta: "Créer un ticket",
             to: "/login",
           },
           {
             icon: FileText,
-            title: "Demander un document",
-            desc: "Attestations, rapports, certificats administratifs. Traitement par le service compétent.",
-            cta: "Demander",
+            title: "Ticket de service",
+            desc: "Attestations, rapports, certificats administratifs : soumettez votre ticket et suivez-le jusqu'à la remise du document.",
+            cta: "Créer un ticket",
             to: "/login",
           },
           {
             icon: HeartHandshake,
-            title: "Obtenir de l'aide",
-            desc: "Posez vos questions à l'équipe support EDG. Réponse rapide depuis votre espace personnel.",
-            cta: "Contacter",
+            title: "Assistance informatique",
+            desc: "Un problème d'accès ou d'outil ? Ouvrez un ticket auprès de l'équipe support DSI et suivez sa résolution.",
+            cta: "Créer un ticket",
             to: "/login",
           },
         ].map((s) => (
@@ -176,26 +176,26 @@ function HowSection() {
     {
       n: "01",
       icon: FilePlus,
-      title: "Déposez votre demande",
-      desc: "Connectez-vous avec votre compte EDG et remplissez le formulaire en quelques clics. Votre référence est générée immédiatement.",
+      title: "Création",
+      desc: "Connectez-vous avec votre compte EDG et décrivez votre besoin en quelques clics. Une référence de suivi est générée immédiatement.",
     },
     {
       n: "02",
       icon: Compass,
-      title: "Orientation automatique",
-      desc: "Votre demande est dirigée vers le service compétent selon sa nature et sa localisation.",
+      title: "Qualification",
+      desc: "Le ticket est analysé puis orienté vers la direction et le service compétents selon sa nature et sa priorité.",
     },
     {
       n: "03",
       icon: Clock,
-      title: "Suivi en temps réel",
-      desc: "Consultez l'avancement à tout moment depuis votre espace personnel ou via le suivi par référence.",
+      title: "Traitement",
+      desc: "Un agent prend en charge le ticket et vous tient informé de chaque avancée, en temps réel.",
     },
     {
       n: "04",
       icon: CheckCircle2,
-      title: "Résolution & confirmation",
-      desc: "Un agent clôture votre dossier et vous êtes notifié en temps réel dès la résolution.",
+      title: "Résolution",
+      desc: "Le ticket est clôturé dès la résolution confirmée et vous êtes notifié instantanément.",
     },
   ] as const;
 
@@ -206,7 +206,7 @@ function HowSection() {
           Comment ça marche
         </h2>
         <p className="mt-3 text-sm text-muted-foreground sm:text-base">
-          En quatre étapes, votre demande est prise en charge et résolue par le bon service.
+          En quatre étapes, votre ticket est pris en charge et résolu par le bon service.
         </p>
       </Reveal>
 
@@ -252,7 +252,7 @@ function ForWhoSection() {
       shadow: "shadow-accent/30",
       title: "Demandeur",
       subtitle: "Employé EDG — tout niveau",
-      desc: "Soumettez vos demandes de support, suivez leur avancement en temps réel et échangez avec les agents en charge de votre dossier.",
+      desc: "Créez vos tickets de support, suivez leur traitement en temps réel et échangez directement avec l'agent en charge de votre dossier.",
       cta: "Accéder à mon espace",
       to: "/login",
     },
@@ -262,7 +262,7 @@ function ForWhoSection() {
       shadow: "shadow-primary/30",
       title: "Agent & Chef de service",
       subtitle: "Traitement et supervision",
-      desc: "File d'attente, triage, gestion des tickets assignés et suivi des délais SLA. Le tableau de bord de supervision couvre toute l'activité de votre équipe.",
+      desc: "Prenez en charge les tickets de votre file d'attente, collaborez avec les autres services par la transmission inter-directions et suivez vos délais SLA en continu.",
       cta: "Espace agent",
       to: "/login",
     },
@@ -272,7 +272,7 @@ function ForWhoSection() {
       shadow: "shadow-primary/25",
       title: "Directeur",
       subtitle: "Pilotage et reporting",
-      desc: "KPIs en temps réel, performances par direction, rapports CSAT et SLA, règles de routage — tout ce qu'il faut pour piloter la qualité de service.",
+      desc: "Pilotez la performance de votre direction grâce aux KPIs en temps réel, aux rapports CSAT/SLA et aux règles de routage — une vision complète de la qualité de service.",
       cta: "Tableau de bord",
       to: "/login",
     },
@@ -323,10 +323,10 @@ function ForWhoSection() {
 
 function TrustSection() {
   const features = [
-    { icon: ShieldCheck,    t: "Sécurisé",    d: "Accès RBAC strict, JWT + biométrie optionnelle." },
-    { icon: Clock,          t: "Temps réel",  d: "Notifications SSE à chaque changement de statut." },
-    { icon: CheckCircle2,   t: "Traçable",    d: "Historique complet et audit trail sur chaque demande." },
-    { icon: HeartHandshake, t: "Collaboratif", d: "Un agent dédié pour chaque dossier, escalades incluses." },
+    { icon: ShieldCheck,    t: "Sécurisé",    d: "Contrôle d'accès strict (RBAC), authentification JWT et biométrie optionnelle." },
+    { icon: Clock,          t: "Temps réel",  d: "Notifications instantanées à chaque changement de statut de votre ticket." },
+    { icon: CheckCircle2,   t: "Traçable",    d: "Historique complet et journal d'audit inviolable sur chaque ticket." },
+    { icon: HeartHandshake, t: "Collaboratif", d: "Un agent dédié pour chaque dossier, avec escalade automatique si nécessaire." },
   ] as const;
 
   return (
@@ -339,9 +339,9 @@ function TrustSection() {
               <span className="text-gradient">confiance</span>.
             </h2>
             <p className="mt-3 text-muted-foreground">
-              EDG Connect centralise les demandes internes vers la bonne direction
-              et le bon service. Chaque employé sait à tout moment où en est son
-              dossier — et qui s'en occupe.
+              EDG Connect centralise le traitement des tickets internes, avec une
+              traçabilité complète et un suivi en temps réel à chaque étape.
+              Chaque employé sait à tout moment où en est son dossier — et qui en a la charge.
             </p>
             <motion.div
               whileHover={{ scale: 1.04 }}
@@ -698,7 +698,7 @@ function AnnouncementsCarousel({ items }: { items: Announcement[] }) {
                   to="/track"
                   className="text-xs font-medium text-primary hover:underline underline-offset-2"
                 >
-                  Suivre ma demande →
+                  Suivre mon ticket →
                 </Link>
               </div>
             </div>
@@ -832,19 +832,19 @@ function Home() {
             <motion.div initial="hidden" animate="show" variants={stagger}>
               <motion.h1
                 variants={fadeUp}
-                className="text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl xl:text-7xl"
+                className="text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl xl:text-6xl"
               >
-                L'espace numérique{" "}
-                <span className="text-gradient">des employés EDG</span>.
+                La gestion collaborative de vos tickets{" "}
+                <span className="text-gradient">de bout en bout</span>.
               </motion.h1>
 
               <motion.p
                 variants={fadeUp}
                 className="mt-5 max-w-xl text-sm text-muted-foreground sm:text-base lg:text-lg"
               >
-                Soumettez vos demandes internes, suivez leur avancement en temps
-                réel, collaborez avec les équipes EDG. Une plateforme pensée
-                pour les employés d'Électricité de Guinée.
+                Créez un ticket, suivez chaque étape de son traitement et
+                collaborez avec les équipes de la Direction des Systèmes
+                d'Information. Une traçabilité complète, de la création à la clôture.
               </motion.p>
 
               <motion.div variants={fadeUp} className="mt-8 flex flex-row flex-wrap gap-3">
@@ -868,7 +868,7 @@ function Home() {
                   >
                     <Link to="/track">
                       <Search className="mr-2 h-4 w-4" />
-                      Suivre ma demande
+                      Suivre un ticket
                     </Link>
                   </Button>
                 </motion.div>
@@ -877,8 +877,8 @@ function Home() {
               <motion.div variants={stagger} className="mt-10 grid grid-cols-3 gap-3 sm:gap-8">
                 {[
                   { v: "24/7", l: "Disponibilité" },
-                  { v: "< 4h", l: "Pannes critiques" },
-                  { v: dirCountLoading ? "…" : activeDirectionsCount != null ? String(activeDirectionsCount) : "—", l: "Directions" },
+                  { v: "< 4h", l: "Délai critique" },
+                  { v: dirCountLoading ? "…" : activeDirectionsCount != null ? String(activeDirectionsCount) : "—", l: "Directions actives" },
                 ].map((s) => (
                   <motion.div key={s.l} variants={fadeUp}>
                     <div className="text-2xl font-bold sm:text-3xl">{s.v}</div>
@@ -907,7 +907,7 @@ function Home() {
                     {/* En-tête ticket */}
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Demande</div>
+                        <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Ticket</div>
                         <div className="font-mono text-sm font-semibold">EDG-2025-0178</div>
                       </div>
                       <span className="shrink-0 rounded-full bg-success/15 px-3 py-1 text-xs font-semibold text-success ring-1 ring-success/30">
@@ -927,10 +927,10 @@ function Home() {
                     {/* Historique */}
                     <div className="space-y-2.5">
                       {[
-                        { t: "Demande soumise",        d: "08 jan. 2025 · 09h14", done: true },
+                        { t: "Ticket créé",        d: "08 jan. 2025 · 09h14", done: true },
                         { t: "Prise en charge",         d: "08 jan. 2025 · 10h02", done: true },
-                        { t: "Technicien dépêché",      d: "08 jan. 2025 · 14h30", done: true },
-                        { t: "Clôturée — problème résolu", d: "09 jan. 2025 · 11h20", done: true },
+                        { t: "Ticket en traitement",      d: "08 jan. 2025 · 14h30", done: true },
+                        { t: "Ticket clôturé", d: "09 jan. 2025 · 11h20", done: true },
                       ].map((step, i) => (
                         <motion.div key={i} variants={fadeUp} className="flex items-start gap-3">
                           <div className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full bg-success ring-4 ring-success/20" />
@@ -944,7 +944,7 @@ function Home() {
 
                     {/* Note satisfaction */}
                     <div className="flex items-center justify-between rounded-xl border border-success/20 bg-success/5 px-3 py-2">
-                      <span className="text-[11px] text-muted-foreground">Satisfaction client</span>
+                      <span className="text-[11px] text-muted-foreground">Satisfaction utilisateur</span>
                       <div className="flex gap-0.5">
                         {[1,2,3,4,5].map((s) => (
                           <span key={s} className={s <= 4 ? "text-amber-400 text-xs" : "text-muted-foreground/30 text-xs"}>★</span>

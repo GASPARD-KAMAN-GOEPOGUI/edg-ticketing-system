@@ -41,6 +41,7 @@ import {
   GitBranch,
   Flag,
   FolderTree,
+  Compass,
 } from "lucide-react";
 import { useState, useRef, useCallback, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -114,12 +115,12 @@ function resolveBackFallback(pathname: string, role: Role): string {
 const navItems: NavItem[] = [
   // ── Mon espace personnel (tous les rôles — chaque acteur garde son espace propre) ──
   { to: "/app",                  label: "Accueil",          icon: LayoutDashboard, roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Mon espace" },
-  { to: "/app/requests",         label: "Mes demandes",      icon: Inbox,   roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Mon espace" },
+  { to: "/app/requests",         label: "Mes tickets",      icon: Inbox,   roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Mon espace" },
   { to: "/app/requests/history", label: "Historique",        icon: History, roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Mon espace" },
 
   // ── Agent / Chef ─────────────────────────────────────────────────────────
-  { to: "/app/chief-inbox",      label: "Boîte de traitement",              icon: ClipboardList, roles: ["chief-service"],                   group: "Traitement" },
-  { to: "/app/department-inbox", label: "Boîte de traitement (département)", icon: ClipboardList, roles: ["chief-departement"],                group: "Traitement" },
+  { to: "/app/chief-inbox",      label: "Centre de répartition", icon: ClipboardList, roles: ["chief-service"],                   group: "Traitement" },
+  { to: "/app/department-inbox", label: "Centre de pilotage",   icon: ClipboardList, roles: ["chief-departement"],                group: "Traitement" },
   { to: "/app/my-tickets",  label: "Mes tickets",          icon: Ticket,          roles: ["agent-support"],                   group: "Traitement" },
   { to: "/app/queue",       label: "File d'attente",       icon: ListChecks,      roles: ["agent-support", "chief-service"], group: "Traitement" },
 
@@ -128,6 +129,8 @@ const navItems: NavItem[] = [
 
   // ── Direction / pilotage global ───────────────────────────────────────────
   { to: "/app/direction",  label: "Vue direction", icon: Building2,  roles: ["director"],                          group: "Pilotage" },
+  // Lot 4 — additif, ne retire aucun accès existant à director.
+  { to: "/app/strategic-dashboard", label: "Tableau de bord stratégique", icon: Compass, roles: ["director"],      group: "Pilotage" },
   { to: "/app/dg",         label: "Vue globale",   icon: TrendingUp, roles: ["admin"],                             group: "Pilotage" },
   { to: "/app/sla-center", label: "Centre SLA",    icon: AlarmClock, roles: ["chief-service", "chief-departement", "director", "admin"],       group: "Pilotage" },
   { to: "/app/reports",    label: "Rapports",      icon: BarChart3,  roles: ["chief-service", "chief-departement", "director", "admin"],       group: "Pilotage" },
@@ -142,7 +145,7 @@ const navItems: NavItem[] = [
   { to: "/app/admin/units",      label: "Services & Unités", icon: Layers,    roles: ["admin"], group: "Organisation" },
 
   // ── Admin — Gestion tickets ───────────────────────────────────────────────
-  { to: "/app/admin/references", label: "Types de demandes", icon: Database,  roles: ["admin"], group: "Gestion tickets" },
+  { to: "/app/admin/references", label: "Types de tickets", icon: Database,  roles: ["admin"], group: "Gestion tickets" },
   { to: "/app/admin/routing",    label: "Règles de routage", icon: RouteIcon, roles: ["admin"], group: "Gestion tickets" },
 
   // ── Admin — SLA & Escalades ───────────────────────────────────────────────
@@ -637,14 +640,14 @@ export function AppLayout({ children }: { children: ReactNode }) {
                   : role === "chief-service"
                     ? [
                         { to: "/app/queue",         icon: ListChecks,      label: "Tickets" },
-                        { to: "/app/chief-inbox",   icon: ClipboardList,   label: "Boîte", primary: true },
+                        { to: "/app/chief-inbox",   icon: ClipboardList,   label: "Répartition", primary: true },
                         { to: "/app/notifications", icon: Bell,            label: "Alertes" },
                         { to: "/app/profile",       icon: Settings,        label: "Profil" },
                       ]
                     : role === "chief-departement"
                       ? [
                           { to: "/app/supervision",       icon: ShieldAlert,     label: "Superviser" },
-                          { to: "/app/department-inbox",  icon: ClipboardList,   label: "Boîte", primary: true },
+                          { to: "/app/department-inbox",  icon: ClipboardList,   label: "Pilotage", primary: true },
                           { to: "/app/notifications",     icon: Bell,            label: "Alertes" },
                           { to: "/app/profile",           icon: Settings,        label: "Profil" },
                         ]
@@ -665,7 +668,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
                           ]
                         : [
                             { to: "/app",              icon: LayoutDashboard, label: "Accueil" },
-                            { to: "/app/requests",     icon: Inbox,           label: "Demandes" },
+                            { to: "/app/requests",     icon: Inbox,           label: "Tickets" },
                             { to: "/app/new",          icon: Plus,            label: "Créer", primary: true },
                             { to: "/app/notifications", icon: Bell,           label: "Alertes" },
                             { to: "/app/profile",      icon: Settings,        label: "Profil" },

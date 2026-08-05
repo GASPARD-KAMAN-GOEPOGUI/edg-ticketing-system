@@ -264,6 +264,22 @@ class WorkflowDetailRepository(BaseRepository[WorkflowDetail]):
             ]
         return items
 
+    async def get_comment_by_id_for_request(
+        self, comment_id: str, request_id: str
+    ) -> WorkflowDetail | None:
+        """Retourne un commentaire (event_type='comment_added') seulement s'il appartient
+        au workflow de cette demande — utilisé pour valider reply_to_id (C-05.1)."""
+        stmt = (
+            select(WorkflowDetail)
+            .join(Workflow, WorkflowDetail.workflow_id == Workflow.id)
+            .where(WorkflowDetail.id == int(comment_id))
+            .where(Workflow.request_id == int(request_id))
+            .where(WorkflowDetail.event_type == "comment_added")
+            .where(WorkflowDetail.deleted_at.is_(None))
+        )
+        result = await self.session.execute(stmt)
+        return result.scalars().first()
+
     async def list_escalations_by_request(
         self, request_id: str
     ) -> list[WorkflowDetail]:

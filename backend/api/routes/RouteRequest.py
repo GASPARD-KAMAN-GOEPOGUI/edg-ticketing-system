@@ -18,7 +18,11 @@ from api.schemas.base import PaginatedResponse
 from api.services import RequestService, AttachmentService
 from api.repositories import WorkflowDetailRepository, WorkflowRepository
 from api.services.ServiceClamAV import scan_bytes as clamav_scan
-from api.core.ticket_actions import assert_escalation_allowed, assert_ticket_action
+from api.core.ticket_actions import (
+    assert_escalation_allowed,
+    assert_exceptional_escalation_reason,
+    assert_ticket_action,
+)
 from api.core.file_validator import validate_file_magic_bytes
 from api.core.rbac import normalize_role
 from api import storage
@@ -197,6 +201,31 @@ def _att_svc(db: AsyncSession = Depends(get_db)) -> AttachmentService:
 def _actor_display_name(actor) -> str | None:
     parts = [getattr(actor, "firstname", None), getattr(actor, "name", None)]
     return " ".join(part for part in parts if part) or None
+
+
+async def _validate_attachment_ids(
+    att_svc: AttachmentService, request_id: str, attachment_ids: Optional[list[str]]
+) -> list[dict]:
+    """BR-TRANSMIT-001 — mêmes garanties que les pièces jointes de commentaire
+    (BR-ATTACHMENT-001) : chaque pièce jointe fournie doit déjà avoir été uploadée
+    sur cette même demande."""
+    if not attachment_ids:
+        return []
+    validated: list[dict] = []
+    for att_id in attachment_ids:
+        att = await att_svc.get_by_id(att_id)
+        if str(att.request_id) != str(request_id):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Une pièce jointe fournie n'appartient pas à cette demande.",
+            )
+        validated.append({
+            "attachment_id": str(att.id),
+            "filename": att.filename,
+            "mime_type": att.mime_type,
+            "size_bytes": att.size_bytes,
+        })
+    return validated
 
 
 def _hide_internal_comments(schema: RequestResponse) -> RequestResponse:
@@ -678,10 +707,11 @@ async def requester_edit(
 async def assign_request(
     id: str,
     assignee_id: str = Query(...),
-    actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "admin")),
+    actor=Depends(require_roles("agent-support", "chief-service", "admin")),
     svc: RequestService = Depends(_svc),
 ):
-    """Assignation d'une demande — roles autorises : agent-support, chief-service, chief-departement, admin."""
+    """Assignation d'une demande — roles autorises : agent-support, chief-service, admin
+    (Lot 3.1 : chief-departement n'a plus acces a cette action, cf. ticket_actions.py)."""
     return await svc.assign(
         id,
         assignee_id,
@@ -693,25 +723,74 @@ async def assign_request(
 
 
 class ResolveBody(BaseModel):
-    reason: Optional[str] = None
+    summary: str
+    solution: str
+    work_done: str
+    recommendations: Optional[str] = None
+    attachment_ids: Optional[list[str]] = None
 
 
 @router.post("/{id}/resolve", response_model=RequestResponse)
 async def resolve_request(
     id: str,
-    body: Optional[ResolveBody] = None,
+    body: ResolveBody,
     actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "director", "admin")),
     svc: RequestService = Depends(_svc),
+    att_svc: AttachmentService = Depends(_att_svc),
 ):
-    """Resolution — reserve agent-support, chief-service, chief-departement, directeur, admin.
-    `reason` obligatoire pour chief-service uniquement (resolution exceptionnelle, Lot 2.6)."""
+    """BR-TRANSMIT-001 — "Terminer le traitement". Autorisé à l'intervenant actuel
+    (request.assignee_id == actor.id) parmi les rôles traitants : agent-support,
+    chief-service, chief-departement (rouvert — remplace Lot 3.2), director (n'est
+    plus limité aux tickets escaladés — remplace BR-DIRECTOR-RESOLVE-001). Résumé,
+    solution et travail réalisé désormais obligatoires pour tous les rôles."""
+    attachments = await _validate_attachment_ids(att_svc, id, body.attachment_ids)
     return await svc.resolve(
         id,
         actor_id=str(actor.id),
         actor_name=_actor_display_name(actor),
         actor_role=actor.role,
         actor=actor,
-        reason=body.reason if body else None,
+        summary=body.summary,
+        solution=body.solution,
+        work_done=body.work_done,
+        recommendations=body.recommendations,
+        attachments=attachments,
+    )
+
+
+class TransmitTreatmentBody(BaseModel):
+    to_user_id: str
+    work_done: str
+    reason: str
+    instruction: Optional[str] = None
+    attachment_ids: Optional[list[str]] = None
+
+
+@router.post("/{id}/transmit", response_model=RequestResponse)
+async def transmit_treatment_request(
+    id: str,
+    body: TransmitTreatmentBody,
+    actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "director", "admin")),
+    svc: RequestService = Depends(_svc),
+    att_svc: AttachmentService = Depends(_att_svc),
+):
+    """BR-TRANSMIT-001 — "Transmettre le traitement". Autorisé uniquement à
+    l'intervenant actuel (request.assignee_id == actor.id) parmi les rôles traitants.
+    La cible peut être choisie librement dans toute l'organisation (aucune restriction
+    de direction/service) sous réserve d'être active et de porter un rôle traitant —
+    vérifié côté backend, pas seulement masqué côté frontend."""
+    attachments = await _validate_attachment_ids(att_svc, id, body.attachment_ids)
+    return await svc.transmit_treatment(
+        id,
+        to_user_id=body.to_user_id,
+        work_done=body.work_done,
+        reason=body.reason,
+        instruction=body.instruction,
+        attachments=attachments,
+        actor_id=str(actor.id),
+        actor_name=_actor_display_name(actor),
+        actor_role=actor.role,
+        actor=actor,
     )
 
 
@@ -1055,12 +1134,113 @@ async def escalate_request(
     return EscalationResponse.from_detail(event, int(req.id), req.ref)
 
 
+class EscalateToDirectorBody(BaseModel):
+    reason: str
+
+
+@router.post(
+    "/{id}/escalate-to-director",
+    response_model=EscalationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def escalate_to_director_request(
+    id: str,
+    body: EscalateToDirectorBody,
+    actor=Depends(require_roles("chief-departement")),
+    svc: RequestService = Depends(_svc),
+    detail_repo: WorkflowDetailRepository = Depends(_detail_repo),
+    wf_repo: WorkflowRepository = Depends(_wf_repo),
+    db: AsyncSession = Depends(get_db),
+):
+    """Escalade exceptionnelle (Lot 3.3) — reservee au chef de departement. Contrairement
+    a /escalate (qui cible le chef hierarchique le plus proche via find_hierarchical_chief),
+    cette action court-circuite volontairement la hierarchie normale et cible directement
+    le directeur de la direction du chef de departement. Motif obligatoire.
+    """
+    from sqlalchemy import select as sa_select
+    from api.models.ModelAccount import Account
+    from api.services.ServiceEscalade import find_director_for_department
+    from api.services.NotificationEmitter import emit as emit_notif
+
+    actor_id = str(actor.id)
+    req = await svc.get_by_id(id)
+    await _resolve_access(actor, req, db)
+    assert_exceptional_escalation_reason(body.reason)
+    assert_ticket_action(actor, req, "escalate_to_director", target_status="escalated")
+    wf = await wf_repo.find_active_workflow(id)
+    if wf is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Aucun workflow actif pour cette demande — impossible d'escalader.",
+        )
+
+    director_id = await find_director_for_department(db, actor.unity_id)
+    if director_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Aucun directeur trouvé pour la direction de ce département.",
+        )
+
+    director_row = await db.execute(
+        sa_select(Account.name, Account.firstname, Account.role).where(Account.id == director_id)
+    )
+    director_name_raw, director_firstname, director_role = director_row.first()
+    director_name = f"{director_firstname} {director_name_raw}".strip() if director_firstname else director_name_raw
+
+    event = await detail_repo.create_event({
+        "workflow_id": str(wf.id),
+        "event_type": "escalation_exceptional",
+        "label": f"Escalade exceptionnelle vers {director_name} — {req.ref}",
+        "actor_id": actor_id,
+        "actor_name": actor.name,
+        "comment": body.reason.strip(),
+        "activated": True,
+        "infos": {
+            "escalation_type": "exceptional",
+            "to_user_id": str(director_id),
+            "to_agent_name": director_name,
+            "priority": req.priority,
+            "status": "open",
+            "event_status": "escalated",
+            "source_role": actor.role,
+            "actor_role": actor.role,
+            "target_user_id": str(director_id),
+            "target_user_name": director_name,
+            "target_role": director_role,
+            "old_status": req.request_status,
+            "new_status": "escalated",
+        },
+    })
+    await svc.update(
+        id,
+        {"request_status": "escalated", "assignee_id": str(director_id)},
+        actor_id=actor_id,
+        actor_name=_actor_display_name(actor),
+        actor_role=actor.role,
+    )
+
+    await emit_notif(
+        svc.session,
+        recipient_id=str(director_id),
+        title=f"Escalade exceptionnelle — {req.ref}",
+        body=f"Le ticket {req.ref} vous a été escaladé directement par {actor.name} (chef de département) : {body.reason.strip()[:100]}",
+        type="warning",
+        request_id=str(req.id),
+        action_label="Voir le ticket",
+        action_url=f"/app/requests/{req.id}",
+    )
+
+    return EscalationResponse.from_detail(event, int(req.id), req.ref)
+
+
 # ── Comments (nested — stockés dans workflow_detail, event_type='comment') ───
 
 class _CommentBody(BaseModel):
     body: str
     is_public: bool = False
     attachment_id: Optional[str] = None
+    is_directive: bool = False
+    reply_to_id: Optional[str] = None
 
 
 @router.get("/{request_id}/comments", response_model=list[WorkflowDetailResponse])
@@ -1108,6 +1288,20 @@ async def create_comment(
             detail="Aucun workflow actif pour cette demande.",
         )
 
+    # Lot 2.7 — "Directive" : commentaire dedie chef -> agent assigne, cible et
+    # notifie precisement (BR-NOTIF-001 : jamais tout un service par defaut).
+    if body.is_directive:
+        if normalize_role(actor.role) not in {"chief-service", "chief-departement"}:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Seul un chef de service ou de département peut envoyer une directive.",
+            )
+        if not getattr(req, "assignee_id", None):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Impossible d'envoyer une directive : ce ticket n'a pas encore d'agent assigné.",
+            )
+
     attachment_infos: dict = {}
     if body.attachment_id is not None:
         att = await att_svc.get_by_id(body.attachment_id)
@@ -1123,10 +1317,36 @@ async def create_comment(
             "size_bytes": att.size_bytes,
         }
 
+    # C-05.1 — reply_to_id : lien reel vers le commentaire cible (fil de discussion),
+    # distinct de workflow_detail.parent_id qui reste reserve au chainage d'audit du
+    # workflow et a la hierarchie des etapes de traitement.
+    reply_infos: dict = {}
+    if body.reply_to_id is not None:
+        try:
+            target_comment = await detail_repo.get_comment_by_id_for_request(
+                body.reply_to_id, request_id
+            )
+        except (ValueError, TypeError):
+            target_comment = None
+        if target_comment is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Commentaire cible introuvable pour cette demande.",
+            )
+        reply_infos = {"reply_to_id": str(target_comment.id)}
+
+    directive_target_id = str(req.assignee_id) if body.is_directive else None
+    # BR-TRACE-001 — rattache le commentaire à l'intervention ouverte de son auteur,
+    # s'il est l'intervenant courant du ticket (sinon reste hors conteneur — ex.
+    # message du demandeur).
+    intervention_infos = RequestService._intervention_meta_for_actor(
+        req.infos, req.assignee_id, actor.id
+    )
     event = await detail_repo.create_event({
         "workflow_id": str(wf.id),
         "event_type": "comment_added",
-        "label": "Commentaire public ajouté" if body.is_public else "Commentaire interne ajouté",
+        "label": "Directive envoyée à l'agent" if body.is_directive
+            else ("Commentaire public ajouté" if body.is_public else "Commentaire interne ajouté"),
         "actor_id": actor.id,
         "actor_name": _actor_display_name(actor) or actor.name,
         "comment": body.body,
@@ -1138,7 +1358,10 @@ async def create_comment(
             "request_status": req.request_status,
             "source_role": actor.role,
             "actor_role": actor.role,
+            **({"is_directive": True, "target_user_id": directive_target_id} if body.is_directive else {}),
             **attachment_infos,
+            **reply_infos,
+            **intervention_infos,
         },
     })
 
@@ -1157,6 +1380,20 @@ async def create_comment(
                 action_label="Voir la demande",
                 action_url=f"/app/requests/{request_id}",
             )
+
+    # Directive : notification nominative a l'agent assigne uniquement (BR-NOTIF-001).
+    if directive_target_id:
+        from api.services.NotificationEmitter import emit as emit_notif
+        await emit_notif(
+            db,
+            recipient_id=directive_target_id,
+            title="Directive reçue",
+            body=f"{_actor_display_name(actor) or actor.name} vous a envoyé une directive sur le ticket {req.ref}.",
+            type="warning",
+            request_id=request_id,
+            action_label="Voir la demande",
+            action_url=f"/app/requests/{request_id}",
+        )
 
     return event
 
@@ -1352,6 +1589,11 @@ async def upload_attachment(
     if not skip_timeline_event:
         wf = await _timeline_workflow(wf_repo, request_id)
         if wf is not None:
+            # BR-TRACE-001 — rattache la pièce jointe à l'intervention ouverte de son
+            # auteur, s'il est l'intervenant courant du ticket.
+            intervention_infos = RequestService._intervention_meta_for_actor(
+                req.infos, req.assignee_id, actor.id
+            )
             await detail_repo.create_event({
                 "workflow_id": str(wf.id),
                 "event_type": "attachment_added",
@@ -1369,6 +1611,7 @@ async def upload_attachment(
                     "mime_type": real_mime,
                     "size_bytes": len(data),
                     "scan_status": scan_db_status,
+                    **intervention_infos,
                 },
             })
 

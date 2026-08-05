@@ -459,7 +459,7 @@ function ProfilePage() {
               <div className="text-2xl font-bold">
                 {statTotal ? totalRequests : <span className="text-base text-muted-foreground">—</span>}
               </div>
-              <div className="mt-0.5 text-[11px] font-medium text-muted-foreground">Demandes</div>
+              <div className="mt-0.5 text-[11px] font-medium text-muted-foreground">Tickets</div>
             </div>
             <div className="py-4">
               <div className="text-2xl font-bold text-success">
@@ -741,8 +741,8 @@ function ProfilePage() {
                   <div className="space-y-2">
                     <NotifRow label="Toutes les notifications"  desc="Activez ou désactivez toutes les alertes in-app" value={nInApp}      set={setNInApp} />
                     <NotifRow label="Alertes délais critiques"     desc="Délais dépassés ou proches d'expiration"         value={nSLA}        set={setNSLA} />
-                    <NotifRow label="Escalades reçues"          desc="Demandes transmises à votre niveau"              value={nEscalade}   set={setNEscalade} />
-                    <NotifRow label="Résolution de demandes"    desc="Notification quand une demande est résolue"      value={nResolution} set={setNResolution} />
+                    <NotifRow label="Escalades reçues"          desc="Tickets transmis à votre niveau"              value={nEscalade}   set={setNEscalade} />
+                    <NotifRow label="Résolution de tickets"    desc="Notification quand un ticket est résolu"      value={nResolution} set={setNResolution} />
                   </div>
                 </div>
 
@@ -752,7 +752,7 @@ function ProfilePage() {
                   </h4>
                   <div className="space-y-2">
                     <NotifRow label="Alertes délais par email"  desc="Envoi email pour les délais critiques"         value={nEmail}         set={setNEmail} />
-                    <NotifRow label="Nouveaux commentaires"  desc="Réponses sur vos demandes en cours"            value={nEmailComments} set={setNEmailComments} />
+                    <NotifRow label="Nouveaux commentaires"  desc="Réponses sur vos tickets en cours"            value={nEmailComments} set={setNEmailComments} />
                   </div>
                 </div>
 

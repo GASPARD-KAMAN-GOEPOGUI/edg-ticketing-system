@@ -66,8 +66,8 @@ export function exportXLSX(
   ];
 
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, options?.sheetName ?? "Demandes EDG");
-  const filename = buildFilename("demandes_edg", "xlsx", options?.dateFrom, options?.dateTo);
+  XLSX.utils.book_append_sheet(wb, ws, options?.sheetName ?? "Tickets EDG");
+  const filename = buildFilename("tickets_edg", "xlsx", options?.dateFrom, options?.dateTo);
   XLSX.writeFile(wb, filename);
 }
 
@@ -85,7 +85,7 @@ export function exportCSV(
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = buildFilename("demandes_edg", "csv", options?.dateFrom, options?.dateTo);
+  a.download = buildFilename("tickets_edg", "csv", options?.dateFrom, options?.dateTo);
   a.click();
   URL.revokeObjectURL(url);
 }

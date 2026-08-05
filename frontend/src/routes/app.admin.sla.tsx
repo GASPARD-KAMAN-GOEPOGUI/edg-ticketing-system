@@ -357,7 +357,7 @@ function SLAAdminPage() {
               <div className="flex items-center justify-between rounded-xl bg-card/60 p-3">
                 <div>
                   <Label className="m-0">Politique active</Label>
-                  <p className="text-xs text-muted-foreground">Appliquée aux nouvelles demandes</p>
+                  <p className="text-xs text-muted-foreground">Appliquée aux nouveaux tickets</p>
                 </div>
                 <Switch checked={editing.active} onCheckedChange={(v) => setEditing({ ...editing, active: v })} />
               </div>

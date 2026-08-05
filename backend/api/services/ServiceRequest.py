@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy import true as sql_true
+from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import noload
 
@@ -17,9 +18,10 @@ from api.core.rbac import normalize_role
 from api.core.ticket_actions import (
     BYPASS_TRANSITION_ROLES as _BYPASS_ROLES,
     TERMINAL_STATUSES,
+    TREATING_ROLES,
     assert_assignment_allowed,
     assert_action_allowed,
-    assert_exceptional_resolve_reason,
+    assert_is_current_handler,
     assert_qualify_target_allowed,
     assert_role_specific_action_constraints,
     assert_service_reassignment_allowed,
@@ -187,6 +189,236 @@ class RequestService(BaseService):
         self.session.add(wf)
         await self.session.flush()
         return wf.id
+
+    async def _atomic_conditional_update(
+        self,
+        current: RequestModel,
+        *,
+        values: dict[str, Any],
+        require_current_assignee: bool,
+    ) -> RequestModel:
+        """
+        BR-TRANSMIT-001 — écriture atomique conditionnelle (compare-and-set côté SQL)
+        pour empêcher deux transmissions/résolutions simultanées d'écraser silencieusement
+        l'affectation l'une de l'autre sur la base d'un état obsolète. `require_current_assignee`
+        vaut False pour l'admin (bypass exceptionnel, cf. assert_is_current_handler).
+
+        Écrit via un UPDATE Core brut (pas `self.repo.update`) pour que la clause WHERE
+        porte la condition de concurrence. Rafraîchit ensuite `current` (déjà chargé dans
+        l'identity map de la session) plutôt que de refaire un SELECT : un SELECT après un
+        UPDATE Core renverrait sinon l'objet ORM encore en cache, avec des valeurs perimées.
+        """
+        stmt = sa_update(RequestModel).where(RequestModel.id == current.id)
+        if require_current_assignee:
+            stmt = stmt.where(RequestModel.assignee_id == current.assignee_id)
+        stmt = stmt.values(**values)
+        result = await self.session.execute(stmt)
+        if result.rowcount == 0:
+            await self.session.rollback()
+            raise ConflictException(
+                "Ce ticket a été modifié par un autre utilisateur. Veuillez actualiser la page.",
+                error_code=ErrorCode.TICKET_STATE_CONFLICT,
+            )
+        await self.session.commit()
+        await self.session.refresh(current)
+        return current
+
+    async def _next_treatment_cycle(
+        self, request_id: int, *, fallback_started_at: datetime
+    ) -> tuple[int, datetime, datetime, Optional[int]]:
+        """
+        BR-TRANSMIT-001 — calcule (cycle_number, started_at, ended_at, duration_seconds)
+        pour l'événement de transmission/terminaison en cours de création. Un nouveau
+        cycle commence à chaque `assigned` (prise en charge initiale) ou
+        `treatment_transmitted` (transmission) ; cycle_number = nombre de cycles déjà
+        clôturés (transmis ou terminés) + 1 — reconstruit uniquement depuis
+        workflow_detail (append-only), sans nouvelle table.
+        """
+        events = await self.detail_repo.list_by_request(str(request_id))
+        cycle_number = sum(
+            1 for e in events if e.event_type in ("treatment_transmitted", "treatment_completed")
+        ) + 1
+        started_at = fallback_started_at
+        for event in reversed(events):
+            if event.event_type in ("assigned", "treatment_transmitted"):
+                started_at = event.created_at
+                break
+        ended_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        duration_seconds = int((ended_at - started_at).total_seconds()) if started_at else None
+        return cycle_number, started_at, ended_at, duration_seconds
+
+    async def _sla_cycle_snapshot(
+        self,
+        request_id: int,
+        *,
+        sla_hours: int,
+        fallback_created_at: datetime,
+        ended_at: datetime,
+        current_infos: Optional[dict] = None,
+    ) -> dict[str, Any]:
+        """
+        BR-SLA-REOPEN-001 — instantané SLA du cycle qui se clôture (résolution en
+        cours). Un nouveau cycle SLA démarre à chaque réouverture approuvée
+        (`reopened`) ; reconstruit uniquement depuis `workflow_detail`
+        (append-only, sans nouvelle table) : `sla_cycle_number` = nombre de
+        résolutions déjà enregistrées (`treatment_completed`) + 1 ;
+        `sla_cycle_started_at` = date de la dernière réouverture, ou date de
+        création si le ticket n'a jamais été réouvert. Gelé définitivement dans
+        l'événement de résolution (`infos`) — jamais recalculé après coup, le
+        premier cycle SLA reste donc intact quel que soit le nombre de
+        réouvertures ultérieures.
+        BR-TRACE-001 : si `request.infos.sla_cycle_number` (compteur explicite,
+        incrémenté par `reopen()`) est disponible, il est utilisé tel quel plutôt
+        que recompté — cohérent avec la consigne de ne jamais dériver le cycle.
+        Le comptage par événements reste un filet de sécurité pour les tickets
+        antérieurs à ce compteur.
+        Temps de réponse (`sla_response_hours`) : première prise en charge
+        (`assigned`/`in_progress`/`treatment_transmitted`) après le début du
+        cycle — approximation basée sur les événements réellement tracés
+        (aucune donnée dédiée "première réponse" n'existe dans le modèle), à
+        `None` si aucun événement de prise en charge n'est retrouvé.
+        """
+        events = await self.detail_repo.list_by_request(str(request_id))
+        explicit_cycle = (current_infos or {}).get("sla_cycle_number") if isinstance(current_infos, dict) else None
+        sla_cycle_number = (
+            int(explicit_cycle) if explicit_cycle
+            else sum(1 for e in events if e.event_type == "treatment_completed") + 1
+        )
+        started_at = fallback_created_at
+        reopen_reason: Optional[str] = None
+        for event in reversed(events):
+            if event.event_type == "reopened":
+                started_at = event.created_at
+                reopen_reason = event.comment or (event.infos or {}).get("reopen_reason")
+                break
+        response_at = next(
+            (
+                e.created_at for e in events
+                if e.created_at and started_at and e.created_at >= started_at
+                and e.event_type in ("assigned", "in_progress", "treatment_transmitted")
+            ),
+            None,
+        )
+        elapsed_hours = round((ended_at - started_at).total_seconds() / 3600, 2) if started_at else None
+        response_hours = round((response_at - started_at).total_seconds() / 3600, 2) if response_at and started_at else None
+        breached = bool(sla_hours > 0 and elapsed_hours is not None and elapsed_hours > sla_hours)
+        return {
+            "sla_cycle_number": sla_cycle_number,
+            "sla_cycle_started_at": started_at.isoformat() if started_at else None,
+            "sla_hours_target": sla_hours if sla_hours > 0 else None,
+            "sla_elapsed_hours": elapsed_hours,
+            "sla_response_hours": response_hours,
+            "sla_breached": breached,
+            "sla_reopen_reason": reopen_reason,
+        }
+
+    # ── BR-TRACE-001 — traçabilité complète des interventions ──────────────────
+    #
+    # Une "intervention" est le conteneur logique du travail complet d'un seul
+    # intervenant (commentaires, pièces jointes, travail effectué), depuis le
+    # moment où il devient l'intervenant courant jusqu'à sa transmission ou sa
+    # résolution. Contrairement au cycle SLA (BR-SLA-REOPEN-001, recalculé pour
+    # les rapports), le cycle et l'ordre d'une intervention sont ici demandés
+    # explicitement enregistrés — jamais recalculés après coup. Le pointeur
+    # "intervention courante" (cycle_number/intervention_order/intervention_id)
+    # vit dans `request.infos` (colonne JSON déjà existante, aucune nouvelle
+    # colonne/table) au même titre que le flag `reopen_requested` déjà présent :
+    # c'est un état "live", mis à jour à chaque ouverture/fermeture, jamais une
+    # donnée historique — l'historique lui-même reste entièrement porté par les
+    # événements `workflow_detail` (append-only), chacun figeant sa propre copie
+    # de ce pointeur au moment de sa création.
+
+    async def _actor_identity_snapshot(self, account_id: Optional[int | str]) -> dict[str, Any]:
+        """Identité figée de l'intervenant TITULAIRE de l'intervention (peut être
+        différent de l'acteur qui écrit l'événement — ex. un admin/chef qui
+        assigne un agent : l'intervention appartient à l'agent, pas à celui qui
+        l'assigne). Inclut `intervention_actor_id`/`intervention_actor_name` en
+        plus du matricule + direction/département/service, résolus via
+        l'organigramme, au moment de l'action — jamais recalculés ensuite, même
+        si le compte change ensuite d'unité."""
+        if not account_id:
+            return {}
+        from api.repositories.RepositoryAccount import AccountRepository
+
+        account = await AccountRepository(self.session).get_by_id(int(account_id))
+        if account is None:
+            return {}
+        direction = departement = service = None
+        unity_id = getattr(account, "unity_id", None)
+        if unity_id:
+            chain = await self._org_chain_for_unity(unity_id)
+            if chain:
+                service = chain[0]
+                direction = chain[-1]
+                departement = chain[1] if len(chain) >= 3 else None
+        return self._clean_infos({
+            "intervention_actor_id": str(account.id),
+            "intervention_actor_name": self._account_display_name(account),
+            "intervention_actor_role": normalize_role(getattr(account, "role", None)),
+            "actor_matricule": getattr(account, "matricule", None),
+            "actor_direction_label": direction.label if direction else None,
+            "actor_department_label": departement.label if departement else None,
+            "actor_service_label": service.label if service else None,
+        })
+
+    async def _open_intervention(
+        self, current_infos: Optional[dict], assignee_id: Optional[int | str], request_id: int | str,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Ouvre une nouvelle intervention pour `assignee_id` : calcule et
+        enregistre explicitement `intervention_id`/`intervention_order`
+        (jamais recalculés), et pointe le nouveau conteneur courant dans
+        `request.infos` pour que les événements suivants du même intervenant
+        (commentaires, pièces jointes) s'y rattachent jusqu'à la prochaine
+        transmission/résolution.
+        Retourne (nouveaux `infos` de la demande, métadonnées à figer dans
+        l'événement d'ouverture — `assigned`/`treatment_transmitted`).
+        """
+        infos = dict(current_infos) if isinstance(current_infos, dict) else {}
+        sla_cycle_number = int(infos.get("sla_cycle_number") or 1)
+        intervention_order = int(infos.get("intervention_order_in_cycle") or 0) + 1
+        intervention_id = f"req{request_id}-c{sla_cycle_number}-i{intervention_order}"
+        infos["sla_cycle_number"] = sla_cycle_number
+        infos["intervention_order_in_cycle"] = intervention_order
+        infos["current_intervention_id"] = intervention_id
+        identity = await self._actor_identity_snapshot(assignee_id)
+        meta = self._clean_infos({
+            "intervention_id": intervention_id,
+            "intervention_order": intervention_order,
+            # Nommé "intervention_cycle_number" (et non "cycle_number") pour ne
+            # jamais entrer en collision avec le `cycle_number` déjà utilisé par
+            # BR-TRANSMIT-001 (compteur global de transmissions/résolutions,
+            # jamais réinitialisé) — sur le même événement, les deux coexistent
+            # avec des sens différents. Valeur numériquement alignée sur
+            # `sla_cycle_number` (BR-SLA-REOPEN-001) mais suivie indépendamment
+            # via ce pointeur explicite, jamais recalculée.
+            "intervention_cycle_number": sla_cycle_number,
+            **identity,
+        })
+        return infos, meta
+
+    @staticmethod
+    def _current_intervention_meta(current_infos: Optional[dict]) -> dict[str, Any]:
+        """Métadonnées de l'intervention EN COURS (à figer dans l'événement qui
+        la ferme : `treatment_transmitted`/`treatment_completed`), lues depuis le
+        pointeur `request.infos` sans jamais être recalculées."""
+        infos = current_infos if isinstance(current_infos, dict) else {}
+        return RequestService._clean_infos({
+            "intervention_id": infos.get("current_intervention_id"),
+            "intervention_order": infos.get("intervention_order_in_cycle"),
+            "intervention_cycle_number": infos.get("sla_cycle_number") or 1,
+        })
+
+    @staticmethod
+    def _intervention_meta_for_actor(
+        current_infos: Optional[dict], assignee_id: Optional[int | str], actor_id: Optional[int | str],
+    ) -> dict[str, Any]:
+        """Rattache un événement secondaire (commentaire, pièce jointe) à
+        l'intervention ouverte, uniquement si son auteur est l'intervenant
+        courant du ticket (sinon l'événement reste visible dans l'historique
+        mais hors de tout conteneur d'intervention — ex. message du demandeur)."""
+        if not assignee_id or not actor_id or str(actor_id) != str(assignee_id):
+            return {}
+        return RequestService._current_intervention_meta(current_infos)
 
     @staticmethod
     def _account_display_name(account_or_name=None, firstname: Optional[str] = None) -> Optional[str]:
@@ -1059,6 +1291,22 @@ class RequestService(BaseService):
                 actor_role=actor_role,
             )
 
+        # BR-TRACE-001 — un `assignee_id` different de l'actuel ouvre une nouvelle
+        # intervention (qualification directe vers une personne, auto-assignation,
+        # prise en charge) — couvre ce chemin générique en plus de `assign()` et
+        # `transmit_treatment()` dédiés.
+        opening_meta: dict[str, Any] = {}
+        new_assignee_id = data.get("assignee_id")
+        if (
+            new_assignee_id
+            and current is not None
+            and str(new_assignee_id) != str(getattr(current, "assignee_id", None) or "")
+        ):
+            new_infos, opening_meta = await self._open_intervention(
+                getattr(current, "infos", None), new_assignee_id, id
+            )
+            data = {**data, "infos": new_infos}
+
         translated = await self._translate_codes(data)
         obj = await self.repo.update(id, translated)
         if obj is None:
@@ -1089,6 +1337,9 @@ class RequestService(BaseService):
                     "old_status": getattr(current, "request_status", None),
                     "new_status": status_code,
                     "changed_fields": sorted(data.keys()),
+                    # BR-TRACE-001 — intervention ouverte, le cas échéant (qualification
+                    # directe, auto-assignation, prise en charge).
+                    **opening_meta,
                 }),
             })
             await emit_event(AppEvent(
@@ -1279,10 +1530,14 @@ class RequestService(BaseService):
                     error_code=ErrorCode.INVALID_STATUS_TRANSITION,
                 )
 
+        # BR-TRACE-001 — ouvre l'intervention du nouvel assigné.
+        new_infos, opening_meta = await self._open_intervention(current.infos, assignee_id, id)
+
         translated = await self._translate_codes({"request_status": "assigned"})
         obj = await self.repo.update(id, {
             "assignee_id": assignee_id,
             "in_triage": False,
+            "infos": new_infos,
             **translated,
         })
         if obj is None:
@@ -1304,6 +1559,8 @@ class RequestService(BaseService):
                 "target_role": assignee_role,
                 "target_user_id": str(assignee_id),
                 "target_user_name": assignee_name,
+                # BR-TRACE-001 — intervention ouverte par cette assignation.
+                **opening_meta,
                 "old_status": current.request_status,
                 "new_status": "assigned",
                 "old_assignee_id": current.assignee_id,
@@ -1389,32 +1646,76 @@ class RequestService(BaseService):
         actor_name: Optional[str] = None,
         actor_role: Optional[str] = None,
         actor=None,
-        reason: Optional[str] = None,
+        summary: str = "",
+        solution: str = "",
+        work_done: str = "",
+        recommendations: Optional[str] = None,
+        attachments: Optional[list[dict]] = None,
     ):
-        clean_reason = reason.strip() if isinstance(reason, str) else ""
-        # Lot 2.6 : resolution "exceptionnelle" pour chief-service — motif obligatoire,
-        # meme mecanique que assert_service_reassignment_allowed pour reassign.
-        assert_exceptional_resolve_reason(actor_role, clean_reason)
-        current = await self._guard_ticket_action(
-            id,
-            "resolve",
-            target_status="resolved",
-            actor=actor,
-            actor_role=actor_role,
+        """
+        BR-TRANSMIT-001 — "Terminer le traitement". Autorisé à l'intervenant actuel
+        (request.assignee_id == actor.id) parmi les rôles traitants, sans restriction
+        de rôle supplémentaire : remplace l'ancienne exclusion de chief-departement
+        (Lot 3.2) et l'ancienne limite "director → ticket escaladé uniquement"
+        (BR-DIRECTOR-RESOLVE-001). Résumé/solution/travail réalisé désormais
+        obligatoires pour tous les rôles (remplace le motif "exceptionnel" réservé
+        à chief-service, Lot 2.6).
+        """
+        clean_summary = summary.strip() if isinstance(summary, str) else ""
+        clean_solution = solution.strip() if isinstance(solution, str) else ""
+        clean_work_done = work_done.strip() if isinstance(work_done, str) else ""
+        if not clean_summary:
+            raise self.bad_request("Le résumé final est obligatoire.", error_code=ErrorCode.MISSING_REQUIRED_FIELD)
+        if not clean_solution:
+            raise self.bad_request("La solution appliquée est obligatoire.", error_code=ErrorCode.MISSING_REQUIRED_FIELD)
+        if not clean_work_done:
+            raise self.bad_request("Le travail réalisé est obligatoire.", error_code=ErrorCode.MISSING_REQUIRED_FIELD)
+        clean_recommendations = recommendations.strip() if isinstance(recommendations, str) else ""
+
+        effective_role = str(getattr(actor, "role", actor_role or "") or "")
+        if effective_role:
+            assert_action_allowed(effective_role, "resolve")
+
+        current = await self.get_by_id(id)
+        if actor is not None:
+            assert_is_current_handler(actor, current)
+        # Transition de statut toujours validée, y compris pour admin (comportement
+        # inchangé : BYPASS_TRANSITION_ROLES n'est jamais activé sur ce chemin).
+        assert_transition_allowed(current.request_status, "resolved", actor_role=effective_role or None)
+
+        previous_status = current.request_status
+        cycle_number, started_at, ended_at, duration_seconds = await self._next_treatment_cycle(
+            int(id), fallback_started_at=current.created_at
         )
+        # BR-TRACE-001 — fige les métadonnées de l'intervention fermée par cette
+        # résolution AVANT toute mise à jour du pointeur (jamais recalculées).
+        intervention_meta = self._current_intervention_meta(current.infos)
+        actor_identity = await self._actor_identity_snapshot(current.assignee_id)
+
+        new_infos = dict(current.infos) if isinstance(current.infos, dict) else {}
+        new_infos["current_intervention_id"] = None
+
         translated = await self._translate_codes({"request_status": "resolved"})
-        obj = await self.repo.update(id, {
-            **translated,
-            "resolved_at": datetime.now(timezone.utc).replace(tzinfo=None),
-            "in_triage": False,
-        })
-        if obj is None:
-            raise self.not_found("Cette demande n'existe pas.", error_code=ErrorCode.REQUEST_NOT_FOUND)
+        require_guard = normalize_role(effective_role) not in _BYPASS_ROLES
+        obj = await self._atomic_conditional_update(
+            current,
+            values={**translated, "resolved_at": ended_at, "in_triage": False, "infos": new_infos},
+            require_current_assignee=require_guard,
+        )
+
+        sla_snapshot = await self._sla_cycle_snapshot(
+            int(id),
+            sla_hours=int(current.sla_hours or 0),
+            fallback_created_at=current.created_at,
+            ended_at=ended_at,
+            current_infos=current.infos,
+        )
+
         wf_id_res = await self._get_or_create_workflow(int(id))
         await self.detail_repo.create_event({
             "workflow_id": wf_id_res,
-            "event_type": "resolved",
-            "label": "Demande résolue" + (f" — {clean_reason}" if clean_reason else ""),
+            "event_type": "treatment_completed",
+            "label": f"Traitement terminé — {clean_summary}",
             "actor_id": actor_id,
             "actor_name": actor_name,
             "activated": True,
@@ -1422,22 +1723,176 @@ class RequestService(BaseService):
                 "event_status": "resolved",
                 "source_role": actor_role,
                 "actor_role": actor_role,
-                "old_status": current.request_status,
+                "summary": clean_summary,
+                "solution": clean_solution,
+                "work_done": clean_work_done,
+                "recommendations": clean_recommendations or None,
+                "attachment_ids": [a["attachment_id"] for a in attachments] if attachments else None,
+                "attachments": attachments or None,
+                "old_status": previous_status,
                 "new_status": "resolved",
-                **({"reason": clean_reason} if clean_reason else {}),
+                "previous_status": previous_status,
+                "started_at": started_at.isoformat() if started_at else None,
+                "ended_at": ended_at.isoformat(),
+                "duration_seconds": duration_seconds,
+                "cycle_number": cycle_number,
+                # BR-SLA-REOPEN-001 — instantané gelé du cycle SLA clos par cette résolution.
+                **sla_snapshot,
+                # BR-TRACE-001 — intervention fermée par cette résolution (id/ordre/cycle
+                # explicites, identité figée de l'intervenant).
+                **intervention_meta,
+                **actor_identity,
             }),
         })
         await emit_notif(
             self.session,
             recipient_id=getattr(obj, "requester_id", None),
             title="Demande résolue",
-            body=f"Votre demande {obj.ref} a été résolue avec succès.",
+            body=f"Votre demande {obj.ref} a été résolue. Résumé : {clean_summary}",
             type="success",
             request_id=id,
             action_label="Confirmer la résolution",
             action_url=f"/app/requests/{id}",
         )
         await emit_event(AppEvent(type="request.resolved", payload={"id": id}, target={"roles": "all"}))
+        return obj
+
+    async def transmit_treatment(
+        self,
+        id: str,
+        *,
+        to_user_id: str,
+        work_done: str,
+        reason: str,
+        instruction: Optional[str] = None,
+        attachments: Optional[list[dict]] = None,
+        actor_id: Optional[str] = None,
+        actor_name: Optional[str] = None,
+        actor_role: Optional[str] = None,
+        actor=None,
+    ):
+        """
+        BR-TRANSMIT-001 — "Transmettre le traitement". Le nombre, l'ordre et les rôles
+        des intervenants ne sont jamais connus à l'avance : le prochain intervenant est
+        choisi librement dans tout l'annuaire (aucune restriction de direction/service),
+        sous réserve d'être actif et de porter un rôle traitant. Le ticket reste dans son
+        statut actif courant (jamais forcé à `assigned`) — seul assignee_id change.
+        Ne construit jamais de chaîne fixe : chaque transmission crée un seul événement
+        `treatment_transmitted`, jamais un circuit complet (voir create_circuit, non
+        réutilisé ici — chaîne prédéfinie, incompatible avec ce workflow dynamique).
+        """
+        from api.repositories.RepositoryAccount import AccountRepository
+
+        clean_work_done = work_done.strip() if isinstance(work_done, str) else ""
+        clean_reason = reason.strip() if isinstance(reason, str) else ""
+        if not clean_work_done:
+            raise self.bad_request("Le travail effectué est obligatoire.", error_code=ErrorCode.MISSING_REQUIRED_FIELD)
+        if not clean_reason:
+            raise self.bad_request("Le motif est obligatoire.", error_code=ErrorCode.MISSING_REQUIRED_FIELD)
+        clean_instruction = instruction.strip() if isinstance(instruction, str) else ""
+
+        effective_role = str(getattr(actor, "role", actor_role or "") or "")
+        if effective_role:
+            assert_action_allowed(effective_role, "transmit_treatment")
+
+        current = await self.get_by_id(id)
+        if actor is not None:
+            assert_is_current_handler(actor, current)
+
+        try:
+            target_id_int = int(to_user_id)
+        except (TypeError, ValueError):
+            raise self.bad_request("Identifiant de destinataire invalide.", error_code=ErrorCode.VALIDATION_ERROR)
+
+        acc_repo = AccountRepository(self.session)
+        target = await acc_repo.get_by_id(target_id_int)
+        if target is None:
+            raise self.not_found("Ce destinataire n'existe pas.", error_code=ErrorCode.ACCOUNT_NOT_FOUND)
+        if target.status is not True:
+            raise self.bad_request("Ce destinataire est inactif.", error_code=ErrorCode.INVALID_FIELD_VALUE)
+        target_role = normalize_role(target.role)
+        if target_role not in TREATING_ROLES:
+            raise self.bad_request(
+                "Ce destinataire n'a pas un rôle de traitement autorisé.",
+                error_code=ErrorCode.INVALID_FIELD_VALUE,
+            )
+        target_name = self._account_display_name(target)
+
+        previous_assignee_id = current.assignee_id
+        cycle_number, started_at, ended_at, duration_seconds = await self._next_treatment_cycle(
+            int(id), fallback_started_at=current.created_at
+        )
+        # BR-TRACE-001 — fige l'intervention fermée par cette transmission (celle de
+        # l'émetteur), puis ouvre la nouvelle intervention du destinataire.
+        closing_meta = self._current_intervention_meta(current.infos)
+        closing_identity = await self._actor_identity_snapshot(previous_assignee_id)
+        new_infos, opening_meta = await self._open_intervention(current.infos, target_id_int, id)
+
+        require_guard = normalize_role(effective_role) not in _BYPASS_ROLES
+        obj = await self._atomic_conditional_update(
+            current,
+            values={"assignee_id": target_id_int, "in_triage": False, "infos": new_infos},
+            require_current_assignee=require_guard,
+        )
+
+        wf_id = await self._get_or_create_workflow(int(id))
+        await self.detail_repo.create_event({
+            "workflow_id": wf_id,
+            "event_type": "treatment_transmitted",
+            "label": f"Traitement transmis à {target_name or to_user_id}",
+            "actor_id": actor_id,
+            "actor_name": actor_name,
+            "dest_id": target_id_int,
+            "comment": clean_reason,
+            "activated": True,
+            "infos": self._clean_infos({
+                "source_role": actor_role,
+                "actor_role": actor_role,
+                "dest_role": target_role,
+                "target_role": target_role,
+                "target_user_id": str(target_id_int),
+                "target_user_name": target_name,
+                "work_done": clean_work_done,
+                "reason": clean_reason,
+                "instruction": clean_instruction or None,
+                "attachment_ids": [a["attachment_id"] for a in attachments] if attachments else None,
+                "attachments": attachments or None,
+                "previous_assignee_id": previous_assignee_id,
+                "new_assignee_id": target_id_int,
+                "old_status": current.request_status,
+                "new_status": current.request_status,
+                "started_at": started_at.isoformat() if started_at else None,
+                "ended_at": ended_at.isoformat(),
+                "duration_seconds": duration_seconds,
+                "cycle_number": cycle_number,
+                # BR-TRACE-001 — intervention fermée (émetteur) : id/ordre/cycle explicites
+                # + identité figée. `next_intervention` référence et décrit entièrement
+                # l'intervention ouverte pour le destinataire — cette transmission est le
+                # seul événement qui marque son début (aucun événement `assigned` séparé
+                # n'est créé pour une transmission), donc la seule source disponible pour
+                # que cette nouvelle intervention soit malgré tout retrouvable même si le
+                # destinataire n'a encore rien fait sur le ticket.
+                **closing_meta,
+                **closing_identity,
+                "next_intervention": {**opening_meta, "started_at": ended_at.isoformat()},
+            }),
+        })
+
+        await emit_notif(
+            self.session,
+            recipient_id=str(target_id_int),
+            title="Traitement transmis",
+            body=f"{actor_name or 'Un intervenant'} vous a transmis le traitement de la demande {obj.ref}. Motif : {clean_reason}",
+            type="info",
+            request_id=id,
+            action_label="Voir la demande",
+            action_url=f"/app/requests/{id}",
+        )
+        await emit_event(AppEvent(
+            type="request.transmitted",
+            payload={"id": id, "assignee_id": target_id_int},
+            target={"roles": "all"},
+        ))
         return obj
 
     async def request_reopen(
@@ -1568,9 +2023,15 @@ class RequestService(BaseService):
         actor=None,
     ):
         """
-        Phase 2 — Le chef approuve la réouverture.
+        BR-REOPEN-QUEUE-001 — Phase 2 : le chef approuve la réouverture.
 
-        Efface le flag reopen_requested si présent, change le statut en REOPENED.
+        La réouverture ne doit jamais réaffecter automatiquement l'ancien intervenant :
+        le ticket redevient non affecté (`assignee_id=None`) et retourne dans la File
+        d'attente (`in_triage=True`) — `list_pending_triage()` accepte déjà `reopened`
+        parmi ses statuts qualifiables (`RepositoryRequest._QUALIFIABLE_STATUSES`), seul
+        `in_triage` manquait pour que le ticket y réapparaisse. Le workflow collaboratif
+        dynamique (transmit/resolve) ne redevient disponible qu'après qu'un nouvel
+        intervenant a pris ou reçu le ticket (nouveau cycle, jamais préempté ici).
         """
         await self._guard_ticket_action(
             id,
@@ -1589,78 +2050,135 @@ class RequestService(BaseService):
                 error_code=ErrorCode.INVALID_STATUS_TRANSITION,
             )
 
-        # Efface le flag de demande de réouverture si présent
-        if has_pending_reopen:
-            current_infos = dict(obj.infos)
-            current_infos.pop("reopen_requested", None)
-            await self.repo.update(id, {"infos": current_infos})
+        # Motif et demandeur de la réouverture — retrouvés depuis le dernier événement
+        # `reopen_requested` (append-only, jamais modifié), pour les reporter dans le
+        # nouvel événement sans les ressaisir ni les perdre.
+        past_events = await self.detail_repo.list_by_request(str(id))
+        reopen_requested_event = next(
+            (e for e in reversed(past_events) if e.event_type == "reopen_requested"), None
+        )
+        reopen_reason = (
+            reopen_requested_event.comment
+            or (reopen_requested_event.infos or {}).get("reason")
+        ) if reopen_requested_event else None
+        reopen_requested_by = (
+            (reopen_requested_event.infos or {}).get("actor_id")
+            or getattr(reopen_requested_event, "agent_id", None)
+        ) if reopen_requested_event else None
+        previous_cycle_number = sum(
+            1 for e in past_events if e.event_type in ("treatment_transmitted", "treatment_completed")
+        )
 
+        previous_assignee_id = obj.assignee_id
+        previous_status = obj.request_status
+
+        # Efface le flag de demande de réouverture ET libère l'intervenant/remet en file
+        # d'attente en une seule écriture (réduit le risque de modification partielle :
+        # une seule commande SQL porte l'ensemble des changements de cette approbation).
+        current_infos = dict(obj.infos) if isinstance(obj.infos, dict) else {}
+        current_infos.pop("reopen_requested", None)
+        # BR-TRACE-001 — nouveau cycle d'intervention explicitement enregistré (jamais
+        # recalculé) : incrémente le compteur de cycle et remet l'ordre des interventions
+        # à zéro, pour que la première intervention du nouveau cycle reparte à 1.
+        next_sla_cycle_number = int(current_infos.get("sla_cycle_number") or 1) + 1
+        current_infos["sla_cycle_number"] = next_sla_cycle_number
+        current_infos["intervention_order_in_cycle"] = 0
+        current_infos["current_intervention_id"] = None
         translated = await self._translate_codes({"request_status": "reopened"})
-        updated = await self.repo.update(id, translated)
+        updated = await self.repo.update(id, {
+            **translated,
+            "infos": current_infos,
+            "assignee_id": None,
+            "in_triage": True,
+            # BR-SLA-REOPEN-001 — nouveau cycle SLA : les indicateurs "live" (utilisés
+            # par l'escalade auto SLA) repartent de zéro à partir de cette réouverture,
+            # sans jamais toucher le cycle précédent déjà gelé dans l'événement
+            # `treatment_completed` correspondant. Sans ce reset, `sla_breached` resterait
+            # à True après une réouverture (le scheduler ne le remet jamais à False) et
+            # déclencherait une escalade automatique immédiate et injustifiée du nouveau cycle.
+            "sla_breached": False,
+            "sla_elapsed": 0,
+        })
         if updated is None:
             raise self.not_found("Cette demande n'existe pas.", error_code=ErrorCode.REQUEST_NOT_FOUND)
 
+        reopened_at = datetime.now(timezone.utc).replace(tzinfo=None)
         wf_id = await self._get_or_create_workflow(int(id))
         await self.detail_repo.create_event({
             "workflow_id": wf_id,
             "event_type": "reopened",
-            "label": "Réouverture approuvée — ticket remis en traitement",
+            "label": "Demande réouverte et renvoyée dans la File d'attente",
             "actor_id": actor_id,
             "actor_name": actor_name,
+            "comment": reopen_reason,
             "activated": True,
             "infos": self._clean_infos({
-                "event_status": "in_progress",
+                "source": "reopen_approval",
                 "source_role": actor_role,
                 "actor_role": actor_role,
-                "dest_role": "user",
-                "target_role": "user",
-                "target_user_id": str(obj.requester_id) if obj.requester_id else None,
-                "target_user_name": obj.requester_name,
-                "old_status": obj.request_status,
+                "requester_id": str(obj.requester_id) if obj.requester_id else None,
+                "previous_status": previous_status,
                 "new_status": "reopened",
+                "old_status": previous_status,
+                "new_status_full": "reopened",
+                "previous_assignee_id": previous_assignee_id,
+                "new_assignee_id": None,
+                "reopen_reason": reopen_reason,
+                "reopen_requested_by": str(reopen_requested_by) if reopen_requested_by else None,
+                "reopen_approved_by": str(actor_id) if actor_id else None,
+                "reopened_at": reopened_at.isoformat(),
+                "previous_cycle_number": previous_cycle_number,
+                "next_cycle_number": previous_cycle_number + 1,
+                # BR-TRACE-001 — cycle d'intervention explicitement ouvert par cette
+                # réouverture (distinct de next_cycle_number ci-dessus, qui compte les
+                # transmissions/résolutions globales — voir note terminologique BR-TRACE-001).
+                "intervention_cycle_number": next_sla_cycle_number,
             }),
         })
 
-        # Notifie le requérant
+        # Notifie le requérant — confirmation, ticket remis en file d'attente.
         if obj.requester_id:
             await emit_notif(
                 self.session,
                 recipient_id=str(obj.requester_id),
-                title="Votre demande de réouverture a été acceptée",
-                body=f"Le ticket {obj.ref} a été remis en traitement.",
+                title="Votre demande de réouverture a été approuvée",
+                body=f"Le ticket {obj.ref} a été replacé dans la File d'attente en vue d'une nouvelle prise en charge.",
                 type="info",
                 request_id=id,
                 action_label="Voir la demande",
                 action_url=f"/app/requests/{id}",
             )
 
-        next_handler_id = getattr(obj, "assignee_id", None)
-        if next_handler_id and not self._same_account(next_handler_id, obj.requester_id):
+        # BR-NOTIF-001 : jamais d'affectation automatique — l'ancien intervenant n'est
+        # informé qu'à titre indicatif, il ne redevient jamais assignee_id ici.
+        notified_ids = {str(obj.requester_id)} if obj.requester_id else set()
+        if previous_assignee_id and str(previous_assignee_id) not in notified_ids:
             await emit_notif(
                 self.session,
-                recipient_id=str(next_handler_id),
-                title="Demande réouverte",
-                body=f"La demande {obj.ref} a été réouverte et nécessite une reprise de traitement.",
+                recipient_id=str(previous_assignee_id),
+                title="Ticket réouvert",
+                body=f"Le ticket {obj.ref} sur lequel vous êtes intervenu a été réouvert et replacé dans la File d'attente.",
                 type="warning",
                 request_id=id,
                 action_label="Voir la demande",
                 action_url=f"/app/requests/{id}",
             )
-        elif obj.unity_id:
+            notified_ids.add(str(previous_assignee_id))
+        if obj.unity_id:
             from api.repositories.RepositoryAccount import AccountRepository
 
             acc_repo = AccountRepository(self.session)
             chief = await acc_repo.find_chief_for_unity(obj.unity_id)
-            if chief and not self._same_account(chief.id, obj.requester_id):
+            if chief and str(chief.id) not in notified_ids:
                 await emit_notif(
                     self.session,
                     recipient_id=str(chief.id),
-                    title="Demande réouverte",
-                    body=f"La demande {obj.ref} a été réouverte et doit être réorientée.",
+                    title="Ticket réouvert — File d'attente",
+                    body=f"Le ticket {obj.ref} a été réouvert et replacé dans la File d'attente ; une nouvelle prise en charge est nécessaire.",
                     type="warning",
                     request_id=id,
-                    action_label="Voir la demande",
-                    action_url=f"/app/requests/{id}",
+                    action_label="Voir la file d'attente",
+                    action_url="/app/queue",
                 )
 
         await emit_event(AppEvent(type="request.reopened", payload={"id": id}, target={"roles": "all"}))

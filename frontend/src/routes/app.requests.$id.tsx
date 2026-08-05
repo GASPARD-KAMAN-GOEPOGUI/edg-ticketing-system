@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useSearch } from "@tanstack/react-router";
 import { requireAuth } from "@/lib/auth-guard";
 import { WorkflowTimeline } from "@/components/workflow-timeline";
+import { InterventionJournal } from "@/components/intervention-journal";
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient, useQueries } from "@tanstack/react-query";
 import { motion } from "framer-motion";
@@ -12,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
 import type { RequestItem, Appreciation } from "@/lib/mock-data";
+import { roleLabels } from "@/lib/mock-data";
 import { AppreciationForm } from "@/components/appreciation-form";
 import { cn } from "@/lib/utils";
 import { useRole, useUser } from "@/lib/session";
@@ -33,6 +35,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import {
   fetchRequest,
   resolveRequest,
+  transmitTreatment,
   assignRequest,
   createComment,
   deleteComment,
@@ -44,6 +47,7 @@ import {
   changeRequestPriority,
   cancelRequest,
   escalateRequest,
+  escalateToDirectorRequest,
   uploadAttachment,
   fetchAttachments,
   fetchAttachmentFile,
@@ -55,7 +59,7 @@ import {
 } from "@/lib/api/requests";
 import { fetchRefTable } from "@/lib/api/admin-config";
 import { buildAvatarUrl, fetchUser, fetchUsers, type AccountUser } from "@/lib/api/accounts";
-import { fetchDirections, fetchUnits } from "@/lib/api/directions-units";
+import { fetchDirections, fetchDepartments, fetchUnits } from "@/lib/api/directions-units";
 import type { Direction, Unit } from "@/lib/api/directions-units";
 import { submitAppreciation, updateRequestAppreciation } from "@/lib/api/csat";
 import {
@@ -103,6 +107,7 @@ import {
   ZoomIn,
   ZoomOut,
   UserCog,
+  Send,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -112,13 +117,13 @@ import { canTicketAction, isRequester } from "@/lib/capabilities";
 
 export const Route = createFileRoute("/app/requests/$id")({
   beforeLoad: () => requireAuth(),
-  head: () => ({ meta: [{ title: "Détail demande — EDG Support" }] }),
+  head: () => ({ meta: [{ title: "Détail ticket — EDG Support" }] }),
   component: RequestDetail,
   notFoundComponent: () => (
     <div className="mx-auto max-w-md p-10 text-center">
-      <h2 className="text-lg font-semibold">Demande introuvable</h2>
+      <h2 className="text-lg font-semibold">Ticket introuvable</h2>
       <Button asChild variant="outline" className="mt-4 rounded-full">
-        <Link to="/app/requests">Retour aux demandes</Link>
+        <Link to="/app/requests">Retour aux tickets</Link>
       </Button>
     </div>
   ),
@@ -127,8 +132,8 @@ export const Route = createFileRoute("/app/requests/$id")({
 const DETAIL_CONTEXTS = {
   requests: {
     eyebrow: "Mon espace",
-    backLabel: "Toutes les demandes",
-    notFoundBackLabel: "Retour aux demandes",
+    backLabel: "Tous les tickets",
+    notFoundBackLabel: "Retour aux tickets",
     backTo: "/app/requests",
   },
   supervision: {
@@ -150,15 +155,15 @@ const DETAIL_CONTEXTS = {
     backTo: "/app/my-tickets",
   },
   chiefInbox: {
-    eyebrow: "Boîte de traitement",
-    backLabel: "Retour à la boîte de traitement",
-    notFoundBackLabel: "Retour à la boîte de traitement",
+    eyebrow: "Centre de répartition",
+    backLabel: "Retour au centre de répartition",
+    notFoundBackLabel: "Retour au centre de répartition",
     backTo: "/app/chief-inbox",
   },
   departmentInbox: {
-    eyebrow: "Boîte de traitement — Département",
-    backLabel: "Retour à la boîte de traitement",
-    notFoundBackLabel: "Retour à la boîte de traitement",
+    eyebrow: "Centre de pilotage",
+    backLabel: "Retour au centre de pilotage",
+    notFoundBackLabel: "Retour au centre de pilotage",
     backTo: "/app/department-inbox",
   },
   direction: {
@@ -194,8 +199,12 @@ type DirectTreatmentAction =
   | "selfAssign"
   | "takeOwnership"
   | "resume"
-  | "resolve"
   | "close";
+
+// BR-TRANSMIT-001 — rôles pouvant devenir/rester "intervenant actuel" d'un ticket
+// (cible valide pour une transmission). Doit rester aligné avec TREATING_ROLES
+// côté backend (ticket_actions.py).
+const TREATING_ROLES = new Set(["agent-support", "chief-service", "chief-departement", "director"]);
 
 type RequestDetailPageProps = {
   id: string;
@@ -616,9 +625,11 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
 
   const [comment, setComment] = useState("");
   const [replyTarget, setReplyTarget] = useState<string | null>(null);
+  const [replyToId, setReplyToId] = useState<string | null>(null);
   const [stagedFile, setStagedFile] = useState<File | null>(null);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [isPublic, setIsPublic] = useState(false);
+  const [isDirective, setIsDirective] = useState(false);
   const [role] = useRole();
   // Dans "Mes demandes", le propriétaire garde la vue demandeur. Dans les espaces
   // métier, le contexte fonctionnel prime sur la propriété personnelle du ticket.
@@ -636,10 +647,39 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const [cancelReason, setCancelReason] = useState("");
   const [showRequestInfoForm, setShowRequestInfoForm] = useState(false);
   const [infoQuestion, setInfoQuestion] = useState("");
+  // BR-TRANSMIT-001 — "Terminer le traitement" : résumé/solution/travail réalisé
+  // obligatoires pour tout intervenant actuel (remplace l'ancienne note optionnelle).
   const [showResolveForm, setShowResolveForm] = useState(false);
-  const [resolutionNote, setResolutionNote] = useState("");
+  const [resolveSummary, setResolveSummary] = useState("");
+  const [resolveSolution, setResolveSolution] = useState("");
+  const [resolveWorkDone, setResolveWorkDone] = useState("");
+  const [resolveRecommendations, setResolveRecommendations] = useState("");
+  // BR-TRANSMIT-001 — "Transmettre le traitement" : annuaire libre (direction/
+  // département/service/recherche), motif + travail effectué obligatoires.
+  const [showTransmitForm, setShowTransmitForm] = useState(false);
+  const [transmitDirectionId, setTransmitDirectionId] = useState("");
+  const [transmitDepartmentId, setTransmitDepartmentId] = useState("");
+  const [transmitUnitId, setTransmitUnitId] = useState("");
+  const [transmitSearch, setTransmitSearch] = useState("");
+  const [transmitTargetId, setTransmitTargetId] = useState("");
+  const [transmitWorkDone, setTransmitWorkDone] = useState("");
+  const [transmitReason, setTransmitReason] = useState("");
+  const [transmitInstruction, setTransmitInstruction] = useState("");
+  const resetTransmitForm = () => {
+    setTransmitDirectionId("");
+    setTransmitDepartmentId("");
+    setTransmitUnitId("");
+    setTransmitSearch("");
+    setTransmitTargetId("");
+    setTransmitWorkDone("");
+    setTransmitReason("");
+    setTransmitInstruction("");
+  };
   const [showEscalateForm, setShowEscalateForm] = useState(false);
   const [escalateReason, setEscalateReason] = useState("");
+  // Lot 3.3 — "Escalade exceptionnelle" (chief-departement uniquement).
+  const [showEscalateToDirectorForm, setShowEscalateToDirectorForm] = useState(false);
+  const [escalateToDirectorReason, setEscalateToDirectorReason] = useState("");
   const attachRef = useRef<HTMLInputElement>(null);
   const commentRef = useRef<HTMLTextAreaElement>(null);
   const commentsPanelRef = useRef<HTMLElement>(null);
@@ -680,6 +720,9 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   );
   const [showAllParticipants, setShowAllParticipants] = useState(false);
   const [showAllDetails, setShowAllDetails] = useState(false);
+  // BR-TRACE-001 — journal hiérarchique (Cycle -> Intervention) par défaut,
+  // avec bascule vers la vue chronologique événement par événement existante.
+  const [journalView, setJournalView] = useState<"interventions" | "events">("interventions");
   const [attachmentAction, setAttachmentAction] = useState<{
     id: string;
     mode: "open" | "download";
@@ -788,17 +831,14 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   };
 
   const resolveMut = useMutation({
-    mutationFn: async () => {
-      if (resolutionNote.trim()) {
-        await createComment(id, {
-          author_id: authorId,
-          author_name: authorName,
-          body: `[Résolution] ${resolutionNote.trim()}`,
-          is_public: false,
-        });
-      }
-      return resolveRequest(id);
-    },
+    // BR-TRANSMIT-001 — "Terminer le traitement" : résumé/solution/travail réalisé
+    // obligatoires pour tout intervenant actuel, quel que soit son rôle.
+    mutationFn: () => resolveRequest(id, {
+      summary: resolveSummary.trim(),
+      solution: resolveSolution.trim(),
+      work_done: resolveWorkDone.trim(),
+      recommendations: resolveRecommendations.trim() || undefined,
+    }),
     onMutate: async () => {
       await qc.cancelQueries({ queryKey: requestQueryKey });
       const previous = qc.getQueryData<RequestItem>(requestQueryKey);
@@ -808,14 +848,42 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       return { previous };
     },
     onSuccess: () => {
-      toast.success("Demande marquée comme résolue.");
+      toast.success("Traitement terminé — le ticket est résolu.");
       setShowResolveForm(false);
-      setDirectTreatmentAction(null);
-      setResolutionNote("");
+      setResolveSummary("");
+      setResolveSolution("");
+      setResolveWorkDone("");
+      setResolveRecommendations("");
     },
     onError: (_err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible de résoudre la demande.");
+      toast.error("Impossible de terminer le traitement.");
+    },
+    onSettled: () => invalidate(),
+  });
+
+  const transmitMut = useMutation({
+    // BR-TRANSMIT-001 — "Transmettre le traitement" : cible libre dans toute
+    // l'organisation, motif + travail effectué obligatoires, statut préservé.
+    mutationFn: () => transmitTreatment(id, {
+      to_user_id: transmitTargetId,
+      work_done: transmitWorkDone.trim(),
+      reason: transmitReason.trim(),
+      instruction: transmitInstruction.trim() || undefined,
+    }),
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: requestQueryKey });
+      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
+      return { previous };
+    },
+    onSuccess: () => {
+      toast.success("Traitement transmis avec succès.");
+      setShowTransmitForm(false);
+      resetTransmitForm();
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
+      toast.error("Impossible de transmettre le traitement.");
     },
     onSettled: () => invalidate(),
   });
@@ -837,7 +905,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     },
     onError: (_err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible de réassigner la demande.");
+      toast.error("Impossible de réassigner le ticket.");
     },
     onSettled: () => invalidate(),
   });
@@ -961,12 +1029,12 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       return { previous };
     },
     onSuccess: () => {
-      toast.success("Demande clôturée — merci pour votre retour.");
+      toast.success("Ticket clôturé — merci pour votre retour.");
       setDirectTreatmentAction(null);
     },
     onError: (_err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible de clôturer la demande.");
+      toast.error("Impossible de clôturer le ticket.");
     },
     onSettled: () => invalidate(),
   });
@@ -977,13 +1045,13 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       description: editDescription.trim() || undefined,
     }),
     onSuccess: () => {
-      toast.success("Demande modifiée.");
+      toast.success("Ticket modifié.");
       setShowEditForm(false);
       invalidate();
     },
     onError: (err: unknown) => {
       const msg = (err as { message?: string })?.message;
-      toast.error(msg ?? "Impossible de modifier la demande.");
+      toast.error(msg ?? "Impossible de modifier le ticket.");
     },
   });
 
@@ -998,13 +1066,13 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       return { previous };
     },
     onSuccess: () => {
-      toast.success("Demande annulée.");
+      toast.success("Ticket annulé.");
       setShowCancelConfirm(false);
       setCancelReason("");
     },
     onError: (_err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible d'annuler la demande.");
+      toast.error("Impossible d'annuler le ticket.");
     },
     onSettled: () => invalidate(),
   });
@@ -1025,7 +1093,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     },
     onError: (_err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible de prendre en charge la demande.");
+      toast.error("Impossible de prendre en charge le ticket.");
     },
     onSettled: () => invalidate(),
   });
@@ -1109,10 +1177,10 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       );
       return { previous };
     },
-    onSuccess: () => { toast.success("Demande rejetée."); setShowRejectConfirm(false); setRejectNote(""); },
+    onSuccess: () => { toast.success("Ticket rejeté."); setShowRejectConfirm(false); setRejectNote(""); },
     onError: (_err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible de rejeter la demande.");
+      toast.error("Impossible de rejeter le ticket.");
     },
     onSettled: () => invalidate(),
   });
@@ -1144,14 +1212,14 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     },
     onSuccess: () => {
       const target = directions.find((d) => d.id === transferDirectionId);
-      toast.success(`Demande transférée vers ${target?.name ?? "la direction cible"}.`);
+      toast.success(`Ticket transféré vers ${target?.name ?? "la direction cible"}.`);
       setShowDirectionTransfer(false);
       setTransferDirectionId("");
       setTransferReason("");
     },
     onError: (_err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible de transférer la demande.");
+      toast.error("Impossible de transférer le ticket.");
     },
     onSettled: () => invalidate(),
   });
@@ -1184,13 +1252,37 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       return { previous };
     },
     onSuccess: () => {
-      toast.success("Demande escaladée au chef hiérarchique.");
+      toast.success("Ticket escaladé au chef hiérarchique.");
       setShowEscalateForm(false);
       setEscalateReason("");
     },
     onError: (_err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible d'escalader la demande.");
+      toast.error("Impossible d'escalader le ticket.");
+    },
+    onSettled: () => invalidate(),
+  });
+
+  const escalateToDirectorMut = useMutation({
+    mutationFn: () => escalateToDirectorRequest(id, {
+      reason: escalateToDirectorReason.trim(),
+    }),
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: requestQueryKey });
+      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
+      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
+        old ? { ...old, status: "escalated" } : old,
+      );
+      return { previous };
+    },
+    onSuccess: () => {
+      toast.success("Ticket escaladé directement au directeur.");
+      setShowEscalateToDirectorForm(false);
+      setEscalateToDirectorReason("");
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
+      toast.error("Impossible d'escalader le ticket au directeur.");
     },
     onSettled: () => invalidate(),
   });
@@ -1217,6 +1309,8 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
         body: finalBody,
         is_public: isRequesterView ? true : isPublic,
         attachment_id: attachmentId,
+        is_directive: canSendDirective ? isDirective : false,
+        reply_to_id: replyToId ?? undefined,
       });
     },
     onMutate: async () => {
@@ -1228,6 +1322,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
         author: authorName,
         body: replyTarget ? `@${replyTarget} ${comment.trim()}` : comment.trim(),
         isPublic: isRequesterView ? true : isPublic,
+        replyToId: replyToId ?? undefined,
         isEdited: false,
         createdAt: new Date().toISOString(),
         attachmentName: stagedFile?.name,
@@ -1238,10 +1333,16 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       return { previous };
     },
     onSuccess: () => {
-      toast.success(stagedFile ? "Commentaire et pièce jointe envoyés" : "Commentaire ajouté");
+      toast.success(
+        canSendDirective && isDirective
+          ? "Directive envoyée à l'agent"
+          : stagedFile ? "Commentaire et pièce jointe envoyés" : "Commentaire ajouté",
+      );
       setComment("");
       setReplyTarget(null);
+      setReplyToId(null);
       setStagedFile(null);
+      setIsDirective(false);
       if (attachRef.current) attachRef.current.value = "";
     },
     onError: (_err, _vars, context) => {
@@ -1315,6 +1416,57 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     staleTime: 5 * 60_000,
   });
 
+  // BR-TRANSMIT-001 — annuaire libre pour "Transmettre le traitement" : cascade
+  // Direction -> Département -> Service (facultative, pour affiner) + recherche
+  // libre dans toute l'organisation, restreinte aux rôles traitants côté client
+  // (le backend revérifie de toute façon existence/statut actif/rôle habilité).
+  const { data: transmitDirections = [] } = useQuery({
+    queryKey: ["directions", "active"],
+    queryFn: () => fetchDirections({ status: "active" }),
+    enabled: showTransmitForm,
+    staleTime: 5 * 60_000,
+  });
+  const { data: transmitDepartments = [] } = useQuery({
+    queryKey: ["departments", transmitDirectionId, "active"],
+    queryFn: () => fetchDepartments({ directionId: transmitDirectionId, status: "active" }),
+    enabled: showTransmitForm && !!transmitDirectionId,
+    staleTime: 5 * 60_000,
+  });
+  const { data: transmitUnits = [] } = useQuery({
+    queryKey: ["units", transmitDepartmentId, "active"],
+    queryFn: () => fetchUnits({ departmentId: transmitDepartmentId, status: "active" }),
+    enabled: showTransmitForm && !!transmitDepartmentId,
+    staleTime: 5 * 60_000,
+  });
+  const { data: transmitPeople = [], isFetching: transmitPeopleLoading } = useQuery({
+    queryKey: ["transmit-people", transmitSearch, transmitUnitId, transmitDepartmentId, transmitDirectionId],
+    queryFn: async () => {
+      if (transmitSearch.trim()) {
+        const res = await fetchUsers({ search: transmitSearch.trim(), limit: 50 });
+        return res.items.filter((u) => TREATING_ROLES.has(u.role));
+      }
+      if (transmitUnitId) {
+        const [agents, chiefs] = await Promise.all([
+          fetchUsers({ role: "agent-support", unit_id: transmitUnitId, limit: 100 }),
+          fetchUsers({ role: "chief-service", unit_id: transmitUnitId, limit: 100 }),
+        ]);
+        const byId = new Map([...agents.items, ...chiefs.items].map((p) => [p.id, p]));
+        return Array.from(byId.values());
+      }
+      if (transmitDepartmentId) {
+        const res = await fetchUsers({ role: "chief-departement", unit_id: transmitDepartmentId, limit: 50 });
+        return res.items;
+      }
+      if (transmitDirectionId) {
+        const res = await fetchUsers({ role: "director", unit_id: transmitDirectionId, limit: 50 });
+        return res.items;
+      }
+      return [];
+    },
+    enabled: showTransmitForm,
+    staleTime: 30_000,
+  });
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-24 text-muted-foreground">
@@ -1326,7 +1478,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   if (isError || !r) {
     return (
       <div className="mx-auto max-w-md py-20 text-center">
-        <h2 className="text-lg font-semibold">Demande introuvable</h2>
+        <h2 className="text-lg font-semibold">Ticket introuvable</h2>
         <Button asChild variant="outline" className="mt-4 rounded-full">
           <Link to={detailContext.backTo}>{detailContext.notFoundBackLabel}</Link>
         </Button>
@@ -1407,18 +1559,18 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     return sessionUser.role !== "user" && !isOwnerView;
   };
   const lastVisibleComment = visibleComments[visibleComments.length - 1];
-  const lastCommentIsFromRequester = Boolean(
-    lastVisibleComment?.authorId && r.requesterId && String(lastVisibleComment.authorId) === String(r.requesterId),
-  );
-  const needsUserResponse = isRequesterView && r.status === "pending" && !lastCommentIsFromRequester;
+  // Badge "reponse attendue" bidirectionnel par camp (demandeur <-> personnel) :
+  // s'allume pour le viewer dont ce n'est pas le camp qui a parle en dernier,
+  // tant que le ticket reste actif (meme garde que le bouton "Repondre" ci-dessous).
+  const isDiscussionLocked = isArchived || r.status === "closed" || r.status === "rejected";
+  const lastCommentFromRequesterSide = isRequester(r.requesterId, lastVisibleComment?.authorId);
+  const needsUserResponse =
+    !isDiscussionLocked &&
+    Boolean(lastVisibleComment) &&
+    (isRequesterView ? !lastCommentFromRequesterSide : lastCommentFromRequesterSide);
   const isAssignedToMe = isRequester(r.assigneeId, sessionUser?.id);
   const hasAssignee = Boolean(r.assigneeId);
   const hasReopenRequest = (r.infos as Record<string, unknown> | undefined)?.reopen_requested === true;
-
-  // Compteur fermeture auto (4 jours après résolution)
-  const daysUntilAutoClose = r.resolvedAt
-    ? Math.max(0, 4 - differenceInDays(new Date(), new Date(r.resolvedAt)))
-    : 4;
 
   // Fenêtre réouverture ticket fermé (7 jours après fermeture)
   const canReopenClosed = r.closedAt
@@ -1447,8 +1599,24 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     && !iAmRequester
     && canTicketAction(role, "escalate", r.status, ownershipOptions)
     && (role !== "agent-support" || isAssignedToMe);
+  // Lot 3.3 — "Escalade exceptionnelle" : distincte de l'escalade générique ci-dessus,
+  // réservée à chief-departement, cible directement le directeur.
+  const canEscalateToDirector = !isArchived
+    && !iAmRequester
+    && canTicketAction(role, "escalate_to_director", r.status, ownershipOptions);
   const canAssignTicket = !isArchived && !iAmRequester && canTicketAction(role, "assign", r.status, ownershipOptions);
-  const canResolveTicket = !isArchived && !iAmRequester && canTicketAction(role, "resolve", r.status, ownershipOptions);
+  // BR-TRANSMIT-001 : "Terminer le traitement" et "Transmettre le traitement" sont
+  // réservés à l'intervenant actuel (assignee_id == moi), quel que soit le rôle parmi
+  // les rôles traitants — le rôle n'est plus qu'un filtre de sécurité général.
+  const canResolveTicket = !isArchived && !iAmRequester && isAssignedToMe
+    && canTicketAction(role, "resolve", r.status, { ...ownershipOptions, isAssignedToMe });
+  const canTransmitTreatment = !isArchived && !iAmRequester && isAssignedToMe
+    && canTicketAction(role, "transmit_treatment", r.status, { ...ownershipOptions, isAssignedToMe });
+  // Lot 2.7 — "Directive" : commentaire dédié chef -> agent assigné, réservé aux chefs
+  // et impossible tant que le ticket n'a pas d'agent assigné (rien à cibler sinon).
+  const canSendDirective = !isRequesterView
+    && (role === "chief-service" || role === "chief-departement")
+    && !!r.assigneeId;
   const canCreateCircuit = !isArchived && !iAmRequester && canTicketAction(role, "create_circuit", r.status, ownershipOptions);
   const canChangePriority = !isArchived && !iAmRequester && canTicketAction(role, "change_priority", r.status, ownershipOptions);
   const canChangeService = !isArchived && !iAmRequester && canTicketAction(role, "change_service", r.status, ownershipOptions);
@@ -1473,7 +1641,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const detailTabs: Array<{ key: DetailTab; label: string; count?: number; icon: LucideIcon }> = [
     { key: "description", label: "Description", icon: FileText },
     { key: "journal", label: "Journals", count: r.timeline.length, icon: GitBranch },
-    { key: "comments", label: "Commentaires", count: visibleComments.length, icon: MessageSquare },
+    { key: "comments", label: "Discussions", count: visibleComments.length, icon: MessageSquare },
     { key: "files", label: "Fichiers", count: attachments.length, icon: Paperclip },
     { key: "sla", label: "Délais de traitement", icon: Clock },
     { key: "treatment", label: "Traitement", icon: Wrench },
@@ -1503,7 +1671,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
         return {
           icon: UserCheck,
           title: "Démarrer le traitement",
-          description: "La demande passera en cours de traitement.",
+          description: "Le ticket passera en cours de traitement.",
           confirmLabel: "Démarrer",
           isPending: takeOwnershipMut.isPending,
         };
@@ -1511,23 +1679,15 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
         return {
           icon: RotateCcw,
           title: "Reprendre le traitement",
-          description: "La demande quittera l'attente et repassera en cours de traitement.",
+          description: "Le ticket quittera l'attente et repassera en cours de traitement.",
           confirmLabel: "Reprendre",
           isPending: resumeMut.isPending,
-        };
-      case "resolve":
-        return {
-          icon: CheckCircle2,
-          title: "Marquer la demande comme résolue",
-          description: "La demande sera indiquée comme résolue, sans note interne supplémentaire.",
-          confirmLabel: "Marquer résolue",
-          isPending: resolveMut.isPending,
         };
       case "close":
         return {
           icon: CheckCircle2,
           title: "Confirmer la résolution",
-          description: "La demande sera clôturée et le traitement sera considéré comme terminé.",
+          description: "Le ticket sera clôturé et le traitement sera considéré comme terminé.",
           confirmLabel: "Confirmer",
           isPending: closeMut.isPending,
         };
@@ -1549,9 +1709,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       case "resume":
         resumeMut.mutate();
         break;
-      case "resolve":
-        resolveMut.mutate();
-        break;
       case "close":
         closeMut.mutate();
         break;
@@ -1566,6 +1723,14 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       </div>
     ) : (
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3" role="group" aria-label="Actions de traitement">
+        {/* BR-REOPEN-QUEUE-001 — assignee_id=null tant que personne n'a repris le
+            ticket depuis la File d'attente : le rappeler explicitement. */}
+        {r.status === "reopened" && !r.assigneeId && (
+          <div className="col-span-full flex items-center gap-2 rounded-full border border-fuchsia-500/40 bg-fuchsia-500/10 px-4 py-2 text-sm text-fuchsia-700 dark:text-fuchsia-300">
+            <RotateCcw className="h-3.5 w-3.5 shrink-0" />
+            Ce ticket réouvert attend une nouvelle prise en charge.
+          </div>
+        )}
         {canApproveReopen && (
           <button
             type="button"
@@ -1625,7 +1790,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
               : <UserCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" />}
             <span>
               <span className="block text-sm font-semibold text-primary">Démarrer traitement</span>
-              <span className="text-xs text-muted-foreground">Passer la demande en cours</span>
+              <span className="text-xs text-muted-foreground">Passer le ticket en cours</span>
             </span>
           </button>
         )}
@@ -1638,7 +1803,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
           >
             <MessageSquareWarning className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
             <span>
-              <span className="block text-sm font-semibold text-amber-500">Demander des infos</span>
+              <span className="block text-sm font-semibold text-amber-500">Ouvrir une discussion</span>
               <span className="text-xs text-muted-foreground">Mettre en attente du demandeur</span>
             </span>
           </button>
@@ -1671,6 +1836,20 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             <span>
               <span className="block text-sm font-semibold text-orange-600">Escalader</span>
               <span className="text-xs text-muted-foreground">Transmettre à un niveau supérieur</span>
+            </span>
+          </button>
+        )}
+        {/* Lot 3.3 — Escalade exceptionnelle : court-circuite la hiérarchie, cible le directeur */}
+        {canEscalateToDirector && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-left transition hover:bg-destructive/15"
+            onClick={() => setShowEscalateToDirectorForm(true)}
+          >
+            <ArrowUpRight className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            <span>
+              <span className="block text-sm font-semibold text-destructive">Escalader au Directeur</span>
+              <span className="text-xs text-muted-foreground">Escalade exceptionnelle — court-circuite la hiérarchie</span>
             </span>
           </button>
         )}
@@ -1728,7 +1907,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             <Ban className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
             <span>
               <span className="block text-sm font-semibold text-destructive">Rejeter</span>
-              <span className="text-xs text-muted-foreground">Refuser cette demande</span>
+              <span className="text-xs text-muted-foreground">Refuser ce ticket</span>
             </span>
           </button>
         )}
@@ -1764,36 +1943,36 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             </span>
           </button>
         )}
-        {/* C4 — Marquer résolue : 1 clic direct, ou avec note optionnelle */}
+        {/* BR-TRANSMIT-001 — Transmettre le traitement : réservé à l'intervenant actuel. */}
+        {canTransmitTreatment && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-sky-600/40 bg-sky-600/10 p-3 text-left transition hover:bg-sky-600/15 disabled:opacity-60"
+            onClick={() => setShowTransmitForm(true)}
+            disabled={transmitMut.isPending}
+          >
+            <Send className="mt-0.5 h-4 w-4 shrink-0 text-sky-600" />
+            <span>
+              <span className="block text-sm font-semibold text-sky-600">Transmettre le traitement</span>
+              <span className="text-xs text-muted-foreground">Choisir le prochain intervenant</span>
+            </span>
+          </button>
+        )}
+        {/* BR-TRANSMIT-001 — Terminer le traitement : réservé à l'intervenant actuel,
+            résumé/solution/travail réalisé obligatoires. */}
         {canResolveTicket && (
-          <>
-            <button
-              type="button"
-              className="flex items-start gap-3 rounded-xl border border-primary/40 bg-primary/5 p-3 text-left transition hover:bg-primary/10 disabled:opacity-60"
-              onClick={() => setShowResolveForm(true)}
-              disabled={resolveMut.isPending}
-            >
-              <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-              <span>
-                <span className="block text-sm font-semibold text-primary">Ajouter une note</span>
-                <span className="text-xs text-muted-foreground">Avant de marquer résolue</span>
-              </span>
-            </button>
-            <button
-              type="button"
-              className="flex items-start gap-3 rounded-xl border border-success/40 bg-success/10 p-3 text-left transition hover:bg-success/15 disabled:opacity-60"
-              onClick={() => setDirectTreatmentAction("resolve")}
-              disabled={resolveMut.isPending}
-            >
-              {resolveMut.isPending
-                ? <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-success" />
-                : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />}
-              <span>
-                <span className="block text-sm font-semibold text-success">Marquer résolue</span>
-                <span className="text-xs text-muted-foreground">Action de traitement</span>
-              </span>
-            </button>
-          </>
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-success/40 bg-success/10 p-3 text-left transition hover:bg-success/15 disabled:opacity-60"
+            onClick={() => setShowResolveForm(true)}
+            disabled={resolveMut.isPending}
+          >
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />
+            <span>
+              <span className="block text-sm font-semibold text-success">Terminer le traitement</span>
+              <span className="text-xs text-muted-foreground">Ticket complètement traité</span>
+            </span>
+          </button>
         )}
       </div>
     )
@@ -1815,7 +1994,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             >
               <Pencil className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
               <span>
-                <span className="block text-sm font-semibold text-amber-500">Modifier la demande</span>
+                <span className="block text-sm font-semibold text-amber-500">Modifier le ticket</span>
                 <span className="text-xs text-muted-foreground">Uniquement au début</span>
               </span>
             </button>
@@ -1828,7 +2007,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             >
               <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
               <span>
-                <span className="block text-sm font-semibold text-destructive">Annuler la demande</span>
+                <span className="block text-sm font-semibold text-destructive">Annuler le ticket</span>
                 <span className="text-xs text-muted-foreground">Uniquement au début</span>
               </span>
             </button>
@@ -1842,7 +2021,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
               <RotateCcw className="mt-0.5 h-4 w-4 shrink-0 text-info" />
               <span>
                 <span className="block text-sm font-semibold text-info">
-                  {r.status === "closed" ? "Rouvrir la demande" : "Demander une réouverture"}
+                  {r.status === "closed" ? "Rouvrir le ticket" : "Demander une réouverture"}
                 </span>
                 <span className="text-xs text-muted-foreground">Après résolution</span>
               </span>
@@ -1856,8 +2035,8 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             >
               <Lock className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
               <span>
-                <span className="block text-sm font-semibold">Demande clôturée</span>
-                <span className="text-xs text-muted-foreground">Voir l'état de la demande</span>
+                <span className="block text-sm font-semibold">Ticket clôturé</span>
+                <span className="text-xs text-muted-foreground">Voir l'état du ticket</span>
               </span>
             </button>
           )}
@@ -1908,43 +2087,43 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
           </p>
         ) : (
           <ul className="relative space-y-4 pb-1">
-            <span className="absolute left-[18px] top-9 hidden h-[calc(100%-3rem)] w-px bg-border/45 sm:block" aria-hidden />
             {visibleComments.map((c, index) => {
               const fullAttachment = c.attachmentName
                 ? attachments.find((a) => a.id === c.attachmentId)
                 : undefined;
               const authorAvatar = avatarForComment(c);
-              const commentDepth = c.authorId && r.requesterId && String(c.authorId) === String(r.requesterId)
-                ? (index === 0 ? 0 : 2)
-                : 1;
-              const marginLeft = `clamp(0rem, ${Math.min(commentDepth, 2) * 2.75}rem, 18vw)`;
+              // Style messagerie viewer-relatif : mes propres messages a droite,
+              // ceux des autres a gauche, quel que soit mon role (demandeur ou personnel).
+              const isMine = isRequester(c.authorId, sessionUser?.id);
               const attachmentSize = c.attachmentSize ?? fullAttachment?.size_bytes;
               const attachmentMime = c.attachmentMime ?? fullAttachment?.mime_type ?? "";
-              // Réponse attendue : dernier commentaire du fil tant que le ticket
-              // est en attente du retour du demandeur (aucune reponse posterieure).
               const isAwaitingReply = needsUserResponse && index === visibleComments.length - 1;
 
               return (
-                <li key={c.id} className="relative flex min-w-0 gap-3" style={{ marginLeft }}>
-                  {commentDepth > 0 && (
-                    <span
-                      className="absolute -left-8 top-5 hidden h-8 w-8 rounded-bl-2xl border-b border-l border-border/45 sm:block"
-                      aria-hidden
-                    />
-                  )}
+                <li key={c.id} className={cn("relative flex min-w-0 gap-3", isMine && "flex-row-reverse")}>
                   <Avatar className="h-10 w-10 shrink-0 border border-border/60 bg-background shadow-sm">
                     <AvatarImage src={authorAvatar} alt={c.author} />
                     <AvatarFallback className="bg-primary/10 text-xs font-bold text-primary">
                       {initialsFor(c.author)}
                     </AvatarFallback>
                   </Avatar>
-                  <div className="min-w-0 flex-1">
-                    <div className="relative inline-block max-w-full rounded-2xl bg-muted/45 px-3.5 py-2.5 pr-10 shadow-sm">
+                  <div className={cn("flex min-w-0 flex-1 flex-col", isMine ? "items-end" : "items-start")}>
+                    <div className={cn(
+                      "relative inline-block max-w-full rounded-2xl px-3.5 py-2.5 pr-10 shadow-sm",
+                      c.isDirective
+                        ? "border border-warning/40 bg-warning/10"
+                        : "bg-muted/45",
+                    )}>
                       <div className="flex min-w-0 flex-wrap items-center gap-2">
                         <span className="truncate text-sm font-semibold text-foreground">{c.author}</span>
                         <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
                           {roleForComment(c)}
                         </span>
+                        {c.isDirective && (
+                          <span className="flex shrink-0 items-center gap-1 rounded-full bg-warning/20 px-2 py-0.5 text-[10px] font-bold text-warning-foreground dark:text-warning">
+                            <AlertTriangle className="h-2.5 w-2.5" /> Directive
+                          </span>
+                        )}
                         {!isRequesterView && (
                           c.isPublic ? (
                             <span className="shrink-0 rounded-full bg-info/15 px-2 py-0.5 text-[10px] text-info">
@@ -1998,7 +2177,10 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                         </DropdownMenu>
                       )}
                     </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-2 pl-1 text-xs text-muted-foreground">
+                    <div className={cn(
+                      "mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground",
+                      isMine ? "pr-1" : "pl-1",
+                    )}>
                       <span>{formatCommentDate(c.createdAt)}</span>
                       {!(isArchived || r.status === "closed" || r.status === "rejected") && (
                         <>
@@ -2014,6 +2196,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                             title={isAwaitingReply ? "Une réponse est attendue à ce message" : undefined}
                             onClick={() => {
                               setReplyTarget(c.author);
+                              setReplyToId(c.id);
                               commentRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
                               commentRef.current?.focus();
                             }}
@@ -2046,7 +2229,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                   type="button"
                   className="grid h-5 w-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
                   title="Annuler la réponse"
-                  onClick={() => setReplyTarget(null)}
+                  onClick={() => { setReplyTarget(null); setReplyToId(null); }}
                 >
                   <XCircle className="h-3.5 w-3.5" />
                 </button>
@@ -2135,11 +2318,21 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
               </Button>
             </div>
             {!isRequesterView && (
-              <div className="mt-2 flex items-center gap-2 pl-0 sm:pl-12">
-                <Switch id="public" checked={isPublic} onCheckedChange={setIsPublic} />
-                <Label htmlFor="public" className="text-sm">
-                  Visible par le demandeur
-                </Label>
+              <div className="mt-2 flex flex-wrap items-center gap-4 pl-0 sm:pl-12">
+                <div className="flex items-center gap-2">
+                  <Switch id="public" checked={isPublic} onCheckedChange={setIsPublic} />
+                  <Label htmlFor="public" className="text-sm">
+                    Visible par le demandeur
+                  </Label>
+                </div>
+                {canSendDirective && (
+                  <div className="flex items-center gap-2">
+                    <Switch id="directive" checked={isDirective} onCheckedChange={setIsDirective} />
+                    <Label htmlFor="directive" className="text-sm font-medium text-warning-foreground dark:text-warning">
+                      Marquer comme directive
+                    </Label>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -2301,10 +2494,10 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2">
                     <Pencil className="h-5 w-5 text-amber-500" />
-                    Modifier la demande
+                    Modifier le ticket
                   </DialogTitle>
                   <DialogDescription>
-                    Vous pouvez corriger le titre ou la description tant que la demande n'est pas encore traitée.
+                    Vous pouvez corriger le titre ou la description tant que le ticket n'est pas encore traité.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-3 py-2">
@@ -2361,10 +2554,10 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2 text-destructive">
                     <Ban className="h-5 w-5" />
-                    Annuler cette demande ?
+                    Annuler ce ticket ?
                   </DialogTitle>
                   <DialogDescription>
-                    Cette action est irréversible. La demande sera marquée comme annulée et ne sera plus traitée.
+                    Cette action est irréversible. Le ticket sera marqué comme annulé et ne sera plus traité.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-2 py-2">
@@ -2382,7 +2575,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                 <DialogFooter className="gap-2">
                   <Button variant="ghost" className="rounded-full"
                     onClick={() => { setShowCancelConfirm(false); setCancelReason(""); }}>
-                    Garder la demande
+                    Garder le ticket
                   </Button>
                   <Button
                     variant="destructive"
@@ -2411,7 +2604,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
                     <MessageSquareWarning className="h-5 w-5" />
-                    Demander des informations complémentaires
+                    Ouvrir une discussion
                   </DialogTitle>
                   <DialogDescription>
                     Le demandeur recevra une notification. Le ticket passera en attente jusqu'à sa réponse.
@@ -2462,10 +2655,10 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2 text-destructive">
                     <ArrowUpRight className="h-5 w-5" />
-                    Escalader la demande
+                    Escalader le ticket
                   </DialogTitle>
                   <DialogDescription>
-                    Cette demande sera transmise au chef hiérarchique de la personne en charge
+                    Ce ticket sera transmis au chef hiérarchique de la personne en charge
                     du traitement. Le motif sera enregistré dans l'historique.
                   </DialogDescription>
                 </DialogHeader>
@@ -2509,47 +2702,348 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             </Dialog>
           )}
 
-          {/* C4 — Modal note de résolution optionnelle */}
+          {/* Lot 3.3 — Modal escalade exceptionnelle au directeur */}
+          {!isRequesterView && (
+            <Dialog
+              open={showEscalateToDirectorForm}
+              onOpenChange={(open) => {
+                if (!open) { setShowEscalateToDirectorForm(false); setEscalateToDirectorReason(""); }
+              }}
+            >
+              <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2 text-destructive">
+                    <ArrowUpRight className="h-5 w-5" />
+                    Escalade exceptionnelle au Directeur
+                  </DialogTitle>
+                  <DialogDescription>
+                    Ce ticket sera transmis directement au directeur de votre direction,
+                    sans passer par le chef hiérarchique le plus proche. Le motif sera enregistré
+                    dans l'historique.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-4 py-2">
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium">
+                      Motif <span className="text-destructive">*</span>
+                    </label>
+                    <textarea
+                      value={escalateToDirectorReason}
+                      onChange={(e) => setEscalateToDirectorReason(e.target.value)}
+                      placeholder="Décrivez la raison de cette escalade exceptionnelle…"
+                      rows={3}
+                      className="w-full resize-none rounded-xl border border-border/50 bg-background/60 px-3 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-destructive/40"
+                    />
+                  </div>
+                </div>
+
+                <DialogFooter className="gap-2">
+                  <Button
+                    variant="ghost"
+                    className="rounded-full"
+                    onClick={() => { setShowEscalateToDirectorForm(false); setEscalateToDirectorReason(""); }}
+                  >
+                    Annuler
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    className="rounded-full"
+                    disabled={!escalateToDirectorReason.trim() || escalateToDirectorMut.isPending}
+                    onClick={() => escalateToDirectorMut.mutate()}
+                  >
+                    {escalateToDirectorMut.isPending
+                      ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                      : <ArrowUpRight className="mr-1.5 h-4 w-4" />}
+                    Confirmer l'escalade au directeur
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          )}
+
+          {/* BR-TRANSMIT-001 — Modal "Terminer le traitement" : résumé/solution/travail
+              réalisé obligatoires, recommandations et pièces jointes facultatives. */}
           <Dialog
             open={showResolveForm}
             onOpenChange={(open) => {
               setShowResolveForm(open);
-              if (!open) setResolutionNote("");
+              if (!open) {
+                setResolveSummary("");
+                setResolveSolution("");
+                setResolveWorkDone("");
+                setResolveRecommendations("");
+              }
             }}
           >
-            <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
+            <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
-                  <MessageSquare className="h-5 w-5 text-primary" />
-                  Note de résolution
+                  <CheckCircle2 className="h-5 w-5 text-success" />
+                  Terminer le traitement
                 </DialogTitle>
                 <DialogDescription>
-                  Cette note sera ajoutée à l'historique des commentaires, visible en interne uniquement.
+                  L'ensemble du ticket est complètement traité. Le demandeur sera notifié
+                  et pourra confirmer la résolution ou demander une réouverture.
                 </DialogDescription>
               </DialogHeader>
-              <div className="space-y-2 py-2">
-                <Label htmlFor="resolution-note" className="text-sm font-medium">
-                  Note optionnelle
-                </Label>
-                <Textarea
-                  id="resolution-note"
-                  value={resolutionNote}
-                  onChange={(e) => setResolutionNote(e.target.value)}
-                  placeholder="Décrivez comment la demande a été résolue…"
-                  className="min-h-24 bg-background"
-                />
+              <div className="space-y-3 py-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="resolve-summary" className="text-sm font-medium">
+                    Résumé final <span className="text-destructive">*</span>
+                  </Label>
+                  <Textarea
+                    id="resolve-summary"
+                    value={resolveSummary}
+                    onChange={(e) => setResolveSummary(e.target.value)}
+                    placeholder="Résumé de la résolution…"
+                    className="min-h-16 bg-background"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="resolve-solution" className="text-sm font-medium">
+                    Solution appliquée <span className="text-destructive">*</span>
+                  </Label>
+                  <Textarea
+                    id="resolve-solution"
+                    value={resolveSolution}
+                    onChange={(e) => setResolveSolution(e.target.value)}
+                    placeholder="Solution mise en œuvre…"
+                    className="min-h-16 bg-background"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="resolve-work-done" className="text-sm font-medium">
+                    Travail réalisé <span className="text-destructive">*</span>
+                  </Label>
+                  <Textarea
+                    id="resolve-work-done"
+                    value={resolveWorkDone}
+                    onChange={(e) => setResolveWorkDone(e.target.value)}
+                    placeholder="Détail du travail effectué…"
+                    className="min-h-16 bg-background"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="resolve-recommendations" className="text-sm font-medium">
+                    Recommandations <span className="text-xs text-muted-foreground">(facultatif)</span>
+                  </Label>
+                  <Textarea
+                    id="resolve-recommendations"
+                    value={resolveRecommendations}
+                    onChange={(e) => setResolveRecommendations(e.target.value)}
+                    placeholder="Recommandations pour éviter que le problème ne se reproduise…"
+                    className="min-h-14 bg-background"
+                  />
+                </div>
               </div>
               <DialogFooter className="gap-2">
                 <Button variant="ghost" className="rounded-full"
-                  onClick={() => { setShowResolveForm(false); setResolutionNote(""); }}>
+                  onClick={() => setShowResolveForm(false)}>
                   Annuler
                 </Button>
                 <Button className="rounded-full gradient-primary"
-                  disabled={resolveMut.isPending} onClick={() => resolveMut.mutate()}>
+                  disabled={
+                    resolveMut.isPending
+                    || !resolveSummary.trim()
+                    || !resolveSolution.trim()
+                    || !resolveWorkDone.trim()
+                  }
+                  onClick={() => resolveMut.mutate()}>
                   {resolveMut.isPending
                     ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
                     : <CheckCircle2 className="mr-1.5 h-4 w-4" />}
-                  Confirmer la résolution
+                  Terminer le traitement
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* BR-TRANSMIT-001 — Modal "Transmettre le traitement" : annuaire libre
+              (direction/département/service/recherche), motif + travail effectué
+              obligatoires, instruction et pièces jointes facultatives. */}
+          <Dialog
+            open={showTransmitForm}
+            onOpenChange={(open) => {
+              setShowTransmitForm(open);
+              if (!open) resetTransmitForm();
+            }}
+          >
+            <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Send className="h-5 w-5 text-sky-600" />
+                  Transmettre le traitement
+                </DialogTitle>
+                <DialogDescription>
+                  Choisissez librement le prochain intervenant dans l'annuaire — aucune
+                  chaîne fixe, le ticket reste dans son statut de traitement actif.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3 py-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="transmit-search" className="text-sm font-medium">
+                    Recherche
+                  </Label>
+                  <input
+                    id="transmit-search"
+                    value={transmitSearch}
+                    onChange={(e) => {
+                      setTransmitSearch(e.target.value);
+                      setTransmitTargetId("");
+                    }}
+                    placeholder="Nom d'un intervenant, dans toute l'organisation…"
+                    className="w-full rounded-xl border border-border/50 bg-background/60 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  />
+                </div>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium text-muted-foreground">Direction</Label>
+                    <select
+                      value={transmitDirectionId}
+                      onChange={(e) => {
+                        setTransmitDirectionId(e.target.value);
+                        setTransmitDepartmentId("");
+                        setTransmitUnitId("");
+                        setTransmitTargetId("");
+                      }}
+                      className="w-full rounded-xl border border-border/50 bg-background/60 px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    >
+                      <option value="">Toutes</option>
+                      {transmitDirections.map((d) => (
+                        <option key={d.id} value={d.id}>{d.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium text-muted-foreground">Département</Label>
+                    <select
+                      value={transmitDepartmentId}
+                      onChange={(e) => {
+                        setTransmitDepartmentId(e.target.value);
+                        setTransmitUnitId("");
+                        setTransmitTargetId("");
+                      }}
+                      disabled={!transmitDirectionId}
+                      className="w-full rounded-xl border border-border/50 bg-background/60 px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-50"
+                    >
+                      <option value="">Tous</option>
+                      {transmitDepartments.map((d) => (
+                        <option key={d.id} value={d.id}>{d.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium text-muted-foreground">Service</Label>
+                    <select
+                      value={transmitUnitId}
+                      onChange={(e) => {
+                        setTransmitUnitId(e.target.value);
+                        setTransmitTargetId("");
+                      }}
+                      disabled={!transmitDepartmentId}
+                      className="w-full rounded-xl border border-border/50 bg-background/60 px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-50"
+                    >
+                      <option value="">Tous</option>
+                      {transmitUnits.map((u) => (
+                        <option key={u.id} value={u.id}>{u.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-sm font-medium">
+                    Personne cible <span className="text-destructive">*</span>
+                  </Label>
+                  <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-border/40 bg-background/40 p-1.5">
+                    {transmitPeopleLoading ? (
+                      <p className="px-2 py-3 text-center text-xs text-muted-foreground">Recherche en cours…</p>
+                    ) : transmitPeople.length === 0 ? (
+                      <p className="px-2 py-3 text-center text-xs text-muted-foreground">
+                        {transmitSearch.trim() || transmitUnitId || transmitDepartmentId || transmitDirectionId
+                          ? "Aucun intervenant actif trouvé pour ces critères."
+                          : "Recherchez un nom ou affinez par direction/département/service."}
+                      </p>
+                    ) : (
+                      transmitPeople.map((person) => (
+                        <button
+                          key={person.id}
+                          type="button"
+                          onClick={() => setTransmitTargetId(person.id)}
+                          className={cn(
+                            "flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition",
+                            transmitTargetId === person.id
+                              ? "bg-primary/15 text-primary"
+                              : "hover:bg-foreground/5",
+                          )}
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate font-medium">{person.name}</span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {roleLabels[person.role as keyof typeof roleLabels] ?? person.role}
+                              {(person.service ?? person.direction) ? ` · ${person.service ?? person.direction}` : ""}
+                            </span>
+                          </span>
+                          {transmitTargetId === person.id && <BadgeCheck className="h-4 w-4 shrink-0 text-primary" />}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="transmit-work-done" className="text-sm font-medium">
+                    Travail effectué <span className="text-destructive">*</span>
+                  </Label>
+                  <Textarea
+                    id="transmit-work-done"
+                    value={transmitWorkDone}
+                    onChange={(e) => setTransmitWorkDone(e.target.value)}
+                    placeholder="Ce qui a déjà été fait sur ce ticket…"
+                    className="min-h-16 bg-background"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="transmit-reason" className="text-sm font-medium">
+                    Motif <span className="text-destructive">*</span>
+                  </Label>
+                  <Textarea
+                    id="transmit-reason"
+                    value={transmitReason}
+                    onChange={(e) => setTransmitReason(e.target.value)}
+                    placeholder="Pourquoi une autre intervention est nécessaire…"
+                    className="min-h-14 bg-background"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="transmit-instruction" className="text-sm font-medium">
+                    Instruction <span className="text-xs text-muted-foreground">(facultatif)</span>
+                  </Label>
+                  <Textarea
+                    id="transmit-instruction"
+                    value={transmitInstruction}
+                    onChange={(e) => setTransmitInstruction(e.target.value)}
+                    placeholder="Consigne pour le prochain intervenant…"
+                    className="min-h-14 bg-background"
+                  />
+                </div>
+              </div>
+              <DialogFooter className="gap-2">
+                <Button variant="ghost" className="rounded-full"
+                  onClick={() => setShowTransmitForm(false)}>
+                  Annuler
+                </Button>
+                <Button className="rounded-full gradient-primary"
+                  disabled={
+                    transmitMut.isPending
+                    || !transmitTargetId
+                    || !transmitWorkDone.trim()
+                    || !transmitReason.trim()
+                  }
+                  onClick={() => transmitMut.mutate()}>
+                  {transmitMut.isPending
+                    ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                    : <Send className="mr-1.5 h-4 w-4" />}
+                  Transmettre
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -2568,10 +3062,10 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2 text-destructive">
                     <Ban className="h-5 w-5" />
-                    Rejeter la demande
+                    Rejeter le ticket
                   </DialogTitle>
                   <DialogDescription>
-                    Expliquez clairement pourquoi cette demande est rejetée.
+                    Expliquez clairement pourquoi ce ticket est rejeté.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-2 py-2">
@@ -2581,7 +3075,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                   <Textarea
                     value={rejectNote}
                     onChange={(e) => setRejectNote(e.target.value)}
-                    placeholder="Expliquez clairement pourquoi cette demande est rejetée…"
+                    placeholder="Expliquez clairement pourquoi ce ticket est rejeté…"
                     className="min-h-24 bg-background"
                   />
                 </div>
@@ -2669,7 +3163,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                     Réassigner le ticket
                   </DialogTitle>
                   <DialogDescription>
-                    Sélectionnez l'agent qui prendra la demande en charge.
+                    Sélectionnez l'agent qui prendra le ticket en charge.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-2 py-2">
@@ -2751,7 +3245,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                     Changer le service
                   </DialogTitle>
                   <DialogDescription>
-                    Sélectionnez le service qui doit reprendre la demande.
+                    Sélectionnez le service qui doit reprendre le ticket.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-2 py-2">
@@ -2824,7 +3318,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
               <div className="rounded-2xl border border-border/45 bg-background/35 p-4">
                 <h3 className="mb-3 flex items-center gap-2 font-semibold">
                   <FileText className="h-4 w-4 text-primary" />
-                  Description de la demande
+                  Description du ticket
                 </h3>
                 <p className="whitespace-pre-wrap text-sm leading-7 text-muted-foreground">
                   {r.description}
@@ -2837,7 +3331,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                 <div>
                   <h3 className="font-semibold">Pièces jointes</h3>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Fichiers ajoutés à cette demande.
+                    Fichiers ajoutés à ce ticket.
                   </p>
                 </div>
                 <span className="rounded-full bg-muted px-2.5 py-1 text-[10px] font-medium text-muted-foreground">
@@ -2852,7 +3346,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                 </div>
               ) : attachments.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-border/60 bg-background/35 px-4 py-5 text-sm text-muted-foreground">
-                  Aucune pièce jointe n'a encore été ajoutée à cette demande.
+                  Aucune pièce jointe n'a encore été ajoutée à ce ticket.
                 </div>
               ) : (
                 <ul className="grid gap-3 lg:grid-cols-2">
@@ -2923,8 +3417,57 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             </section>
 
             <section className={cn("order-1 p-3 sm:p-4", activeDetailTab !== "journal" && "hidden")}>
+              {/* BR-TRACE-001 — journal d'interventions hiérarchique (Cycle ->
+                  Intervention) par défaut ; bascule possible vers la timeline
+                  événement par événement déjà existante (audit fin). */}
+              {(r.interventions?.length ?? 0) > 0 && (
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1 rounded-full border border-border/50 bg-background/50 p-1 text-xs">
+                    <button
+                      type="button"
+                      className={cn(
+                        "rounded-full px-3 py-1 font-medium transition-colors",
+                        journalView === "interventions" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+                      )}
+                      onClick={() => setJournalView("interventions")}
+                    >
+                      Journal des interventions
+                    </button>
+                    <button
+                      type="button"
+                      className={cn(
+                        "rounded-full px-3 py-1 font-medium transition-colors",
+                        journalView === "events" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+                      )}
+                      onClick={() => setJournalView("events")}
+                    >
+                      Chronologie complète
+                    </button>
+                  </div>
+                  {journalView === "interventions" && (
+                    <button
+                      type="button"
+                      disabled
+                      title="Export du journal — bientôt disponible"
+                      className="cursor-not-allowed rounded-full border border-border/50 px-3 py-1 text-xs font-medium text-muted-foreground opacity-60"
+                    >
+                      Exporter le journal
+                    </button>
+                  )}
+                </div>
+              )}
               <div className="max-h-[520px] overflow-y-auto pr-1">
-                <WorkflowTimeline events={r.timeline} onOpenAttachment={handleTimelineAttachmentOpen} />
+                {journalView === "interventions" && (r.interventions?.length ?? 0) > 0 ? (
+                  <InterventionJournal
+                    interventions={r.interventions!}
+                    events={r.timeline}
+                    currentAssigneeId={r.assigneeId}
+                    requestRef={r.ref}
+                    onOpenAttachment={handleTimelineAttachmentOpen}
+                  />
+                ) : (
+                  <WorkflowTimeline events={r.timeline} onOpenAttachment={handleTimelineAttachmentOpen} />
+                )}
               </div>
             </section>
 
@@ -2977,6 +3520,97 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                   </p>
                 </div>
               </div>
+
+              {/* BR-SLA-REOPEN-001 — cycles SLA distincts : le 1er traitement et chaque
+                  traitement après réouverture sont mesurés indépendamment, sans jamais
+                  recalculer un cycle déjà clos. */}
+              {(r.slaCycles?.length ?? 0) > 1 && (
+                <div className="mt-5 space-y-3">
+                  <div>
+                    <h3 className="font-semibold">Cycles SLA ({r.slaCycles!.length})</h3>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Ce ticket a été réouvert {r.reopenCount ?? r.slaCycles!.length - 1} fois — chaque
+                      traitement est mesuré indépendamment, le premier cycle n'est jamais recalculé.
+                    </p>
+                  </div>
+                  <div className="space-y-3">
+                    {r.slaCycles!.map((cycle) => (
+                      <div
+                        key={cycle.cycleNumber}
+                        className={cn(
+                          "rounded-2xl border p-3 sm:p-4",
+                          cycle.breached
+                            ? "border-destructive/40 bg-destructive/5"
+                            : "border-border/50 bg-background/55",
+                        )}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <h4 className="text-sm font-semibold">
+                            {cycle.cycleNumber === 1
+                              ? "Premier traitement"
+                              : `Traitement après réouverture n°${cycle.cycleNumber - 1}`}
+                          </h4>
+                          {cycle.closed ? (
+                            <span
+                              className={cn(
+                                "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
+                                cycle.breached
+                                  ? "bg-destructive/15 text-destructive"
+                                  : "bg-success/15 text-success",
+                              )}
+                            >
+                              {cycle.breached ? "SLA dépassé" : "SLA respecté"}
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-fuchsia-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-fuchsia-600">
+                              En cours
+                            </span>
+                          )}
+                        </div>
+                        {cycle.reopenReason && (
+                          <p className="mt-1.5 text-xs text-muted-foreground">
+                            <span className="font-medium text-foreground">Motif de réouverture :</span>{" "}
+                            {cycle.reopenReason}
+                          </p>
+                        )}
+                        <dl className="mt-2.5 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
+                          <div>
+                            <dt className="text-muted-foreground">Début</dt>
+                            <dd className="mt-0.5 font-medium">{formatTicketDateTime(cycle.startedAt)}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-muted-foreground">Fin</dt>
+                            <dd className="mt-0.5 font-medium">
+                              {cycle.closed ? formatTicketDateTime(cycle.endedAt) : "En cours"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-muted-foreground">Temps de résolution</dt>
+                            <dd className="mt-0.5 font-medium">
+                              {cycle.elapsedHours != null
+                                ? `${cycle.elapsedHours}h${cycle.slaHours ? ` / ${cycle.slaHours}h` : ""}`
+                                : "—"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-muted-foreground">Respect SLA</dt>
+                            <dd
+                              className={cn(
+                                "mt-0.5 font-medium",
+                                cycle.closed
+                                  ? cycle.breached ? "text-destructive" : "text-success"
+                                  : "text-muted-foreground",
+                              )}
+                            >
+                              {cycle.closed ? (cycle.breached ? "Non" : "Oui") : "—"}
+                            </dd>
+                          </div>
+                        </dl>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </section>
 
             <section className={cn("order-3 space-y-3 border-t border-border/40 p-3 sm:p-4", activeDetailTab !== "treatment" && "hidden")}>
@@ -2993,9 +3627,9 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
               <div className="flex items-start gap-3">
                 <XCircle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
                 <div className="min-w-0 flex-1">
-                  <h3 className="font-semibold text-destructive">Demande rejetée</h3>
+                  <h3 className="font-semibold text-destructive">Ticket rejeté</h3>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Votre demande a été examinée et n'a pas pu être traitée dans son état actuel.
+                    Votre ticket a été examiné et n'a pas pu être traité dans son état actuel.
                     Consultez l'historique ci-dessus pour connaître le motif précis du rejet.
                   </p>
                   {/* Dernier événement du timeline = motif du rejet */}
@@ -3015,7 +3649,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
               <div className="border-t border-border/30 pt-4 space-y-3">
                 <p className="text-xs text-muted-foreground">
                   Si votre situation a évolué ou si vous pensez que ce rejet est injustifié,
-                  vous pouvez réouvrir cette demande. L'historique complet sera conservé.
+                  vous pouvez réouvrir ce ticket. L'historique complet sera conservé.
                 </p>
 
                 {!showReopenForm ? (
@@ -3025,7 +3659,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                     onClick={() => setShowClosedRequestDialog(true)}
                   >
                     <RotateCcw className="mr-1.5 h-4 w-4" />
-                    Réouvrir la demande
+                    Réouvrir le ticket
                   </Button>
                 ) : (
                   <div className="space-y-3 rounded-2xl border border-border/40 bg-background/40 p-4">
@@ -3067,111 +3701,18 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             </GlassCard>
           )}
 
-          {iAmRequester && r.status === "resolved" && (
-            <GlassCard className={
-              (r.infos as Record<string, unknown>)?.reopen_requested
-                ? "border-warning/30 bg-warning/5"
-                : "border-success/30 bg-success/5"
-            }>
+          {iAmRequester && r.status === "resolved" && (r.infos as Record<string, unknown>)?.reopen_requested && (
+            <GlassCard className="border-warning/30 bg-warning/5">
               <div className="flex items-start gap-3">
-                {(r.infos as Record<string, unknown>)?.reopen_requested
-                  ? <RotateCcw className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
-                  : <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-success" />
-                }
+                <RotateCcw className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
                 <div className="min-w-0 flex-1 space-y-3">
-                  {(r.infos as Record<string, unknown>)?.reopen_requested ? (
-                    /* Réouverture déjà demandée — en attente chef */
-                    <div>
-                      <h3 className="font-semibold text-warning">Réouverture en attente d'approbation</h3>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Votre demande de réouverture a été transmise au chef de service.
-                        Vous serez notifié dès qu'une décision sera prise.
-                      </p>
-                    </div>
-                  ) : (
-                    <>
-                      <div>
-                        <h3 className="font-semibold text-success">Demande résolue</h3>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          L'agent a marqué votre demande comme résolue. Confirmez si le problème est
-                          bien réglé, ou contestez la résolution en précisant le motif.
-                        </p>
-                        <div className={`mt-2 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${
-                          daysUntilAutoClose <= 1
-                            ? "bg-destructive/10 text-destructive"
-                            : "bg-warning/10 text-warning-foreground"
-                        }`}>
-                          <Clock className="h-3 w-3" />
-                          {daysUntilAutoClose === 0
-                            ? "Fermeture automatique aujourd'hui"
-                            : `Fermeture automatique dans ${daysUntilAutoClose} jour${daysUntilAutoClose > 1 ? "s" : ""}`}
-                        </div>
-                      </div>
-                      {!showReopenForm ? (
-                        <div className="flex flex-wrap gap-2">
-                          {canClose && (
-                            <Button
-                              size="sm"
-                              className="rounded-full"
-                              disabled={closeMut.isPending}
-                              onClick={() => setDirectTreatmentAction("close")}
-                            >
-                              {closeMut.isPending
-                                ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                                : <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />}
-                              Confirmer la résolution
-                            </Button>
-                          )}
-                          {canRequestReopen && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="rounded-full border-destructive/40 text-destructive hover:bg-destructive/10"
-                              onClick={() => setShowClosedRequestDialog(true)}
-                            >
-                              <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-                              Le problème persiste — contester
-                            </Button>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="space-y-3 rounded-2xl border border-border/40 bg-background/40 p-4">
-                          <div>
-                            <p className="text-sm font-medium">
-                              Motif de contestation <span className="text-destructive">*</span>
-                            </p>
-                            <p className="mt-0.5 text-xs text-muted-foreground">
-                              Obligatoire — décrivez précisément ce qui n'a pas été résolu.
-                            </p>
-                          </div>
-                          <textarea
-                            value={reopenReason}
-                            onChange={(e) => setReopenReason(e.target.value)}
-                            placeholder="Ex : La panne a repris le lendemain, le problème n'est pas résolu…"
-                            rows={3}
-                            className="w-full resize-none rounded-xl border border-border/50 bg-background/60 px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
-                          />
-                          <div className="flex justify-end gap-2">
-                            <Button size="sm" variant="ghost" className="rounded-full"
-                              onClick={() => { setShowReopenForm(false); setReopenReason(""); }}>
-                              Annuler
-                            </Button>
-                            <Button
-                              size="sm"
-                              className="rounded-full gradient-primary"
-                              disabled={requestReopenMut.isPending || !reopenReason.trim()}
-                              onClick={() => requestReopenMut.mutate(reopenReason.trim())}
-                            >
-                              {requestReopenMut.isPending
-                                ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                                : <RotateCcw className="mr-1.5 h-3.5 w-3.5" />}
-                              Demander la réouverture
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  )}
+                  <div>
+                    <h3 className="font-semibold text-warning">Réouverture en attente d'approbation</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Votre demande de réouverture a été transmise au chef de service.
+                      Vous serez notifié dès qu'une décision sera prise.
+                    </p>
+                  </div>
                 </div>
               </div>
             </GlassCard>
@@ -3189,13 +3730,13 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2">
                     <Lock className="h-5 w-5 text-muted-foreground" />
-                    {r.status === "closed" ? "Demande clôturée" : "Demander une réouverture"}
+                    {r.status === "closed" ? "Ticket clôturé" : "Demander une réouverture"}
                   </DialogTitle>
                   <DialogDescription>
                     {r.status === "closed"
                       ? canReopenClosed
-                        ? "Cette demande a été fermée. Si votre problème persiste, vous pouvez encore la rouvrir."
-                        : "Cette demande est archivée. La fenêtre de réouverture (7 jours) est expirée — créez une nouvelle demande si nécessaire."
+                        ? "Ce ticket a été fermé. Si votre problème persiste, vous pouvez encore le rouvrir."
+                        : "Ce ticket est archivé. La fenêtre de réouverture (7 jours) est expirée — créez un nouveau ticket si nécessaire."
                       : "Expliquez pourquoi la résolution ne répond pas encore à votre besoin."}
                   </DialogDescription>
                 </DialogHeader>
@@ -3253,7 +3794,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                     Votre avis
                   </DialogTitle>
                   <DialogDescription>
-                    Évaluez la prise en charge de votre demande.
+                    Évaluez la prise en charge de votre ticket.
                   </DialogDescription>
                 </DialogHeader>
                 <AppreciationForm
@@ -3302,7 +3843,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                     Transférer vers une direction
                   </DialogTitle>
                   <DialogDescription>
-                    La demande entrera dans la direction cible comme un ticket à qualifier.
+                    Le ticket entrera dans la direction cible comme un ticket à qualifier.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-2">
@@ -3328,7 +3869,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                     <Textarea
                       value={transferReason}
                       onChange={(e) => setTransferReason(e.target.value)}
-                      placeholder="Expliquez pourquoi la demande sort de votre direction…"
+                      placeholder="Expliquez pourquoi le ticket sort de votre direction…"
                       rows={4}
                     />
                   </div>
@@ -3373,7 +3914,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                     Créer un circuit de validation
                   </DialogTitle>
                   <DialogDescription>
-                    Un circuit de validation automatique sera créé pour cette demande.
+                    Un circuit de validation automatique sera créé pour ce ticket.
                     Laissez les champs vides pour utiliser la configuration par défaut.
                   </DialogDescription>
                 </DialogHeader>
@@ -3542,7 +4083,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-md">
               <DialogHeader>
                 <DialogTitle>Intervenants ({participants.length})</DialogTitle>
-                <DialogDescription>Toutes les personnes liées à cette demande.</DialogDescription>
+                <DialogDescription>Toutes les personnes liées à ce ticket.</DialogDescription>
               </DialogHeader>
               <ul className="space-y-3">
                 {participants.map((participant) => (
@@ -3555,7 +4096,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
           <section className={cn("order-3", sideCardClass)}>
             <div className="mb-4 flex items-center justify-between gap-3">
               <h3 className="text-sm font-semibold uppercase tracking-wider text-foreground">
-                Détails de la demande
+                Détails du ticket
               </h3>
               <button
                 type="button"
@@ -3571,7 +4112,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
               <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-emerald-500/15 text-emerald-500">
                 <User className="h-3.5 w-3.5" />
               </span>
-              <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-500">Demande</h4>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-500">Ticket</h4>
             </div>
             <dl className="space-y-0 text-sm">
               <div className="flex items-center justify-between gap-3 border-b border-border/30 py-3">
@@ -3597,7 +4138,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
               </div>
               <div className="flex items-center justify-between gap-3 border-b border-border/30 py-3">
                 <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <FileText className="h-3.5 w-3.5" /> ID de la demande
+                  <FileText className="h-3.5 w-3.5" /> ID du ticket
                 </dt>
                 <dd className="flex min-w-0 items-center gap-1.5 font-mono text-xs font-medium">
                   <span className="min-w-0 truncate">{r.ref}</span>
@@ -3620,8 +4161,8 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
           <Dialog open={showAllDetails} onOpenChange={setShowAllDetails}>
             <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-lg">
               <DialogHeader>
-                <DialogTitle>Détails de la demande</DialogTitle>
-                <DialogDescription>Demandeur, traitement et délai de cette demande.</DialogDescription>
+                <DialogTitle>Détails du ticket</DialogTitle>
+                <DialogDescription>Demandeur, traitement et délai de ce ticket.</DialogDescription>
               </DialogHeader>
               <div>
                 <div className="mb-2 mt-2 flex items-center gap-2">

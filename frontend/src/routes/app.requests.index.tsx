@@ -49,7 +49,7 @@ const isoDate = (d: Date) => format(d, "yyyy-MM-dd");
 
 export const Route = createFileRoute("/app/requests/")({
   beforeLoad: () => requireAuth(),
-  head: () => ({ meta: [{ title: "Mes demandes — EDG Support" }] }),
+  head: () => ({ meta: [{ title: "Mes tickets — EDG Support" }] }),
   component: RequestsList,
 });
 
@@ -290,17 +290,17 @@ function RequestsList() {
       >
         <div>
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-            Mes demandes
+            Mes tickets
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {total} demande{total > 1 ? "s" : ""} trouvée{total > 1 ? "s" : ""}.
+            {total} ticket{total > 1 ? "s" : ""} trouvé{total > 1 ? "s" : ""}.
           </p>
         </div>
         <div className="flex items-center gap-2">
           <LayoutToggle layout={layout} onChange={setLayout} />
           <Button asChild className="rounded-full gradient-primary shadow-lg shadow-primary/30">
             <Link to="/app/new">
-              <Plus className="mr-1 h-4 w-4" /> Nouvelle demande
+              <Plus className="mr-1 h-4 w-4" /> Nouveau ticket
             </Link>
           </Button>
         </div>
@@ -415,15 +415,15 @@ function RequestsList() {
             >
               <Inbox className="h-6 w-6 text-muted-foreground" />
             </motion.div>
-            <h3 className="font-semibold">Aucune demande</h3>
+            <h3 className="font-semibold">Aucun ticket</h3>
             <p className="mt-1 text-sm text-muted-foreground">
               {isError
-                ? "Impossible de charger les demandes."
-                : "Vous n'avez pas encore soumis de demande. Cliquez sur « Nouvelle demande » pour commencer."}
+                ? "Impossible de charger les tickets."
+                : "Vous n'avez pas encore soumis de ticket. Cliquez sur « Nouveau ticket » pour commencer."}
             </p>
             {!isError && (
               <Button asChild className="mt-4 rounded-full gradient-primary shadow-lg shadow-primary/30">
-                <Link to="/app/new"><Plus className="mr-1 h-4 w-4" /> Nouvelle demande</Link>
+                <Link to="/app/new"><Plus className="mr-1 h-4 w-4" /> Nouveau ticket</Link>
               </Button>
             )}
           </GlassCard>

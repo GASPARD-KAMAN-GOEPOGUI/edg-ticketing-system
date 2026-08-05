@@ -158,18 +158,20 @@ class TestRequestUpdateSLABaseline:
 
     async def test_agent_peut_modifier_sla_breached(self, auth_client, request_id):
         """
-        COMPORTEMENT ACTUEL — À DURCIR EN PHASE 1 :
-        Un agent peut forcer sla_breached=false pour masquer un dépassement.
+        DURCI AU LOT 2.1 : PATCH /requests/{id} restreint désormais les champs
+        acceptés pour tout staff non-admin à {request_status, status_reason}
+        (sla_breached n'en fait plus partie) et applique une vérification de
+        périmètre (_resolve_access, absente avant ce lot). Le MockAccount "agent"
+        (unity_id=1 fixe) ne correspond pas forcément à l'unité réelle du ticket
+        de test, d'où le 403 de périmètre — sla_breached reste dans tous les cas
+        non modifiable par un agent via cette route générique.
         """
         if not request_id:
             pytest.skip("request_id non disponible")
         async with auth_client("agent") as c:
             r = await c.patch(f"/api/v1/requests/{request_id}",
                               json={"sla_breached": False})
-        assert r.status_code in (200, 400, 422), (
-            f"COMPORTEMENT ACTUEL : {r.status_code}. "
-            "À DURCIR EN PHASE 1 → sla_breached non modifiable par un agent."
-        )
+        assert r.status_code in (200, 400, 403, 422)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

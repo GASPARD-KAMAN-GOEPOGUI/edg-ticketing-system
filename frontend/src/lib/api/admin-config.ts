@@ -303,8 +303,8 @@ export const REF_TABLES = [
 export type RefTableName = (typeof REF_TABLES)[number];
 
 export const REF_TABLE_LABELS: Record<RefTableName, string> = {
-  request_statuses:        "Statuts de demande",
-  request_categories:      "Catégories de demande",
+  request_statuses:        "Statuts de ticket",
+  request_categories:      "Catégories de ticket",
   account_statuses:        "Statuts de compte",
   knowledge_categories:    "Catégories de connaissance",
   announcement_categories: "Catégories d'annonce",

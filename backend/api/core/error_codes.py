@@ -43,6 +43,7 @@ class ErrorCode(str, Enum):
     DUPLICATE_ENTRY          = "DUPLICATE_ENTRY"
     ALREADY_EXISTS           = "ALREADY_EXISTS"
     DUPLICATE_REQUEST        = "DUPLICATE_REQUEST"
+    TICKET_STATE_CONFLICT    = "TICKET_STATE_CONFLICT"
 
     # ── 422 Unprocessable ──────────────────────────────────────────────────
     FOREIGN_KEY_VIOLATION    = "FOREIGN_KEY_VIOLATION"

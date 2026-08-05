@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy import (
     Boolean, Double, Enum as SAEnum, ForeignKey,
@@ -188,6 +188,204 @@ class Request(Base, BaseColumns):
         for wf in sorted(self.workflows or [], key=lambda w: w.id):
             result.extend(wf.details or [])
         return result
+
+    @property
+    def reopen_count(self) -> int:
+        """BR-SLA-REOPEN-001 — nombre de réouvertures approuvées (événements `reopened`)."""
+        return sum(1 for e in self.timelines if e.event_type == "reopened")
+
+    @property
+    def sla_cycles(self) -> list[dict[str, Any]]:
+        """
+        BR-SLA-REOPEN-001 — reconstruit l'historique des cycles SLA depuis
+        `timelines` (workflow_detail, append-only), sans nouvelle table ni colonne :
+        un cycle clos par résolution (`treatment_completed`, instantané gelé dans
+        `infos` par `ServiceRequest._sla_cycle_snapshot`), une réouverture
+        (`reopened`) démarrant le cycle suivant. Le cycle courant (non encore
+        résolu) est ajouté en fin de liste s'il existe, calculé en direct depuis
+        les compteurs "live" (`sla_hours`/`sla_breached`) — jamais persisté ici.
+        Le premier cycle n'est jamais recalculé : une fois clos, ses valeurs
+        proviennent uniquement de l'événement `treatment_completed` d'origine.
+        """
+        events = sorted(
+            (e for e in self.timelines if e.created_at is not None),
+            key=lambda e: e.created_at,
+        )
+        cycles: list[dict[str, Any]] = []
+        # Suivi du cycle courant (non encore clos), pour le cas où le ticket est
+        # toujours en traitement — uniquement recalculé en direct pour CE cycle,
+        # jamais pour un cycle déjà clos (voir bloc `treatment_completed` ci-dessous).
+        started_at = self.created_at
+        reopen_reason: Optional[str] = None
+        for event in events:
+            if event.event_type == "treatment_completed":
+                # Cycle clos : toutes les valeurs proviennent exclusivement de
+                # l'instantané gelé dans `infos` au moment de la résolution — jamais
+                # recalculées depuis un nouveau parcours des événements (robuste à
+                # tout événement enregistré hors-ordre après coup, ex. horloge système).
+                infos = event.infos or {}
+                cycles.append({
+                    "cycle_number": infos.get("sla_cycle_number") or (len(cycles) + 1),
+                    "started_at": infos.get("sla_cycle_started_at", started_at),
+                    "ended_at": event.created_at,
+                    "sla_hours": infos.get("sla_hours_target"),
+                    "elapsed_hours": infos.get("sla_elapsed_hours"),
+                    "response_hours": infos.get("sla_response_hours"),
+                    "breached": infos.get("sla_breached"),
+                    "resolved_by": event.actor_name,
+                    "reopen_reason": infos.get("sla_reopen_reason"),
+                    "closed": True,
+                })
+            elif event.event_type == "reopened":
+                started_at = event.created_at
+                reopen_reason = event.comment or (event.infos or {}).get("reopen_reason")
+
+        # Cycle courant non clos : le nombre de cycles clos doit être exactement
+        # reopen_count + 1 (cycle initial + un par réouverture) tant que le
+        # ticket est de nouveau résolu après chaque réouverture ; s'il en manque
+        # un, le ticket est encore en traitement sur son cycle le plus récent.
+        if len(cycles) < self.reopen_count + 1:
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            elapsed_hours = (
+                round((now - started_at).total_seconds() / 3600, 2) if started_at else None
+            )
+            cycles.append({
+                "cycle_number": len(cycles) + 1,
+                "started_at": started_at,
+                "ended_at": None,
+                "sla_hours": self.sla_hours or None,
+                "elapsed_hours": elapsed_hours,
+                "response_hours": None,
+                "breached": self.sla_breached,
+                "resolved_by": None,
+                "reopen_reason": reopen_reason,
+                "closed": False,
+            })
+        return cycles
+
+    @property
+    def interventions(self) -> list[dict[str, Any]]:
+        """
+        BR-TRACE-001 — reconstruit la liste des interventions (conteneur logique
+        du travail complet d'un intervenant : commentaires, pièces jointes,
+        travail effectué, décision) depuis les métadonnées explicitement
+        enregistrées sur chaque événement (`infos.intervention_id`/
+        `intervention_order`/`intervention_cycle_number`) — jamais recalculées,
+        jamais dérivées par comptage. Chaque intervention garde le detail de ses
+        propres événements via `event_ids` (déjà présents dans `timelines`).
+        """
+        events = sorted(
+            (e for e in self.timelines if e.created_at is not None),
+            key=lambda e: e.created_at,
+        )
+        order: list[str] = []
+        by_id: dict[str, dict[str, Any]] = {}
+
+        def _ensure(intervention_id: str, seed: dict[str, Any]) -> dict[str, Any]:
+            bucket = by_id.get(intervention_id)
+            if bucket is None:
+                bucket = {
+                    "intervention_id": intervention_id,
+                    "cycle_number": seed.get("cycle_number") or 1,
+                    "intervention_order": seed.get("intervention_order"),
+                    "actor_id": seed.get("actor_id"),
+                    "actor_name": seed.get("actor_name"),
+                    "actor_role": seed.get("actor_role"),
+                    "actor_matricule": seed.get("actor_matricule"),
+                    "actor_direction_label": seed.get("actor_direction_label"),
+                    "actor_department_label": seed.get("actor_department_label"),
+                    "actor_service_label": seed.get("actor_service_label"),
+                    "started_at": seed.get("started_at"),
+                    "ended_at": None,
+                    "duration_seconds": None,
+                    "work_done": None,
+                    "instruction": None,
+                    "transmission_reason": None,
+                    "decision": None,
+                    "destination_id": None,
+                    "destination_name": None,
+                    "summary": None,
+                    "solution": None,
+                    "recommendations": None,
+                    "sla_hours": None,
+                    "sla_breached": None,
+                    "comment_count": 0,
+                    "attachment_count": 0,
+                    "event_ids": [],
+                }
+                by_id[intervention_id] = bucket
+                order.append(intervention_id)
+            return bucket
+
+        for event in events:
+            infos = event.infos or {}
+            intervention_id = infos.get("intervention_id")
+
+            # Transmission : pré-amorce l'intervention du destinataire (aucun
+            # événement `assigned` séparé n'existe pour la marquer autrement).
+            next_iv = infos.get("next_intervention")
+            if isinstance(next_iv, dict) and next_iv.get("intervention_id"):
+                _ensure(next_iv["intervention_id"], {
+                    "cycle_number": next_iv.get("intervention_cycle_number"),
+                    "intervention_order": next_iv.get("intervention_order"),
+                    "actor_id": infos.get("target_user_id"),
+                    "actor_name": infos.get("target_user_name"),
+                    "actor_role": infos.get("target_role") or infos.get("dest_role"),
+                    "actor_matricule": next_iv.get("actor_matricule"),
+                    "actor_direction_label": next_iv.get("actor_direction_label"),
+                    "actor_department_label": next_iv.get("actor_department_label"),
+                    "actor_service_label": next_iv.get("actor_service_label"),
+                    "started_at": next_iv.get("started_at"),
+                })
+
+            if not intervention_id:
+                continue  # événement hors conteneur (création, qualification, message du demandeur…)
+
+            bucket = _ensure(intervention_id, {
+                "cycle_number": infos.get("intervention_cycle_number"),
+                "intervention_order": infos.get("intervention_order"),
+                # Le titulaire de l'intervention peut différer de l'acteur qui écrit
+                # l'événement (ex. un chef qui assigne un agent) — `intervention_actor_*`
+                # (figé par `_actor_identity_snapshot` au nom de l'assigné) prime sur les
+                # colonnes `agent_id`/`actor_name` de l'événement lui-même.
+                "actor_id": infos.get("intervention_actor_id") or event.agent_id,
+                "actor_name": infos.get("intervention_actor_name") or event.actor_name,
+                "actor_role": infos.get("intervention_actor_role"),
+                "actor_matricule": infos.get("actor_matricule"),
+                "actor_direction_label": infos.get("actor_direction_label"),
+                "actor_department_label": infos.get("actor_department_label"),
+                "actor_service_label": infos.get("actor_service_label"),
+                "started_at": event.created_at,
+            })
+            bucket["event_ids"].append(event.id)
+
+            if event.event_type == "comment_added":
+                bucket["comment_count"] += 1
+            elif event.event_type == "attachment_added":
+                bucket["attachment_count"] += 1
+            elif event.event_type == "treatment_transmitted":
+                bucket["decision"] = "transmission"
+                bucket["work_done"] = infos.get("work_done")
+                bucket["transmission_reason"] = infos.get("reason")
+                bucket["instruction"] = infos.get("instruction")
+                bucket["destination_id"] = infos.get("target_user_id")
+                bucket["destination_name"] = infos.get("target_user_name")
+                bucket["started_at"] = infos.get("started_at") or bucket["started_at"]
+                bucket["ended_at"] = infos.get("ended_at")
+                bucket["duration_seconds"] = infos.get("duration_seconds")
+            elif event.event_type == "treatment_completed":
+                bucket["decision"] = "resolution"
+                bucket["work_done"] = infos.get("work_done")
+                bucket["summary"] = infos.get("summary")
+                bucket["solution"] = infos.get("solution")
+                bucket["recommendations"] = infos.get("recommendations")
+                bucket["started_at"] = infos.get("started_at") or bucket["started_at"]
+                bucket["ended_at"] = infos.get("ended_at")
+                bucket["duration_seconds"] = infos.get("duration_seconds")
+                bucket["sla_hours"] = infos.get("sla_hours_target")
+                bucket["sla_breached"] = infos.get("sla_breached")
+
+        return [by_id[i] for i in order]
 
     __table_args__ = (
         UniqueConstraint("ref", name="uk_req_ref"),

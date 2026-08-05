@@ -44,7 +44,7 @@ export const DEFAULT_SECTIONS: SectionConfig[] = [
   {
     id: "how",
     label: "Comment ça marche",
-    desc: "Les 4 étapes du parcours client, de la demande à la résolution.",
+    desc: "Les 4 étapes du parcours client, du ticket à la résolution.",
     visible: true,
     order: 3,
   },
@@ -67,7 +67,7 @@ export const DEFAULT_SECTIONS: SectionConfig[] = [
 export const DEFAULT_CONFIG: HomepageConfig = {
   sections: DEFAULT_SECTIONS,
   missionText:
-    "EDG Support est la plateforme unique et officielle qui centralise toutes vos demandes, incidents et réclamations vers la bonne direction — pour les citoyens, les clients et les agents d'Électricité de Guinée.",
+    "EDG Support est la plateforme unique et officielle qui centralise tous vos tickets, incidents et réclamations vers la bonne direction — pour les citoyens, les clients et les agents d'Électricité de Guinée.",
 };
 
 export function loadHomepageConfig(): HomepageConfig {

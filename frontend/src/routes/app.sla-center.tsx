@@ -8,10 +8,15 @@ import {
   ChevronRight,
   Flame,
   LayoutList,
+  RotateCcw,
+  Users,
+  Send,
+  Timer,
 } from "lucide-react";
 import { GlassCard } from "@/components/glass-card";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
 import { fetchRequests } from "@/lib/api/requests";
+import { fetchSlaReopenStats, fetchInterventionStats } from "@/lib/api/reports";
 import type { RequestItem, RequestStatus } from "@/lib/mock-data";
 import { requireRole } from "@/lib/auth-guard";
 import { useRole, useUser } from "@/lib/session";
@@ -124,6 +129,20 @@ function SlaCenterPage() {
     queryKey: ["sla-center", filters],
     queryFn: () => fetchRequests(filters),
     staleTime: 30_000,
+  });
+
+  // BR-SLA-REOPEN-001 — statistiques croisées cycles SLA / réouvertures.
+  const { data: reopenStats } = useQuery({
+    queryKey: ["sla-reopen-stats"],
+    queryFn: () => fetchSlaReopenStats(),
+    staleTime: 60_000,
+  });
+
+  // BR-TRACE-001 — statistiques agrégées sur les interventions.
+  const { data: interventionStats } = useQuery({
+    queryKey: ["intervention-stats"],
+    queryFn: () => fetchInterventionStats(),
+    staleTime: 60_000,
   });
 
   const { data: directionsData = [] } = useQuery({
@@ -276,6 +295,134 @@ function SlaCenterPage() {
           iconColor={critical.length > 0 ? "text-orange-600" : "text-muted-foreground"}
         />
       </div>
+
+      {/* BR-SLA-REOPEN-001 — cycles SLA / réouvertures (30 derniers jours) */}
+      {reopenStats && (
+        <GlassCard>
+          <h2 className="mb-4 font-semibold">Réouvertures — {reopenStats.period}</h2>
+          <div className="grid grid-cols-2 gap-4 md:gap-6 lg:grid-cols-5">
+            <KpiCard
+              label="Tickets réouverts"
+              value={reopenStats.reopened_tickets}
+              sub={`${reopenStats.reopen_rate.toFixed(1)}% des tickets avec SLA`}
+              icon={RotateCcw}
+              iconBg="bg-fuchsia-500/15"
+              iconColor="text-fuchsia-600"
+            />
+            <KpiCard
+              label="Réouvertures moy."
+              value={reopenStats.avg_reopen_count?.toFixed(1) ?? "—"}
+              sub="par ticket réouvert"
+              icon={RotateCcw}
+              iconBg="bg-fuchsia-500/15"
+              iconColor="text-fuchsia-600"
+            />
+            <KpiCard
+              label="Durée moy. 1er traitement"
+              value={reopenStats.avg_first_cycle_hours != null ? `${reopenStats.avg_first_cycle_hours.toFixed(1)}h` : "—"}
+              sub={
+                reopenStats.first_cycle_sla_compliance_rate != null
+                  ? `conformité SLA ${reopenStats.first_cycle_sla_compliance_rate.toFixed(1)}%`
+                  : undefined
+              }
+              icon={CheckCircle2}
+              iconBg="bg-primary/10"
+              iconColor="text-primary"
+            />
+            <KpiCard
+              label="Durée moy. après réouverture"
+              value={reopenStats.avg_post_reopen_cycle_hours != null ? `${reopenStats.avg_post_reopen_cycle_hours.toFixed(1)}h` : "—"}
+              sub={
+                reopenStats.post_reopen_sla_compliance_rate != null
+                  ? `conformité SLA ${reopenStats.post_reopen_sla_compliance_rate.toFixed(1)}%`
+                  : undefined
+              }
+              icon={CheckCircle2}
+              iconBg="bg-primary/10"
+              iconColor="text-primary"
+            />
+            <KpiCard
+              label="Tickets avec SLA"
+              value={reopenStats.total_tickets_with_sla}
+              sub="sur la période"
+              icon={LayoutList}
+              iconBg="bg-muted"
+              iconColor="text-muted-foreground"
+            />
+          </div>
+        </GlassCard>
+      )}
+
+      {/* BR-TRACE-001 — interventions (30 derniers jours) */}
+      {interventionStats && (
+        <GlassCard>
+          <h2 className="mb-4 font-semibold">Interventions — {interventionStats.period}</h2>
+          <div className="grid grid-cols-2 gap-4 md:gap-6 lg:grid-cols-5">
+            <KpiCard
+              label="Interventions"
+              value={interventionStats.total_interventions}
+              sub={`${interventionStats.distinct_agents} intervenant(s) distinct(s)`}
+              icon={Users}
+              iconBg="bg-primary/10"
+              iconColor="text-primary"
+            />
+            <KpiCard
+              label="Durée moyenne"
+              value={interventionStats.avg_duration_hours != null ? `${interventionStats.avg_duration_hours.toFixed(1)}h` : "—"}
+              sub={`${interventionStats.total_duration_hours.toFixed(1)}h cumulées`}
+              icon={Timer}
+              iconBg="bg-sky-500/15"
+              iconColor="text-sky-600"
+            />
+            <KpiCard
+              label="Transmissions"
+              value={interventionStats.transmissions}
+              sub="changements d'intervenant"
+              icon={Send}
+              iconBg="bg-sky-500/15"
+              iconColor="text-sky-600"
+            />
+            <KpiCard
+              label="Résolutions"
+              value={interventionStats.resolutions}
+              sub="traitements terminés"
+              icon={CheckCircle2}
+              iconBg="bg-emerald-500/15"
+              iconColor="text-emerald-600"
+            />
+            <KpiCard
+              label="Réouvertures"
+              value={interventionStats.reopenings}
+              sub="sur la période"
+              icon={RotateCcw}
+              iconBg="bg-fuchsia-500/15"
+              iconColor="text-fuchsia-600"
+            />
+          </div>
+          {interventionStats.by_agent.length > 0 && (
+            <div className="mt-5 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-xs text-muted-foreground">
+                    <th className="py-2 pr-4 text-left">Agent</th>
+                    <th className="py-2 px-3 text-right">Interventions</th>
+                    <th className="py-2 pl-3 text-right">Temps cumulé</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {interventionStats.by_agent.slice(0, 10).map((row) => (
+                    <tr key={row.label} className="transition-colors hover:bg-muted/30">
+                      <td className="py-2.5 pr-4 font-medium">{row.label}</td>
+                      <td className="py-2.5 px-3 text-right tabular-nums">{row.intervention_count}</td>
+                      <td className="py-2.5 pl-3 text-right tabular-nums">{row.total_hours.toFixed(1)}h</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </GlassCard>
+      )}
 
       {/* Stats table — by direction or by service */}
       <GlassCard>

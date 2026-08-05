@@ -1,5 +1,274 @@
 # Changelog Codex
 
+## 2026-08-05 - Uniformisation terminologique "Demande" → "Ticket" (UI/UX + documentation utilisateur)
+
+Demande: uniformiser le vocabulaire métier principal de l'application sur le terme ITSM standard "Ticket", en remplaçant "Demande" partout où ce mot désigne l'objet principal traité par le système (menus, titres, boutons, pages, modales, notifications, messages de succès/erreur, infobulles, libellés de formulaires, breadcrumbs, exports, base de connaissance) — à l'exclusion des routes API, tables SQL, modèles backend, colonnes, endpoints, DTO et migrations (non renommés), et à l'exclusion des usages où "demande"/"demandeur" désigne une catégorie métier distincte ("Demande de service", "Demande de réouverture", "Demande d'informations") ou le rôle de la personne (le "demandeur").
+
+Module: présentation transverse (MOD-WORKFLOW / MOD-AGENT / MOD-CHIEF / MOD-DIRECTION / MOD-DG / MOD-ADMIN / pages publiques) — aucune règle métier modifiée, uniquement du texte affiché.
+
+Fichiers modifiés (45 fichiers frontend, ~180 occurrences renommées):
+- `frontend/src/components/` : `app-layout.tsx`, `appreciation-form.tsx`, `intervention-journal.tsx`, `metadata-fields.tsx`, `new-request-form.tsx`, `notification-panel.tsx`, `public-layout.tsx`, `rejected-ticket-modal.tsx`, `workflow-timeline.tsx`
+- `frontend/src/lib/` : `api/admin-config.ts`, `export.ts`, `homepage-config.ts`, `mock-data.ts`
+- `frontend/src/routes/` : `admin-login.tsx` (aucune occurrence renommée, vérifié), `app.admin.audit.tsx`, `app.admin.priorities.tsx`, `app.admin.routing.tsx`, `app.admin.sla.tsx`, `app.chief-inbox.tsx` (aucune occurrence renommée), `app.dg.tsx`, `app.direction.tsx`, `app.index.tsx`, `app.new.tsx`, `app.notifications.tsx`, `app.profile.tsx`, `app.queue.tsx`, `app.reports.tsx`, `app.requests.$id.tsx` (~55 occurrences), `app.requests.history.tsx`, `app.requests.index.tsx`, `app.supervision.tsx`, `app.tsx`, `create-request.tsx`, `index.tsx`, `track.tsx`
+
+Occurrences volontairement conservées (catégorie métier ou hors périmètre UI/UX):
+- rôle "Demandeur"/"demandeur" (personne, jamais l'objet) — partout dans l'app ;
+- "Demande de réouverture" / "Demande d'informations" (actions/sous-workflows nommés, distincts du ticket lui-même) — `app.chief-inbox.tsx`, `app.requests.$id.tsx` ;
+- "Demande de service" et motifs similaires ("demandes de raccordement") — catégories métier, non affectées ;
+- titres de tickets simulés en texte libre dans `mock-data.ts` (ex. "Demande de congé exceptionnel") — représentent du texte saisi par un utilisateur fictif, pas le vocabulaire de l'app ;
+- usages verbaux du verbe "demander" (ex. "le navigateur le demande", "Demander une réouverture") — non concernés par le remplacement du nom "Demande" ;
+- `notification-panel.tsx`/`app.notifications.tsx` : correspondance de texte (`target.includes("demande à qualifier")`) couplée au contenu généré côté backend — non modifiée pour ne pas casser la classification des notifications sans changement backend correspondant (signalé pour validation métier) ;
+- `lib/api/notifications.ts` (`nature?: "annonce" | "demande"`) : paramètre de requête transmis tel quel au backend, non un texte d'affichage — non modifié (signalé pour validation métier) ;
+- clés de données internes non affichées (`dataKey="demandes"` dans les graphiques Recharts d'`app.reports.tsx` — seul le `name` visible en légende a été renommé) ;
+- commentaires de code (hors périmètre "affiché à l'utilisateur").
+
+Points signalés pour validation métier:
+- Les pages publiques/citoyennes (`index.tsx`, `create-request.tsx`, `track.tsx`) ont été renommées par cohérence avec la consigne globale, mais "Ticket" est un terme plus technique/ITSM que "Demande" pour un public de citoyens non-initiés — à confirmer côté produit.
+- `CLAUDE.md` référence encore certains libellés d'origine ("Nouvelle demande", "Prendre la demande", "Résoudre directement") dans sa description du workflow dynamique — non mis à jour (fichier de gouvernance projet, hors périmètre "documentation utilisateur" de cette tâche), à resynchroniser séparément si souhaité.
+- Le commentaire de code `app.queue.tsx:460` référence encore le libellé de bouton d'origine entre guillemets ("Prendre la demande") — non modifié (commentaire, hors périmètre), mais désormais désynchronisé du bouton réel ("Prendre le ticket").
+
+Verification: recherche exhaustive (`grep -rni "demande"`) avant/après sur `frontend/src` (43 fichiers identifiés initialement, 2 occurrences supplémentaires découvertes lors de l'audit final et corrigées) ; toutes les occurrences résiduelles auditées une à une et classées (renommées vs. volontairement conservées). `npx tsc --noEmit` : les erreurs présentes sont pré-existantes et sans rapport (imports manquants, générique React Query, fichiers non touchés par cette tâche comme `app.sla-center.tsx`). `npm run build` : succès. `eslint` : dette `prettier/prettier` pré-existante massive sur plusieurs fichiers (déjà présente avant cette tâche, cf. entrée précédente du changelog sur le même constat) — non corrigée, hors périmètre d'un changement de terminologie ciblé.
+
+Fichiers modifiés (documentation): `docs/codex/CHANGELOG_CODEX.md`.
+
+Point signalé (honnêteté de vérification): aucune vérification visuelle live en navigateur n'a été effectuée pour ce lot — la vérification s'appuie sur la recherche exhaustive de texte, le typage strict et le build de production.
+
+## 2026-08-05 - Correctif : commentaires/pièces jointes invisibles dans le Journal d'intervention (BR-TRACE-001)
+
+Demande: corriger uniquement le bug d'affichage détecté lors de la recette visuelle du 2026-08-04 (Journal d'intervention premium) — les commentaires et pièces jointes rattachés à une intervention n'apparaissaient jamais dans la carte dépliée ni dans la fiche de consultation, malgré des compteurs corrects.
+
+Module: MOD-WORKFLOW / MOD-AGENT (UI, complète BR-TRACE-001 sans le reconstruire).
+
+Cause confirmée par la recette du 2026-08-04 : dans `intervention-journal.tsx`, `eventsById` était construit avec `event.id` brut (nombre côté runtime, l'API renvoie `timelines[].id` en entier) alors que `interventions[].event_ids[]` est sérialisé en chaînes par Pydantic v1 (`InterventionResponse.event_ids: list[str]`). `Map.get()` exige une correspondance exacte de type — `"338" !== 338` — donc chaque correspondance échouait silencieusement, produisant une liste d'événements vide pour chaque intervention sans jamais lever d'erreur.
+
+Correctif (frontend uniquement, aucune donnée ni endpoint modifié) : normalisation des identifiants en chaîne des deux côtés de la correspondance dans `frontend/src/components/intervention-journal.tsx` — `new Map(events.map((e) => [String(e.id), e]))` à la construction, `eventsById.get(String(id))` à la lecture des `eventIds` de chaque intervention.
+
+Fichiers modifiés:
+- `frontend/src/components/intervention-journal.tsx` (normalisation `String()` de `eventsById`/`eventsByIntervention`, 2 lignes)
+
+Verification: vérification automatisée ciblée (Node `--test`, aucune dépendance ajoutée — le frontend n'a pas de framework de test) reproduisant le cas exact rapporté (`timeline id=12` nombre, `event_ids=["12"]` chaîne) + 4 scénarios complémentaires (plusieurs événements sur une même intervention, aucun mélange entre interventions/cycles distincts, commentaire du demandeur non rattaché correctement exclu, id référencé mais absent filtré sans erreur) — 5/5 passed. `npx tsc --noEmit` : aucune erreur sur le fichier modifié. `eslint intervention-journal.tsx` : les 21 erreurs `prettier/prettier` déjà présentes dans ce fichier restent identiques et sont toutes situées en dehors des lignes modifiées (résidu de formatage du lot du 2026-08-04, hors périmètre de ce correctif ciblé). `npm run build` : succès, aucune nouvelle erreur.
+
+Point signalé : ce correctif ne modifie ni le backend, ni un endpoint, ni une règle de traçabilité — uniquement la lecture côté client d'une correspondance déjà correcte côté données.
+
+## 2026-08-04 - Journal d'intervention premium — refonte UI/UX (BR-TRACE-001)
+
+Demande: améliorer uniquement l'affichage, la hiérarchie visuelle et l'expérience utilisateur du journal d'interventions déjà fonctionnel (BR-TRACE-001) — sans reconstruire le moteur de traçabilité. Un utilisateur doit comprendre en un coup d'œil combien de cycles/interventions/intervenants un ticket a connus, ce que chacun a réalisé, pourquoi et à qui il a transmis, quelles réouvertures ont eu lieu, quel SLA a été respecté — même avec 20 intervenants et 50 événements.
+
+Module: MOD-WORKFLOW / MOD-AGENT / MOD-CHIEF / MOD-DIRECTION (UI/UX, complète BR-TRACE-001 sans le reconstruire).
+
+Analyse préalable (Étape 1-2, validée avant codage) : le composant `InterventionJournal` existant regroupait déjà les événements par Cycle → Intervention avec le détail complet, mais en liste plate sans hiérarchie visuelle, résumé, filtres, ni consultation dédiée. Inventaire des éléments réutilisables (`Avatar`/`initialsFor`, primitives `Dialog`/`Popover`/`Select`/`Checkbox` shadcn, `handleAttachmentFile` existant) effectué avant toute décision de composant nouveau. Deux données manquantes identifiées et confirmées absentes (pas des inventions) : le rôle de l'intervenant et `summary`/`solution`/`recommendations` n'étaient pas recopiés sur le conteneur `Intervention` bien que déjà présents dans `workflow_detail.infos` — complétés de façon additive (aucune donnée historique modifiée). Aucun statut "Interrompue"/"En attente" n'existe dans le modèle : seuls les 3 états réels (En cours/Transmise/Traitement terminé) sont utilisés, aucun n'a été inventé. Aucun système d'export par ticket n'existant, le bouton "Exporter le journal" est préparé (visible, désactivé) plutôt que de construire un nouveau pipeline backend — validé explicitement avec l'utilisateur.
+
+Correctif: `ModelRequest.interventions` et `InterventionResponse` enrichis de `actor_role`/`summary`/`solution`/`recommendations` (lecture pure de données déjà écrites). Le composant `InterventionJournal` est découpé en 5 fichiers : orchestrateur + résumé + cycles + cartes (`intervention-journal.tsx`), corps de détail partagé entre la carte dépliée et la fiche de consultation (`intervention-detail-body.tsx`), fiche de consultation lecture seule (`intervention-details-modal.tsx`), filtres/recherche (`intervention-filters.tsx`), helpers partagés (`intervention-utils.ts`, évite tout import circulaire entre les composants). Hiérarchie visuelle : en-tête résumé compact (badges), cycles repliables (actif + dernier clos ouverts par défaut, anciens repliés), cartes d'intervention (avatar/initiales, matricule, rôle, service, statut réel, résumé replié / détail complet déplié en 7 sous-sections), liaison visuelle légère entre interventions transmises, séparateur de réouverture distinct (motif/demandeur/approbateur/date), badge "Intervenant actuel" sur le cycle actif. Accessibilité : `aria-expanded`/`aria-controls` sur tous les accordéons, boutons natifs (clavier natif), labels explicites. Responsive : badges en `flex-wrap`, aucune table horizontale, colonnes réduites sur mobile.
+
+Fichiers modifiés:
+- `backend/api/models/ModelRequest.py` (`interventions` — `actor_role`, `summary`, `solution`, `recommendations`)
+- `backend/api/services/ServiceRequest.py` (`_actor_identity_snapshot` — `intervention_actor_role`)
+- `backend/api/schemas/SchemaRequest.py` (`InterventionResponse` — champs additifs)
+- `frontend/src/lib/mock-data.ts`, `frontend/src/lib/api/requests.ts` (types/mapping additifs)
+- `frontend/src/lib/intervention-utils.ts` (nouveau)
+- `frontend/src/components/intervention-journal.tsx` (réécrit), `intervention-detail-body.tsx` (nouveau), `intervention-details-modal.tsx` (nouveau), `intervention-filters.tsx` (nouveau)
+- `frontend/src/routes/app.requests.$id.tsx` (libellés de vue "Journal des interventions"/"Chronologie complète", bouton Exporter préparé, props `currentAssigneeId`/`requestRef`)
+- `docs/codex/BUSINESS_RULES.md`, `FEATURE_INDEX.md`
+
+Verification: `pytest tests/api/test_trace_interventions.py` → 7/7 passed (les deux champs additifs n'affectent aucune assertion existante). `pytest tests/api` (suite complète) → 217 passed / 52 échecs préexistants, aucune régression. `npx tsc --noEmit`, `eslint` (hors bruit `prettier/prettier` préexistant) et `npm run build` : 0 nouvelle erreur, succès. Revue de code ciblée des 18 scénarios demandés (cycle unique, cycles multiples, réouvertures multiples, même intervenant sur plusieurs cycles, identité figée, ordre, rattachement commentaires/pièces jointes, transmission entre interventions, résolution en dernière intervention, cycle actif identifiable, filtres, recherche, accordéons accessibles, responsive, données anciennes sans nouveaux champs avec fallback, chronologie complète toujours accessible, aucune intervention modifiable) — tous satisfaits par traçage du code contre les données déjà validées par la suite backend.
+
+Point signalé (honnêteté de vérification) : aucune vérification visuelle live en navigateur n'a été effectuée pour ce lot (pas de framework de test frontend dans ce projet ; l'utilisateur pilote habituellement le démarrage backend/frontend/base de données lui-même dans cette session). La correction est vérifiée par typage strict, lint, build de production et traçage logique du code contre des données déjà prouvées correctes côté backend — une recette visuelle en navigateur reste recommandée avant mise en production si une garantie supplémentaire est souhaitée.
+
+## 2026-08-04 - Traçabilité complète des interventions — journal hiérarchique (BR-TRACE-001)
+
+Demande: faire évoluer la traçabilité vers un niveau professionnel (ITSM) — qu'un responsable ouvrant un ticket des années plus tard comprenne immédiatement qui est intervenu, combien de fois, dans quel ordre, pendant combien de temps, pourquoi, et avec quel résultat. La timeline doit afficher des INTERVENTIONS (conteneurs logiques du travail complet d'un intervenant — commentaires, pièces jointes, travail effectué, décision) plutôt qu'une simple liste d'événements, avec trois principes obligatoires : aucune intervention jamais perdue, une intervention validée est figée (jamais modifiée/écrasée/remplacée), chaque action crée un nouvel enregistrement (jamais de mise à jour destructrice).
+
+Module: MOD-WORKFLOW / MOD-AGENT / MOD-CHIEF / MOD-DIRECTION / MOD-REPORT (BR-TRACE-001, complète BR-TRANSMIT-001/BR-REOPEN-QUEUE-001/BR-SLA-REOPEN-001 — ne les reconstruit pas).
+
+Cause: `workflow_detail` (append-only) portait déjà l'essentiel du contenu métier d'une intervention (travail effectué, motif, destinataire, durée, cycle SLA) mais trois informations manquaient pour en faire un véritable conteneur consultable : (1) le regroupement par cycle de réouverture n'existait que sur l'événement de résolution, pas sur les transmissions ni les événements secondaires ; (2) aucune identité figée de l'intervenant (matricule, direction, département, service) n'était jamais enregistrée — seule une jointure live vers le compte était possible, en contradiction avec le principe "une intervention est figée" si le compte change ensuite d'unité ; (3) aucun identifiant de conteneur explicite ne reliait un commentaire ou une pièce jointe à l'intervention pendant laquelle ils avaient été créés.
+
+Analyse préalable (conforme à la démarche demandée) : aucune nouvelle table ni colonne nécessaire. Complété dans `request.infos` (pointeur "intervention courante" — JSON déjà existant, même mécanisme que le flag `reopen_requested`) et dans `infos` de chaque événement `workflow_detail` concerné (jamais recalculé après coup, conformément à la consigne explicite de ne pas dériver le cycle par comptage).
+
+Correctif: `ServiceRequest._actor_identity_snapshot()` (nouveau) fige matricule + direction/département/service (réutilise `_org_chain_for_unity`, déjà utilisé pour les références de tickets) au moment de l'action. `_open_intervention()`/`_current_intervention_meta()` (nouveaux) calculent et enregistrent explicitement `intervention_id` (déterministe), `intervention_order` (repart à 1 à chaque nouveau cycle SLA) et `intervention_cycle_number` (compteur explicite dans `request.infos`, incrémenté uniquement par `reopen()` — nommé ainsi et non `cycle_number` pour ne jamais entrer en collision avec le `cycle_number` déjà existant de BR-TRANSMIT-001, sémantique différente). Câblés dans `assign()`, `update()` (self-assign/take-ownership/qualify_triage), `transmit_treatment()` (ferme l'intervention de l'émetteur, ouvre celle du destinataire) et `resolve()`. Commentaires et pièces jointes sont rattachés à l'intervention ouverte de leur auteur uniquement s'il est l'intervenant courant du ticket (sinon restent visibles dans l'historique, hors conteneur — ex. message du demandeur). `ModelRequest.interventions` (nouvelle propriété) reconstruit la liste des interventions en lisant exclusivement ces métadonnées explicites, sans aucun recalcul.
+
+Fichiers modifiés:
+- `backend/api/services/ServiceRequest.py` (`_actor_identity_snapshot`, `_open_intervention`, `_current_intervention_meta`, `_intervention_meta_for_actor`, câblage `assign`/`update`/`transmit_treatment`/`resolve`/`reopen`)
+- `backend/api/routes/RouteRequest.py` (rattachement `comment_added`/`attachment_added`)
+- `backend/api/models/ModelRequest.py` (`interventions`)
+- `backend/api/schemas/SchemaRequest.py` (`InterventionResponse`, `RequestResponse.interventions`)
+- `backend/api/services/ServiceReport.py` (`intervention_stats`, additif ; `noload(assignee/requester)` ajouté aussi à `sla_reopen_stats` — voir note ci-dessous)
+- `backend/api/routes/RouteReports.py` (`GET /reports/interventions`)
+- `frontend/src/lib/mock-data.ts` (`Intervention`), `frontend/src/lib/api/requests.ts` (`RawIntervention`, `mapIntervention`), `frontend/src/lib/api/reports.ts` (`fetchInterventionStats`)
+- `frontend/src/components/intervention-journal.tsx` (nouveau — journal hiérarchique Cycle → Intervention, dépliable)
+- `frontend/src/routes/app.requests.$id.tsx` (bascule "Interventions" / "Tous les événements" dans l'onglet Journal)
+- `frontend/src/routes/app.sla-center.tsx` (rangée KPI "Interventions" + tableau par agent)
+- `backend/tests/api/test_trace_interventions.py` (nouveau, 7 tests)
+- `docs/codex/BUSINESS_RULES.md`, `WORKFLOW_INDEX.md`, `API_INDEX.md`, `FEATURE_INDEX.md`
+
+Verification: `pytest tests/api/test_trace_interventions.py` → 7/7 passed. `pytest tests/api` (suite complète) → 217 passed / 52 échecs préexistants, mêmes échecs que la baseline documentée (aucune régression). `npx tsc --noEmit`, `eslint` (hors bruit `prettier/prettier` préexistant) et `npm run build` : 0 nouvelle erreur, succès.
+
+Bug détecté et corrigé en cours de route (hors périmètre initial, découvert en testant à pleine charge) : `intervention_stats()`/`sla_reopen_stats()` chargent les demandes via l'ORM sans restriction, déclenchant le chargement automatique (`lazy="selectin"`) des comptes `assignee`/`requester` — un compte de test préexistant ailleurs dans la suite avec `role="agent"` (valeur héritée, hors du vocabulaire actuel à 7 rôles, présente dans plusieurs fichiers de tests non liés à ce lot) faisait échouer ce chargement (`KeyError` SQLAlchemy sur l'Enum du rôle), uniquement visible en exécutant la suite complète (jamais en isolation). Corrigé par `noload(RequestModel.assignee)`/`noload(RequestModel.requester)` sur les deux requêtes (relations non utilisées par ces rapports) — contournement ciblé et minimal ; le bug de fixture lui-même (`role="agent"` litéral dans les tests) reste hors périmètre, pré-existant, de la même famille que le bug ENUM `activity_log.actor_role` déjà documenté.
+
+Point signalé (best-effort, non bloquant, hérité de BR-SLA-REOPEN-001) : `sla_response_hours` reste une approximation ; le temps de résolution/transmission, seule mesure exploitée par le scénario métier de traçabilité fourni, reste totalement fiable.
+
+## 2026-08-04 - Gestion du SLA lors d'une réouverture — cycles indépendants (BR-SLA-REOPEN-001)
+
+Demande: définir officiellement la gestion du SLA lors d'une réouverture — conserver l'historique complet du premier SLA tout en démarrant une nouvelle période SLA à la réouverture, pour mesurer indépendamment la performance du premier traitement et celle de chaque traitement après réouverture, y compris sur plusieurs réouvertures successives, sans jamais perdre ni recalculer rétroactivement les données historiques.
+
+Module: MOD-WORKFLOW / MOD-CHIEF / MOD-DIRECTION / MOD-REPORT (BR-SLA-REOPEN-001, étend BR-REOPEN-QUEUE-001).
+
+Cause: `request.sla_hours`/`sla_elapsed`/`sla_breached` sont des compteurs plats, uniques par ticket, recalculés en continu par le scheduler (`EscaladeService.mark_sla_breached`, `TIMESTAMPDIFF(HOUR, r.created_at, NOW())`) — aucune notion de "cycle" n'existait avant ce lot : une réouverture ne faisait que repasser le statut à `reopened`, sans jamais réinitialiser ni recalculer ces compteurs depuis la date de réouverture, ce qui aurait cumulé le temps du premier traitement avec celui du second dans une seule mesure, sans distinction possible.
+
+Analyse préalable (conforme à la démarche demandée) : le modèle actuel ne permet de représenter qu'un seul cycle "live" à la fois, mais `workflow_detail` (append-only, déjà le mécanisme central de BR-TRANSMIT-001/BR-REOPEN-QUEUE-001) permet de reconstruire l'historique complet de tous les cycles clos sans aucune nouvelle table ni colonne — chaque résolution (`treatment_completed`) peut geler un instantané SLA du cycle qu'elle clôture, définitivement, dans ses `infos`. Solution retenue : extension minimale de la structure existante, aucune nouvelle table.
+
+Correctif: `ServiceRequest._sla_cycle_snapshot()` (nouveau) calcule et fige, à chaque `resolve()`, un instantané du cycle qui se termine (`sla_cycle_number`, `sla_cycle_started_at` — date de la dernière réouverture ou de création si jamais réouvert —, `sla_hours_target`, `sla_elapsed_hours`, `sla_response_hours` best-effort, `sla_breached`, `sla_reopen_reason`), écrit dans l'événement `treatment_completed` et plus jamais modifié ensuite. `ServiceRequest.reopen()` réinitialise les compteurs "live" (`sla_breached=False`, `sla_elapsed=0`) dans la même écriture atomique que le retour en file d'attente (BR-REOPEN-QUEUE-001), pour éviter qu'un ticket déjà hors-délai avant réouverture ne déclenche une escalade automatique immédiate sur son nouveau cycle. `EscaladeService.mark_sla_breached()` ancre désormais son calcul sur la dernière réouverture du ticket (sous-requête sur `workflow_detail`/`workflow`, `COALESCE(dernier 'reopened', created_at)`) plutôt que systématiquement sur `created_at`. `ModelRequest.sla_cycles`/`reopen_count` (nouvelles propriétés) reconstruisent la liste complète des cycles (clos = lecture pure de l'instantané gelé, jamais recalculé ; cycle courant = calcul en direct) et sont exposées sur `RequestResponse` (détail ticket uniquement). `ServiceReport.sla_reopen_stats()` (nouveau, `GET /reports/sla/reopen-stats`) fournit les KPI agrégés (tickets réouverts, taux de réouverture, durée moyenne 1er cycle vs post-réouverture, conformité SLA par type de cycle) sans toucher à aucun rapport existant.
+
+Fichiers modifiés:
+- `backend/api/services/ServiceRequest.py` (`_sla_cycle_snapshot` nouveau, `resolve` enrichi, `reopen` reset live)
+- `backend/api/services/ServiceEscalade.py` (`mark_sla_breached` — ancre sur la dernière réouverture)
+- `backend/api/models/ModelRequest.py` (`sla_cycles`, `reopen_count`)
+- `backend/api/schemas/SchemaRequest.py` (`SlaCycleResponse`, `RequestResponse.sla_cycles`/`reopen_count`)
+- `backend/api/services/ServiceReport.py` (`sla_reopen_stats`, additif)
+- `backend/api/routes/RouteReports.py` (`GET /reports/sla/reopen-stats`, additif)
+- `frontend/src/lib/mock-data.ts` (`SlaCycle`, `RequestItem.slaCycles`/`reopenCount`)
+- `frontend/src/lib/api/requests.ts` (`RawSlaCycle`, `mapSlaCycle`)
+- `frontend/src/lib/api/reports.ts` (`SlaReopenStats`, `fetchSlaReopenStats`)
+- `frontend/src/routes/app.requests.$id.tsx` (blocs cycles SLA dans l'onglet "Activité SLA")
+- `frontend/src/routes/app.sla-center.tsx` (rangée KPI "Réouvertures")
+- `backend/tests/api/test_sla_reopen.py` (nouveau, 2 tests exécutés + 1 skip documenté)
+- `docs/codex/BUSINESS_RULES.md`, `API_INDEX.md`, `FEATURE_INDEX.md`
+
+Verification: `pytest tests/api/test_sla_reopen.py` → 2 passed, 1 skipped (raison documentée : `mark_sla_breached()` utilise une syntaxe `UPDATE...JOIN` MySQL non supportée par SQLite, déjà jamais couverte par aucun test avant ce lot — précédent identique déjà établi dans `test_decision_report_director_scope.py`). Scénario testé : 3 cycles SLA successifs (2 réouvertures), avec changement de la cible SLA (`sla_hours`) entre le 2e et le 3e cycle — vérifie explicitement que les cycles 1 et 2 déjà clos restent bit-à-bit identiques après coup, malgré le changement de cible et les réouvertures ultérieures. `pytest tests/api` (suite complète) → 210 passed / 52 échecs / 5 skipped, mêmes échecs préexistants que la baseline documentée (aucune régression). `npx tsc --noEmit` et `eslint` (hors bruit `prettier/prettier` préexistant) : 0 nouvelle erreur sur les fichiers touchés. `npm run build` : succès.
+
+Point signalé (best-effort, non bloquant) : `sla_response_hours` ("temps de réponse") est approximé par le premier événement `assigné`/`en cours`/`transmis` après le début du cycle — aucune donnée dédiée "première réponse" n'existe dans le modèle (`sla_response_at` présent en base mais jamais alimenté par aucun code avant ce lot). Le temps de résolution, seule mesure exploitée par le scénario métier fourni, reste lui totalement fiable et ne dépend d'aucune approximation.
+
+## 2026-08-04 - Retour automatique d'un ticket réouvert dans la File d'attente (BR-REOPEN-QUEUE-001)
+
+Demande: corriger le blocage identifié par la vérification fonctionnelle du workflow dynamique (2026-08-04, conclusion "workflow partiellement dynamique") — après approbation d'une demande de réouverture, le ticket restait affecté à l'ancien intervenant (`assignee_id` inchangé) et hors File d'attente (`in_triage` inchangé), alors que `reopened` est volontairement exclu des statuts autorisant `transmit_treatment`/`resolve`. Plus personne ne pouvait transmettre, résoudre, ni reprendre le ticket — il restait bloqué indéfiniment.
+
+Module: MOD-AGENT / MOD-CHIEF / MOD-WORKFLOW (BR-REOPEN-QUEUE-001, étend BR-REOPEN-001).
+
+Cause: `ServiceRequest.reopen()` faisait uniquement passer `request_status` à `reopened` et nettoyait le flag `infos.reopen_requested` — sans jamais toucher `assignee_id` ni `in_triage`. La File d'attente (`RepositoryRequest.list_pending_triage`, `_QUALIFIABLE_STATUSES` incluant déjà `reopened`) et les capacités frontend (`capabilities.ts`, `self_assign`/`take_ownership` incluant déjà `reopened`) étaient déjà prêtes à accueillir un ticket réouvert non affecté — seul le service backend ne produisait jamais cet état.
+
+Correctif: `ServiceRequest.reopen()` fixe désormais explicitement `assignee_id=None` et `in_triage=True` en plus du passage à `reopened`, dans la même mise à jour atomique. Un unique nouvel événement `workflow_detail` (`event_type="reopened"`) est ajouté — table append-only, aucun événement antérieur modifié ou supprimé — avec des `infos` enrichis (`previous_assignee_id`, `new_assignee_id`, `previous_status`, `reopen_reason` (dupliqué dans `comment` pour l'affichage direct dans la timeline), `reopen_requested_by`, `reopen_approved_by`, `reopened_at`, `previous_cycle_number`/`next_cycle_number`). Notifications nominatives (BR-NOTIF-001) : demandeur informé de l'approbation, ancien intervenant informé de la réouverture (jamais réaffecté), chef d'unité informé si distinct. Aucune réaffectation automatique nulle part — le ticket redevient une demande libre en attente, comme n'importe quel ticket non traité.
+
+Fichiers modifiés:
+- `backend/api/services/ServiceRequest.py` (`reopen` réécrit)
+- `frontend/src/routes/app.queue.tsx` (badge `Réouverte` remplaçant "Non orientée" pour ce statut ; encart motif/ancien intervenant/date sur la carte dépliée, chargé à la demande via `fetchRequest`)
+- `frontend/src/routes/app.requests.$id.tsx` (message "Ce ticket réouvert attend une nouvelle prise en charge." dans le panneau d'actions de traitement tant que `assignee_id` est null)
+- `backend/tests/api/test_reopen_queue.py` (nouveau, 8 tests)
+- `docs/codex/BUSINESS_RULES.md`, `WORKFLOW_INDEX.md`, `API_INDEX.md`, `FEATURE_INDEX.md`
+
+Verification: `pytest tests/api/test_reopen_queue.py` → 8/8 passed. `pytest tests/api` (suite complète) → 208 passed / 52 échecs, tous identiques à la baseline préexistante documentée (aucune régression — mêmes échecs qu'avant ce changement). `npx tsc --noEmit` : 0 nouvelle erreur sur les fichiers touchés (erreurs préexistantes inchangées, même famille `fetchDirections`/`queryFn` déjà documentée, répandue sur des fichiers non liés à ce chantier). `eslint` (hors règle `prettier/prettier`, bruit CRLF préexistant sur tout le fichier) : 0 erreur, 1 warning préexistant sans rapport.
+
+Point non tranché (signalé, non implémenté) : aucune règle SLA officielle ne documente le comportement attendu de `sla_hours`/`sla_elapsed`/`sla_response_at` lors du retour en file d'attente après réouverture. Non inventé, non modifié — option recommandée documentée dans BR-REOPEN-QUEUE-001 (`BUSINESS_RULES.md`), en attente de validation avant toute implémentation.
+
+## 2026-08-03 - Workflow collaboratif dynamique post-file d'attente (BR-TRANSMIT-001) : "Transmettre le traitement" et "Terminer le traitement"
+
+Demande: après la file d'attente, permettre un traitement collaboratif dynamique — nombre, ordre et rôles des intervenants inconnus à l'avance, choisis progressivement selon le besoin réel découvert pendant le traitement, sans jamais imposer une chaîne fixe ni un passage obligatoire par un chef de service.
+
+Module: MOD-AGENT / MOD-CHIEF / MOD-DIRECTION / MOD-WORKFLOW (BR-TRANSMIT-001, remplace/assouplit Lot 2.6, Lot 3.2 et BR-DIRECTOR-RESOLVE-001 pour les deux actions concernées).
+
+Cause: le système existant ne permettait pas de transmettre librement le traitement à un autre intervenant — seules des actions rigides existaient (`assign` self/chef-vers-agent, `reassign` changement de service, `escalate` auto-routage vers un chef hiérarchique). La résolution (`resolve`) était par ailleurs restreinte par rôle (chief-departement totalement exclu depuis le Lot 3.2, directeur limité aux tickets escaladés) plutôt que par la question "l'acteur est-il l'intervenant actuel ?", et le motif obligatoire n'existait que pour chief-service (Lot 2.6). Le mécanisme `create_circuit`/`accept_detail` existant (pattern edgrh) construit une chaîne d'étapes prédéfinie complète en un seul appel — incompatible avec un parcours découvert dynamiquement, volontairement non réutilisé.
+
+Correctif: nouvelle garde générique `assert_is_current_handler` (`ticket_actions.py`) — la règle principale devient `request.assignee_id == actor.id` (le rôle n'est plus qu'un filtre parmi `agent-support`/`chief-service`/`chief-departement`/`director`, admin bénéficiant d'un bypass exceptionnel). Nouvelle action `transmit_treatment` (`POST /requests/{id}/transmit`) : transmission libre dans toute l'organisation (annuaire complet, aucune restriction de direction/service), motif + travail effectué obligatoires, statut du ticket toujours préservé (jamais forcé à `assigned`). Action `resolve` existante étendue plutôt que dupliquée : résumé/solution/travail réalisé désormais obligatoires pour tous les rôles traitants (remplace le motif "exceptionnel" réservé à chief-service), plus aucune restriction de rôle additionnelle (chief-departement et directeur peuvent terminer un traitement dès lors qu'ils sont l'intervenant actuel). Cycles d'intervention reconstruits uniquement depuis `workflow_detail` (append-only, aucune nouvelle table) : `cycle_number`, `started_at`/`ended_at`/`duration_seconds` calculés à la volée. Écriture atomique conditionnelle (`_atomic_conditional_update`, `UPDATE ... WHERE assignee_id=<attendu>`) pour refuser (409 `TICKET_STATE_CONFLICT`) toute transmission/résolution basée sur un état obsolète (transmission concurrente).
+
+Fichiers modifiés:
+- `backend/api/core/ticket_actions.py` (`TREATING_ROLES`, `COLLABORATIVE_STATUSES`, `assert_is_current_handler`, `resolve` rouvert à chief-departement, contrainte director-escaladé-only retirée, `assert_exceptional_resolve_reason` supprimée)
+- `backend/api/core/error_codes.py` (`TICKET_STATE_CONFLICT`)
+- `backend/api/services/ServiceRequest.py` (`resolve` réécrit, nouvelle méthode `transmit_treatment`, helpers `_atomic_conditional_update`/`_next_treatment_cycle`)
+- `backend/api/routes/RouteRequest.py` (`POST /requests/{id}/resolve` body étendu, nouveau `POST /requests/{id}/transmit`, validation des pièces jointes factorisée)
+- `frontend/src/lib/api/requests.ts` (`resolveRequest` signature étendue, nouveau `transmitTreatment`)
+- `frontend/src/lib/capabilities.ts` (`transmit_treatment`, `resolve` requiert `isAssignedToMe`, `chief-departement` rétabli sur `resolve`)
+- `frontend/src/routes/app.requests.$id.tsx` (boutons "Transmettre le traitement"/"Terminer le traitement", modales dédiées avec annuaire cascadé Direction→Département→Service→Recherche, suppression de l'ancien flux "Marquer résolue")
+- `frontend/src/routes/app.direction.tsx` (modale de résolution alignée sur les nouveaux champs obligatoires, restriction "escaladé uniquement" retirée)
+- `frontend/src/components/workflow-timeline.tsx` (icônes/couleurs `treatment_transmitted`/`treatment_completed`, affichage travail effectué + durée du cycle)
+- `frontend/src/lib/realtime/invalidation-map.ts` (`request.transmitted`)
+- `backend/tests/api/test_transmit_treatment.py` (nouveau, 12 tests)
+- `backend/tests/api/test_ticket_actions.py`, `test_lot3_narrowing.py`, `test_cdc_alignment.py`, `test_resolve_exceptional_reason.py` (adaptés à la nouvelle règle)
+- `docs/codex/BUSINESS_RULES.md`, `WORKFLOW_INDEX.md`, `API_INDEX.md`, `ROLE_INDEX.md`, `FEATURE_INDEX.md`
+
+Verification: `pytest tests/api` → 200 passed (+18 par rapport à l'état de départ), 52 échecs tous confirmés préexistants et sans rapport (bug SQLite documenté sur `/assign`, bug enum `role="agent"` dans un helper de fixture, module homepage-slides déjà cassé — KI-HOMEPAGE-001, etc. — vérifiés un par un, aucune régression sur `assign`/`reassign`/`escalate`/`create_circuit`). `npx tsc --noEmit` : 0 nouvelle erreur dans les fichiers touchés (erreurs préexistantes inchangées, même famille que celle déjà documentée dans l'entrée du 2026-08-03 ci-dessous, répandue sur 11 fichiers non liés à ce chantier). `npm run build` : succès. Bug détecté et corrigé en cours de route : l'écriture atomique anti-concurrence utilisait un `UPDATE` SQL brut puis un nouveau `SELECT`, renvoyant l'objet ORM encore en cache (non rafraîchi) — corrigé via `session.refresh()` sur l'objet déjà chargé.
+
+Points non traités (hors périmètre, signalés) : pas de framework de tests unitaires/e2e frontend dans ce projet (aucun `vitest`/`jest`/`playwright` configuré) — vérification frontend limitée à `tsc --noEmit`, `eslint` et `npm run build` réussis, sans exécution manuelle en navigateur ni tests automatisés des 12 scénarios frontend demandés. Le bug préexistant `queryFn: fetchDirections` (référence directe incompatible avec la signature `QueryFunctionContext` de TanStack Query, ~11 fichiers) n'a pas été corrigé — hors périmètre de cette demande, déjà présent avant cette session.
+
+## 2026-08-03 - Fil "Discussions" (ex-"Commentaires") : réponse ciblée réelle, alignement viewer-relatif, badge bidirectionnel
+
+Demande: renommer l'onglet "Commentaires" en "Discussions" et le bouton de traitement associé ("Demander des infos" → "Ouvrir une discussion"), puis corriger trois défauts du fil : le bouton "Répondre" ne faisait que préfixer `@nom` sans lien réel vers le message ciblé ; l'indentation gauche/droite était un raccourci à 3 états incohérent au-delà de 2 échanges ; le badge "réponse attendue" n'existait que côté demandeur et seulement en statut `pending`.
+
+Module: MOD-REQUEST-DETAIL (BR-COMMENT-LOCK-001).
+
+Cause: les commentaires ne sont pas une table dédiée mais des lignes `workflow_detail` (`event_type='comment_added'`). Le champ `workflow_detail.parent_id` existe déjà mais sert exclusivement au chaînage d'audit du workflow entier et à la hiérarchie des étapes de traitement (`list_root_nodes`/`list_children`/`get_current_step`) — impropre à réutiliser pour un lien de réponse sans collision. L'ancienne indentation (`commentDepth`, 3 états sur la parité de l'index) et le badge (`isRequesterView && r.status === "pending"`) étaient des heuristiques approximatives, non fiables au-delà du cas d'usage initial (une seule relance agent → réponse demandeur).
+
+Correctif: nouveau champ `infos.reply_to_id` sur l'événement `comment_added` (même pattern que `is_directive`/`attachment_id` déjà stockés dans `infos`, colonne JSON passthrough — aucune migration nécessaire), validé côté backend via la nouvelle méthode `WorkflowDetailRepository.get_comment_by_id_for_request` (422 si la cible n'existe pas, n'est pas un commentaire, ou appartient à une autre demande). Alignement des bulles rendu viewer-relatif (`isMine = isRequester(c.authorId, sessionUser?.id)`, réutilise le helper déjà utilisé par `canDeleteComment`) : chaque utilisateur voit ses propres messages à droite, ceux des autres à gauche, quel que soit son rôle. Badge "réponse attendue" recalculé par camp (demandeur vs personnel) plutôt qu'individuellement, sans condition de statut — seule la garde d'existence du fil (non archivé/clôturé/rejeté) est conservée. Détail complet de la logique dans `docs/codex/BUSINESS_RULES.md` (BR-COMMENT-LOCK-001).
+
+Fichiers modifiés:
+- `backend/api/routes/RouteRequest.py` (`_CommentBody.reply_to_id`, `create_comment`)
+- `backend/api/repositories/RepositoryWorkflowDetail.py` (`get_comment_by_id_for_request`)
+- `frontend/src/lib/api/requests.ts` (`mapRequest`, `mapComment`, `CreateCommentData`, `createComment`)
+- `frontend/src/lib/mock-data.ts` (`RequestItem.comments.replyToId`)
+- `frontend/src/routes/app.requests.$id.tsx` (état `replyToId`, alignement, `needsUserResponse`, libellés "Discussions"/"Ouvrir une discussion")
+- `backend/tests/api/test_directive_comment.py` (4 tests ajoutés)
+- `docs/codex/BUSINESS_RULES.md`
+
+Verification: `pytest tests/api/test_directive_comment.py` → 9 passed (5 existants + 4 nouveaux : round-trip `reply_to_id`, réponse vers une autre demande rejetée, réponse vers un id inexistant rejetée, réponse vers un événement non-commentaire rejetée). `python -m compileall` sur les 2 fichiers backend touchés. `npx tsc --noEmit` : 0 nouvelle erreur dans les fichiers touchés (13 erreurs pré-existantes inchangées dans `app.requests.$id.tsx`, aucune dans `requests.ts`/`mock-data.ts`). Grep de cohérence `reply_to_id`/`replyToId` (lecture/écriture alignées) et `parent_id` (aucun nouvel usage sur `WorkflowDetail`, confirmant l'absence de collision avec le chaînage d'audit existant).
+
+Effet de bord assumé: le connecteur d'angle et la ligne verticale du fil (liés à l'ancien indice de profondeur à 3 états) sont retirés — sans équivalent cohérent dans une mise en page à deux colonnes symétrique. Hors périmètre (observé, non corrigé) : le mapper inline `mapRequest()` n'inclut pas les champs de pièce jointe (`attachmentId`/`attachmentName`/`attachmentMime`/`attachmentSize`) alors que le rendu du fil les lit sur chaque commentaire — possible régression préexistante, sans rapport avec cette demande, signalée mais non traitée.
+
+## 2026-08-01 - Fix : erreur rouge incohérente après clôture/résolution d'un ticket alors que l'action avait bien fonctionné
+
+Demande: signalement utilisateur — en cliquant sur "Confirmer" dans la modale de clôture (`app.requests.$id.tsx`), un message d'erreur rouge apparaissait alors que le ticket était en réalité bien clôturé en base.
+
+Module: MOD-REQUEST-DETAIL (actions `resolve`/`close`/toute action passant par `NotificationEmitter.emit`).
+
+Cause: `NotificationEmitter.emit()` (`backend/api/services/NotificationEmitter.py`) envoyait l'email de notification automatique via `await send_notification_email(...)`, **dans le chemin critique** de la requête HTTP (close/resolve/assign/escalade/...). L'envoi SMTP réel (Gmail, `aiosmtplib`) prend 9 à 13s en conditions normales sur ce poste — dangereusement proche, voire au-delà, du timeout client de 15s (`REQUEST_TIMEOUT_MS` dans `frontend/src/lib/api/client.ts`). Quand le client abandonnait la requête (timeout), le backend continuait et committait quand même la mutation (déjà faite avant l'envoi d'email) — d'où l'incohérence : ticket réellement clôturé/résolu en base, mais toast rouge générique côté frontend (`closeMut`/`resolveMut` affichent un message fixe qui ignore la vraie cause de l'erreur). Reproduit et confirmé via appel direct du service (`RequestService.resolve/close`) et de l'endpoint HTTP réel (`httpx.ASGITransport`) sur des tickets de test, avec chronométrage avant/après correctif.
+
+Correctif: l'envoi d'email devient fire-and-forget (`asyncio.create_task`, référence forte conservée dans `_background_email_tasks` pour éviter la garbage-collection prématurée) au lieu d'être attendu (`await`) dans le chemin de réponse. Aucun changement de comportement pour l'email lui-même (toujours envoyé, toujours best-effort/silencieux en cas d'échec — le `try/except` existant dans `send_notification_email` gère déjà ça) ; seul le blocage de la réponse HTTP est supprimé. Correctif unique, localisé à `NotificationEmitter.emit()` — bénéficie automatiquement à toutes les actions qui notifient (close, resolve, assign, escalade, changement de priorité, etc.), sans toucher aux routes/services appelants.
+
+Fichiers modifiés:
+- `backend/api/services/NotificationEmitter.py`
+
+Verification: `pytest tests/api/test_ticket_actions.py` → 70 passed. Reproduction chronométrée avant correctif (`/resolve` 9218ms, `/close` 12596ms, tous deux < 15s mais dangereusement proches) vs après correctif (`/resolve` 458ms, `/close` 249ms), sur les mêmes tickets de test, statuts restaurés après coup. Pas de test automatisé dédié ajouté (fire-and-forget difficile à tester unitairement sans mock SMTP — hors périmètre de cette correction ciblée).
+
+Effet de bord assumé: aucun — l'email reste envoyé (juste en arrière-plan) ; en cas d'échec SMTP il est toujours silencieusement journalisé (`logger.warning`), comme avant.
+
+## 2026-08-01 - Chantier "File d'attente / actions par rôle" (Lots 1 à 5) — vues et actions différenciées par rôle
+
+Demande: faire évoluer la vue "liste des tickets" et ses actions selon le rôle connecté (Agent Support, Chef de Service, Chef de Département, Direction DSI), sans dupliquer les composants — architecture commune paramétrée. Réalisé en 5 lots validés séparément, avec arrêt explicite avant chaque retrait de capacité RBAC.
+
+Module: MOD-CHIEF, MOD-DIRECTION, MOD-REPORT (BR-ROLE-CHIEF-001, BR-ROLE-CHIEF-DEPARTEMENT-001/002, BR-ESCALATE-EXCEPTIONNELLE-001, BR-DIRECTIVE-001, BR-ROLE-DIRECTOR-001, BR-REPORT-DECISION-001).
+
+**Lot 1 — Fondations backend**
+- Correctif de périmètre `_apply_decision_scope` (`RouteReports.py`) : chief-departement était borné à sa seule unité dans `/reports/decision`, alors qu'il doit voir tout son département (réutilisation de `ServiceReport._scoped_unity_ids()`, déjà existante). `_decision_conditions` accepte désormais `unity_id` en liste (`IN (...)`).
+- Nouvel endpoint `GET /requests/workload-by-unit` (charge active par agent, statuts non terminaux).
+
+**Lot 2 — Chef de Service ("Centre de répartition")**
+- Verrou sécurité sur `PATCH /requests/{id}` : absence totale de contrôle de périmètre avant ce lot (uniquement `require_roles`) — tout staff pouvait modifier n'importe quel ticket hors de son unité. Ajout de `_resolve_access` + restriction des champs acceptés pour le staff non-admin à `{request_status, status_reason}` (seul usage front réel identifié).
+- Panneau "Charge par agent" dans `ChiefInbox`. Correctif `isToAssign()` (gardait à tort les tickets déjà assignés visibles).
+- Narrowing : agent-support perd l'accès au routage vers un tiers dans `/app/queue` (`qualify_triage` + UI) — ne garde que l'auto-assignation.
+- Narrowing : chief-service perd l'accès à "Changer de service" (`reassign`/`change_service`).
+- Nouveau concept : résolution "exceptionnelle" pour chief-service — motif obligatoire (`assert_exceptional_resolve_reason`).
+- Nouveau concept : "Directive" — commentaire dédié chef → agent assigné, notification nominative, badge visuel distinct (BR-DIRECTIVE-001).
+
+**Lot 3 — Chef de Département ("Centre de pilotage")**
+- Narrowing : chief-departement perd l'accès à "Affecter/Réaffecter" (`assign`) et "Traiter/résoudre" (`resolve`) — ne traite plus jamais un ticket lui-même.
+- Nouveau concept : "Escalade exceptionnelle" — action `escalate_to_director` (nouvelle route `POST /{id}/escalate-to-director`, nouvelle fonction `find_director_for_department`), court-circuite `find_hierarchical_chief`, cible directement le directeur, motif obligatoire. **Attention collision de nom** avec l'alias local `escalateToDirector` déjà existant dans `app.supervision.tsx` (import renommé de `escalateRequest` depuis `escalations.ts`, comportement différent) — voir note détaillée dans BR-ESCALATE-EXCEPTIONNELLE-001.
+- Nouveau composant partagé `components/aggregated-service-dashboard.tsx` (mode `"pilotage"`), consommant `GET /reports/decision?group_by=service` déjà entièrement câblé côté frontend — aucun nouveau code API. Devient l'écran principal de `/app/department-inbox` ; drill-down vers `ChiefInbox` (nouvelle prop optionnelle `filterUnitId`/`onBackToOverview`, comportement de `/app/chief-inbox` strictement inchangé).
+
+**Lot 4 — Direction DSI ("Tableau de bord stratégique")**
+- Nouvelle route additive `/app/strategic-dashboard` (guard `director` uniquement), réutilise `AggregatedServiceDashboard` en mode `"strategic"` (lecture seule) + résumé exécutif (`data.kpis`, déjà présent dans la même réponse). Aucun retrait de capacité à director (`/app/direction`, `/app/supervision` inchangés).
+- Entrée de navigation ajoutée au groupe "Pilotage" (sidebar desktop + tiroir hamburger mobile) ; barre de navigation mobile basse à 5 icônes non modifiée (choix explicite pour ne retirer aucun raccourci existant).
+- **Découverte** (voir KI-SQL-001 dans `KNOWN_ISSUES.md`) : `GET /reports/decision` est inexécutable via HTTP dans la suite de tests SQLite (`GROUP_CONCAT(...SEPARATOR...)`, syntaxe MySQL uniquement) — bug pré-existant, sans lien avec ce chantier, jamais couvert par un test HTTP avant ce lot. Non corrigé (hors périmètre, dette technique séparée à traiter dans un chantier dédié de portabilité SQL).
+
+**Lot 5 — Renommage des libellés + documentation**
+- Libellés alignés sur la terminologie validée : "Centre de répartition" (chief-service), "Centre de pilotage" (chief-departement), "Tableau de bord stratégique" (director, Lot 4). Mis à jour : `app-layout.tsx` (sidebar, tiroir hamburger, barre mobile), `app.chief-inbox.tsx` (titre d'onglet + H1), `app.requests.$id.tsx` (eyebrow/backLabel de contexte), `app.index.tsx` (liens rapides d'accueil par rôle — ajout au passage du lien manquant vers `/app/strategic-dashboard` pour director, oubli du Lot 4).
+- Correction mineure trouvée en cours : `ROUTE_INDEX.md` listait `director` parmi les rôles de `/app/queue`, alors que le guard réel (`requireRole("agent-support", "chief-service", "admin")`) ne l'a jamais inclus — corrigé.
+- `docs/codex/` mis à jour : `FEATURE_INDEX.md` (FEATURE-CHIEF-INBOX scindée, nouvelles FEATURE-DEPARTMENT-PILOTAGE et FEATURE-STRATEGIC-DASHBOARD), `MODULE_INDEX.md` (MOD-CHIEF, MOD-DIRECTION), `ROUTE_INDEX.md`, `BUSINESS_RULES.md` (BR-ROLE-CHIEF-001/CHIEF-DEPARTEMENT-001/002 réécrites pour refléter les narrowings, nouvelles BR-ESCALATE-EXCEPTIONNELLE-001, BR-DIRECTIVE-001, note scope chief-departement sur BR-REPORT-DECISION-001), `KNOWN_ISSUES.md` (KI-SQL-001).
+
+Fichiers modifiés (cumul des 5 lots — liste non exhaustive, voir BUSINESS_RULES.md par règle) :
+- Backend : `ticket_actions.py`, `RouteRequest.py`, `RouteReports.py`, `ServiceRequest.py`, `ServiceReport.py`, `ServiceEscalade.py`, `RepositoryRequest.py`.
+- Frontend : `capabilities.ts`, `requests.ts`, `reports.ts` (inchangé, déjà complet), `app.queue.tsx`, `app.chief-inbox.tsx`, `app.department-inbox.tsx`, `app.requests.$id.tsx`, `app-layout.tsx`, `app.index.tsx`, `mock-data.ts`, nouveaux `components/aggregated-service-dashboard.tsx` et `routes/app.strategic-dashboard.tsx`.
+- Tests (nouveaux, 100+ cas) : `test_reports_decision_scope.py`, `test_requests_workload.py`, `test_requests_patch_scope.py`, `test_qualify_narrowing.py`, `test_resolve_exceptional_reason.py`, `test_directive_comment.py`, `test_lot3_narrowing.py`, `test_escalate_to_director.py`, `test_decision_report_director_scope.py` (2 tests skip documentés, voir KI-SQL-001), extensions `test_ticket_actions.py`.
+
+Verification: suite backend ciblée systématiquement verte à chaque lot ; suite complète comparée en isolé avant/après chaque lot — total d'échecs stable (52, tous pré-existants et non liés à ce chantier, vérifiés un par un par exécution isolée par fichier) du Lot 2 au Lot 4 inclus. `npx tsc --noEmit` propre sur tous les fichiers frontend touchés à chaque lot. Build production (`npm run build`) réussi après le Lot 4. Pas de vérification navigateur interactive (session non interactive, pas de serveur+données de seed disponible) — recommandé avant mise en production.
+
+Effet de bord assumé: aucun — chaque narrowing RBAC a fait l'objet d'une confirmation explicite séparée avant application (diffs présentés à l'avance), et chaque ajout (Directive, Escalade exceptionnelle, Tableau de bord stratégique) est additif, sans retrait de capacité non validé.
+
 ## 2026-07-31 - Escalade : plus de choix manuel de niveau, routage automatique vers le chef hiérarchique
 
 Demande: "pour les escalde, on a pas besoin de faire un choix, on doit juste remplir la partie motif, puis le systeme envoie uniquement au chef hierarchie de celui qui fait le traitement uniquement" — retirer le selecteur "Niveau cible" de la modale d'escalade et faire en sorte que le systeme determine seul le destinataire (chef hierarchique de la personne qui traite le ticket), sans choix manuel.

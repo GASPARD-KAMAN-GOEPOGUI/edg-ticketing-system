@@ -29,6 +29,7 @@ import {
   Trash2,
   GitBranch,
   Circle,
+  Send,
   type LucideIcon,
 } from "lucide-react";
 
@@ -87,6 +88,9 @@ const EVENT_CONFIG: Record<string, EventConfig> = {
   workflow_step_rejected: { icon: XCircle,         color: "text-destructive",       bg: "bg-destructive/15",      ring: "ring-destructive/25" },
   workflow_completed: { icon: CheckCircle2,        color: "text-emerald-600",       bg: "bg-emerald-600/15",      ring: "ring-emerald-600/25" },
   workflow_suspended: { icon: PauseCircle,         color: "text-amber-600",         bg: "bg-amber-600/15",        ring: "ring-amber-600/25" },
+  // BR-TRANSMIT-001 — workflow collaboratif dynamique post-file d'attente.
+  treatment_transmitted: { icon: Send,             color: "text-sky-600",           bg: "bg-sky-600/15",          ring: "ring-sky-600/25" },
+  treatment_completed:   { icon: CheckCircle2,     color: "text-emerald-600",       bg: "bg-emerald-600/15",      ring: "ring-emerald-600/25" },
 };
 
 const DEFAULT_CONFIG: EventConfig = {
@@ -110,6 +114,20 @@ function infoString(event: TimelineEvent, key: string): string | undefined {
   if (value === null || value === undefined || value === "") return undefined;
   if (typeof value === "string" || typeof value === "number") return String(value);
   return undefined;
+}
+
+// BR-TRANSMIT-001 — durée du cycle d'intervention clôturé par une transmission ou
+// une terminaison de traitement (infos.duration_seconds, calculé côté backend).
+function formatCycleDuration(event: TimelineEvent): string | undefined {
+  const raw = event.infos?.duration_seconds;
+  if (typeof raw !== "number" || raw < 0) return undefined;
+  const hours = Math.floor(raw / 3600);
+  const minutes = Math.floor((raw % 3600) / 60);
+  if (hours === 0 && minutes === 0) return "moins d'une minute";
+  const parts: string[] = [];
+  if (hours > 0) parts.push(`${hours} h`);
+  if (minutes > 0) parts.push(`${minutes} min`);
+  return parts.join(" ");
 }
 
 function primaryEventLabel(event: TimelineEvent): string {
@@ -149,6 +167,10 @@ function TimelineItem({
     : undefined;
   const attachmentId = infoString(event, "attachment_id") ?? infoString(event, "attachmentId");
   const attachmentFilename = infoString(event, "filename");
+  // BR-TRANSMIT-001 — cycle d'intervention : travail effectué + durée du cycle clos.
+  const isCycleEvent = event.type === "treatment_transmitted" || event.type === "treatment_completed";
+  const workDone = isCycleEvent ? infoString(event, "work_done") : undefined;
+  const cycleDuration = isCycleEvent ? formatCycleDuration(event) : undefined;
   const isAutoRoutedToSupport = event.type === "routed_to_support";
   const canOpenAttachment = Boolean(
     onOpenAttachment &&
@@ -204,6 +226,17 @@ function TimelineItem({
             {reason}
           </p>
         )}
+        {workDone && (
+          <p className="mt-2 rounded-xl border border-border/40 bg-background/45 px-3 py-2 text-sm leading-5 text-foreground">
+            <span className="mr-1 font-medium text-muted-foreground">Travail effectué:</span>
+            {workDone}
+          </p>
+        )}
+        {cycleDuration && (
+          <p className="mt-1.5 text-[11px] leading-5 text-muted-foreground">
+            <span className="font-medium">Durée du cycle:</span> {cycleDuration}
+          </p>
+        )}
       </div>
     </li>
   );
@@ -252,7 +285,7 @@ export function WorkflowTimeline({ events, onOpenAttachment }: WorkflowTimelineP
         <DialogContent className="flex max-h-[80vh] flex-col overflow-hidden sm:max-w-lg">
           <DialogHeader className="shrink-0">
             <DialogTitle>Journaux ({events.length})</DialogTitle>
-            <DialogDescription>Historique complet des événements de cette demande.</DialogDescription>
+            <DialogDescription>Historique complet des événements de ce ticket.</DialogDescription>
           </DialogHeader>
           <ol className="relative min-h-0 flex-1 space-y-0 overflow-y-auto pr-1">
             {events.map((event, index) => (

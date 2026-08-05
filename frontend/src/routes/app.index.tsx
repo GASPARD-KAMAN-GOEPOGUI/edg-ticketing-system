@@ -34,6 +34,7 @@ import {
   ArrowUpRight,
   RotateCcw,
   SlidersHorizontal,
+  Compass,
 } from "lucide-react";
 import {
   PieChart,
@@ -68,12 +69,12 @@ function Dashboard() {
             {firstName ? `Bonjour, ${firstName} 👋` : "Bonjour 👋"}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Voici l'état de vos demandes personnelles.
+            Voici l'état de vos tickets personnels.
           </p>
         </div>
         <Button asChild className="rounded-full gradient-primary shadow-lg shadow-primary/30">
           <Link to="/app/new">
-            <Plus className="mr-1 h-4 w-4" /> Nouvelle demande
+            <Plus className="mr-1 h-4 w-4" /> Nouveau ticket
           </Link>
         </Button>
       </header>
@@ -158,7 +159,7 @@ function Stat({
 function RecentList({
   items,
   isLoading,
-  title = "Demandes récentes",
+  title = "Tickets récents",
   to = "/app/requests",
   detailTo,
   wide = true,
@@ -195,7 +196,7 @@ function RecentList({
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground/40" />
         </div>
       ) : items.length === 0 ? (
-        <p className="py-8 text-center text-sm text-muted-foreground">Aucune demande.</p>
+        <p className="py-8 text-center text-sm text-muted-foreground">Aucun ticket.</p>
       ) : (
         <ul className="space-y-1.5">
           {items.slice(0, limit).map((r) => (
@@ -308,17 +309,18 @@ function PersonalRoleShortcuts() {
       { to: "/app/queue", label: "File d'attente", description: "Tickets orientés à traiter", icon: Inbox },
     ],
     "chief-service": [
-      { to: "/app/chief-inbox", label: "Boîte de traitement", description: "Tickets du service à organiser", icon: MessageSquareWarning },
-      { to: "/app/queue", label: "File d'attente", description: "Demandes orientées et à qualifier", icon: Inbox },
+      { to: "/app/chief-inbox", label: "Centre de répartition", description: "Tickets du service à organiser", icon: MessageSquareWarning },
+      { to: "/app/queue", label: "File d'attente", description: "Tickets orientés et à qualifier", icon: Inbox },
       { to: "/app/supervision", label: "Supervision", description: "Suivi de l'activité du service", icon: AlertTriangle },
       { to: "/app/reports", label: "Rapports", description: "Indicateurs du service", icon: TrendingUp },
     ],
     "chief-departement": [
-      { to: "/app/department-inbox", label: "Boîte de traitement", description: "Tickets du département à organiser", icon: MessageSquareWarning },
+      { to: "/app/department-inbox", label: "Centre de pilotage", description: "Vue agrégée par service du département", icon: MessageSquareWarning },
       { to: "/app/supervision", label: "Supervision", description: "Suivi de l'activité du département", icon: AlertTriangle },
       { to: "/app/reports", label: "Rapports", description: "Indicateurs du département", icon: TrendingUp },
     ],
     director: [
+      { to: "/app/strategic-dashboard", label: "Tableau de bord stratégique", description: "Vue consultative agrégée de la direction", icon: Compass },
       { to: "/app/supervision", label: "Supervision", description: "Tickets escaladés ou à arbitrer", icon: AlertTriangle },
       { to: "/app/direction", label: "Vue direction", description: "Pilotage des services de la direction", icon: Building2 },
       { to: "/app/sla-center", label: "Centre SLA", description: "Suivi des délais et risques", icon: Clock },
@@ -328,7 +330,7 @@ function PersonalRoleShortcuts() {
       { to: "/app/dg", label: "Vue globale", description: "Pilotage inter-directions", icon: Building2 },
       { to: "/app/admin/users", label: "Utilisateurs & rôles", description: "Administration des comptes", icon: Users2 },
       { to: "/app/admin/directions", label: "Directions", description: "Structure de l'organisation", icon: Building2 },
-      { to: "/app/admin/routing", label: "Routage", description: "Règles métier des demandes", icon: SlidersHorizontal },
+      { to: "/app/admin/routing", label: "Routage", description: "Règles métier des tickets", icon: SlidersHorizontal },
       { to: "/app/admin/sla", label: "SLA & politiques", description: "Paramètres de délais", icon: Clock },
     ],
   };
@@ -393,7 +395,7 @@ function PersonalDashboard() {
   return (
     <>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Demandes créées"   value={total}     icon={Inbox}        tone="primary"      hint="Au total" loading={isLoading} />
+        <Stat label="Tickets créés"   value={total}     icon={Inbox}        tone="primary"      hint="Au total" loading={isLoading} />
         <Stat label="En cours"          value={active}    icon={Clock}        tone="accent"        loading={isLoading} />
         <Stat label="Résolues"          value={done}      icon={CheckCircle2} tone="success"       loading={isLoading} />
         <Stat label="Annulées"          value={cancelled} icon={AlertTriangle} tone="destructive"  loading={isLoading} />
@@ -457,9 +459,9 @@ function AgentDashboard() {
     <>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <Stat label="File d'attente" value={queueData?.total ?? 0} icon={Inbox} tone="primary" loading={loadQueue} hint="Tickets orientés" />
-        <Stat label="À qualifier" value={triageData?.total ?? 0} icon={SlidersHorizontal} tone="warning" loading={loadTriage} hint="Demandes non orientées" />
+        <Stat label="À qualifier" value={triageData?.total ?? 0} icon={SlidersHorizontal} tone="warning" loading={loadTriage} hint="Tickets non orientés" />
         <Stat label="Mes tickets" value={assignedData?.total ?? 0} icon={Users2} tone="accent" loading={loadAssigned} hint="Assignés à moi" />
-        <Stat label="Mes demandes" value={myRequestsData?.total ?? 0} icon={Plus} tone="success" loading={loadMyRequests} hint="Créées par moi" />
+        <Stat label="Mes tickets" value={myRequestsData?.total ?? 0} icon={Plus} tone="success" loading={loadMyRequests} hint="Créés par moi" />
         <Stat label="Non lues" value={unreadNotifications?.total ?? 0} icon={Bell} tone="destructive" loading={loadNotifications} hint="Notifications" />
       </div>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -519,7 +521,7 @@ function AgentDashboard() {
           wide={false}
         />
         <RecentList
-          title="Mes demandes récentes"
+          title="Mes tickets récents"
           to="/app/requests"
           items={myRequests}
           isLoading={loadMyRequests}
@@ -691,7 +693,7 @@ function GlobalDashboard() {
     <>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <Stat label="Directions"       value={loadAllReq ? "…" : dirStats.length} icon={Building2}    tone="primary"  loading={loadAllReq} />
-        <Stat label="Demandes totales" value={total}                               icon={Inbox}        tone="accent"   loading={isLoading} />
+        <Stat label="Tickets totaux" value={total}                               icon={Inbox}        tone="accent"   loading={isLoading} />
         <Stat label="Ouvertes"         value={open}                                icon={Clock}        tone="warning"  loading={isLoading} />
         <Stat label="Résolues"         value={resolved}                            icon={CheckCircle2} tone="success"  loading={isLoading} />
         <Stat label="CSAT global"      value={(csat?.global ?? 0) > 0 ? `${csat!.global}/5` : "—"} icon={Star} tone="warning" />
@@ -753,7 +755,7 @@ function AdminDashboard() {
     <>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Directions"       value={directionsData?.length ?? 0} icon={Building2}    tone="accent"   loading={loadDirs} />
-        <Stat label="Demandes totales" value={total}                        icon={Inbox}        tone="primary"  loading={isLoading} />
+        <Stat label="Tickets totaux" value={total}                        icon={Inbox}        tone="primary"  loading={isLoading} />
         <Stat label="Ouvertes"         value={open}                         icon={Clock}        tone="warning"  loading={isLoading} />
         <Stat label="Système"          value="OK"                           icon={CheckCircle2} tone="success"  />
       </div>

@@ -17,7 +17,14 @@
       "Bash(PORT=3000 node dist/server/server.js)",
       "Bash(curl -s -m 10 -o /dev/null -w \"HTTP %{http_code} in %{time_total}s\\\\n\" http://localhost:4173/login)",
       "Bash(grep -n \"from \\\\\"lucide-react\\\\\"\" -A 30 \"/c/Users/HP/Desktop/reactproject/EDG Connect \\(1\\)/frontend/src/routes/app.requests.\\\\$id.tsx\" | head -35)",
-      "Read(//c/Users/HP/Desktop/reactproject/EDG Connect \\(1\\)/frontend/src/routes/**)"
+      "Read(//c/Users/HP/Desktop/reactproject/EDG Connect \\(1\\)/frontend/src/routes/**)",
+      "Bash(mysql -u root edg_ticketing -e \"SELECT id, ref, status, deleted_at FROM request WHERE id=22;\")",
+      "PowerShell(Start-Service wampmysqld64 -ErrorAction Stop)",
+      "PowerShell(Get-Service wampmysqld64)",
+      "Bash(npx --yes -p playwright node \"/c/Users/HP/AppData/Local/Temp/claude/c--Users-HP-Desktop-reactproject-EDG-Connect--1-/a02b9c08-53a3-4322-8466-95ffcc3ffe90/scratchpad/uat/p2_transmit_a_to_b.mjs\")",
+      "Bash(npx --yes -p playwright node \"/c/Users/HP/AppData/Local/Temp/claude/c--Users-HP-Desktop-reactproject-EDG-Connect--1-/a02b9c08-53a3-4322-8466-95ffcc3ffe90/scratchpad/uat/p3_verify_b_and_timeline.mjs\")",
+      "Bash(netstat -ano)",
+      "Bash(powershell -NoProfile -Command \"Get-Process -Id 13596,15876,21200 -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,Path | Format-Table -AutoSize\")"
     ]
   }
 }

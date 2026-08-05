@@ -51,7 +51,7 @@ function AppRoute() {
                   <Sparkles className="h-4 w-4 text-primary" />
                 </div>
                 <div>
-                  <DialogTitle>Nouvelle demande</DialogTitle>
+                  <DialogTitle>Nouveau ticket</DialogTitle>
                   <DialogDescription className="text-xs">
                     Décrivez votre besoin — nous routerons automatiquement vers le bon service.
                   </DialogDescription>

@@ -21,6 +21,7 @@ import { Route as AdminLoginRouteImport } from './routes/admin-login'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as AppSupervisionRouteImport } from './routes/app.supervision'
+import { Route as AppStrategicDashboardRouteImport } from './routes/app.strategic-dashboard'
 import { Route as AppSlaCenterRouteImport } from './routes/app.sla-center'
 import { Route as AppReportsRouteImport } from './routes/app.reports'
 import { Route as AppQueueRouteImport } from './routes/app.queue'
@@ -121,6 +122,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const AppSupervisionRoute = AppSupervisionRouteImport.update({
   id: '/supervision',
   path: '/supervision',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppStrategicDashboardRoute = AppStrategicDashboardRouteImport.update({
+  id: '/strategic-dashboard',
+  path: '/strategic-dashboard',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSlaCenterRoute = AppSlaCenterRouteImport.update({
@@ -354,6 +360,7 @@ export interface FileRoutesByFullPath {
   '/app/queue': typeof AppQueueRoute
   '/app/reports': typeof AppReportsRoute
   '/app/sla-center': typeof AppSlaCenterRoute
+  '/app/strategic-dashboard': typeof AppStrategicDashboardRoute
   '/app/supervision': typeof AppSupervisionRoute
   '/app/': typeof AppIndexRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
@@ -408,6 +415,7 @@ export interface FileRoutesByTo {
   '/app/queue': typeof AppQueueRoute
   '/app/reports': typeof AppReportsRoute
   '/app/sla-center': typeof AppSlaCenterRoute
+  '/app/strategic-dashboard': typeof AppStrategicDashboardRoute
   '/app/supervision': typeof AppSupervisionRoute
   '/app': typeof AppIndexRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
@@ -464,6 +472,7 @@ export interface FileRoutesById {
   '/app/queue': typeof AppQueueRoute
   '/app/reports': typeof AppReportsRoute
   '/app/sla-center': typeof AppSlaCenterRoute
+  '/app/strategic-dashboard': typeof AppStrategicDashboardRoute
   '/app/supervision': typeof AppSupervisionRoute
   '/app/': typeof AppIndexRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
@@ -521,6 +530,7 @@ export interface FileRouteTypes {
     | '/app/queue'
     | '/app/reports'
     | '/app/sla-center'
+    | '/app/strategic-dashboard'
     | '/app/supervision'
     | '/app/'
     | '/app/admin/audit'
@@ -575,6 +585,7 @@ export interface FileRouteTypes {
     | '/app/queue'
     | '/app/reports'
     | '/app/sla-center'
+    | '/app/strategic-dashboard'
     | '/app/supervision'
     | '/app'
     | '/app/admin/audit'
@@ -630,6 +641,7 @@ export interface FileRouteTypes {
     | '/app/queue'
     | '/app/reports'
     | '/app/sla-center'
+    | '/app/strategic-dashboard'
     | '/app/supervision'
     | '/app/'
     | '/app/admin/audit'
@@ -759,6 +771,13 @@ declare module '@tanstack/react-router' {
       path: '/supervision'
       fullPath: '/app/supervision'
       preLoaderRoute: typeof AppSupervisionRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/strategic-dashboard': {
+      id: '/app/strategic-dashboard'
+      path: '/strategic-dashboard'
+      fullPath: '/app/strategic-dashboard'
+      preLoaderRoute: typeof AppStrategicDashboardRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/sla-center': {
@@ -1118,6 +1137,7 @@ interface AppRouteChildren {
   AppQueueRoute: typeof AppQueueRoute
   AppReportsRoute: typeof AppReportsRoute
   AppSlaCenterRoute: typeof AppSlaCenterRoute
+  AppStrategicDashboardRoute: typeof AppStrategicDashboardRoute
   AppSupervisionRoute: typeof AppSupervisionRoute
   AppIndexRoute: typeof AppIndexRoute
   AppRequestsIdRoute: typeof AppRequestsIdRoute
@@ -1147,6 +1167,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppQueueRoute: AppQueueRoute,
   AppReportsRoute: AppReportsRoute,
   AppSlaCenterRoute: AppSlaCenterRoute,
+  AppStrategicDashboardRoute: AppStrategicDashboardRoute,
   AppSupervisionRoute: AppSupervisionRoute,
   AppIndexRoute: AppIndexRoute,
   AppRequestsIdRoute: AppRequestsIdRoute,

@@ -124,6 +124,42 @@ export type DecisionReport = {
 export type ExportReportType = "daily" | "monthly" | "by-agent" | "by-unity" | "decision" | "sla" | "csat";
 export type ExportFormat = "csv" | "excel" | "pdf";
 
+// BR-SLA-REOPEN-001
+export type SlaReopenStats = {
+  report_type: "sla_reopen_stats";
+  period: string;
+  total_tickets_with_sla: number;
+  reopened_tickets: number;
+  reopen_rate: number;
+  avg_reopen_count: number | null;
+  avg_first_cycle_hours: number | null;
+  avg_post_reopen_cycle_hours: number | null;
+  first_cycle_sla_compliance_rate: number | null;
+  post_reopen_sla_compliance_rate: number | null;
+};
+
+// BR-TRACE-001
+export type InterventionStatsBucket = {
+  label: string;
+  intervention_count: number;
+  total_hours: number;
+};
+
+export type InterventionStats = {
+  report_type: "intervention_stats";
+  period: string;
+  total_interventions: number;
+  distinct_agents: number;
+  avg_duration_hours: number | null;
+  total_duration_hours: number;
+  transmissions: number;
+  resolutions: number;
+  reopenings: number;
+  by_agent: InterventionStatsBucket[];
+  by_service: InterventionStatsBucket[];
+  by_department: InterventionStatsBucket[];
+};
+
 // ── Lectures JSON ─────────────────────────────────────────────────────────────
 
 export async function fetchDailyReport(date?: string): Promise<DailyReport> {
@@ -163,6 +199,24 @@ export async function fetchUnityReport(
   if (direction_id) params.set("direction_id", direction_id);
   const qs = params.toString() ? `?${params.toString()}` : "";
   return apiFetch<UnityReportRow[]>(`/reports/by-unity${qs}`);
+}
+
+// BR-SLA-REOPEN-001
+export async function fetchSlaReopenStats(start?: string, end?: string): Promise<SlaReopenStats> {
+  const params = new URLSearchParams();
+  if (start) params.set("start", start);
+  if (end) params.set("end", end);
+  const qs = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch<SlaReopenStats>(`/reports/sla/reopen-stats${qs}`);
+}
+
+// BR-TRACE-001
+export async function fetchInterventionStats(start?: string, end?: string): Promise<InterventionStats> {
+  const params = new URLSearchParams();
+  if (start) params.set("start", start);
+  if (end) params.set("end", end);
+  const qs = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch<InterventionStats>(`/reports/interventions${qs}`);
 }
 
 export async function fetchDecisionReport(filters: DecisionReportFilters = {}): Promise<DecisionReport> {

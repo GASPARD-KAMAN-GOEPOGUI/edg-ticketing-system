@@ -9,11 +9,11 @@ import { UserCheck, ArrowRight, Lock } from "lucide-react";
 export const Route = createFileRoute("/create-request")({
   head: () => ({
     meta: [
-      { title: "Créer une demande — EDG Support" },
+      { title: "Créer un ticket — EDG Support" },
       {
         name: "description",
         content:
-          "Soumettez une demande de support via votre espace employé EDG.",
+          "Soumettez un ticket de support via votre espace employé EDG.",
       },
     ],
   }),
@@ -29,10 +29,10 @@ function CreateRequestGateway() {
             <UserCheck className="h-7 w-7 text-background" />
           </div>
           <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-            Créer une demande
+            Créer un ticket
           </h1>
           <p className="mt-3 text-muted-foreground">
-            La soumission de demandes est réservée aux employés EDG disposant d'un compte.
+            La soumission de tickets est réservée aux employés EDG disposant d'un compte.
           </p>
         </div>
 
@@ -42,7 +42,7 @@ function CreateRequestGateway() {
             <p className="text-muted-foreground">
               <span className="font-semibold text-foreground">Accès réservé aux employés EDG.</span>{" "}
               Connectez-vous avec votre adresse <span className="font-mono font-medium text-foreground">@edg.gn</span> pour accéder
-              au formulaire de demande interne.
+              au formulaire de ticket interne.
             </p>
           </div>
 

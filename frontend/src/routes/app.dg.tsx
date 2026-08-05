@@ -383,7 +383,7 @@ function GlobalView() {
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Vue globale</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Tableau de bord global —{" "}
-          {loadReq ? "chargement…" : `${total} demandes · ${scopeLabel}`}.
+          {loadReq ? "chargement…" : `${total} tickets · ${scopeLabel}`}.
         </p>
       </header>
 
@@ -528,7 +528,7 @@ function GlobalView() {
       {/* KPIs */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 stagger">
         <GlassCard className="space-y-1">
-          <div className="text-sm text-muted-foreground">Total demandes</div>
+          <div className="text-sm text-muted-foreground">Total tickets</div>
           {loadReq ? <Loader2 className="h-7 w-7 animate-spin text-muted-foreground/40" /> : (
             <div className="text-3xl font-bold">{total}</div>
           )}
@@ -828,7 +828,7 @@ function GlobalView() {
                 <div className="text-xs font-medium">{directionLookup[s.id] ?? s.id}</div>
                 <div className="mt-1 text-2xl font-bold">{s.slaRespect}%</div>
                 <div className="mt-0.5 text-[11px] opacity-80">
-                  {s.total} demandes · {s.overdue} hors délai
+                  {s.total} tickets · {s.overdue} hors délai
                 </div>
               </div>
             ))}
@@ -936,7 +936,7 @@ function GlobalView() {
                         </ResponsiveContainer>
                       ) : (
                         <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
-                          Aucune demande pour cette direction.
+                          Aucun ticket pour cette direction.
                         </div>
                       )}
                     </div>
@@ -944,11 +944,11 @@ function GlobalView() {
                     {/* Liste demandes cliquables */}
                     <div>
                       <h3 className="mb-3 text-sm font-semibold">
-                        Demandes récentes ({dirReqs.length})
+                        Tickets récents ({dirReqs.length})
                       </h3>
                       <div className="max-h-[200px] space-y-2 overflow-y-auto">
                         {dirReqs.length === 0 ? (
-                          <p className="text-sm text-muted-foreground">Aucune demande.</p>
+                          <p className="text-sm text-muted-foreground">Aucun ticket.</p>
                         ) : (
                           dirReqs.slice(0, 8).map((r) => (
                             <Link

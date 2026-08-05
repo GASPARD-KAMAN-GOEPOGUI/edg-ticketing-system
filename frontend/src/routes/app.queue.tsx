@@ -13,7 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { fetchTriage, qualifyTriage } from "@/lib/api/requests";
+import { fetchTriage, fetchRequest, qualifyTriage } from "@/lib/api/requests";
 import { fetchUsers } from "@/lib/api/accounts";
 import { fetchDirections, fetchDepartments, fetchUnits } from "@/lib/api/directions-units";
 import { fetchRoutingRules, fetchRequestCategories } from "@/lib/api/admin-config";
@@ -21,12 +21,13 @@ import { priorityLabels } from "@/lib/mock-data";
 import type { Priority } from "@/lib/mock-data";
 import { toast } from "sonner";
 import {
-  CheckCircle2, ChevronDown, ChevronUp,
+  CheckCircle2, ChevronDown, ChevronUp, History,
   Loader2, MessageSquare, User, UserPlus, Zap,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { fr } from "date-fns/locale";
 import { AsyncSwap } from "@/components/async-states";
+import { StatusBadge } from "@/components/status-badge";
 import { useUser } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
@@ -189,6 +190,25 @@ function QualifyTab() {
   });
   const unitPeople = unitPeopleData ?? [];
 
+  // BR-REOPEN-QUEUE-001 : détail de la réouverture (motif, ancien intervenant)
+  // — chargé à la demande seulement pour la carte dépliée, le endpoint /triage
+  // ne renvoyant pas l'historique complet (allégé pour les listes).
+  const expandedStatus = expanded
+    ? normalizeQueueStatus(queue.find((r) => r.id === expanded)?.status)
+    : "";
+  const { data: expandedDetail } = useQuery({
+    queryKey: ["queue-reopen-detail", expanded],
+    queryFn: () => fetchRequest(expanded as string),
+    enabled: !!expanded && expandedStatus === "reopened",
+    staleTime: 10_000,
+  });
+  const reopenEvent = expandedDetail?.timeline
+    ?.filter((t) => t.type === "reopened")
+    .slice(-1)[0];
+  const priorHandlerEvent = expandedDetail?.timeline
+    ?.filter((t) => t.type === "treatment_completed")
+    .slice(-1)[0];
+
   const qualifyMut = useMutation({
     mutationFn: ({ id, form }: { id: string; form: TriageForm }) =>
       qualifyTriage(
@@ -204,7 +224,7 @@ function QualifyTab() {
       ),
     onSuccess: (_, { id }) => {
       const req = queue.find((r) => r.id === id);
-      toast.success(`Demande ${req?.ref ?? ""} orientée avec succès.`);
+      toast.success(`Ticket ${req?.ref ?? ""} orienté avec succès.`);
       setExpanded(null);
       queryClient.invalidateQueries({ queryKey: ["qualify"] });
       queryClient.invalidateQueries({ queryKey: ["queue"] });
@@ -231,7 +251,7 @@ function QualifyTab() {
     }) => qualifyTriage(id, data, sessionUser?.id),
     onSuccess: (_, { id }) => {
       const req = queue.find((r) => r.id === id);
-      toast.success(`Demande ${req?.ref ?? ""} prise en charge.`);
+      toast.success(`Ticket ${req?.ref ?? ""} pris en charge.`);
       setExpanded(null);
       queryClient.invalidateQueries({ queryKey: ["qualify"] });
       queryClient.invalidateQueries({ queryKey: ["queue"] });
@@ -259,13 +279,13 @@ function QualifyTab() {
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">File d'attente</h1>
           {!isLoading && (
             <p className="mt-1 text-sm text-muted-foreground">
-              {queue.length} demande{queue.length !== 1 ? "s" : ""} en attente de qualification.
+              {queue.length} ticket{queue.length !== 1 ? "s" : ""} en attente de qualification.
             </p>
           )}
         </div>
         <div className="flex items-center gap-2 rounded-2xl border border-warning/30 bg-warning/10 px-4 py-2 text-sm font-medium text-warning-foreground dark:text-warning">
           <Zap className="h-4 w-4 shrink-0" />
-          Aucune demande ne doit rester non orientée plus de 2h.
+          Aucun ticket ne doit rester non orienté plus de 2h.
         </div>
       </header>
 
@@ -274,14 +294,14 @@ function QualifyTab() {
         empty={
           isError ? (
             <GlassCard className="py-16 text-center">
-              <p className="text-sm text-muted-foreground">Impossible de charger les demandes.</p>
+              <p className="text-sm text-muted-foreground">Impossible de charger les tickets.</p>
             </GlassCard>
           ) : (
             <GlassCard className="py-16 text-center">
               <CheckCircle2 className="mx-auto h-10 w-10 text-success" />
               <h3 className="mt-3 font-semibold">File de qualification vide</h3>
               <p className="mt-1 text-sm text-muted-foreground">
-                Toutes les demandes ont été qualifiées et orientées.
+                Tous les tickets ont été qualifiés et orientés.
               </p>
             </GlassCard>
           )
@@ -335,9 +355,13 @@ function QualifyTab() {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-mono text-xs text-muted-foreground">{req.ref}</span>
-                      <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent-foreground dark:text-accent">
-                        Non orientée
-                      </span>
+                      {status === "reopened" ? (
+                        <StatusBadge status="reopened" />
+                      ) : (
+                        <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent-foreground dark:text-accent">
+                          Non orientée
+                        </span>
+                      )}
                     </div>
                     <div className="mt-0.5 font-semibold leading-snug">{req.title}</div>
                     <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
@@ -357,6 +381,31 @@ function QualifyTab() {
 
                 {isOpen && (
                   <div className="space-y-5 border-t border-border/40 bg-background/30 px-5 pb-5 pt-4">
+                    {status === "reopened" && (
+                      <div className="flex items-start gap-2.5 rounded-xl border border-fuchsia-200 bg-fuchsia-50 px-4 py-3 text-sm dark:border-fuchsia-800/50 dark:bg-fuchsia-950/30">
+                        <History className="mt-0.5 h-4 w-4 shrink-0 text-fuchsia-600 dark:text-fuchsia-400" />
+                        <div className="space-y-1 text-fuchsia-800 dark:text-fuchsia-300">
+                          <p className="font-medium">
+                            Ticket réouvert — en attente d'une nouvelle prise en charge.
+                          </p>
+                          {reopenEvent ? (
+                            <>
+                              {reopenEvent.comment && (
+                                <p><span className="font-medium">Motif :</span> {reopenEvent.comment}</p>
+                              )}
+                              {priorHandlerEvent?.by && (
+                                <p><span className="font-medium">Ancien intervenant :</span> {priorHandlerEvent.by}</p>
+                              )}
+                              <p className="text-xs opacity-80">
+                                Réouvert {formatDistanceToNow(new Date(reopenEvent.at), { addSuffix: true, locale: fr })}
+                              </p>
+                            </>
+                          ) : (
+                            <p className="text-xs opacity-80">Chargement du détail de la réouverture…</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
                     <p className="text-sm text-muted-foreground">
                       <span className="font-medium text-foreground">Description :</span>{" "}
                       {req.description}
@@ -570,7 +619,7 @@ function QualifyTab() {
                           {isTaking
                             ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
                             : <UserPlus className="mr-1.5 h-3.5 w-3.5" />}
-                          Prendre la demande
+                          Prendre le ticket
                         </Button>
 
                         {/* Assigner — nécessite les 4 niveaux : direction, département, service, personne.

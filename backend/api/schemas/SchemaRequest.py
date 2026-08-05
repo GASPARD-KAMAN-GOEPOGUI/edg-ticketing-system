@@ -138,10 +138,61 @@ class RequestListItemResponse(_RequestCommonFields):
     pass
 
 
+class SlaCycleResponse(BaseModel):
+    """BR-SLA-REOPEN-001 — un cycle SLA (premier traitement ou après réouverture),
+    reconstruit depuis `workflow_detail` (voir `ModelRequest.sla_cycles`)."""
+    cycle_number: int
+    started_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+    sla_hours: Optional[int] = None
+    elapsed_hours: Optional[float] = None
+    response_hours: Optional[float] = None
+    breached: Optional[bool] = None
+    resolved_by: Optional[str] = None
+    reopen_reason: Optional[str] = None
+    closed: bool = False
+
+
+class InterventionResponse(BaseModel):
+    """BR-TRACE-001 — conteneur logique du travail complet d'un intervenant
+    (voir `ModelRequest.interventions`) : identification/ordre explicitement
+    enregistrés (jamais recalculés), identité figée, temps, travail, décision."""
+    intervention_id: str
+    cycle_number: int
+    intervention_order: Optional[int] = None
+    actor_id: Optional[str] = None
+    actor_name: Optional[str] = None
+    actor_role: Optional[str] = None
+    actor_matricule: Optional[str] = None
+    actor_direction_label: Optional[str] = None
+    actor_department_label: Optional[str] = None
+    actor_service_label: Optional[str] = None
+    started_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+    duration_seconds: Optional[int] = None
+    work_done: Optional[str] = None
+    instruction: Optional[str] = None
+    transmission_reason: Optional[str] = None
+    decision: Optional[str] = None
+    destination_id: Optional[str] = None
+    destination_name: Optional[str] = None
+    summary: Optional[str] = None
+    solution: Optional[str] = None
+    recommendations: Optional[str] = None
+    sla_hours: Optional[int] = None
+    sla_breached: Optional[bool] = None
+    comment_count: int = 0
+    attachment_count: int = 0
+    event_ids: list[str] = []
+
+
 class RequestResponse(_RequestCommonFields):
     """Schéma complet — page détail d'un ticket (historique + appréciation CSAT)."""
     timelines: list[WorkflowDetailResponse] = []
     appreciation: Optional[AppreciationResponse] = None
+    sla_cycles: list[SlaCycleResponse] = []
+    reopen_count: int = 0
+    interventions: list[InterventionResponse] = []
 
 
 class RequestSearch(BaseModel):

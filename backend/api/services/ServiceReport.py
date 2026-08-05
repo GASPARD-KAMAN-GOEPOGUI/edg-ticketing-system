@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from sqlalchemy import bindparam, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import noload
 
 from api.models.ModelOrganigram import Organigram
 from api.models.ModelUnity import Unity
@@ -1761,4 +1762,194 @@ class ReportService(BaseService):
             "resolved_late": row["resolved_late"] or 0,
             "compliance_rate": round(in_sla / total * 100, 1) if total else 100.0,
             "avg_resolution_min": int(row["avg_resolution_min"] or 0),
+        }
+
+    async def sla_reopen_stats(
+        self,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> dict:
+        """
+        BR-SLA-REOPEN-001 — statistiques croisées cycles SLA / réouvertures, sur la
+        même fenêtre (par défaut) que `sla_report()`. Additif et indépendant :
+        ne touche à aucune requête/donnée des rapports existants ci-dessus.
+        Calculé depuis les cycles déjà reconstruits par `ModelRequest.sla_cycles`
+        (donc depuis `workflow_detail`, append-only) — aucune nouvelle table ni
+        colonne. Le premier cycle SLA (`cycle_number == 1`) n'est jamais recalculé
+        : ses valeurs proviennent uniquement de l'événement `treatment_completed`
+        d'origine, gelé par `ServiceRequest._sla_cycle_snapshot`.
+        Note performance : charge en mémoire les demandes + leur historique complet
+        sur la période — acceptable pour une fenêtre de rapport habituelle (jours/
+        semaines), à revisiter si utilisé sur un historique de plusieurs années.
+        """
+        from api.models.ModelRequest import Request as RequestModel
+
+        today = date.today()
+        s = start_date or (today - timedelta(days=30))
+        e = end_date or today
+        range_start = datetime.combine(s, datetime.min.time())
+        range_end = datetime.combine(e, datetime.min.time()) + timedelta(days=1)
+
+        result = await self.session.execute(
+            select(RequestModel)
+            # Ni sla_cycles/reopen_count ni interventions n'ont besoin des comptes
+            # requester/assignee (seuls `timelines`/`workflows` sont parcourus) —
+            # désactiver leur chargement automatique (`lazy="selectin"` par défaut)
+            # évite de charger inutilement des comptes hors périmètre de ce rapport.
+            .options(noload(RequestModel.assignee), noload(RequestModel.requester))
+            .where(
+                RequestModel.deleted_at.is_(None),
+                RequestModel.created_at >= range_start,
+                RequestModel.created_at < range_end,
+            )
+        )
+        requests = result.scalars().unique().all()
+
+        total_tickets = 0
+        reopened_tickets = 0
+        reopen_counts: list[int] = []
+        first_cycle_hours: list[float] = []
+        post_reopen_hours: list[float] = []
+        closed_first = breached_first = 0
+        closed_post = breached_post = 0
+
+        for req in requests:
+            if not req.sla_hours or req.sla_hours <= 0:
+                continue
+            total_tickets += 1
+            if req.reopen_count <= 0:
+                continue
+            reopened_tickets += 1
+            reopen_counts.append(req.reopen_count)
+            for cycle in req.sla_cycles:
+                if not cycle["closed"] or cycle["elapsed_hours"] is None:
+                    continue
+                if cycle["cycle_number"] == 1:
+                    first_cycle_hours.append(cycle["elapsed_hours"])
+                    closed_first += 1
+                    breached_first += 1 if cycle["breached"] else 0
+                else:
+                    post_reopen_hours.append(cycle["elapsed_hours"])
+                    closed_post += 1
+                    breached_post += 1 if cycle["breached"] else 0
+
+        def _avg(values: list[float]) -> Optional[float]:
+            return round(sum(values) / len(values), 2) if values else None
+
+        return {
+            "report_type": "sla_reopen_stats",
+            "period": f"{s.isoformat()} → {e.isoformat()}",
+            "total_tickets_with_sla": total_tickets,
+            "reopened_tickets": reopened_tickets,
+            "reopen_rate": round(reopened_tickets / total_tickets * 100, 1) if total_tickets else 0.0,
+            "avg_reopen_count": _avg([float(c) for c in reopen_counts]),
+            "avg_first_cycle_hours": _avg(first_cycle_hours),
+            "avg_post_reopen_cycle_hours": _avg(post_reopen_hours),
+            "first_cycle_sla_compliance_rate": (
+                round((closed_first - breached_first) / closed_first * 100, 1) if closed_first else None
+            ),
+            "post_reopen_sla_compliance_rate": (
+                round((closed_post - breached_post) / closed_post * 100, 1) if closed_post else None
+            ),
+        }
+
+    async def intervention_stats(
+        self,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> dict:
+        """
+        BR-TRACE-001 — statistiques agrégées sur les interventions (conteneurs
+        logiques du travail d'un intervenant), sur la même fenêtre (par défaut)
+        que `sla_report()`/`sla_reopen_stats()`. Additif et indépendant : ne
+        touche à aucune requête/donnée des rapports existants. Calculé depuis
+        `ModelRequest.interventions` (déjà reconstruit depuis `workflow_detail`,
+        données explicitement enregistrées — jamais recalculées ici).
+        Note performance : même limite que `sla_reopen_stats` (charge en mémoire
+        les demandes + leur historique complet sur la période).
+        """
+        from api.models.ModelRequest import Request as RequestModel
+
+        today = date.today()
+        s = start_date or (today - timedelta(days=30))
+        e = end_date or today
+        range_start = datetime.combine(s, datetime.min.time())
+        range_end = datetime.combine(e, datetime.min.time()) + timedelta(days=1)
+
+        result = await self.session.execute(
+            select(RequestModel)
+            # Ni sla_cycles/reopen_count ni interventions n'ont besoin des comptes
+            # requester/assignee (seuls `timelines`/`workflows` sont parcourus) —
+            # désactiver leur chargement automatique (`lazy="selectin"` par défaut)
+            # évite de charger inutilement des comptes hors périmètre de ce rapport.
+            .options(noload(RequestModel.assignee), noload(RequestModel.requester))
+            .where(
+                RequestModel.deleted_at.is_(None),
+                RequestModel.created_at >= range_start,
+                RequestModel.created_at < range_end,
+            )
+        )
+        requests = result.scalars().unique().all()
+
+        durations: list[float] = []
+        transmissions = resolutions = 0
+        reopenings = 0
+        distinct_agents: set[str] = set()
+        by_agent: dict[str, dict[str, Any]] = {}
+        by_service: dict[str, dict[str, Any]] = {}
+        by_department: dict[str, dict[str, Any]] = {}
+
+        def _bump(bucket: dict[str, dict[str, Any]], key: Optional[str], label: Optional[str], hours: Optional[float]) -> None:
+            if not key:
+                return
+            entry = bucket.setdefault(key, {"label": label or key, "intervention_count": 0, "total_hours": 0.0})
+            entry["intervention_count"] += 1
+            if hours is not None:
+                entry["total_hours"] += hours
+
+        total_interventions = 0
+        for req in requests:
+            reopenings += req.reopen_count
+            for iv in req.interventions:
+                total_interventions += 1
+                actor_id = iv.get("actor_id")
+                if actor_id:
+                    distinct_agents.add(str(actor_id))
+                hours = (
+                    round(iv["duration_seconds"] / 3600, 2)
+                    if iv.get("duration_seconds") is not None else None
+                )
+                if hours is not None:
+                    durations.append(hours)
+                if iv.get("decision") == "transmission":
+                    transmissions += 1
+                elif iv.get("decision") == "resolution":
+                    resolutions += 1
+                _bump(by_agent, str(actor_id) if actor_id else None, iv.get("actor_name"), hours)
+                _bump(by_service, iv.get("actor_service_label"), iv.get("actor_service_label"), hours)
+                _bump(by_department, iv.get("actor_department_label"), iv.get("actor_department_label"), hours)
+
+        def _round_bucket(bucket: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+            return sorted(
+                (
+                    {**v, "total_hours": round(v["total_hours"], 2)}
+                    for v in bucket.values()
+                ),
+                key=lambda x: x["total_hours"],
+                reverse=True,
+            )
+
+        return {
+            "report_type": "intervention_stats",
+            "period": f"{s.isoformat()} → {e.isoformat()}",
+            "total_interventions": total_interventions,
+            "distinct_agents": len(distinct_agents),
+            "avg_duration_hours": round(sum(durations) / len(durations), 2) if durations else None,
+            "total_duration_hours": round(sum(durations), 2) if durations else 0.0,
+            "transmissions": transmissions,
+            "resolutions": resolutions,
+            "reopenings": reopenings,
+            "by_agent": _round_bucket(by_agent),
+            "by_service": _round_bucket(by_service),
+            "by_department": _round_bucket(by_department),
         }

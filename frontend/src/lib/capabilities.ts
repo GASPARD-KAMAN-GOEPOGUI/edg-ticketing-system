@@ -76,6 +76,7 @@ export type TicketAction =
   | "resume"
   | "assign"
   | "resolve"
+  | "transmit_treatment"
   | "close"
   | "request_reopen"
   | "approve_reopen"
@@ -83,6 +84,7 @@ export type TicketAction =
   | "cancel"
   | "reject"
   | "escalate"
+  | "escalate_to_director"
   | "change_priority"
   | "change_service"
   | "transfer_direction"
@@ -105,8 +107,16 @@ const TICKET_ACTION_ROLES: Record<TicketAction, Role[]> = {
   take_ownership: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
   request_info: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
   resume: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
-  assign: ["chief-service", "chief-departement", "admin"],
+  // Lot 3.1 : chief-departement n'a plus accès à "Affecter/Réaffecter" un agent.
+  assign: ["chief-service", "admin"],
+  // BR-TRANSMIT-001 (remplace Lot 3.2) : "Terminer le traitement" est réservé à
+  // l'intervenant actuel (isAssignedToMe, voir canTicketAction ci-dessous) — chief-
+  // departement redevient éligible dès lors qu'il est devenu intervenant actuel via
+  // une transmission ; le rôle n'est plus qu'un filtre de sécurité général.
   resolve: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
+  // BR-TRANSMIT-001 : "Transmettre le traitement" — mêmes rôles traitants que resolve,
+  // même garde isAssignedToMe.
+  transmit_treatment: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
   close: AUTHENTICATED_ROLES,
   request_reopen: AUTHENTICATED_ROLES,
   approve_reopen: ["chief-service", "chief-departement", "director", "admin"],
@@ -114,6 +124,8 @@ const TICKET_ACTION_ROLES: Record<TicketAction, Role[]> = {
   cancel: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"],
   reject: ["chief-service", "chief-departement", "admin"],
   escalate: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
+  // Lot 3.3 : "Escalade exceptionnelle" — reservee au chef de departement.
+  escalate_to_director: ["chief-departement"],
   change_priority: ["chief-service", "chief-departement", "director", "admin"],
   // Lot 2.5 : chief-service n'a plus accès à "Changer de service" (reste chief-departement,
   // director, admin) — cf. ticket_actions.ACTION_ALLOWED_ROLES["reassign"] côté backend.
@@ -131,6 +143,7 @@ const TICKET_ACTION_STATUSES: Record<TicketAction, RequestStatus[]> = {
   resume: ["pending"],
   assign: ["new", "qualifying", "qualified", "reopened"],
   resolve: ["assigned", "in_progress", "pending", "escalated"],
+  transmit_treatment: ["assigned", "in_progress", "pending", "escalated"],
   close: ["resolved"],
   request_reopen: ["resolved", "closed", "rejected"],
   approve_reopen: ["resolved", "closed", "rejected"],
@@ -138,6 +151,7 @@ const TICKET_ACTION_STATUSES: Record<TicketAction, RequestStatus[]> = {
   cancel: ["new", "qualifying", "qualified", "assigned", "in_progress", "pending"],
   reject: ["new", "qualifying", "qualified", "assigned", "in_progress", "pending"],
   escalate: ["qualifying", "assigned", "in_progress", "pending"],
+  escalate_to_director: ["qualifying", "assigned", "in_progress", "pending"],
   change_priority: ["new", "qualifying", "qualified", "assigned", "in_progress", "pending", "escalated", "reopened"],
   change_service: ["new", "qualifying", "qualified", "reopened"],
   transfer_direction: ["new", "qualifying", "qualified", "assigned", "in_progress", "pending", "escalated", "reopened"],
@@ -163,8 +177,11 @@ export function canTicketAction(
   if (!TICKET_ACTION_STATUSES[action].includes(status)) return false;
   if (options.isRequester === true && !OWN_REQUEST_ALLOWED_ACTIONS.has(action)) return false;
 
-  if (action === "resolve" && role === "director") {
-    return status === "escalated";
+  // BR-TRANSMIT-001 : "Terminer le traitement" et "Transmettre le traitement" sont
+  // réservés à l'intervenant actuel — remplace l'ancienne restriction "director
+  // uniquement si escaladé" (le rôle seul ne suffit plus, quel qu'il soit).
+  if (action === "resolve" || action === "transmit_treatment") {
+    return options.isAssignedToMe === true;
   }
   if (action === "requester_edit") return options.isRequester === true;
   if (action === "self_assign") return options.hasAssignee !== true;

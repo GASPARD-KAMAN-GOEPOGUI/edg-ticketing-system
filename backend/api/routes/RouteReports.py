@@ -8,6 +8,8 @@ Endpoints JSON :
   GET /reports/by-unity?start=...&end=...&direction_id=...
   GET /reports/decision?start=...&end=...&direction_id=...
   GET /reports/sla?start=...&end=...
+  GET /reports/sla/reopen-stats?start=...&end=...
+  GET /reports/interventions?start=...&end=...
 
 Exports (ajout de ?format=csv|excel|pdf) :
   GET /reports/daily/export
@@ -445,3 +447,27 @@ async def export_sla(
         title="Rapport Conformité SLA",
         subtitle=data["period"],
     )
+
+
+@router.get("/sla/reopen-stats")
+async def sla_reopen_stats(
+    start: Optional[date] = Query(None),
+    end: Optional[date] = Query(None),
+    svc: ReportService = Depends(_svc),
+):
+    """BR-SLA-REOPEN-001 — statistiques croisées cycles SLA / réouvertures
+    (tickets réouverts, durée moyenne 1er traitement vs après réouverture,
+    nombre moyen de réouvertures, conformité SLA par type de cycle)."""
+    return await svc.sla_reopen_stats(start, end)
+
+
+@router.get("/interventions")
+async def intervention_stats(
+    start: Optional[date] = Query(None),
+    end: Optional[date] = Query(None),
+    svc: ReportService = Depends(_svc),
+):
+    """BR-TRACE-001 — statistiques agrégées sur les interventions (nombre,
+    intervenants distincts, durée moyenne/cumulée, transmissions/résolutions/
+    réouvertures, temps passé par agent/service/département)."""
+    return await svc.intervention_stats(start, end)

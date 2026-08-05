@@ -13,7 +13,7 @@ import { fetchUser, fetchUsers, buildAvatarUrl } from "@/lib/api/accounts";
 import { cn, initialsFor } from "@/lib/utils";
 import {
   ClipboardList, UserPlus, RotateCcw,
-  Clock, Inbox, AlertTriangle, Wrench, Users,
+  Clock, Inbox, AlertTriangle, Wrench, Users, ArrowLeft,
 } from "lucide-react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -22,7 +22,7 @@ import type { RequestItem } from "@/lib/mock-data";
 
 export const Route = createFileRoute("/app/chief-inbox")({
   beforeLoad: () => requireRole("chief-service", "admin"),
-  head: () => ({ meta: [{ title: "Boîte de traitement — EDG Support" }] }),
+  head: () => ({ meta: [{ title: "Centre de répartition — EDG Support" }] }),
   component: ChiefInbox,
 });
 
@@ -131,7 +131,15 @@ function TicketRow({ r, detailRoute, requesterAvatar }: { r: RequestItem; detail
 // rôle et navigation ticket, mais la même interface — seul le périmètre de
 // données change (service unique vs département entier).
 
-export function ChiefInbox() {
+type ChiefInboxProps = {
+  /** Lot 3.4 — drill-down depuis AggregatedServiceDashboard (department-inbox
+   * uniquement) : filtre client-side sur un seul service du département. Non fourni
+   * pour /app/chief-inbox (route standard, comportement strictement inchangé). */
+  filterUnitId?: string;
+  onBackToOverview?: () => void;
+};
+
+export function ChiefInbox({ filterUnitId, onBackToOverview }: ChiefInboxProps = {}) {
   const sessionUser = useUser();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isDepartmentSpace = pathname.startsWith("/app/department-inbox");
@@ -152,7 +160,10 @@ export function ChiefInbox() {
     enabled: !!sessionUser?.id,
   });
 
-  const allItems = queueData?.items ?? [];
+  const allItems = useMemo(() => {
+    const items = queueData?.items ?? [];
+    return filterUnitId ? items.filter((r) => r.serviceId === filterUnitId) : items;
+  }, [queueData?.items, filterUnitId]);
 
   const toAssign   = useMemo(() => allItems.filter(isToAssign),      [allItems]);
   const toReopen   = useMemo(() => allItems.filter(isReopenPending), [allItems]);
@@ -217,14 +228,29 @@ export function ChiefInbox() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
       >
+        {onBackToOverview && (
+          <button
+            type="button"
+            onClick={onBackToOverview}
+            className="mb-2 flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" /> Retour à la vue d'ensemble
+          </button>
+        )}
         <div className="flex items-center gap-2">
           <ClipboardList className="h-6 w-6 text-primary" />
+          {/* Lot 5 — terminologie validée : ce composant reste "Centre de répartition"
+              que ce soit à son propre niveau (chief-service) ou en drill-down depuis
+              le Centre de pilotage (chief-departement, qui garde son propre libellé
+              sur l'écran d'ensemble — AggregatedServiceDashboard). */}
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-            {isDepartmentSpace ? "Boîte de traitement — Département" : "Boîte de traitement"}
+            Centre de répartition
           </h1>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          Tickets de votre {scopeLabel} nécessitant une action de votre part.
+          {filterUnitId
+            ? "Tickets de ce service nécessitant une action de votre part."
+            : `Tickets de votre ${scopeLabel} nécessitant une action de votre part.`}
         </p>
       </motion.header>
 

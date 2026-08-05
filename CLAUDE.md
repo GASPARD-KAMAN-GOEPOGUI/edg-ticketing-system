@@ -70,7 +70,7 @@ Le secrétaire a l'autorité complète de routage vers n'importe quel niveau —
 
 **Routes publiques:** `/`, `/login`, `/register`, `/admin-login`, `/forgot-password`, `/help`, `/track`, `/create-request`, `/knowledge`
 **Routes app protégée:** `/app`, `/app/requests`, `/app/requests/:id`, `/app/requests/history`, `/app/new`, `/app/queue`, `/app/triage`, `/app/my-tickets`, `/app/supervision`, `/app/direction`, `/app/dg`, `/app/chief-inbox`, `/app/reports`, `/app/sla-center`, `/app/notifications`, `/app/knowledge`, `/app/profile`
-**Routes admin (`/app/admin/*`):** users, security, directions, units, org, priorities, references, sla, routing, knowledge, communication, logs, audit, settings, homepage
+**Routes admin (`/app/admin/*`):** users, security, directions, directions/$id, departments, units, org, priorities, references, sla, routing, knowledge, communication, logs, audit, homepage (pas de route `settings` dédiée — réglages répartis entre communication, references, priorities, sla, routing, homepage)
 
 **Session/Auth:** `src/lib/session.ts` — `getRole()` décode le JWT access token en priorité (rôle local = UX only, le vrai rôle vient toujours du JWT signé serveur / re-vérifié en DB côté backend)
 
@@ -189,7 +189,7 @@ Déclenchement via compteur `sessionStorage` (`edg.admin.fail_count`) : 1ère er
 
 **Écarts CDC connus (dernier audit 2026-06-24, score 112/116 = 96,6%):**
 - DG5 : ✅ corrigé (vérifié 2026-07-04) — `/app/dg` dispose d'un panneau "Annonce globale" fonctionnel (titre/corps/catégorie/priorité + publication)
-- S9 : `DISABLE_AUTH=True` en `.env` — action manuelle requise avant mise en production
+- S9 : ✅ corrigé (vérifié 2026-08-01, audit espace administrateur) — `backend/.env` a désormais `DISABLE_AUTH=False`
 
 ---
 

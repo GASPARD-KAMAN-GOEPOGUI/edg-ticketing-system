@@ -103,7 +103,7 @@ function getActions(n: Notif): ActionDef[] {
   const t = n.title.toLowerCase();
   if (t.includes("sla"))
     return [
-      { label: "Voir la demande", icon: ArrowRight, variant: "outline", action: "navigate" },
+      { label: "Voir le ticket", icon: ArrowRight, variant: "outline", action: "navigate" },
       { label: "Prendre en charge", icon: Zap, variant: "default", action: "navigate" },
     ];
   if (t.includes("escalade"))
@@ -123,7 +123,7 @@ function getActions(n: Notif): ActionDef[] {
   // Toutes les notifications liées à une demande (assignée, routée, rejetée, etc.)
   if (n.requestId && n.source === "request")
     return [
-      { label: "Voir la demande", icon: ArrowRight, variant: "outline", action: "navigate" },
+      { label: "Voir le ticket", icon: ArrowRight, variant: "outline", action: "navigate" },
     ];
   return [];
 }
@@ -236,14 +236,14 @@ function NotifListCard({
                 onToggleRead(n.id);
                 if (a.action === "navigate") {
                   if (!navigateNotification(n, navigate, role)) {
-                    toast.info("Aucune demande liée à cette notification.");
+                    toast.info("Aucun ticket lié à cette notification.");
                   }
                 } else if (a.action === "close") {
                   if (n.requestId) onClose(n.requestId);
-                  else toast.info("Aucune demande liée à cette notification.");
+                  else toast.info("Aucun ticket lié à cette notification.");
                 } else if (a.action === "reopen") {
                   if (n.requestId) onReopen(n.requestId);
-                  else toast.info("Aucune demande liée à cette notification.");
+                  else toast.info("Aucun ticket lié à cette notification.");
                 }
               }}
             >
@@ -405,14 +405,14 @@ function NotifGridCard({
                 onToggleRead(n.id);
                 if (a.action === "navigate") {
                   if (!navigateNotification(n, navigate, role)) {
-                    toast.info("Aucune demande liée à cette notification.");
+                    toast.info("Aucun ticket lié à cette notification.");
                   }
                 } else if (a.action === "close") {
                   if (n.requestId) onClose(n.requestId);
-                  else toast.info("Aucune demande liée à cette notification.");
+                  else toast.info("Aucun ticket lié à cette notification.");
                 } else if (a.action === "reopen") {
                   if (n.requestId) onReopen(n.requestId);
-                  else toast.info("Aucune demande liée à cette notification.");
+                  else toast.info("Aucun ticket lié à cette notification.");
                 }
               }}
             >
@@ -589,14 +589,14 @@ function Notifications() {
 
   const closeMut = useMutation({
     mutationFn: (id: string) => closeRequest(id),
-    onSuccess: () => { invalidateRequests(); toast.success("Demande clôturée."); },
-    onError: () => toast.error("Impossible de clôturer la demande."),
+    onSuccess: () => { invalidateRequests(); toast.success("Ticket clôturé."); },
+    onError: () => toast.error("Impossible de clôturer le ticket."),
   });
 
   const reopenMut = useMutation({
     mutationFn: (id: string) => requestReopen(id, "Réouverture demandée"),
-    onSuccess: () => { invalidateRequests(); toast.success("Demande renvoyée pour réouverture."); },
-    onError: () => toast.error("Impossible de rouvrir la demande."),
+    onSuccess: () => { invalidateRequests(); toast.success("Ticket renvoyé pour réouverture."); },
+    onError: () => toast.error("Impossible de rouvrir le ticket."),
   });
 
   const cardProps = {
@@ -681,7 +681,7 @@ function Notifications() {
         </div>
         <div className="flex gap-1 rounded-2xl border border-border/40 bg-card/40 p-1">
           {(["all", "request", "announcement"] as const).map((s) => {
-            const labels = { all: "Tout", request: "Demandes", announcement: "Annonces" };
+            const labels = { all: "Tout", request: "Tickets", announcement: "Annonces" };
             return (
               <button
                 key={s}

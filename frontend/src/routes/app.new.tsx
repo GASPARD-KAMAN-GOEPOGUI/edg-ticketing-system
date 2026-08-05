@@ -5,7 +5,7 @@ import { requireAuth } from "@/lib/auth-guard";
 // Le form est rendu en Dialog par le layout parent app.tsx.
 // Le requester_id est forcé depuis le JWT côté backend (C-02) — aucun rôle ne peut usurper.
 export const Route = createFileRoute("/app/new")({
-  head: () => ({ meta: [{ title: "Nouvelle demande — EDG Support" }] }),
+  head: () => ({ meta: [{ title: "Nouveau ticket — EDG Support" }] }),
   beforeLoad: () => requireAuth(),
   component: () => null,
 });

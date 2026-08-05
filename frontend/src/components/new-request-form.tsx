@@ -68,7 +68,7 @@ export function NewRequestForm({ onClose }: NewRequestFormProps) {
   const validateForm = (): ValidationErrors => {
     const errors: ValidationErrors = {};
     if (!form.title.trim()) {
-      errors.title = "Le titre de la demande est obligatoire.";
+      errors.title = "Le titre du ticket est obligatoire.";
     }
     if (!form.description.trim()) {
       errors.description = "La description détaillée est obligatoire.";
@@ -103,15 +103,15 @@ export function NewRequestForm({ onClose }: NewRequestFormProps) {
         const refMatch = err.message.match(/réf\.\s+([^\)]+)\)/);
         setDuplicateRef(refMatch?.[1]?.trim() ?? "—");
       } else if (err instanceof ApiError) {
-        toast.error(err.message || "Impossible de créer la demande.");
+        toast.error(err.message || "Impossible de créer le ticket.");
       } else {
-        toast.error("Impossible de créer la demande. Veuillez réessayer.");
+        toast.error("Impossible de créer le ticket. Veuillez réessayer.");
       }
       setSubmitting(false);
       return;
     }
 
-    toast.success("La demande a été créée avec succès.", {
+    toast.success("Le ticket a été créé avec succès.", {
       description: `Référence ${result.ref}.`,
       icon: <CheckCircle2 className="h-4 w-4 text-success" />,
     });
@@ -130,7 +130,7 @@ export function NewRequestForm({ onClose }: NewRequestFormProps) {
         }
       }
       if (uploadFailed) {
-        toast.warning("Demande créée, pièces jointes incomplètes.", {
+        toast.warning("Ticket créé, pièces jointes incomplètes.", {
           description: "Certaines pièces jointes n'ont pas pu être téléversées.",
         });
       }
@@ -139,8 +139,8 @@ export function NewRequestForm({ onClose }: NewRequestFormProps) {
     try {
       await navigate({ to: "/app/requests/$id", params: { id: String(result.id) } });
     } catch {
-      toast.warning("Demande créée, mais l'ouverture automatique a échoué.", {
-        description: "Retrouvez-la dans Mes demandes.",
+      toast.warning("Ticket créé, mais l'ouverture automatique a échoué.", {
+        description: "Retrouvez-le dans Mes tickets.",
       });
       setSubmitting(false);
     }
@@ -173,17 +173,17 @@ export function NewRequestForm({ onClose }: NewRequestFormProps) {
       <Dialog open={duplicateRef !== null} onOpenChange={(o) => { if (!o) setDuplicateRef(null); }}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Demande déjà soumise</DialogTitle>
+            <DialogTitle>Ticket déjà soumis</DialogTitle>
             <DialogDescription>
-              Une demande identique est déjà en cours de traitement.
+              Un ticket identique est déjà en cours de traitement.
             </DialogDescription>
           </DialogHeader>
           <div className="rounded-xl border border-amber-300/40 bg-amber-50/60 dark:bg-amber-950/20 p-4 text-sm">
-            <p className="text-muted-foreground">Référence de votre demande existante :</p>
+            <p className="text-muted-foreground">Référence de votre ticket existant :</p>
             <p className="mt-1 font-mono text-lg font-bold tracking-widest">{duplicateRef}</p>
           </div>
           <p className="text-sm text-muted-foreground">
-            Consultez l'avancement de cette demande dans votre espace personnel avant d'en soumettre une nouvelle.
+            Consultez l'avancement de ce ticket dans votre espace personnel avant d'en soumettre un nouveau.
           </p>
           <DialogFooter className="gap-2 sm:flex-row">
             <Button variant="outline" className="rounded-full" onClick={() => setDuplicateRef(null)}>
@@ -193,7 +193,7 @@ export function NewRequestForm({ onClose }: NewRequestFormProps) {
               className="rounded-full gradient-primary"
               onClick={() => { setDuplicateRef(null); navigate({ to: "/app/requests" }); }}
             >
-              Voir mes demandes
+              Voir mes tickets
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -202,7 +202,7 @@ export function NewRequestForm({ onClose }: NewRequestFormProps) {
       <form onSubmit={submit} className="space-y-5" noValidate>
         {/* Titre */}
         <div>
-          <Label>Titre de la demande</Label>
+          <Label>Titre du ticket</Label>
           <Input
             required
             className="mt-1.5 h-11"
@@ -280,7 +280,7 @@ export function NewRequestForm({ onClose }: NewRequestFormProps) {
           >
             {submitting ? (
               <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Envoi en cours…</>
-            ) : "Soumettre la demande"}
+            ) : "Soumettre le ticket"}
           </Button>
         </div>
       </form>

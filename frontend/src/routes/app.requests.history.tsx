@@ -238,9 +238,9 @@ function RequestHistory() {
   const currentTab = TABS.find((t) => t.key === safeTab)!;
 
   const emptyMessage: Record<TerminalStatus, string> = {
-    closed: "Aucune demande clôturée dans l'historique.",
-    cancelled: "Aucune demande annulée dans l'historique.",
-    rejected: "Aucune demande rejetée dans l'historique.",
+    closed: "Aucun ticket clôturé dans l'historique.",
+    cancelled: "Aucun ticket annulé dans l'historique.",
+    rejected: "Aucun ticket rejeté dans l'historique.",
   };
 
   return (
@@ -259,7 +259,7 @@ function RequestHistory() {
               className="flex items-center gap-1 hover:text-foreground transition-colors"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
-              Mes demandes
+              Mes tickets
             </Link>
           </div>
           <div className="flex items-center gap-2">
@@ -267,7 +267,7 @@ function RequestHistory() {
             <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Historique</h1>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            {total} demande{total > 1 ? "s" : ""} {statusLabels[safeTab].toLowerCase()}
+            {total} ticket{total > 1 ? "s" : ""} {statusLabels[safeTab].toLowerCase()}
             {total > 1 ? "s" : ""}.
           </p>
         </div>

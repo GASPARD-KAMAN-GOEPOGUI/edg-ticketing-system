@@ -52,8 +52,9 @@ Source: `backend/api/core/ticket_actions.py`.
 | Action | Roles backend | Note |
 | --- | --- | --- |
 | `qualify` | agent-support, chief-service, chief-departement, admin | qualification/orientation |
-| `assign` | agent-support, chief-service, chief-departement, admin | agent seulement auto-assignation; chief-service vers agent de son service; chief-departement vers agent de n'importe quel service de son departement |
-| `resolve` | agent-support, chief-service, chief-departement, director, admin | director seulement si ticket escalade/arbitrage |
+| `assign` | agent-support, chief-service, admin | Lot 3.1 : chief-departement retire — agent seulement auto-assignation, chief-service vers agent de son service |
+| `resolve` ("Terminer le traitement") | agent-support, chief-service, chief-departement, director, admin | BR-TRANSMIT-001 : reserve a l'intervenant actuel (`assignee_id == actor.id`), quel que soit le role parmi ceux-ci ; resume/solution/travail realise obligatoires |
+| `transmit_treatment` ("Transmettre le traitement") | agent-support, chief-service, chief-departement, director, admin | BR-TRANSMIT-001 : reserve a l'intervenant actuel ; cible libre dans toute l'organisation (role traitant + actif) ; statut preserve |
 | `close` | user, agent-support, chief-service, chief-departement, director, admin | demandeur peut cloturer sa demande resolue |
 | `request_reopen` | user, agent-support, chief-service, chief-departement, director, admin | seul demandeur via scope |
 | `reopen`, `reject_reopen` | chief-service, chief-departement, director, admin | demande de reouverture requise |

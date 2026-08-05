@@ -178,7 +178,7 @@ function RoutingAdminPage() {
             Règles de routage
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Affectez automatiquement chaque demande à la bonne direction et au bon service.
+            Affectez automatiquement chaque ticket à la bonne direction et au bon service.
           </p>
         </div>
         <Button onClick={openCreate} className="rounded-full gradient-primary text-background shadow-lg shadow-primary/30">

@@ -26,6 +26,16 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
 BYPASS_TRANSITION_ROLES = frozenset({"admin"})
 GLOBAL_SCOPE_ROLES = frozenset({"admin"})
 OWN_REQUEST_ALLOWED_ACTIONS = frozenset({"close", "cancel", "request_reopen"})
+
+# BR-TRANSMIT-001 — workflow collaboratif dynamique post-file d'attente. Rôles
+# traitants pouvant devenir "intervenant actuel" (request.assignee_id) et donc
+# transmettre/terminer un traitement. L'admin n'en fait volontairement pas partie :
+# son intervention reste possible mais exceptionnelle (bypass séparé, cf.
+# assert_is_current_handler) plutôt qu'un traitement normal.
+TREATING_ROLES = frozenset({"agent-support", "chief-service", "chief-departement", "director"})
+# Statuts compatibles avec une transmission ou une terminaison de traitement — un
+# ticket doit déjà être pris en charge activement. Identique à ALLOWED_TRANSITIONS["resolved"].
+COLLABORATIVE_STATUSES = frozenset({"assigned", "in_progress", "pending", "escalated"})
 STATUS_ALIASES = {
     "cancalled": "cancelled",
     "canceled": "cancelled",
@@ -36,7 +46,13 @@ QUALIFIABLE_STATUSES = frozenset({"new", "qualifying", "qualified", "reopened"})
 
 ACTION_ALLOWED_ROLES: dict[str, set[str]] = {
     "qualify": {"agent-support", "chief-service", "chief-departement", "admin"},
-    "assign": {"agent-support", "chief-service", "chief-departement", "admin"},
+    # Lot 3.1 : "Affecter/Reaffecter" retire a chief-departement — reste agent-support
+    # (auto-assignation), chief-service (son propre service), admin (global).
+    "assign": {"agent-support", "chief-service", "admin"},
+    # BR-TRANSMIT-001 (remplace Lot 3.2) : "Terminer le traitement" est desormais ouvert
+    # a chief-departement — la restriction "un chef de departement ne traite jamais
+    # lui-meme" ne s'applique plus des lors qu'il est devenu intervenant actuel via une
+    # transmission (assert_is_current_handler verifie assignee_id == actor.id).
     "resolve": {"agent-support", "chief-service", "chief-departement", "director", "admin"},
     "close": {"user", "agent-support", "chief-service", "chief-departement", "director", "admin"},
     "request_reopen": {"user", "agent-support", "chief-service", "chief-departement", "director", "admin"},
@@ -49,7 +65,14 @@ ACTION_ALLOWED_ROLES: dict[str, set[str]] = {
     "transfer_direction": {"director", "admin"},
     "reject": {"chief-service", "chief-departement", "admin"},
     "escalate": {"agent-support", "chief-service", "chief-departement", "director", "admin"},
+    # Lot 3.3 : "Escalade exceptionnelle" — court-circuite find_hierarchical_chief pour
+    # cibler directement le directeur. Reservee a chief-departement.
+    "escalate_to_director": {"chief-departement"},
     "change_priority": {"chief-service", "chief-departement", "director", "admin"},
+    # BR-TRANSMIT-001 : "Transmettre le traitement" — libre parmi les rôles traitants,
+    # la vraie garde est assert_is_current_handler (assignee_id == actor.id), le rôle
+    # ne sert que de filtre de sécurité général.
+    "transmit_treatment": {"agent-support", "chief-service", "chief-departement", "director", "admin"},
 }
 
 TRIAGE_SCOPE_ACTIONS = frozenset({"qualify", "resolve"})
@@ -261,16 +284,15 @@ def assert_assignment_allowed(
             )
         return
 
-    if role in {"chief-service", "chief-departement"}:
+    if role == "chief-service":
         if target_role_name != "agent-support":
             raise ForbiddenException(
                 "Un chef peut assigner uniquement un agent de son service.",
                 error_code=ErrorCode.FORBIDDEN,
             )
-        # Seul chief-departement beneficie de l'elargissement au perimetre departemental ;
-        # chief-service reste strictement borne a sa propre unite, meme si le parametre
-        # est fourni par erreur par l'appelant.
-        scope_ids = {str(v) for v in (allowed_scope_unity_ids or set())} if role == "chief-departement" else set()
+        # Lot 3.1 : chief-departement retire d'ACTION_ALLOWED_ROLES["assign"] — cette
+        # branche n'est plus atteignable que par chief-service, borne a sa propre unite.
+        scope_ids: set[str] = set()
         if actor_unity_id is not None:
             scope_ids.add(str(actor_unity_id))
         if target_unity_id is None or str(target_unity_id) not in scope_ids:
@@ -358,18 +380,13 @@ def assert_service_reassignment_allowed(
     )
 
 
-def assert_exceptional_resolve_reason(actor_role: str | None, reason: str | None) -> None:
-    """Lot 2.6 : la resolution par chief-service devient "exceptionnelle" — un motif
-    est desormais obligatoire, meme mecanique que assert_service_reassignment_allowed
-    pour reassign. Les autres roles autorises a resoudre (agent-support, director,
-    admin) ne sont pas concernes (chief-departement retire de `resolve` au Lot 3)."""
-    role = normalize_role(actor_role)
-    if role != "chief-service":
-        return
+def assert_exceptional_escalation_reason(reason: str | None) -> None:
+    """Lot 3.3 : motif obligatoire pour l'escalade exceptionnelle "Escalader au
+    Directeur" — meme mecanique que assert_exceptional_resolve_reason."""
     clean_reason = reason.strip() if isinstance(reason, str) else ""
     if not clean_reason:
         raise BusinessException(
-            "Un motif est obligatoire pour resoudre un ticket en tant que chef de service.",
+            "Un motif est obligatoire pour une escalade exceptionnelle au directeur.",
             error_code=ErrorCode.MISSING_REQUIRED_FIELD,
         )
 
@@ -392,14 +409,15 @@ def assert_escalation_allowed(actor: Any, request: Any) -> None:
 
 
 def assert_role_specific_action_constraints(actor: Any, request: Any, action: str) -> None:
-    role = normalize_role(_value(actor, "role"))
-    current_status = normalize_status(_value(request, "request_status"))
+    """Point d'extension pour des contraintes propres à un rôle sur une action donnée.
 
-    if role == "director" and action == "resolve" and current_status != "escalated":
-        raise ForbiddenException(
-            "Un directeur peut resoudre uniquement un ticket escalade ou en arbitrage.",
-            error_code=ErrorCode.FORBIDDEN,
-        )
+    BR-TRANSMIT-001 (2026-08) : l'ancienne contrainte "un directeur ne peut résoudre
+    qu'un ticket déjà escaladé" a été retirée — un directeur peut désormais terminer
+    le traitement de tout ticket dont il est l'intervenant actuel (voir
+    assert_is_current_handler), y compris reçu par transmission sans escalade
+    préalable. Aucune contrainte spécifique n'est actuellement nécessaire ici.
+    """
+    return
 
 
 def assert_ticket_action(
@@ -424,4 +442,49 @@ def assert_ticket_action(
             _value(request, "request_status"),
             target_status,
             actor_role=actor_role,
+        )
+
+
+def assert_is_current_handler(
+    actor: Any,
+    request: Any,
+    *,
+    allowed_statuses: frozenset[str] = COLLABORATIVE_STATUSES,
+) -> None:
+    """
+    BR-TRANSMIT-001 — garde générique du workflow collaboratif dynamique
+    (transmission / terminaison de traitement).
+
+    La règle principale n'est plus le rôle seul mais : l'acteur est-il
+    l'intervenant actuel du ticket (request.assignee_id == actor.id) ? Le rôle ne
+    sert que de filtre de sécurité général (uniquement les rôles traitants).
+
+    admin : bypass volontaire, cohérent avec GLOBAL_SCOPE_ROLES ailleurs dans ce
+    module — reste une intervention exceptionnelle, tracée via actor_role="admin"
+    dans l'audit (workflow_detail.infos), jamais un traitement normal.
+    """
+    role = normalize_role(_value(actor, "role"))
+    if role in GLOBAL_SCOPE_ROLES:
+        return
+
+    if role not in TREATING_ROLES:
+        raise ForbiddenException(
+            "Seuls les rôles de traitement (agent support, chef de service, chef de "
+            "département, directeur) peuvent transmettre ou terminer un traitement.",
+            error_code=ErrorCode.FORBIDDEN,
+        )
+
+    actor_id = _value(actor, "id")
+    assignee_id = _value(request, "assignee_id")
+    if assignee_id is None or actor_id is None or str(assignee_id) != str(actor_id):
+        raise ForbiddenException(
+            "Vous n'êtes plus l'intervenant actuel de ce ticket.",
+            error_code=ErrorCode.FORBIDDEN,
+        )
+
+    current_status = normalize_status(_value(request, "request_status"))
+    if current_status not in allowed_statuses:
+        raise BusinessException(
+            f"Impossible d'effectuer cette action : le ticket est actuellement {current_status!r}.",
+            error_code=ErrorCode.INVALID_STATUS_TRANSITION,
         )

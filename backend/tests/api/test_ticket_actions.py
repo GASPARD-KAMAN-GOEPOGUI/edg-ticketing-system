@@ -283,10 +283,15 @@ def test_chief_and_admin_can_assign_other_agents():
         )
 
 
-def test_chief_departement_can_assign_across_department_scope():
+def test_chief_departement_can_no_longer_assign():
+    """Lot 3.1 (narrowing valide) : chief-departement ne peut plus affecter/reaffecter
+    un agent, quel que soit le perimetre fourni — il pilote plusieurs services mais
+    ne descend plus au niveau assignation individuelle."""
     current_ticket = ticket(status="qualified", unity_id=2, assignee_id=None)
 
-    # Sans perimetre departemental fourni, un chef-departement reste borne a sa propre unite.
+    with pytest.raises(ForbiddenException):
+        assert_action_allowed("chief-departement", "assign")
+
     with pytest.raises(ForbiddenException):
         assert_assignment_allowed(
             actor("chief-departement", id=3, unity_id=1),
@@ -294,20 +299,12 @@ def test_chief_departement_can_assign_across_department_scope():
             assignee_id=2,
             target_unity_id=2,
             target_role="agent-support",
+            allowed_scope_unity_ids={1, 2, 3},
         )
 
-    # Avec le perimetre departemental (departement + services rattaches), l'assignation
-    # a un agent d'un autre service du meme departement est autorisee.
-    assert_assignment_allowed(
-        actor("chief-departement", id=3, unity_id=1),
-        current_ticket,
-        assignee_id=2,
-        target_unity_id=2,
-        target_role="agent-support",
-        allowed_scope_unity_ids={1, 2, 3},
-    )
-
-    # Un chef-service ne beneficie pas de cet elargissement meme si le perimetre est fourni par erreur.
+    # Regression : chief-service reste fonctionnel, borne a sa propre unite (le
+    # parametre allowed_scope_unity_ids, meme fourni par erreur, n'a plus d'effet).
+    assert_action_allowed("chief-service", "assign")
     with pytest.raises(ForbiddenException):
         assert_assignment_allowed(
             actor("chief-service", id=3, unity_id=1),
@@ -446,26 +443,35 @@ def test_director_scope_is_limited_to_direction_services():
         )
 
 
-def test_director_resolves_only_escalated_tickets():
+def test_director_can_resolve_any_active_status():
+    """BR-TRANSMIT-001 (remplace l'ancien test_director_resolves_only_escalated_tickets) :
+    l'ancienne limite "un directeur ne peut résoudre qu'un ticket déjà escaladé" a été
+    retirée — un directeur peut désormais terminer le traitement de tout ticket dont
+    il est l'intervenant actuel, quel que soit son statut actif, y compris reçu par
+    transmission sans escalade préalable (assert_role_specific_action_constraints n'a
+    plus de contrainte propre à director/resolve)."""
     current_actor = actor("director", id=4, unity_id=1)
 
-    assert_ticket_action(
-        current_actor,
-        ticket(status="escalated", unity_id=2, direction_id=1),
-        "resolve",
-        target_status="resolved",
-        allowed_dir_unity_ids={1, 2, 3},
-    )
+    for status in ("assigned", "in_progress", "pending", "escalated"):
+        assert_ticket_action(
+            current_actor,
+            ticket(status=status, unity_id=2, direction_id=1),
+            "resolve",
+            target_status="resolved",
+            allowed_dir_unity_ids={1, 2, 3},
+        )
 
-    for status in ("assigned", "in_progress", "pending"):
-        with pytest.raises(ForbiddenException):
-            assert_ticket_action(
-                current_actor,
-                ticket(status=status, unity_id=2, direction_id=1),
-                "resolve",
-                target_status="resolved",
-                allowed_dir_unity_ids={1, 2, 3},
-            )
+
+def test_chief_departement_can_now_resolve():
+    """BR-TRANSMIT-001 (remplace l'ancien test_chief_departement_can_no_longer_resolve) :
+    l'exclusion Lot 3.2 est levée — un chef de département peut désormais terminer le
+    traitement d'un ticket dont il est l'intervenant actuel (assert_is_current_handler
+    vérifie assignee_id == actor.id ; le rôle n'est plus qu'un filtre général)."""
+    assert_action_allowed("chief-departement", "resolve")
+
+    # Regression : les autres roles autorises a resoudre restent inchanges.
+    for role in ("agent-support", "chief-service", "director", "admin"):
+        assert_action_allowed(role, "resolve")
 
 
 def test_ticket_action_combines_role_scope_and_transition():

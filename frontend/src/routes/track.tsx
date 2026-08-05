@@ -20,8 +20,8 @@ import type { RequestItem } from "@/lib/mock-data";
 export const Route = createFileRoute("/track")({
   head: () => ({
     meta: [
-      { title: "Suivre une demande — EDG Support" },
-      { name: "description", content: "Suivez l'avancement de votre demande EDG par numéro." },
+      { title: "Suivre un ticket — EDG Support" },
+      { name: "description", content: "Suivez l'avancement de votre ticket EDG par numéro." },
     ],
   }),
   component: Track,
@@ -63,7 +63,7 @@ function Track() {
       setFound(result);
     } catch {
       setNotFound(true);
-      toast.error("Aucune demande trouvée pour ces coordonnées.");
+      toast.error("Aucun ticket trouvé pour ces coordonnées.");
     } finally {
       setSearched(true);
       setLoading(false);
@@ -77,7 +77,7 @@ function Track() {
       <section className="mx-auto max-w-3xl px-4 py-12 sm:px-6 sm:py-20">
         <div className="text-center">
           <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-            Suivre votre demande
+            Suivre votre ticket
           </h1>
           <p className="mt-2 text-muted-foreground">
             Saisissez votre numéro de suivi pour consulter l'état d'avancement.
@@ -87,7 +87,7 @@ function Track() {
         <GlassCard strong className="mt-8 p-6 sm:p-8">
           <div className="grid gap-4 sm:grid-cols-[1fr_1fr_auto]">
             <div>
-              <Label>Numéro de demande</Label>
+              <Label>Numéro de ticket</Label>
               <Input
                 className="mt-1.5 h-12 font-mono"
                 placeholder="EDG-2026-XXXX"
@@ -106,7 +106,7 @@ function Track() {
                 onKeyDown={(e) => e.key === "Enter" && search()}
               />
               <p className="mt-1.5 text-[11px] text-muted-foreground">
-                Coordonnées liées au compte ayant soumis cette demande.
+                Coordonnées liées au compte ayant soumis ce ticket.
               </p>
             </div>
             <div className="flex items-end pb-[22px]">
@@ -125,7 +125,7 @@ function Track() {
         {searched && notFound && (
           <GlassCard className="mt-6 text-center">
             <p className="text-muted-foreground">
-              Aucune demande trouvée pour ce numéro.
+              Aucun ticket trouvé pour ce numéro.
             </p>
           </GlassCard>
         )}
@@ -148,7 +148,7 @@ function Track() {
             {isExternal && (
               <>
                 <div>
-                  <h3 className="mb-3 text-sm font-semibold">Avancement de votre demande</h3>
+                  <h3 className="mb-3 text-sm font-semibold">Avancement de votre ticket</h3>
                   <EscalationProgressBar
                     steps={externalProgressSteps(found.status)}
                   />
@@ -226,7 +226,7 @@ function Track() {
               <div className="space-y-4">
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="h-5 w-5 text-success" />
-                  <span className="font-semibold text-success">Demande résolue</span>
+                  <span className="font-semibold text-success">Ticket résolu</span>
                 </div>
                 <AppreciationForm
                   requestId={found.id}
@@ -236,7 +236,7 @@ function Track() {
                   onSubmit={(appr) => setAppreciation(appr)}
                   onReopen={() => {
                     setFound({ ...found, status: "reopened" });
-                    toast.info("Demande réouverte. Un agent vous contactera prochainement.");
+                    toast.info("Ticket réouvert. Un agent vous contactera prochainement.");
                   }}
                   onSave={async (data) => {
                     const hasExisting = !!(appreciation ?? found.appreciation);

@@ -406,7 +406,7 @@ function ReportsPage() {
           <Loader2 className="ml-auto h-4 w-4 animate-spin text-muted-foreground" />
         ) : (
           <span className="ml-auto text-xs text-muted-foreground">
-            {total.toLocaleString("fr-FR")} demandes chargées
+            {total.toLocaleString("fr-FR")} tickets chargés
           </span>
         )}
       </GlassCard>
@@ -489,7 +489,7 @@ function ReportsPage() {
           <div className="mb-4">
             <h3 className="font-semibold">Distribution par statut</h3>
             <p className="text-xs text-muted-foreground">
-              Répartition actuelle des demandes
+              Répartition actuelle des tickets
             </p>
           </div>
           {isLoading ? (
@@ -535,7 +535,7 @@ function ReportsPage() {
                   />
                   <Bar
                     dataKey="count"
-                    name="Demandes"
+                    name="Tickets"
                     fill="var(--chart-1)"
                     radius={[0, 6, 6, 0]}
                   />
@@ -654,7 +654,7 @@ function ReportsPage() {
                   <Legend wrapperStyle={{ fontSize: 12 }} />
                   <Bar
                     dataKey="demandes"
-                    name="Demandes"
+                    name="Tickets"
                     fill="var(--chart-1)"
                     radius={[0, 4, 4, 0]}
                   />

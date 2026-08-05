@@ -89,7 +89,11 @@ async def test_cdc_tous_les_roles_peuvent_creer_leur_propre_demande(auth_client,
 @pytest.mark.parametrize(
     ("role", "method", "path_suffix", "json_body", "query"),
     [
-        ("agent", "post", "/resolve", None, ""),
+        ("agent", "post", "/resolve", {
+            "summary": "Résumé de test",
+            "solution": "Solution de test",
+            "work_done": "Travail de test",
+        }, ""),
         ("chief", "post", "/assign", None, "?assignee_id=202"),
         ("director", "post", "/transfer-direction", {
             "target_direction_id": "9900",
@@ -224,7 +228,16 @@ async def test_cdc_scenario_soutenance_ticket_complet(auth_client):
 
         MOCK_ACCOUNTS["chief"].unity_id = 9901
         async with auth_client("chief") as c:
-            resolved = await c.post(f"/api/v1/requests/{rid}/resolve")
+            # BR-TRANSMIT-001 : "Terminer le traitement" — resume/solution/travail
+            # realise desormais obligatoires pour tout intervenant actuel.
+            resolved = await c.post(
+                f"/api/v1/requests/{rid}/resolve",
+                json={
+                    "summary": "Resolution directe par le chef de service, agent indisponible.",
+                    "solution": "Redemarrage du service concerne.",
+                    "work_done": "Diagnostic et redemarrage effectues par le chef de service.",
+                },
+            )
         assert resolved.status_code == 200
         resolved_data = resolved.json().get("data", resolved.json())
         assert resolved_data["request_status"] == "resolved"
@@ -247,7 +260,7 @@ async def test_cdc_scenario_soutenance_ticket_complet(auth_client):
             "assigned",
             "comment_added",
             "escalation_manual",
-            "resolved",
+            "treatment_completed",
             "closed",
         }.issubset(events)
     finally:

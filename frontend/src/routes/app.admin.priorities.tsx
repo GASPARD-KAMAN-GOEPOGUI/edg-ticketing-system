@@ -235,7 +235,7 @@ function PrioritiesAdminPage() {
             Niveaux de priorité
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Créez, modifiez et organisez les niveaux de priorité applicables aux demandes.
+            Créez, modifiez et organisez les niveaux de priorité applicables aux tickets.
           </p>
         </div>
         <Button
@@ -492,7 +492,7 @@ function PrioritiesAdminPage() {
                 <div>
                   <Label className="m-0">Actif</Label>
                   <p className="text-xs text-muted-foreground">
-                    Disponible dans les formulaires de demande
+                    Disponible dans les formulaires de ticket
                   </p>
                 </div>
                 <Switch
@@ -529,8 +529,8 @@ function PrioritiesAdminPage() {
             <code className="rounded bg-muted/60 px-1 font-mono text-xs">
               {deleteTarget?.slug}
             </code>{" "}
-            sera définitivement supprimé. Les demandes déjà enregistrées ne seront pas
-            modifiées.
+            sera définitivement supprimé. Les tickets déjà enregistrés ne seront pas
+            modifiés.
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteTarget(null)}>

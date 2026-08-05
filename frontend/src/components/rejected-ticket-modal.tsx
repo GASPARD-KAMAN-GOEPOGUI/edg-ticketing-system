@@ -47,14 +47,14 @@ export function RejectedTicketModal({ id, open, onClose }: Props) {
   const reopenMut = useMutation({
     mutationFn: (reason: string) => reopenRequest(id!, reason || undefined),
     onSuccess: () => {
-      toast.success("Demande réouverte — un agent va la reprendre en charge.");
+      toast.success("Ticket réouvert — un agent va le reprendre en charge.");
       qc.invalidateQueries({ queryKey: ["requests"] });
       qc.invalidateQueries({ queryKey: ["request", id] });
       setShowReopenForm(false);
       setReopenReason("");
       handleClose();
     },
-    onError: () => toast.error("Impossible de réouvrir la demande. Veuillez réessayer."),
+    onError: () => toast.error("Impossible de réouvrir le ticket. Veuillez réessayer."),
   });
 
   function handleClose() {
@@ -142,7 +142,7 @@ export function RejectedTicketModal({ id, open, onClose }: Props) {
               <div className="space-y-2">
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                   <FileText className="h-3.5 w-3.5" />
-                  Description de la demande
+                  Description du ticket
                 </div>
                 <p className="text-sm leading-relaxed rounded-xl border border-border/40 bg-background/50 px-4 py-3 text-foreground/90">
                   {r.description}
@@ -266,7 +266,7 @@ export function RejectedTicketModal({ id, open, onClose }: Props) {
                 onClick={() => setShowReopenForm(true)}
               >
                 <RotateCcw className="mr-1.5 h-4 w-4" />
-                Réouvrir la demande
+                Réouvrir le ticket
               </Button>
             )}
           </div>

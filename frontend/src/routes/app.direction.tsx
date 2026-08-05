@@ -59,7 +59,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 export const Route = createFileRoute("/app/direction")({
   beforeLoad: () => requireRole("director", "admin"),
-  head: () => ({ meta: [{ title: "Demandes à arbitrer / orienter — EDG Support" }] }),
+  head: () => ({ meta: [{ title: "Tickets à arbitrer / orienter — EDG Support" }] }),
   component: DirectionView,
 });
 
@@ -70,7 +70,6 @@ const ACTIVE_STATUSES = new Set([
 function DirectionView() {
   const sessionUser = useUser();
   const qc = useQueryClient();
-  const isDirectorRole = sessionUser?.role === "director";
   const directionId = sessionUser?.direction_id ?? (
     sessionUser?.role === "director" ? sessionUser?.unit_id : undefined
   );
@@ -79,11 +78,18 @@ function DirectionView() {
   const [ticketModal, setTicketModal] = useState<{ type: TicketModalType; ticket: RequestItem | null }>({ type: null, ticket: null });
   const [transferUnitId, setTransferUnitId]   = useState("");
   const [transferReason, setTransferReason]   = useState("");
+  // BR-TRANSMIT-001 : "Terminer le traitement" exige désormais résumé/solution/travail réalisé.
+  const [resolveSummary, setResolveSummary]   = useState("");
+  const [resolveSolution, setResolveSolution] = useState("");
+  const [resolveWorkDone, setResolveWorkDone] = useState("");
 
   const closeTicketModal = () => {
     setTicketModal({ type: null, ticket: null });
     setTransferUnitId("");
     setTransferReason("");
+    setResolveSummary("");
+    setResolveSolution("");
+    setResolveWorkDone("");
   };
 
   /* ── Queries ─────────────────────────────────────────────────────────── */
@@ -224,21 +230,16 @@ function DirectionView() {
   };
 
   const dirResolveMut = useMutation({
-    mutationFn: () => {
-      if (isDirectorRole && ticketModal.ticket?.status !== "escalated") {
-        throw new Error("DIRECTOR_RESOLVE_REQUIRES_ESCALATED");
-      }
-      return resolveRequest(ticketModal.ticket!.id, sessionUser?.id);
-    },
+    // BR-TRANSMIT-001 : "Terminer le traitement" — plus de restriction "ticket escaladé
+    // uniquement" pour le directeur ; le backend vérifie que l'acteur est l'intervenant
+    // actuel (assignee_id). Résumé/solution/travail réalisé désormais obligatoires.
+    mutationFn: () => resolveRequest(ticketModal.ticket!.id, {
+      summary: resolveSummary.trim(),
+      solution: resolveSolution.trim(),
+      work_done: resolveWorkDone.trim(),
+    }),
     onSuccess: () => { toast.success("Ticket résolu."); invalidateTickets(); closeTicketModal(); },
-    onError: (err: unknown) => {
-      const message = (err as { message?: string })?.message;
-      toast.error(
-        message === "DIRECTOR_RESOLVE_REQUIRES_ESCALATED"
-          ? "Le directeur peut résoudre uniquement un ticket escaladé/arbitrage."
-          : "Erreur lors de la résolution.",
-      );
-    },
+    onError: () => toast.error("Erreur lors de la résolution."),
   });
 
   const transferMut = useMutation({
@@ -354,7 +355,7 @@ function DirectionView() {
             {directionName}
           </div>
           <h1 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">
-            Demandes à arbitrer / orienter
+            Tickets à arbitrer / orienter
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Vue consolidée multi-services · {sessionUser?.name}
@@ -362,7 +363,7 @@ function DirectionView() {
         </div>
         <Button asChild variant="outline" className="rounded-full">
           <Link to="/app/requests">
-            Toutes les demandes <ArrowRight className="ml-1 h-3.5 w-3.5" />
+            Tous les tickets <ArrowRight className="ml-1 h-3.5 w-3.5" />
           </Link>
         </Button>
       </header>
@@ -613,14 +614,14 @@ function DirectionView() {
       {/* Ticket list — C6 */}
       <GlassCard>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-semibold">Demandes à arbitrer / orienter ({total})</h2>
+          <h2 className="font-semibold">Tickets à arbitrer / orienter ({total})</h2>
         </div>
         {isLoading ? (
           <div className="flex h-20 items-center justify-center">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground/40" />
           </div>
         ) : allItems.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Aucune demande à arbitrer ou orienter pour cette direction.</p>
+          <p className="text-sm text-muted-foreground">Aucun ticket à arbitrer ou orienter pour cette direction.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -637,9 +638,11 @@ function DirectionView() {
               <tbody>
                 {pagedItems.map((r) => {
                   const isActive = ACTIVE_STATUSES.has(r.status);
-                  const canResolveFromDirection = isDirectorRole
-                    ? r.status === "escalated"
-                    : isActive;
+                  // BR-TRANSMIT-001 : "Terminer le traitement" est réservé à l'intervenant
+                  // actuel (assignee_id) — plus de restriction "escaladé uniquement" pour
+                  // le directeur, ni d'accès pour un rôle non-traitant de ce ticket.
+                  const canResolveFromDirection = isActive
+                    && String(r.assigneeId ?? "") === String(sessionUser?.id ?? "");
                   return (
                   <tr key={r.id} className="border-t border-border/40 transition hover:bg-foreground/[0.02]">
                     <td className="py-2.5">
@@ -816,11 +819,11 @@ function DirectionView() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-success">
-              <CheckCircle2 className="h-4 w-4" /> Résoudre le ticket
+              <CheckCircle2 className="h-4 w-4" /> Terminer le traitement
             </DialogTitle>
             <DialogDescription>
-              Le directeur confirme uniquement la résolution d'un ticket escaladé/arbitrage.
-              Le demandeur sera notifié et pourra confirmer ou demander une réouverture.
+              L'ensemble du ticket est complètement traité. Le demandeur sera notifié
+              et pourra confirmer la résolution ou demander une réouverture.
             </DialogDescription>
           </DialogHeader>
           {ticketModal.ticket && (
@@ -829,15 +832,52 @@ function DirectionView() {
               <p className="mt-0.5 font-mono text-xs text-muted-foreground">{ticketModal.ticket.ref}</p>
             </div>
           )}
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="dir-resolve-summary">Résumé final *</Label>
+              <Textarea
+                id="dir-resolve-summary"
+                value={resolveSummary}
+                onChange={(e) => setResolveSummary(e.target.value)}
+                placeholder="Résumé de la résolution…"
+                rows={2}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="dir-resolve-solution">Solution appliquée *</Label>
+              <Textarea
+                id="dir-resolve-solution"
+                value={resolveSolution}
+                onChange={(e) => setResolveSolution(e.target.value)}
+                placeholder="Solution mise en œuvre…"
+                rows={2}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="dir-resolve-work-done">Travail réalisé *</Label>
+              <Textarea
+                id="dir-resolve-work-done"
+                value={resolveWorkDone}
+                onChange={(e) => setResolveWorkDone(e.target.value)}
+                placeholder="Détail du travail effectué…"
+                rows={2}
+              />
+            </div>
+          </div>
           <DialogFooter>
             <Button variant="ghost" className="rounded-full" onClick={closeTicketModal}>Annuler</Button>
             <Button
               className="rounded-full bg-success text-success-foreground hover:bg-success/90"
-              disabled={dirResolveMut.isPending || (isDirectorRole && ticketModal.ticket?.status !== "escalated")}
+              disabled={
+                dirResolveMut.isPending
+                || !resolveSummary.trim()
+                || !resolveSolution.trim()
+                || !resolveWorkDone.trim()
+              }
               onClick={() => dirResolveMut.mutate()}
             >
               {dirResolveMut.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-              Confirmer la résolution
+              Terminer le traitement
             </Button>
           </DialogFooter>
         </DialogContent>

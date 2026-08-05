@@ -191,9 +191,9 @@ export function NotificationPanel({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["requests"] });
       queryClient.invalidateQueries({ queryKey: ["notifications"] });
-      toast.success("Demande clôturée.");
+      toast.success("Ticket clôturé.");
     },
-    onError: () => toast.error("Impossible de clôturer la demande."),
+    onError: () => toast.error("Impossible de clôturer le ticket."),
   });
 
   const reopenMut = useMutation({
@@ -201,9 +201,9 @@ export function NotificationPanel({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["requests"] });
       queryClient.invalidateQueries({ queryKey: ["notifications"] });
-      toast.success("Demande renvoyée pour réouverture.");
+      toast.success("Ticket renvoyé pour réouverture.");
     },
-    onError: () => toast.error("Impossible de rouvrir la demande."),
+    onError: () => toast.error("Impossible de rouvrir le ticket."),
   });
 
   const markRead = (id: string) => {
@@ -268,7 +268,7 @@ export function NotificationPanel({
   const TABS: { key: FilterTab; label: string }[] = [
     { key: "all", label: `Toutes (${allNotifs.length})` },
     { key: "unread", label: `Non lues${unread > 0 ? ` (${unread})` : ""}` },
-    { key: "request", label: "Demandes" },
+    { key: "request", label: "Tickets" },
     { key: "announcement", label: "Annonces" },
     ...(alertTabCount > 0 ? [{ key: "alerts" as FilterTab, label: `Alertes (${alertTabCount})` }] : []),
   ];

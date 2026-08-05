@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 
@@ -10,6 +11,20 @@ from api.core.event_bus import AppEvent, emit as emit_event
 from api.repositories.RepositoryNotification import NotificationRepository
 
 logger = logging.getLogger(__name__)
+
+# Références fortes vers les tâches d'envoi d'email en arrière-plan — évite qu'elles
+# soient garbage-collectées avant complétion (piège classique asyncio.create_task).
+_background_email_tasks: set[asyncio.Task] = set()
+
+
+def _send_email_fire_and_forget(coro) -> None:
+    """Lance l'envoi d'email sans bloquer l'appelant. Le SMTP (Gmail) peut prendre
+    plusieurs secondes, ce qui retardait la réponse HTTP de close/resolve/etc. au
+    point de dépasser le timeout client (15s) — le ticket était bien mis à jour en
+    base mais le frontend affichait quand même une erreur générique."""
+    task = asyncio.create_task(coro)
+    _background_email_tasks.add(task)
+    task.add_done_callback(_background_email_tasks.discard)
 
 
 def _display_date(value) -> str:
@@ -154,7 +169,7 @@ async def emit(
                                         "NotificationEmitter : details email indisponibles : %s",
                                         detail_exc,
                                     )
-                            await send_notification_email(
+                            _send_email_fire_and_forget(send_notification_email(
                                 to_email=acc.email,
                                 recipient_name=name,
                                 title=title,
@@ -163,7 +178,7 @@ async def emit(
                                 action_label=action_label or "Voir la demande",
                                 notification_type=type,
                                 request_details=request_details,
-                            )
+                            ))
                 except Exception as _exc:
                     logger.warning("NotificationEmitter : email auto échoué : %s", _exc)
 

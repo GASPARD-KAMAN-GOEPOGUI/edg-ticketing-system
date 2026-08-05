@@ -86,6 +86,21 @@ class TaskRepository(BaseRepository[Task]):
             limit=limit,
         )
 
+    async def find_open_for_agent(self, request_id: str, agent_id: str) -> Task | None:
+        """Retourne la tâche de transfert en cours (pending/in_progress) confiée à cet
+        agent sur cette demande — utilisée pour la clôturer quand il transmet/résout."""
+        stmt = (
+            select(Task)
+            .where(Task.request_id == int(request_id))
+            .where(Task.to_agent_id == int(agent_id))
+            .where(Task.task_status.in_(["pending", "in_progress"]))
+            .where(Task.deleted_at.is_(None))
+            .order_by(Task.id.desc())
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalars().first()
+
     async def complete(self, id: str, *, resolution_note: str | None = None) -> Task | None:
         data: dict = {"task_status": "completed"}
         if resolution_note:

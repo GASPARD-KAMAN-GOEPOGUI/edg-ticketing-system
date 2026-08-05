@@ -129,6 +129,17 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
     ["my-stats"],
     ["stats"],
   ],
+  // BR-TRANSMIT-001 — "Transmettre le traitement" : change assignee_id sans changer
+  // de statut, même surface d'invalidation que request.assigned/reassigned.
+  "request.transmitted": [
+    ["request"],
+    ["requests"],
+    ["queue"],
+    ["my-tickets"],
+    ["my-tickets-stats"],
+    ["my-stats"],
+    ["stats"],
+  ],
   "request.transferred_direction": [
     ["request"],
     ["requests"],

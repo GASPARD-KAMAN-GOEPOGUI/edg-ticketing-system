@@ -13,6 +13,8 @@ import type {
   RequestStatus,
   Priority,
   Appreciation,
+  SlaCycle,
+  Intervention,
 } from "@/lib/mock-data";
 
 // ── Types bruts backend (snake_case) ─────────────────────────────────────────
@@ -114,6 +116,54 @@ export type RawRequest = {
   infos?: Record<string, unknown>;
   timelines: RawTimeline[];
   appreciation?: RawAppreciation;
+  // BR-SLA-REOPEN-001 — détail ticket uniquement (absent des listes allégées).
+  sla_cycles?: RawSlaCycle[];
+  reopen_count?: number;
+  // BR-TRACE-001 — détail ticket uniquement (absent des listes allégées).
+  interventions?: RawIntervention[];
+};
+
+export type RawSlaCycle = {
+  cycle_number: number;
+  started_at?: string;
+  ended_at?: string;
+  sla_hours?: number;
+  elapsed_hours?: number;
+  response_hours?: number;
+  breached?: boolean;
+  resolved_by?: string;
+  reopen_reason?: string;
+  closed: boolean;
+};
+
+export type RawIntervention = {
+  intervention_id: string;
+  cycle_number: number;
+  intervention_order?: number;
+  actor_id?: string;
+  actor_name?: string;
+  actor_role?: string;
+  actor_matricule?: string;
+  actor_direction_label?: string;
+  actor_department_label?: string;
+  actor_service_label?: string;
+  started_at?: string;
+  ended_at?: string;
+  duration_seconds?: number;
+  work_done?: string;
+  instruction?: string;
+  transmission_reason?: string;
+  decision?: "transmission" | "resolution";
+  destination_id?: string;
+  destination_name?: string;
+  summary?: string;
+  solution?: string;
+  recommendations?: string;
+  sla_hours?: number;
+  sla_breached?: boolean;
+  comment_count: number;
+  attachment_count: number;
+  event_ids: string[];
 };
 
 export type RawPaginated<T> = {
@@ -202,6 +252,8 @@ export function mapRequest(raw: RawRequest): RequestItem {
         authorRole: asString(t.infos?.actor_role ?? t.infos?.source_role),
         body: t.comment ?? t.label ?? "",
         isPublic: t.infos?.is_public === true,
+        isDirective: t.infos?.is_directive === true,
+        replyToId: asString(t.infos?.reply_to_id),
         isEdited: false,
         createdAt: t.created_at,
       })),
@@ -235,6 +287,58 @@ export function mapRequest(raw: RawRequest): RequestItem {
           at: raw.appreciation.created_at,
         } as Appreciation)
       : undefined,
+    slaCycles: (raw.sla_cycles ?? []).map(mapSlaCycle),
+    reopenCount: raw.reopen_count ?? 0,
+    interventions: (raw.interventions ?? []).map(mapIntervention),
+  };
+}
+
+// BR-SLA-REOPEN-001
+export function mapSlaCycle(c: RawSlaCycle): SlaCycle {
+  return {
+    cycleNumber: c.cycle_number,
+    startedAt: c.started_at ?? undefined,
+    endedAt: c.ended_at ?? undefined,
+    slaHours: c.sla_hours ?? undefined,
+    elapsedHours: c.elapsed_hours ?? undefined,
+    responseHours: c.response_hours ?? undefined,
+    breached: c.breached ?? undefined,
+    resolvedBy: c.resolved_by ?? undefined,
+    reopenReason: c.reopen_reason ?? undefined,
+    closed: c.closed,
+  };
+}
+
+// BR-TRACE-001
+export function mapIntervention(i: RawIntervention): Intervention {
+  return {
+    interventionId: i.intervention_id,
+    cycleNumber: i.cycle_number,
+    interventionOrder: i.intervention_order ?? undefined,
+    actorId: i.actor_id ? String(i.actor_id) : undefined,
+    actorName: i.actor_name ?? undefined,
+    actorRole: i.actor_role ?? undefined,
+    actorMatricule: i.actor_matricule ?? undefined,
+    actorDirectionLabel: i.actor_direction_label ?? undefined,
+    actorDepartmentLabel: i.actor_department_label ?? undefined,
+    actorServiceLabel: i.actor_service_label ?? undefined,
+    startedAt: i.started_at ?? undefined,
+    endedAt: i.ended_at ?? undefined,
+    durationSeconds: i.duration_seconds ?? undefined,
+    workDone: i.work_done ?? undefined,
+    instruction: i.instruction ?? undefined,
+    transmissionReason: i.transmission_reason ?? undefined,
+    decision: i.decision ?? undefined,
+    destinationId: i.destination_id ? String(i.destination_id) : undefined,
+    destinationName: i.destination_name ?? undefined,
+    summary: i.summary ?? undefined,
+    solution: i.solution ?? undefined,
+    recommendations: i.recommendations ?? undefined,
+    slaHours: i.sla_hours ?? undefined,
+    slaBreached: i.sla_breached ?? undefined,
+    commentCount: i.comment_count ?? 0,
+    attachmentCount: i.attachment_count ?? 0,
+    eventIds: (i.event_ids ?? []).map(String),
   };
 }
 
@@ -245,6 +349,8 @@ export function mapComment(t: RawTimeline) {
     author: t.actor_name ?? "Système",
     body: t.comment ?? t.label ?? "",
     isPublic: t.infos?.is_public === true,
+    isDirective: t.infos?.is_directive === true,
+    replyToId: asString(t.infos?.reply_to_id),
     isEdited: false,
     createdAt: t.created_at,
     attachmentId: asString(t.infos?.attachment_id),
@@ -428,14 +534,44 @@ export async function changeRequestPriority(
   return mapRequest(raw);
 }
 
+// BR-TRANSMIT-001 — "Terminer le traitement" : résumé/solution/travail réalisé
+// obligatoires pour tout intervenant actuel, quel que soit son rôle.
+export type ResolveTreatmentData = {
+  summary: string;
+  solution: string;
+  work_done: string;
+  recommendations?: string;
+  attachment_ids?: string[];
+};
+
 export async function resolveRequest(
   id: string,
-  actorId?: string,
+  data: ResolveTreatmentData,
 ): Promise<RequestItem> {
-  const params = actorId ? `?actor_id=${actorId}` : "";
-  const raw = await apiFetch<RawRequest>(`/requests/${id}/resolve${params}`, {
+  const raw = await apiFetch<RawRequest>(`/requests/${id}/resolve`, {
     method: "POST",
-    body: "{}",
+    body: JSON.stringify(data),
+  });
+  return mapRequest(raw);
+}
+
+// BR-TRANSMIT-001 — "Transmettre le traitement" : réservé à l'intervenant actuel,
+// cible libre dans toute l'organisation (annuaire complet, backend seul juge).
+export type TransmitTreatmentData = {
+  to_user_id: string;
+  work_done: string;
+  reason: string;
+  instruction?: string;
+  attachment_ids?: string[];
+};
+
+export async function transmitTreatment(
+  id: string,
+  data: TransmitTreatmentData,
+): Promise<RequestItem> {
+  const raw = await apiFetch<RawRequest>(`/requests/${id}/transmit`, {
+    method: "POST",
+    body: JSON.stringify(data),
   });
   return mapRequest(raw);
 }
@@ -582,6 +718,8 @@ export type CreateCommentData = {
   body: string;
   is_public: boolean;
   attachment_id?: string;
+  is_directive?: boolean;
+  reply_to_id?: string;
 };
 
 export async function fetchComments(requestId: string, publicOnly = false) {
@@ -600,6 +738,8 @@ export async function createComment(
       body: data.body,
       is_public: data.is_public,
       ...(data.attachment_id ? { attachment_id: data.attachment_id } : {}),
+      ...(data.is_directive ? { is_directive: true } : {}),
+      ...(data.reply_to_id ? { reply_to_id: data.reply_to_id } : {}),
     }),
   });
   return mapComment(raw);
@@ -708,6 +848,18 @@ export async function escalateRequest(
   data: { reason: string },
 ): Promise<void> {
   await apiFetch<RawTimeline>(`/requests/${id}/escalate`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+// Lot 3.3 — "Escalade exceptionnelle" : réservée à chief-departement, cible
+// directement le directeur (court-circuite la hiérarchie normale de /escalate).
+export async function escalateToDirectorRequest(
+  id: string,
+  data: { reason: string },
+): Promise<void> {
+  await apiFetch<RawTimeline>(`/requests/${id}/escalate-to-director`, {
     method: "POST",
     body: JSON.stringify(data),
   });
