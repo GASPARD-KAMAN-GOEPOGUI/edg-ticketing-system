@@ -743,8 +743,20 @@ class RequestService(BaseService):
         items, total = await self.repo.list_sla_breached(page=page, limit=limit)
         return self.paginate(self._serialize(items), total, page, limit)
 
-    async def list_transmitted_by_me(self, actor_id: str, *, page: int = 1, limit: int = 20):
-        items, total = await self.repo.list_transmitted_by_actor(actor_id, page=page, limit=limit)
+    async def list_transmitted_by_me(
+        self,
+        actor_id: str,
+        *,
+        search: Optional[str] = None,
+        page: int = 1,
+        limit: int = 20,
+    ):
+        items, total = await self.repo.list_transmitted_by_actor(
+            actor_id,
+            search=search,
+            page=page,
+            limit=limit,
+        )
         return self.paginate(self._serialize(items), total, page, limit)
 
     async def list_queue(

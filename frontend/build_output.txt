@@ -1,0 +1,237 @@
+
+> build
+> vite build
+
+[@lovable.dev/vite-tanstack-config] No Lovable context detected ÔÇö skipping nitro deploy plugin. Pass `nitro: true` (or `nitro: { ... }`) to force-enable.
+[@lovable.dev/vite-tanstack-config] No Lovable context detected ÔÇö skipping nitro deploy plugin. Pass `nitro: true` (or `nitro: { ... }`) to force-enable.
+[@lovable.dev/vite-tanstack-config] No Lovable context detected ÔÇö skipping nitro deploy plugin. Pass `nitro: true` (or `nitro: { ... }`) to force-enable.
+[36mvite v7.3.5 [32mbuilding client environment for production...[36m[39m
+transforming...
+[32mÔ£ô[39m 4019 modules transformed.
+rendering chunks...
+computing gzip size...
+[2mdist/client/[22m[32massets/edg_logo-DLDsZ47P.png                          [39m[1m[2m131.75 kB[22m[1m[22m
+[2mdist/client/[22m[35massets/styles-CeK_Adjc.css                            [39m[1m[2m225.84 kB[22m[1m[22m[2m Ôöé gzip:  33.35 kB[22m
+[2mdist/client/[22m[36massets/help-DtqBFgK5.js                               [39m[1m[2m  0.04 kB[22m[1m[22m[2m Ôöé gzip:   0.06 kB[22m
+[2mdist/client/[22m[36massets/app.new-DtqBFgK5.js                            [39m[1m[2m  0.04 kB[22m[1m[22m[2m Ôöé gzip:   0.06 kB[22m
+[2mdist/client/[22m[36massets/app.admin-BMHG5pVN.js                          [39m[1m[2m  0.10 kB[22m[1m[22m[2m Ôöé gzip:   0.11 kB[22m
+[2mdist/client/[22m[36massets/chevron-left-DVv_o-1x.js                       [39m[1m[2m  0.13 kB[22m[1m[22m[2m Ôöé gzip:   0.15 kB[22m
+[2mdist/client/[22m[36massets/plus-CppKe5It.js                               [39m[1m[2m  0.15 kB[22m[1m[22m[2m Ôöé gzip:   0.15 kB[22m
+[2mdist/client/[22m[36massets/app.dg_.tickets._id-xS9Xikw7.js                [39m[1m[2m  0.16 kB[22m[1m[22m[2m Ôöé gzip:   0.15 kB[22m
+[2mdist/client/[22m[36massets/app.queue_.tickets._id-aFAWJ6cS.js             [39m[1m[2m  0.16 kB[22m[1m[22m[2m Ôöé gzip:   0.15 kB[22m
+[2mdist/client/[22m[36massets/app.admin.tickets._id-DZPIMrmA.js              [39m[1m[2m  0.16 kB[22m[1m[22m[2m Ôöé gzip:   0.15 kB[22m
+[2mdist/client/[22m[36massets/app.history_.tickets._id-CbtToZpG.js           [39m[1m[2m  0.16 kB[22m[1m[22m[2m Ôöé gzip:   0.15 kB[22m
+[2mdist/client/[22m[36massets/app.sla-center_.tickets._id-D4WdgGVr.js        [39m[1m[2m  0.16 kB[22m[1m[22m[2m Ôöé gzip:   0.15 kB[22m
+[2mdist/client/[22m[36massets/app.my-tickets_.tickets._id-CEBzKlbA.js        [39m[1m[2m  0.16 kB[22m[1m[22m[2m Ôöé gzip:   0.16 kB[22m
+[2mdist/client/[22m[36massets/app.direction_.tickets._id-X3Rq-HWc.js         [39m[1m[2m  0.16 kB[22m[1m[22m[2m Ôöé gzip:   0.15 kB[22m
+[2mdist/client/[22m[36massets/arrow-up-kjQavLkQ.js                           [39m[1m[2m  0.16 kB[22m[1m[22m[2m Ôöé gzip:   0.16 kB[22m
+[2mdist/client/[22m[36massets/app.chief-inbox_.tickets._id-B6aBfa6O.js       [39m[1m[2m  0.16 kB[22m[1m[22m[2m Ôöé gzip:   0.16 kB[22m
+[2mdist/client/[22m[36massets/app.transmitted_.tickets._id-CUFWt9b5.js       [39m[1m[2m  0.16 kB[22m[1m[22m[2m Ôöé gzip:   0.15 kB[22m
+[2mdist/client/[22m[36massets/app.supervision_.tickets._id-EbU9IUI3.js       [39m[1m[2m  0.16 kB[22m[1m[22m[2m Ôöé gzip:   0.16 kB[22m
+[2mdist/client/[22m[36massets/arrow-right-CAiFmQpa.js                        [39m[1m[2m  0.17 kB[22m[1m[22m[2m Ôöé gzip:   0.16 kB[22m
+[2mdist/client/[22m[36massets/app.department-inbox_.tickets._id-DbKnJ8o7.js  [39m[1m[2m  0.17 kB[22m[1m[22m[2m Ôöé gzip:   0.16 kB[22m
+[2mdist/client/[22m[36massets/power-CcUffnP7.js                              [39m[1m[2m  0.17 kB[22m[1m[22m[2m Ôöé gzip:   0.17 kB[22m
+[2mdist/client/[22m[36massets/trending-up-CJN9u6v9.js                        [39m[1m[2m  0.18 kB[22m[1m[22m[2m Ôöé gzip:   0.17 kB[22m
+[2mdist/client/[22m[36massets/gauge-BWfR9q4_.js                              [39m[1m[2m  0.18 kB[22m[1m[22m[2m Ôöé gzip:   0.17 kB[22m
+[2mdist/client/[22m[36massets/menu-gy0lrTsm.js                               [39m[1m[2m  0.19 kB[22m[1m[22m[2m Ôöé gzip:   0.16 kB[22m
+[2mdist/client/[22m[36massets/smartphone-C18yes-L.js                         [39m[1m[2m  0.20 kB[22m[1m[22m[2m Ôöé gzip:   0.18 kB[22m
+[2mdist/client/[22m[36massets/info-BCVqGz5A.js                               [39m[1m[2m  0.21 kB[22m[1m[22m[2m Ôöé gzip:   0.18 kB[22m
+[2mdist/client/[22m[36massets/chart-no-axes-column-DlPh0H5i.js               [39m[1m[2m  0.21 kB[22m[1m[22m[2m Ôöé gzip:   0.18 kB[22m
+[2mdist/client/[22m[36massets/mail-BBENV3lQ.js                               [39m[1m[2m  0.21 kB[22m[1m[22m[2m Ôöé gzip:   0.20 kB[22m
+[2mdist/client/[22m[36massets/briefcase-2x9ly2a8.js                          [39m[1m[2m  0.22 kB[22m[1m[22m[2m Ôöé gzip:   0.20 kB[22m
+[2mdist/client/[22m[36massets/log-out-Dgs-_-F8.js                            [39m[1m[2m  0.23 kB[22m[1m[22m[2m Ôöé gzip:   0.19 kB[22m
+[2mdist/client/[22m[36massets/library-XesM6N80.js                            [39m[1m[2m  0.23 kB[22m[1m[22m[2m Ôöé gzip:   0.18 kB[22m
+[2mdist/client/[22m[36massets/activity-CcvCKFic.js                           [39m[1m[2m  0.24 kB[22m[1m[22m[2m Ôöé gzip:   0.20 kB[22m
+[2mdist/client/[22m[36massets/history-BA10pVMz.js                            [39m[1m[2m  0.24 kB[22m[1m[22m[2m Ôöé gzip:   0.20 kB[22m
+[2mdist/client/[22m[36massets/globe-D0njOUps.js                              [39m[1m[2m  0.24 kB[22m[1m[22m[2m Ôöé gzip:   0.19 kB[22m
+[2mdist/client/[22m[36massets/database-CCFTAmMY.js                           [39m[1m[2m  0.24 kB[22m[1m[22m[2m Ôöé gzip:   0.20 kB[22m
+[2mdist/client/[22m[36massets/compass-B_b8n9it.js                            [39m[1m[2m  0.25 kB[22m[1m[22m[2m Ôöé gzip:   0.21 kB[22m
+[2mdist/client/[22m[36massets/chart-column-Bz3GMt_x.js                       [39m[1m[2m  0.25 kB[22m[1m[22m[2m Ôöé gzip:   0.20 kB[22m
+[2mdist/client/[22m[36massets/users-round-BrErxZ1d.js                        [39m[1m[2m  0.25 kB[22m[1m[22m[2m Ôöé gzip:   0.22 kB[22m
+[2mdist/client/[22m[36massets/route-fEbWsth0.js                              [39m[1m[2m  0.26 kB[22m[1m[22m[2m Ôöé gzip:   0.20 kB[22m
+[2mdist/client/[22m[36massets/flag-Ddgs25qq.js                               [39m[1m[2m  0.26 kB[22m[1m[22m[2m Ôöé gzip:   0.21 kB[22m
+[2mdist/client/[22m[36massets/map-pin-Dq1ALkIn.js                            [39m[1m[2m  0.26 kB[22m[1m[22m[2m Ôöé gzip:   0.23 kB[22m
+[2mdist/client/[22m[36massets/monitor-CibeED6s.js                            [39m[1m[2m  0.26 kB[22m[1m[22m[2m Ôöé gzip:   0.21 kB[22m
+[2mdist/client/[22m[36massets/zap-dRveeF5q.js                                [39m[1m[2m  0.26 kB[22m[1m[22m[2m Ôöé gzip:   0.21 kB[22m
+[2mdist/client/[22m[36massets/shield-C915DfCF.js                             [39m[1m[2m  0.27 kB[22m[1m[22m[2m Ôöé gzip:   0.23 kB[22m
+[2mdist/client/[22m[36massets/pen-line-Dqp_fTk2.js                           [39m[1m[2m  0.28 kB[22m[1m[22m[2m Ôöé gzip:   0.23 kB[22m
+[2mdist/client/[22m[36massets/book-open-C1GWUl77.js                          [39m[1m[2m  0.28 kB[22m[1m[22m[2m Ôöé gzip:   0.21 kB[22m
+[2mdist/client/[22m[36massets/list-checks-BPwO56SF.js                        [39m[1m[2m  0.28 kB[22m[1m[22m[2m Ôöé gzip:   0.19 kB[22m
+[2mdist/client/[22m[36massets/bell-c3E-Iain.js                               [39m[1m[2m  0.29 kB[22m[1m[22m[2m Ôöé gzip:   0.24 kB[22m
+[2mdist/client/[22m[36massets/app.strategic-dashboard-vxs8ujvf.js            [39m[1m[2m  0.29 kB[22m[1m[22m[2m Ôöé gzip:   0.24 kB[22m
+[2mdist/client/[22m[36massets/shield-check-CBQX_enV.js                       [39m[1m[2m  0.32 kB[22m[1m[22m[2m Ôöé gzip:   0.25 kB[22m
+[2mdist/client/[22m[36massets/ticket-UyViqiQ_.js                             [39m[1m[2m  0.32 kB[22m[1m[22m[2m Ôöé gzip:   0.22 kB[22m
+[2mdist/client/[22m[36massets/phone-DwAzhWUz.js                              [39m[1m[2m  0.32 kB[22m[1m[22m[2m Ôöé gzip:   0.23 kB[22m
+[2mdist/client/[22m[36massets/camera-CfqOSXQY.js                             [39m[1m[2m  0.34 kB[22m[1m[22m[2m Ôöé gzip:   0.25 kB[22m
+[2mdist/client/[22m[36massets/megaphone-Bx0tZgli.js                          [39m[1m[2m  0.35 kB[22m[1m[22m[2m Ôöé gzip:   0.25 kB[22m
+[2mdist/client/[22m[36massets/shield-alert-BAUMlkYY.js                       [39m[1m[2m  0.35 kB[22m[1m[22m[2m Ôöé gzip:   0.26 kB[22m
+[2mdist/client/[22m[36massets/shield-x-CsryKXHP.js                           [39m[1m[2m  0.36 kB[22m[1m[22m[2m Ôöé gzip:   0.26 kB[22m
+[2mdist/client/[22m[36massets/layout-list-DQz4iW_o.js                        [39m[1m[2m  0.36 kB[22m[1m[22m[2m Ôöé gzip:   0.23 kB[22m
+[2mdist/client/[22m[36massets/grip-vertical-BhwYrLA8.js                      [39m[1m[2m  0.37 kB[22m[1m[22m[2m Ôöé gzip:   0.20 kB[22m
+[2mdist/client/[22m[36massets/network-B2cCcLzw.js                            [39m[1m[2m  0.39 kB[22m[1m[22m[2m Ôöé gzip:   0.24 kB[22m
+[2mdist/client/[22m[36massets/eye-off-B4OwRVaz.js                            [39m[1m[2m  0.43 kB[22m[1m[22m[2m Ôöé gzip:   0.27 kB[22m
+[2mdist/client/[22m[36massets/app.department-inbox-BRYEGUET.js               [39m[1m[2m  0.44 kB[22m[1m[22m[2m Ôöé gzip:   0.33 kB[22m
+[2mdist/client/[22m[36massets/sparkles-Dh0vBLI1.js                           [39m[1m[2m  0.50 kB[22m[1m[22m[2m Ôöé gzip:   0.28 kB[22m
+[2mdist/client/[22m[36massets/auth-D966cemQ.js                               [39m[1m[2m  0.67 kB[22m[1m[22m[2m Ôöé gzip:   0.32 kB[22m
+[2mdist/client/[22m[36massets/use-session-state-Bsbm9if5.js                  [39m[1m[2m  0.67 kB[22m[1m[22m[2m Ôöé gzip:   0.39 kB[22m
+[2mdist/client/[22m[36massets/endOfWeek-5smSfR-x.js                          [39m[1m[2m  0.72 kB[22m[1m[22m[2m Ôöé gzip:   0.40 kB[22m
+[2mdist/client/[22m[36massets/badge-BU3rSEKO.js                              [39m[1m[2m  0.72 kB[22m[1m[22m[2m Ôöé gzip:   0.38 kB[22m
+[2mdist/client/[22m[36massets/use-theme-DYvTwX7x.js                          [39m[1m[2m  1.13 kB[22m[1m[22m[2m Ôöé gzip:   0.60 kB[22m
+[2mdist/client/[22m[36massets/layout-toggle-D1fj1YOu.js                      [39m[1m[2m  1.21 kB[22m[1m[22m[2m Ôöé gzip:   0.54 kB[22m
+[2mdist/client/[22m[36massets/escalations-COKbGQZ5.js                        [39m[1m[2m  1.24 kB[22m[1m[22m[2m Ôöé gzip:   0.59 kB[22m
+[2mdist/client/[22m[36massets/knowledge-BupSIsor.js                          [39m[1m[2m  1.50 kB[22m[1m[22m[2m Ôöé gzip:   0.60 kB[22m
+[2mdist/client/[22m[36massets/reports-B3qiRK2Q.js                            [39m[1m[2m  1.74 kB[22m[1m[22m[2m Ôöé gzip:   0.78 kB[22m
+[2mdist/client/[22m[36massets/mail-open-D-4JwaCQ.js                          [39m[1m[2m  1.93 kB[22m[1m[22m[2m Ôöé gzip:   1.00 kB[22m
+[2mdist/client/[22m[36massets/pagination-bar-DJ98VEcd.js                     [39m[1m[2m  2.18 kB[22m[1m[22m[2m Ôöé gzip:   1.01 kB[22m
+[2mdist/client/[22m[36massets/sheet-CpLp1Lbx.js                              [39m[1m[2m  2.27 kB[22m[1m[22m[2m Ôöé gzip:   0.88 kB[22m
+[2mdist/client/[22m[36massets/create-request-jKwsbp9O.js                     [39m[1m[2m  2.52 kB[22m[1m[22m[2m Ôöé gzip:   1.05 kB[22m
+[2mdist/client/[22m[36massets/communication-WL-E9Ii8.js                      [39m[1m[2m  2.59 kB[22m[1m[22m[2m Ôöé gzip:   0.99 kB[22m
+[2mdist/client/[22m[36massets/homepage-CoQoyhjt.js                           [39m[1m[2m  2.93 kB[22m[1m[22m[2m Ôöé gzip:   1.23 kB[22m
+[2mdist/client/[22m[36massets/escalation-progress-bar-Dy4rIJ7S.js            [39m[1m[2m  3.75 kB[22m[1m[22m[2m Ôöé gzip:   1.58 kB[22m
+[2mdist/client/[22m[36massets/login-DdCSZY2o.js                              [39m[1m[2m  4.22 kB[22m[1m[22m[2m Ôöé gzip:   1.82 kB[22m
+[2mdist/client/[22m[36massets/alert-dialog-DmCqbdck.js                       [39m[1m[2m  4.61 kB[22m[1m[22m[2m Ôöé gzip:   1.69 kB[22m
+[2mdist/client/[22m[36massets/admin-config-Do4ZspEw.js                       [39m[1m[2m  4.80 kB[22m[1m[22m[2m Ôöé gzip:   1.28 kB[22m
+[2mdist/client/[22m[36massets/aggregated-service-dashboard-KClmPiYW.js       [39m[1m[2m  4.83 kB[22m[1m[22m[2m Ôöé gzip:   1.66 kB[22m
+[2mdist/client/[22m[36massets/track-C-tZxUnU.js                              [39m[1m[2m  6.12 kB[22m[1m[22m[2m Ôöé gzip:   2.23 kB[22m
+[2mdist/client/[22m[36massets/app.admin.audit-BBGAeZYy.js                    [39m[1m[2m  6.60 kB[22m[1m[22m[2m Ôöé gzip:   2.26 kB[22m
+[2mdist/client/[22m[36massets/knowledge-BI8JyItf.js                          [39m[1m[2m  6.98 kB[22m[1m[22m[2m Ôöé gzip:   2.35 kB[22m
+[2mdist/client/[22m[36massets/app.admin.org-ByJRc9MB.js                      [39m[1m[2m  7.53 kB[22m[1m[22m[2m Ôöé gzip:   2.39 kB[22m
+[2mdist/client/[22m[36massets/register-C8955jM-.js                           [39m[1m[2m  7.59 kB[22m[1m[22m[2m Ôöé gzip:   2.40 kB[22m
+[2mdist/client/[22m[36massets/app.admin.logs-l6KTsw6o.js                     [39m[1m[2m  8.01 kB[22m[1m[22m[2m Ôöé gzip:   2.86 kB[22m
+[2mdist/client/[22m[36massets/tooltip-C8vO8NT-.js                            [39m[1m[2m  8.18 kB[22m[1m[22m[2m Ôöé gzip:   3.02 kB[22m
+[2mdist/client/[22m[36massets/app.transmitted-B3KNuS2V.js                    [39m[1m[2m  8.24 kB[22m[1m[22m[2m Ôöé gzip:   2.85 kB[22m
+[2mdist/client/[22m[36massets/forgot-password-tier3Hs7.js                    [39m[1m[2m  8.30 kB[22m[1m[22m[2m Ôöé gzip:   2.82 kB[22m
+[2mdist/client/[22m[36massets/public-layout-r0ODVtBh.js                      [39m[1m[2m  8.90 kB[22m[1m[22m[2m Ôöé gzip:   2.51 kB[22m
+[2mdist/client/[22m[36massets/app.admin.sla-CeVX4ww2.js                      [39m[1m[2m  8.97 kB[22m[1m[22m[2m Ôöé gzip:   2.65 kB[22m
+[2mdist/client/[22m[36massets/app.admin.routing-BReaD0qC.js                  [39m[1m[2m  9.45 kB[22m[1m[22m[2m Ôöé gzip:   3.09 kB[22m
+[2mdist/client/[22m[36massets/app.index-Dp1xUfTj.js                          [39m[1m[2m  9.62 kB[22m[1m[22m[2m Ôöé gzip:   3.34 kB[22m
+[2mdist/client/[22m[36massets/app.admin.knowledge-D2Ez0Rsy.js                [39m[1m[2m 10.06 kB[22m[1m[22m[2m Ôöé gzip:   3.22 kB[22m
+[2mdist/client/[22m[36massets/app.admin.references-CshBOziX.js               [39m[1m[2m 10.13 kB[22m[1m[22m[2m Ôöé gzip:   3.19 kB[22m
+[2mdist/client/[22m[36massets/app.history-BQRpTP0m.js                        [39m[1m[2m 10.60 kB[22m[1m[22m[2m Ôöé gzip:   3.49 kB[22m
+[2mdist/client/[22m[36massets/app.requests.history-CUUVvD88.js               [39m[1m[2m 10.60 kB[22m[1m[22m[2m Ôöé gzip:   3.49 kB[22m
+[2mdist/client/[22m[36massets/app.admin.directions-BkLB110F.js               [39m[1m[2m 10.86 kB[22m[1m[22m[2m Ôöé gzip:   3.42 kB[22m
+[2mdist/client/[22m[36massets/app.admin.security-CHlU2kAA.js                 [39m[1m[2m 11.03 kB[22m[1m[22m[2m Ôöé gzip:   3.52 kB[22m
+[2mdist/client/[22m[36massets/app.admin.departments-DjpWrygS.js              [39m[1m[2m 11.14 kB[22m[1m[22m[2m Ôöé gzip:   3.31 kB[22m
+[2mdist/client/[22m[36massets/app.admin.priorities-tKvY-m1n.js               [39m[1m[2m 11.75 kB[22m[1m[22m[2m Ôöé gzip:   3.60 kB[22m
+[2mdist/client/[22m[36massets/app.admin.units-BiH3v8tS.js                    [39m[1m[2m 12.45 kB[22m[1m[22m[2m Ôöé gzip:   3.53 kB[22m
+[2mdist/client/[22m[36massets/app.sla-center-7H8iRVgM.js                     [39m[1m[2m 12.62 kB[22m[1m[22m[2m Ôöé gzip:   3.72 kB[22m
+[2mdist/client/[22m[36massets/app.knowledge-bdkArVjn.js                      [39m[1m[2m 13.83 kB[22m[1m[22m[2m Ôöé gzip:   3.78 kB[22m
+[2mdist/client/[22m[36massets/app.my-tickets-aU8xHiSC.js                     [39m[1m[2m 14.26 kB[22m[1m[22m[2m Ôöé gzip:   4.25 kB[22m
+[2mdist/client/[22m[36massets/app.queue-CEKz6I7l.js                          [39m[1m[2m 14.28 kB[22m[1m[22m[2m Ôöé gzip:   4.37 kB[22m
+[2mdist/client/[22m[36massets/app.notifications-BOzbSz2u.js                  [39m[1m[2m 15.47 kB[22m[1m[22m[2m Ôöé gzip:   4.65 kB[22m
+[2mdist/client/[22m[36massets/admin-login-CWsjd8m6.js                        [39m[1m[2m 20.60 kB[22m[1m[22m[2m Ôöé gzip:   6.29 kB[22m
+[2mdist/client/[22m[36massets/app.admin.users-BqCDGf7a.js                    [39m[1m[2m 20.64 kB[22m[1m[22m[2m Ôöé gzip:   5.89 kB[22m
+[2mdist/client/[22m[36massets/app.requests.index-BIL_iPG4.js                 [39m[1m[2m 21.94 kB[22m[1m[22m[2m Ôöé gzip:   6.66 kB[22m
+[2mdist/client/[22m[36massets/app.profile-CxMaebP7.js                        [39m[1m[2m 22.99 kB[22m[1m[22m[2m Ôöé gzip:   6.43 kB[22m
+[2mdist/client/[22m[36massets/app.admin.directions._id-DTO4srjI.js           [39m[1m[2m 23.58 kB[22m[1m[22m[2m Ôöé gzip:   6.49 kB[22m
+[2mdist/client/[22m[36massets/app.admin.communication-NxQm54LX.js            [39m[1m[2m 23.68 kB[22m[1m[22m[2m Ôöé gzip:   6.53 kB[22m
+[2mdist/client/[22m[36massets/BarChart-D-ZLzrjH.js                           [39m[1m[2m 24.67 kB[22m[1m[22m[2m Ôöé gzip:   6.39 kB[22m
+[2mdist/client/[22m[36massets/app.admin.homepage-y0dWzJO-.js                 [39m[1m[2m 25.93 kB[22m[1m[22m[2m Ôöé gzip:   6.38 kB[22m
+[2mdist/client/[22m[36massets/PieChart-fC5maYCq.js                           [39m[1m[2m 26.04 kB[22m[1m[22m[2m Ôöé gzip:   7.07 kB[22m
+[2mdist/client/[22m[36massets/app.direction-BfnyLOfu.js                      [39m[1m[2m 27.38 kB[22m[1m[22m[2m Ôöé gzip:   6.96 kB[22m
+[2mdist/client/[22m[36massets/index-D637YtBQ.js                              [39m[1m[2m 27.91 kB[22m[1m[22m[2m Ôöé gzip:   8.63 kB[22m
+[2mdist/client/[22m[36massets/app.dg-DkpToVML.js                             [39m[1m[2m 28.74 kB[22m[1m[22m[2m Ôöé gzip:   8.01 kB[22m
+[2mdist/client/[22m[36massets/app.reports-Cm1bGr8b.js                        [39m[1m[2m 32.59 kB[22m[1m[22m[2m Ôöé gzip:   9.35 kB[22m
+[2mdist/client/[22m[36massets/app-B_n6baoS.js                                [39m[1m[2m 51.36 kB[22m[1m[22m[2m Ôöé gzip:  13.60 kB[22m
+[2mdist/client/[22m[36massets/app.supervision-DqBu3OFd.js                    [39m[1m[2m 51.80 kB[22m[1m[22m[2m Ôöé gzip:  12.50 kB[22m
+[2mdist/client/[22m[36massets/app.requests._id-CkSQufpo.js                   [39m[1m[2m105.65 kB[22m[1m[22m[2m Ôöé gzip:  22.34 kB[22m
+[2mdist/client/[22m[36massets/app.requests._id-B0UVSNwI.js                   [39m[1m[2m105.86 kB[22m[1m[22m[2m Ôöé gzip:  22.40 kB[22m
+[2mdist/client/[22m[36massets/generateCategoricalChart-C-UVDIy0.js           [39m[1m[2m359.67 kB[22m[1m[22m[2m Ôöé gzip: 100.84 kB[22m
+[2mdist/client/[22m[36massets/index-ieAuQZfX.js                              [39m[1m[33m956.13 kB[39m[22m[2m Ôöé gzip: 285.59 kB[22m
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+[32mÔ£ô built in 33.87s[39m
+[36mvite v7.3.5 [32mbuilding ssr environment for production...[36m[39m
+transforming...
+"createRequestHandler", "defineHandlerCallback", "transformPipeableStreamWithRouter" and "transformReadableStreamWithRouter" are imported from external module "@tanstack/router-core/ssr/server" but never used in "node_modules/@tanstack/start-server-core/dist/esm/index.js".
+"RawStream" is imported from external module "@tanstack/router-core" but never used in "node_modules/@tanstack/start-client-core/dist/esm/index.js".
+"hydrate" and "json" are imported from external module "@tanstack/router-core/ssr/client" but never used in "node_modules/@tanstack/start-client-core/dist/esm/index.js".
+[32mÔ£ô[39m 246 modules transformed.
+rendering chunks...
+[2mdist/server/[22m[36massets/help-BTU5dmpx.js                               [39m[1m[2m  0.08 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.new-BTU5dmpx.js                            [39m[1m[2m  0.08 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/empty-plugin-adapters-BFgPZ6_d.js              [39m[1m[2m  0.13 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.admin-BFsOu0JM.js                          [39m[1m[2m  0.19 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.dg_.tickets._id-Dh4tNDFZ.js                [39m[1m[2m  0.87 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.my-tickets_.tickets._id-NG7Nh-6e.js        [39m[1m[2m  0.88 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.sla-center_.tickets._id-B9wSaYrs.js        [39m[1m[2m  0.88 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.queue_.tickets._id-UtTeakiI.js             [39m[1m[2m  0.88 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.admin.tickets._id-DpJ2IZ7_.js              [39m[1m[2m  0.88 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.history_.tickets._id-C12hJRGp.js           [39m[1m[2m  0.89 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.direction_.tickets._id-BsH4g44g.js         [39m[1m[2m  0.89 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.chief-inbox_.tickets._id-Q4aJZ6Lw.js       [39m[1m[2m  0.90 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.transmitted_.tickets._id-Btl_YfOM.js       [39m[1m[2m  0.90 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.supervision_.tickets._id-4Aj6Yh3m.js       [39m[1m[2m  0.90 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/use-theme-BTjNyKTQ.js                          [39m[1m[2m  0.91 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.department-inbox_.tickets._id-DW3HzLmP.js  [39m[1m[2m  0.91 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/badge-fz4cqQqG.js                              [39m[1m[2m  0.99 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.strategic-dashboard-BQMbzPfs.js            [39m[1m[2m  1.01 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/use-session-state-CUNM-QlT.js                  [39m[1m[2m  1.08 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/auth-PKTIjJsI.js                               [39m[1m[2m  1.13 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/tooltip-C5M5Lw92.js                            [39m[1m[2m  1.21 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.department-inbox-DnhAz4TI.js               [39m[1m[2m  1.34 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/layout-toggle-Boj18CpY.js                      [39m[1m[2m  1.60 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/start-Fk0VnPVv.js                              [39m[1m[2m  1.71 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/escalations-D99ZLLio.js                        [39m[1m[2m  1.94 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/notifications-BcIBMnRO.js                      [39m[1m[2m  2.26 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/knowledge-M-OzoIVe.js                          [39m[1m[2m  2.39 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/reports-C0vNeDwy.js                            [39m[1m[2m  2.78 kB[22m[1m[22m
+[2mdist/server/[22m[36mserver.js                                             [39m[1m[2m  3.34 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/sheet-CD8Uepko.js                              [39m[1m[2m  3.49 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/alert-dialog-BEtQ-jlW.js                       [39m[1m[2m  3.51 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/create-request-CCUk75Xi.js                     [39m[1m[2m  3.87 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/communication-VVP3zOt6.js                      [39m[1m[2m  4.23 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/homepage-BhxwU3Zn.js                           [39m[1m[2m  4.55 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/pagination-bar-CRNu0ewJ.js                     [39m[1m[2m  4.64 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/login-C5TTPTrF.js                              [39m[1m[2m  7.40 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/admin-config-gGg2LKC0.js                       [39m[1m[2m  7.67 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/escalation-progress-bar-CD7Mqtfs.js            [39m[1m[2m  8.16 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/aggregated-service-dashboard-BvUNMh1b.js       [39m[1m[2m  8.19 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.admin.audit-B2wkoIto.js                    [39m[1m[2m 10.26 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/track-RP8smBhg.js                              [39m[1m[2m 10.44 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/knowledge-SYp7VJ3J.js                          [39m[1m[2m 10.52 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/register-CaMPbclJ.js                           [39m[1m[2m 12.80 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.admin.org-DTHv4t2a.js                      [39m[1m[2m 13.71 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.admin.logs-BAvmvBaG.js                     [39m[1m[2m 14.02 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/forgot-password-JYgW98H_.js                    [39m[1m[2m 14.05 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.transmitted-BRQhwJCY.js                    [39m[1m[2m 14.35 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/public-layout-CIA1TxYR.js                      [39m[1m[2m 14.67 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.index-DJV1IZUC.js                          [39m[1m[2m 15.23 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.admin.sla-2r73Rklr.js                      [39m[1m[2m 15.50 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.admin.routing-D970T9LG.js                  [39m[1m[2m 16.21 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.admin.security-BqFMldQt.js                 [39m[1m[2m 16.41 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.admin.references-DcfuVNlu.js               [39m[1m[2m 16.52 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.admin.knowledge-CpicYC94.js                [39m[1m[2m 17.55 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.history-Dz_b1S3o.js                        [39m[1m[2m 18.48 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.requests.history-BJeiKx8o.js               [39m[1m[2m 18.48 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.admin.directions-B6ZgrSgA.js               [39m[1m[2m 18.48 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.admin.departments-X_FfNLs8.js              [39m[1m[2m 19.93 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.admin.priorities-BN0DM_5B.js               [39m[1m[2m 19.97 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.sla-center-GtKlfnpf.js                     [39m[1m[2m 20.46 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/_tanstack-start-manifest_v-DEOYwiVF.js         [39m[1m[2m 20.86 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.admin.units-qN5tHXpz.js                    [39m[1m[2m 22.41 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.knowledge-BceEaq5y.js                      [39m[1m[2m 23.12 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.notifications-DN1Yl6ZK.js                  [39m[1m[2m 24.14 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.my-tickets-CIGi8O7i.js                     [39m[1m[2m 25.58 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.queue-D7VImvwt.js                          [39m[1m[2m 26.92 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/admin-login-DBi8IJnm.js                        [39m[1m[2m 32.20 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.reports-C0LJoQhV.js                        [39m[1m[2m 34.97 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.admin.users-BZCqupzQ.js                    [39m[1m[2m 35.11 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.requests.index-RBw6tONi.js                 [39m[1m[2m 35.45 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.profile-CiXtVsnk.js                        [39m[1m[2m 36.95 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.admin.directions._id-ClKjUwYT.js           [39m[1m[2m 37.69 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/index-DN4rVru-.js                              [39m[1m[2m 38.13 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.admin.communication-snJn7VaB.js            [39m[1m[2m 38.44 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.admin.homepage-DRsWah_w.js                 [39m[1m[2m 41.33 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.dg-DgEaTjDN.js                             [39m[1m[2m 44.21 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.direction-iWC-fIQz.js                      [39m[1m[2m 45.40 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/server-CHqAnbQT.js                             [39m[1m[2m 58.37 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.supervision-CgZI4HH9.js                    [39m[1m[2m 85.97 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app-BtdVGLXW.js                                [39m[1m[2m 90.12 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.requests._id-BK3vgitO.js                   [39m[1m[2m185.10 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/app.requests._id-B8oUdNqK.js                   [39m[1m[2m185.39 kB[22m[1m[22m
+[2mdist/server/[22m[36massets/router-jbCrzJCk.js                             [39m[1m[2m421.00 kB[22m[1m[22m
+[32mÔ£ô built in 16.71s[39m

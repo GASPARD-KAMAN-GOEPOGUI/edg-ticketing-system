@@ -30,8 +30,8 @@ Chemins probables en cas de probleme: `app.requests.*`, `requests.ts`, `RouteReq
 Identifiant: FEATURE-AGENT-TICKETS
 Nom: Mes tickets agent
 Module: MOD-AGENT
-Description: tickets personnellement assignes a l'agent, KPI dynamiques sur cette charge, actions de traitement, resolution et escalade.
-Roles concernes: agent.
+Description: tickets personnellement assignes a l'intervenant, KPI dynamiques sur cette charge, actions de traitement, resolution et escalade. Depuis le 2026-08-06, pour `chief-service` et `chief-departement`, la vue inclut aussi les tickets `escalated` du perimetre operationnel autorise, en remplacement de l'ancien onglet `Repartition > Escalades`.
+Roles concernes: agent-support, chief-service, chief-departement, director, admin.
 Route frontend: `/app/my-tickets`, `/app/my-tickets/tickets/$id`.
 Page principale: `frontend/src/routes/app.my-tickets.tsx`, `frontend/src/routes/app.my-tickets_.tickets.$id.tsx`.
 Service frontend: `frontend/src/lib/api/requests.ts`.
@@ -61,7 +61,7 @@ Chemins probables: `app.queue.tsx`, `requests.ts`, `RouteRequest.py`, `ServiceRe
 Identifiant: FEATURE-CHIEF-INBOX
 Nom: Centre de repartition (chief-service) — libelle valide au chantier "File d'attente / actions par role" (2026-07-31), anciennement "Boite de traitement chef"
 Module: MOD-CHIEF
-Description: vue chief-service pour les tickets de son service — liste directe, sans etape d'agregation — et actions d'affectation/reaffectation d'agent, changement de priorite, resolution exceptionnelle (motif obligatoire, Lot 2.6). Depuis le Lot 2.5, chief-service n'a plus acces a "Changer de service" (retire, reserve a chief-departement/director/admin). Panneau "Charge par agent" (Lot 2.2, `GET /requests/workload-by-unit`) affichant le nombre de tickets actifs par agent du service.
+Description: vue chief-service pour les tickets de son service — liste directe, sans etape d'agregation — et actions d'affectation/reaffectation d'agent, changement de priorite, resolution exceptionnelle (motif obligatoire, Lot 2.6). Depuis le Lot 2.5, chief-service n'a plus acces a "Changer de service" (retire, reserve a chief-departement/director/admin). Panneau "Charge par agent" (Lot 2.2, `GET /requests/workload-by-unit`) affichant le nombre de tickets actifs par agent du service. Depuis le 2026-08-06, l'onglet interne `Escalades` est retire; les escalades operationnelles apparaissent dans `/app/my-tickets`.
 Roles concernes: chief-service.
 Route frontend: `/app/chief-inbox`, `/app/chief-inbox/tickets/$id`.
 Endpoint backend: `GET /api/v1/requests/by-unity/{unity_id}`, `GET /api/v1/requests/workload-by-unit`, `POST /api/v1/requests/{id}/assign`, `POST /api/v1/requests/{id}/priority`, `POST /api/v1/requests/{id}/resolve` (motif obligatoire pour ce role).
@@ -73,7 +73,7 @@ Chemins probables: `app.chief-inbox.tsx`, `capabilities.ts`, `RouteRequest.py`, 
 Identifiant: FEATURE-DEPARTMENT-PILOTAGE
 Nom: Centre de pilotage (chief-departement)
 Module: MOD-CHIEF
-Description: ecran principal agrege par service du departement (nb tickets, tickets critiques, % SLA, escalades — `AggregatedServiceDashboard` mode `"pilotage"`, alimente par `GET /reports/decision?group_by=service` deja scope departement). Clic sur un service = drill-down vers le composant partage `ChiefInbox` (meme composant que chief-service), filtre a ce seul service. Chief-departement ne traite jamais un ticket lui-meme : "Affecter/Reaffecter" et "Traiter/resoudre" retires (Lot 3.1/3.2). Action propre : "Escalade exceptionnelle" (`escalate_to_director`, court-circuite la hierarchie normale, cible directement le directeur, motif obligatoire).
+Description: ecran principal agrege par service du departement (nb tickets, tickets critiques, % SLA, escalades — `AggregatedServiceDashboard` mode `"pilotage"`, alimente par `GET /reports/decision?group_by=service` deja scope departement). Clic sur un service = drill-down vers le composant partage `ChiefInbox` (meme composant que chief-service), filtre a ce seul service. Depuis le 2026-08-06, le drill-down ne contient plus d'onglet interne `Escalades`; les escalades operationnelles apparaissent dans `/app/my-tickets`. Chief-departement ne traite jamais un ticket lui-meme : "Affecter/Reaffecter" et "Traiter/resoudre" retires (Lot 3.1/3.2). Action propre : "Escalade exceptionnelle" (`escalate_to_director`, court-circuite la hierarchie normale, cible directement le directeur, motif obligatoire).
 Roles concernes: chief-departement.
 Route frontend: `/app/department-inbox` (dashboard), `/app/department-inbox/tickets/$id` (drill-down puis detail).
 Endpoint backend: `GET /api/v1/reports/decision`, `GET /api/v1/requests/by-unity/{unity_id}`, `POST /api/v1/requests/{id}/reassign`, `POST /api/v1/requests/{id}/escalate-to-director`, `POST /api/v1/requests/{id}/priority`.
@@ -105,6 +105,7 @@ Endpoint backend: principalement `GET /api/v1/requests` avec filtres, actions ti
 Regles metier: BR-NAV-001, BR-ROLE-CHIEF-001, BR-ROLE-DIRECTOR-001.
 Chemins probables: `app.supervision.tsx`, `ticket-navigation.ts`, `app-layout.tsx`, `RouteRequest.py`, `ServiceRequest.py`.
 Note chief-departement: la liste supervision charge le perimetre departemental avec `direction_id=<department unity_id>` pour reutiliser l'expansion backend departement + services, tandis que chief-service reste en `unit_id` exact.
+Note UI (2026-08-06): la page `/app/supervision` masque les sections operationnelles `Charge & retards par agent`, `Distribution des escalades` et `Escalades en cours`; les donnees, routes et calculs backend restent inchanges.
 
 ## FEATURE-DIRECTION
 
@@ -261,7 +262,7 @@ Chemins probables: `notification-panel.tsx`, `notifications.ts`, `NotificationEm
 Identifiant: FEATURE-REPORTS
 Nom: Rapports
 Module: MOD-REPORT
-Description: rapports journaliers, mensuels, par agent, par service/unite, SLA, CSAT et moteur decisionnel hierarchique EDG -> direction -> service -> agent -> ticket, avec vues executive, analytique et audit.
+Description: rapports journaliers, mensuels, par agent, par service/unite, SLA, CSAT et moteur decisionnel hierarchique EDG -> direction -> service -> agent -> ticket, avec vues executive, analytique et audit. Depuis le 2026-08-06, pour `chief-service`, le filtre direction est masque dans `/app/reports` et les rapports par agent/service/CSAT sont forces cote backend sur le service exact de l'acteur. Depuis le 2026-08-06, le bandeau visuel `Filtres` / periode / compteur tickets est retire de la page; les valeurs par defaut continuent d'alimenter les exports et chargements existants. Depuis le 2026-08-06, l'entree sidebar `Rapports Service` est masquee pour `chief-service`; les entrees rapports des roles `chief-departement`, `director` et `admin` restent visibles.
 Roles concernes: chief, director, admin.
 Route frontend: `/app/reports`.
 Endpoint backend: `/api/v1/reports/daily`, `/monthly`, `/by-agent`, `/by-unity`, `/decision`, `/decision/export`, `/sla`, `/csat`.

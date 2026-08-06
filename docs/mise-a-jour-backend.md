@@ -58,10 +58,10 @@ Les demandes de citoyens/clients externes sont hors périmètre (cf. CDC § 3.2)
 
 #### 3. Page d'accueil (`frontend/src/routes/index.tsx`)
 - Hero : nouveau titre "L'espace numérique des employés EDG", paragraphe recentré employés
-- CTA principal : "Faire une demande" → "Accéder à mon espace" → `/login`
+- CTA principal : "Faire une demande" → "Ouvrir un ticket" → `/login`
 - Section "Pour qui ?" : suppression carte "Citoyen/Client", 3 cartes employé (Demandeur / Agent-Chef / Directeur-DG)
 - Section "Comment ça marche" : suppression "sans création de compte" → "compte EDG requis"
-- Section confiance : "Créer un compte" → "Accéder à mon espace" → `/login`
+- Section confiance : "Créer un compte" → "Ouvrir un ticket" → `/login`
 - Meta : titre et description mis à jour pour refléter le périmètre interne
 
 #### 4. `/create-request` (`frontend/src/routes/create-request.tsx`)

@@ -13,7 +13,7 @@ import { fetchUser, fetchUsers, buildAvatarUrl } from "@/lib/api/accounts";
 import { cn, initialsFor } from "@/lib/utils";
 import {
   ClipboardList, UserPlus, RotateCcw,
-  Clock, Inbox, AlertTriangle, Wrench, Users, ArrowLeft,
+  Clock, Inbox, Wrench, Users, ArrowLeft,
 } from "lucide-react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -28,12 +28,11 @@ export const Route = createFileRoute("/app/chief-inbox")({
 
 // ── Types internes ─────────────────────────────────────────────────────────────
 
-type Tab = "assign" | "reopen" | "escalated";
+type Tab = "assign" | "reopen";
 
 const TABS: { key: Tab; label: string; icon: typeof ClipboardList; color: string }[] = [
   { key: "assign",   label: "À affecter",    icon: UserPlus,       color: "text-primary" },
   { key: "reopen",   label: "Réouvertures",  icon: RotateCcw,      color: "text-amber-500" },
-  { key: "escalated",label: "Escalades",     icon: AlertTriangle,  color: "text-destructive" },
 ];
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -47,9 +46,6 @@ function isToAssign(r: RequestItem): boolean {
 }
 function isReopenPending(r: RequestItem): boolean {
   return r.infos?.reopen_requested === true;
-}
-function isEscalated(r: RequestItem): boolean {
-  return r.status === "escalated";
 }
 
 // ── Sous-composant : carte ticket ──────────────────────────────────────────────
@@ -149,11 +145,11 @@ export function ChiefInbox({ filterUnitId, onBackToOverview }: ChiefInboxProps =
 
   const [activeTab, setActiveTab] = useState<Tab>("assign");
 
-  // Deep-link depuis le menu "Mon travail"/"Pilotage" (Réouvertures, Escalades) —
-  // ?tab=reopen|escalated pré-sélectionne l'onglet déjà existant, sans nouvelle vue.
+  // Deep-link depuis le menu "Mon travail"/"Pilotage" (Réouvertures) —
+  // ?tab=reopen pré-sélectionne l'onglet déjà existant, sans nouvelle vue.
   useEffect(() => {
     const tab = new URLSearchParams(window.location.search).get("tab");
-    if (tab === "reopen" || tab === "escalated" || tab === "assign") setActiveTab(tab);
+    if (tab === "reopen" || tab === "assign") setActiveTab(tab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -175,10 +171,9 @@ export function ChiefInbox({ filterUnitId, onBackToOverview }: ChiefInboxProps =
 
   const toAssign   = useMemo(() => allItems.filter(isToAssign),      [allItems]);
   const toReopen   = useMemo(() => allItems.filter(isReopenPending), [allItems]);
-  const escalated  = useMemo(() => allItems.filter(isEscalated),     [allItems]);
 
   const tabItems: Record<Tab, RequestItem[]> = {
-    assign: toAssign, reopen: toReopen, escalated,
+    assign: toAssign, reopen: toReopen,
   };
   const displayed = tabItems[activeTab];
 
@@ -220,11 +215,9 @@ export function ChiefInbox({ filterUnitId, onBackToOverview }: ChiefInboxProps =
   const listState: "loading" | "empty" | "ready" = isLoading
     ? "loading" : isError || displayed.length === 0 ? "empty" : "ready";
 
-  const scopeLabel = isDepartmentSpace ? "département" : "service";
   const emptyMessages: Record<Tab, string> = {
     assign:   "Aucun ticket en attente d'affectation.",
     reopen:   "Aucune demande de réouverture en attente.",
-    escalated:`Aucune escalade reçue pour votre ${scopeLabel}.`,
   };
 
   return (
@@ -267,7 +260,7 @@ export function ChiefInbox({ filterUnitId, onBackToOverview }: ChiefInboxProps =
         initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.04 }}
-        className="grid grid-cols-1 gap-3 sm:grid-cols-3"
+        className="grid grid-cols-1 gap-3 sm:grid-cols-2"
       >
         {TABS.map((t) => {
           const count = tabItems[t.key].length;
@@ -285,13 +278,11 @@ export function ChiefInbox({ filterUnitId, onBackToOverview }: ChiefInboxProps =
                 "flex items-center gap-3 p-4 transition-shadow",
                 activeTab === t.key && "ring-2 ring-primary/30",
                 count > 0 && t.key === "reopen"   && "border-amber-500/40",
-                count > 0 && t.key === "escalated" && "border-destructive/40",
               )}>
                 <span className={cn(
                   "grid h-9 w-9 shrink-0 place-items-center rounded-xl",
                   t.key === "assign"    && "bg-primary/10",
                   t.key === "reopen"    && (count > 0 ? "bg-amber-500/15" : "bg-muted"),
-                  t.key === "escalated" && (count > 0 ? "bg-destructive/15" : "bg-muted"),
                 )}>
                   <Icon className={cn("h-4 w-4", count > 0 ? t.color : "text-muted-foreground")} />
                 </span>
@@ -377,7 +368,6 @@ export function ChiefInbox({ filterUnitId, onBackToOverview }: ChiefInboxProps =
                   "rounded-full px-1.5 py-0.5 text-[10px] font-bold",
                   t.key === "assign"    && "bg-primary/15 text-primary",
                   t.key === "reopen"    && "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-                  t.key === "escalated" && "bg-destructive/15 text-destructive",
                 )}>
                   {count}
                 </span>

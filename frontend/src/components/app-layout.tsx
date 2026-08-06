@@ -98,6 +98,8 @@ const HEADER_ROLE_LABEL: Record<Role, string> = {
 function resolveBackFallback(pathname: string, role: Role): string {
   if (pathname.startsWith("/app/supervision/tickets/")) return "/app/supervision";
   if (pathname.startsWith("/app/queue/tickets/")) return "/app/queue";
+  if (pathname.startsWith("/app/transmitted/tickets/")) return "/app/transmitted";
+  if (pathname.startsWith("/app/history/tickets/")) return "/app/history";
   if (pathname.startsWith("/app/my-tickets/tickets/")) return "/app/my-tickets";
   if (pathname.startsWith("/app/chief-inbox/tickets/")) return "/app/chief-inbox";
   if (pathname.startsWith("/app/department-inbox/tickets/")) return "/app/department-inbox";
@@ -105,10 +107,12 @@ function resolveBackFallback(pathname: string, role: Role): string {
   if (pathname.startsWith("/app/dg/tickets/")) return "/app/dg";
   if (pathname.startsWith("/app/sla-center/tickets/")) return "/app/sla-center";
   if (pathname.startsWith("/app/admin/tickets/")) return role === "admin" ? "/app/admin/users" : "/app";
+  if (pathname.startsWith("/app/history")) return "/app/history";
   if (pathname.startsWith("/app/requests/")) return "/app/requests";
   if (pathname.startsWith("/app/requests")) return "/app";
   if (pathname.startsWith("/app/my-tickets")) return "/app";
   if (pathname.startsWith("/app/queue")) return "/app";
+  if (pathname.startsWith("/app/transmitted")) return "/app";
   if (pathname.startsWith("/app/chief-inbox")) return "/app";
   if (pathname.startsWith("/app/department-inbox")) return "/app";
   if (pathname.startsWith("/app/direction")) return "/app";
@@ -123,7 +127,7 @@ const navItems: NavItem[] = [
   // ── Mon espace personnel (tous les rôles — chaque acteur garde son espace propre) ──
   { to: "/app",                  label: "Accueil",          icon: LayoutDashboard, roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Mon espace" },
   { to: "/app/requests",         label: "Mes tickets",      icon: Inbox,   roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Mon espace" },
-  { to: "/app/requests/history", label: "Historique",        icon: History, roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Mon espace" },
+  { to: "/app/history", label: "Historique",        icon: History, roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Mon espace" },
 
   // ── Mon travail — socle commun de traitement, identique pour tous les rôles
   //    opérationnels (le traitement n'est plus différenciateur, cf. philosophie
@@ -136,19 +140,14 @@ const navItems: NavItem[] = [
   { to: "/app/transmitted", label: "Tickets transmis", icon: Send, roles: ["agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Mon travail" },
 
   // ── Pilotage — supervision/répartition, distinct du traitement personnel ──
-  { to: "/app/chief-inbox",      label: "Centre de répartition", icon: ClipboardList, roles: ["chief-service"],                   group: "Pilotage" },
   { to: "/app/department-inbox", label: "Centre de pilotage",    icon: ClipboardList, roles: ["chief-departement"],                group: "Pilotage" },
   { to: "/app/supervision", label: "Supervision", icon: ShieldAlert, roles: ["chief-service", "chief-departement", "director"], group: "Pilotage" },
-  { to: "/app/supervision", label: "Mon équipe", icon: Users, roles: ["chief-service"], group: "Pilotage", search: { section: "equipe" } },
-  { to: "/app/chief-inbox",      label: "Escalades", icon: AlertTriangle, roles: ["chief-service"],     group: "Pilotage", search: { tab: "escalated" } },
-  { to: "/app/department-inbox", label: "Escalades", icon: AlertTriangle, roles: ["chief-departement"], group: "Pilotage", search: { tab: "escalated" } },
   { to: "/app/direction",        label: "Escalades", icon: AlertTriangle, roles: ["director"],          group: "Pilotage", search: { section: "escalades-l3" } },
   { to: "/app/strategic-dashboard", label: "Tableau de bord DSI", icon: Compass, roles: ["director"],   group: "Pilotage" },
   { to: "/app/dg",         label: "Supervision globale", icon: TrendingUp, roles: ["admin"],            group: "Pilotage" },
   { to: "/app/sla-center", label: "Centre SLA",    icon: AlarmClock, roles: ["chief-service", "chief-departement", "director", "admin"],       group: "Pilotage" },
 
   // ── Analyse — rapports/statistiques, séparé du pilotage opérationnel ──────
-  { to: "/app/reports", label: "Rapports Service",     icon: BarChart3, roles: ["chief-service"],      group: "Analyse" },
   { to: "/app/reports", label: "Rapports Département", icon: BarChart3, roles: ["chief-departement"],  group: "Analyse" },
   { to: "/app/reports", label: "Rapports Direction",   icon: BarChart3, roles: ["director"],           group: "Analyse" },
   { to: "/app/reports", label: "Rapports",             icon: BarChart3, roles: ["admin"],               group: "Analyse" },
@@ -246,7 +245,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
     return !best || item.to.length > best.length ? item.to : best;
   }, null);
 
-  // Plusieurs items ("Escalades", "Mon équipe"…) pointent volontairement
+  // Plusieurs items ("Escalades"…) pointent volontairement
   // vers la même route qu'un autre item (deep-link ?tab=/?status=/
   // ?section= vers un onglet/filtre déjà existant) — départager avec le pathname
   // seul allumerait tous les items partageant ce "to" en même temps. On ne
@@ -696,7 +695,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
                   : role === "chief-service"
                     ? [
                         { to: "/app/queue",         icon: ListChecks,      label: "Tickets" },
-                        { to: "/app/chief-inbox",   icon: ClipboardList,   label: "Répartition", primary: true },
+                        { to: "/app/my-tickets",    icon: Ticket,          label: "Ma boîte", primary: true },
                         { to: "/app/notifications", icon: Bell,            label: "Alertes" },
                         { to: "/app/profile",       icon: Settings,        label: "Profil" },
                       ]

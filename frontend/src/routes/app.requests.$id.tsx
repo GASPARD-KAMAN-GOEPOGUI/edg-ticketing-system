@@ -136,6 +136,12 @@ const DETAIL_CONTEXTS = {
     notFoundBackLabel: "Retour aux tickets",
     backTo: "/app/requests",
   },
+  history: {
+    eyebrow: "Historique",
+    backLabel: "Retour à l'historique",
+    notFoundBackLabel: "Retour à l'historique",
+    backTo: "/app/history",
+  },
   supervision: {
     eyebrow: "Supervision",
     backLabel: "Retour à la supervision",
@@ -147,6 +153,12 @@ const DETAIL_CONTEXTS = {
     backLabel: "Retour à la file d'attente",
     notFoundBackLabel: "Retour à la file d'attente",
     backTo: "/app/queue",
+  },
+  transmitted: {
+    eyebrow: "Tickets transmis",
+    backLabel: "Retour aux tickets transmis",
+    notFoundBackLabel: "Retour aux tickets transmis",
+    backTo: "/app/transmitted",
   },
   myTickets: {
     eyebrow: "Traitement",
@@ -1438,12 +1450,15 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     enabled: showTransmitForm && !!transmitDepartmentId,
     staleTime: 5 * 60_000,
   });
+  const currentUserId = String(sessionUser?.id ?? "");
+  const filterCurrentUser = (users: AccountUser[]) =>
+    users.filter((user) => String(user.id) !== currentUserId);
   const { data: transmitPeople = [], isFetching: transmitPeopleLoading } = useQuery({
-    queryKey: ["transmit-people", transmitSearch, transmitUnitId, transmitDepartmentId, transmitDirectionId],
+    queryKey: ["transmit-people", transmitSearch, transmitUnitId, transmitDepartmentId, transmitDirectionId, currentUserId],
     queryFn: async () => {
       if (transmitSearch.trim()) {
         const res = await fetchUsers({ search: transmitSearch.trim(), limit: 50 });
-        return res.items.filter((u) => TREATING_ROLES.has(u.role));
+        return filterCurrentUser(res.items.filter((u) => TREATING_ROLES.has(u.role)));
       }
       if (transmitUnitId) {
         const [agents, chiefs] = await Promise.all([
@@ -1451,21 +1466,38 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
           fetchUsers({ role: "chief-service", unit_id: transmitUnitId, limit: 100 }),
         ]);
         const byId = new Map([...agents.items, ...chiefs.items].map((p) => [p.id, p]));
-        return Array.from(byId.values());
+        return filterCurrentUser(Array.from(byId.values()));
       }
       if (transmitDepartmentId) {
         const res = await fetchUsers({ role: "chief-departement", unit_id: transmitDepartmentId, limit: 50 });
-        return res.items;
+        return filterCurrentUser(res.items);
       }
       if (transmitDirectionId) {
         const res = await fetchUsers({ role: "director", unit_id: transmitDirectionId, limit: 50 });
-        return res.items;
+        return filterCurrentUser(res.items);
       }
       return [];
     },
     enabled: showTransmitForm,
     staleTime: 30_000,
   });
+  const selectedTransmitPerson = useMemo(
+    () => transmitPeople.find((person) => person.id === transmitTargetId),
+    [transmitPeople, transmitTargetId],
+  );
+
+  useEffect(() => {
+    if (!transmitTargetId || !selectedTransmitPerson) return;
+    if (selectedTransmitPerson.direction_id && transmitDirectionId !== selectedTransmitPerson.direction_id) {
+      setTransmitDirectionId(selectedTransmitPerson.direction_id);
+    }
+    if (selectedTransmitPerson.department_id && transmitDepartmentId !== selectedTransmitPerson.department_id) {
+      setTransmitDepartmentId(selectedTransmitPerson.department_id);
+    }
+    if (selectedTransmitPerson.unit_id && transmitUnitId !== selectedTransmitPerson.unit_id) {
+      setTransmitUnitId(selectedTransmitPerson.unit_id);
+    }
+  }, [selectedTransmitPerson, transmitTargetId, transmitDirectionId, transmitDepartmentId, transmitUnitId]);
 
   if (isLoading) {
     return (
@@ -1638,6 +1670,25 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const updatedAtLabel = formatTicketDateTime(r.updatedAt);
   const canShowQuickActions = canEdit || canCancel || canClose || canRequestReopen || canShowClosedRequestAction || canOpenAppreciation;
   const hasRequestActions = canShowQuickActions;
+  const hasTreatmentActions = !isRequesterView && (
+    (r.status === "reopened" && !r.assigneeId) ||
+    canApproveReopen ||
+    canRejectReopen ||
+    canSelfAssign ||
+    canTakeOwnership ||
+    canRequestInfo ||
+    canResumeTreatment ||
+    canEscalateTicket ||
+    canEscalateToDirector ||
+    canAssignTicket ||
+    canCreateCircuit ||
+    canChangePriority ||
+    canRejectTicket ||
+    canChangeService ||
+    canTransferDirection ||
+    canTransmitTreatment ||
+    canResolveTicket
+  );
   const detailTabs: Array<{ key: DetailTab; label: string; count?: number; icon: LucideIcon }> = [
     { key: "description", label: "Description", icon: FileText },
     { key: "journal", label: "Journals", count: r.timeline.length, icon: GitBranch },
@@ -1715,17 +1766,17 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     }
   };
 
-  const treatmentActionsPanel = !isRequesterView && (
-    (isFinal && !canDecideReopen) ? (
+  const treatmentActionsPanel = (
+    !isRequesterView && (isFinal && !canDecideReopen) ? (
       <div className="flex w-full flex-wrap items-center gap-2 rounded-full border border-border/40 bg-muted/30 px-4 py-2 text-sm text-muted-foreground">
         <Lock className="h-3.5 w-3.5" />
         Ticket {isArchived ? "archivé" : r.status === "closed" ? "clôturé" : r.status === "rejected" ? "rejeté" : "résolu"} — aucune action disponible
       </div>
-    ) : (
+    ) : (hasTreatmentActions || hasRequestActions) ? (
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3" role="group" aria-label="Actions de traitement">
         {/* BR-REOPEN-QUEUE-001 — assignee_id=null tant que personne n'a repris le
             ticket depuis la File d'attente : le rappeler explicitement. */}
-        {r.status === "reopened" && !r.assigneeId && (
+        {!isRequesterView && r.status === "reopened" && !r.assigneeId && (
           <div className="col-span-full flex items-center gap-2 rounded-full border border-fuchsia-500/40 bg-fuchsia-500/10 px-4 py-2 text-sm text-fuchsia-700 dark:text-fuchsia-300">
             <RotateCcw className="h-3.5 w-3.5 shrink-0" />
             Ce ticket réouvert attend une nouvelle prise en charge.
@@ -1974,108 +2025,95 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             </span>
           </button>
         )}
+        {canEdit && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-left transition hover:bg-amber-500/10"
+            onClick={() => {
+              setEditTitle(r.title);
+              setEditDescription(r.description);
+              setShowEditForm(true);
+            }}
+          >
+            <Pencil className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+            <span>
+              <span className="block text-sm font-semibold text-amber-500">Modifier le ticket</span>
+              <span className="text-xs text-muted-foreground">Uniquement au début</span>
+            </span>
+          </button>
+        )}
+        {canCancel && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-left transition hover:bg-destructive/15"
+            onClick={() => setShowCancelConfirm(true)}
+          >
+            <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            <span>
+              <span className="block text-sm font-semibold text-destructive">Annuler le ticket</span>
+              <span className="text-xs text-muted-foreground">Uniquement au début</span>
+            </span>
+          </button>
+        )}
+        {canRequestReopen && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-info/40 bg-info/10 p-3 text-left transition hover:bg-info/15"
+            onClick={() => setShowClosedRequestDialog(true)}
+          >
+            <RotateCcw className="mt-0.5 h-4 w-4 shrink-0 text-info" />
+            <span>
+              <span className="block text-sm font-semibold text-info">
+                {r.status === "closed" ? "Rouvrir le ticket" : "Demander une réouverture"}
+              </span>
+              <span className="text-xs text-muted-foreground">Après résolution</span>
+            </span>
+          </button>
+        )}
+        {canShowClosedRequestAction && !canRequestReopen && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-border/40 bg-muted/10 p-3 text-left transition hover:bg-muted/20"
+            onClick={() => setShowClosedRequestDialog(true)}
+          >
+            <Lock className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+            <span>
+              <span className="block text-sm font-semibold">Ticket clôturé</span>
+              <span className="text-xs text-muted-foreground">Voir l'état du ticket</span>
+            </span>
+          </button>
+        )}
+        {canClose && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-success/40 bg-success/10 p-3 text-left transition hover:bg-success/15 disabled:opacity-60"
+            onClick={() => setDirectTreatmentAction("close")}
+            disabled={closeMut.isPending}
+          >
+            {closeMut.isPending
+              ? <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-success" />
+              : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />}
+            <span>
+              <span className="block text-sm font-semibold text-success">Confirmer la résolution</span>
+              <span className="text-xs text-muted-foreground">Après traitement</span>
+            </span>
+          </button>
+        )}
+        {canOpenAppreciation && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-border/40 bg-background/30 p-3 text-left transition hover:bg-foreground/5"
+            onClick={() => setShowAppreciationDialog(true)}
+          >
+            <Star className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+            <span>
+              <span className="block text-sm font-semibold">Votre avis</span>
+              <span className="text-xs text-muted-foreground">Évaluer la prise en charge</span>
+            </span>
+          </button>
+        )}
       </div>
-    )
-  );
-
-  const requestActionsPanel = (
-    <section className="min-w-0 rounded-[16px] border border-border/35 bg-background/25" aria-label="Actions disponibles">
-      {hasRequestActions ? (
-        <div className="overflow-hidden">
-          {canEdit && (
-            <button
-              type="button"
-              className="flex w-full items-start gap-3 border-b border-amber-500/40 bg-amber-500/5 px-3 py-3 text-left transition hover:bg-amber-500/10 sm:px-4"
-              onClick={() => {
-                setEditTitle(r.title);
-                setEditDescription(r.description);
-                setShowEditForm(true);
-              }}
-            >
-              <Pencil className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-              <span>
-                <span className="block text-sm font-semibold text-amber-500">Modifier le ticket</span>
-                <span className="text-xs text-muted-foreground">Uniquement au début</span>
-              </span>
-            </button>
-          )}
-          {canCancel && (
-            <button
-              type="button"
-              className="flex w-full items-start gap-3 border-b border-destructive/40 bg-destructive/10 px-3 py-3 text-left transition hover:bg-destructive/15 sm:px-4"
-              onClick={() => setShowCancelConfirm(true)}
-            >
-              <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-              <span>
-                <span className="block text-sm font-semibold text-destructive">Annuler le ticket</span>
-                <span className="text-xs text-muted-foreground">Uniquement au début</span>
-              </span>
-            </button>
-          )}
-          {canRequestReopen && (
-            <button
-              type="button"
-              className="flex w-full items-start gap-3 border-b border-info/40 bg-info/10 px-3 py-3 text-left transition hover:bg-info/15 sm:px-4"
-              onClick={() => setShowClosedRequestDialog(true)}
-            >
-              <RotateCcw className="mt-0.5 h-4 w-4 shrink-0 text-info" />
-              <span>
-                <span className="block text-sm font-semibold text-info">
-                  {r.status === "closed" ? "Rouvrir le ticket" : "Demander une réouverture"}
-                </span>
-                <span className="text-xs text-muted-foreground">Après résolution</span>
-              </span>
-            </button>
-          )}
-          {canShowClosedRequestAction && !canRequestReopen && (
-            <button
-              type="button"
-              className="flex w-full items-start gap-3 border-b border-border/40 bg-muted/10 px-3 py-3 text-left transition hover:bg-muted/20 sm:px-4"
-              onClick={() => setShowClosedRequestDialog(true)}
-            >
-              <Lock className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-              <span>
-                <span className="block text-sm font-semibold">Ticket clôturé</span>
-                <span className="text-xs text-muted-foreground">Voir l'état du ticket</span>
-              </span>
-            </button>
-          )}
-          {canClose && (
-            <button
-              type="button"
-              className="flex w-full items-start gap-3 border-b border-success/40 bg-success/10 px-3 py-3 text-left transition hover:bg-success/15 disabled:opacity-60 sm:px-4"
-              onClick={() => setDirectTreatmentAction("close")}
-              disabled={closeMut.isPending}
-            >
-              {closeMut.isPending
-                ? <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-success" />
-                : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />}
-              <span>
-                <span className="block text-sm font-semibold text-success">Confirmer la résolution</span>
-                <span className="text-xs text-muted-foreground">Après traitement</span>
-              </span>
-            </button>
-          )}
-          {canOpenAppreciation && (
-            <button
-              type="button"
-              className="flex w-full items-start gap-3 px-3 py-3 text-left transition hover:bg-foreground/5 sm:px-4"
-              onClick={() => setShowAppreciationDialog(true)}
-            >
-              <Star className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-              <span>
-                <span className="block text-sm font-semibold">Votre avis</span>
-                <span className="text-xs text-muted-foreground">Évaluer la prise en charge</span>
-              </span>
-            </button>
-          )}
-        </div>
-      ) : (
-        <p className="m-4 rounded-2xl border border-dashed border-border/60 bg-background/35 px-4 py-5 text-sm text-muted-foreground">
-          Aucune action disponible dans l'état actuel du ticket.
-        </p>
-      )}
-    </section>
+    ) : null
   );
 
   const commentsPanel = (
@@ -2955,40 +2993,73 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                   <Label className="text-sm font-medium">
                     Personne cible <span className="text-destructive">*</span>
                   </Label>
-                  <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-border/40 bg-background/40 p-1.5">
-                    {transmitPeopleLoading ? (
-                      <p className="px-2 py-3 text-center text-xs text-muted-foreground">Recherche en cours…</p>
-                    ) : transmitPeople.length === 0 ? (
-                      <p className="px-2 py-3 text-center text-xs text-muted-foreground">
-                        {transmitSearch.trim() || transmitUnitId || transmitDepartmentId || transmitDirectionId
-                          ? "Aucun intervenant actif trouvé pour ces critères."
-                          : "Recherchez un nom ou affinez par direction/département/service."}
-                      </p>
-                    ) : (
-                      transmitPeople.map((person) => (
+                  {selectedTransmitPerson ? (
+                    <div className="rounded-xl border border-primary/20 bg-primary/10 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-slate-900">
+                            {[selectedTransmitPerson.firstname, selectedTransmitPerson.name].filter(Boolean).join(" ")}
+                          </div>
+                          <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                            {selectedTransmitPerson.email} · {roleLabels[selectedTransmitPerson.role as keyof typeof roleLabels] ?? selectedTransmitPerson.role}
+                            {(selectedTransmitPerson.service ?? selectedTransmitPerson.direction) ? ` · ${selectedTransmitPerson.service ?? selectedTransmitPerson.direction}` : ""}
+                          </div>
+                        </div>
                         <button
-                          key={person.id}
                           type="button"
-                          onClick={() => setTransmitTargetId(person.id)}
-                          className={cn(
-                            "flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition",
-                            transmitTargetId === person.id
-                              ? "bg-primary/15 text-primary"
-                              : "hover:bg-foreground/5",
-                          )}
+                          onClick={() => {
+                            setTransmitTargetId("");
+                            setTransmitSearch("");
+                          }}
+                          className="rounded-full border border-border/70 bg-background px-3 py-1 text-xs text-slate-600 hover:bg-foreground/5"
                         >
-                          <span className="min-w-0">
-                            <span className="block truncate font-medium">{person.name}</span>
-                            <span className="block truncate text-xs text-muted-foreground">
-                              {roleLabels[person.role as keyof typeof roleLabels] ?? person.role}
-                              {(person.service ?? person.direction) ? ` · ${person.service ?? person.direction}` : ""}
-                            </span>
-                          </span>
-                          {transmitTargetId === person.id && <BadgeCheck className="h-4 w-4 shrink-0 text-primary" />}
+                          Changer
                         </button>
-                      ))
-                    )}
-                  </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-border/40 bg-background/40 p-1.5">
+                      {transmitPeopleLoading ? (
+                        <p className="px-2 py-3 text-center text-xs text-muted-foreground">Recherche en cours…</p>
+                      ) : transmitPeople.length === 0 ? (
+                        <p className="px-2 py-3 text-center text-xs text-muted-foreground">
+                          {transmitSearch.trim() || transmitUnitId || transmitDepartmentId || transmitDirectionId
+                            ? "Aucun intervenant actif trouvé pour ces critères."
+                            : "Recherchez un nom ou affinez par direction/département/service."}
+                        </p>
+                      ) : (
+                        transmitPeople.map((person) => (
+                          <button
+                            key={person.id}
+                            type="button"
+                            onClick={() => {
+                              setTransmitTargetId(person.id);
+                              setTransmitDirectionId(person.direction_id ?? "");
+                              setTransmitDepartmentId(person.department_id ?? "");
+                              setTransmitUnitId(person.unit_id ?? "");
+                            }}
+                            className={cn(
+                              "flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition",
+                              transmitTargetId === person.id
+                                ? "bg-primary/15 text-primary"
+                                : "hover:bg-foreground/5",
+                            )}
+                          >
+                            <span className="min-w-0">
+                              <span className="block truncate font-medium">
+                                {[person.firstname, person.name].filter(Boolean).join(" ")}
+                              </span>
+                              <span className="block truncate text-xs text-muted-foreground">
+                                {person.email} · {roleLabels[person.role as keyof typeof roleLabels] ?? person.role}
+                                {(person.service ?? person.direction) ? ` · ${person.service ?? person.direction}` : ""}
+                              </span>
+                            </span>
+                            {transmitTargetId === person.id && <BadgeCheck className="h-4 w-4 shrink-0 text-primary" />}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="transmit-work-done" className="text-sm font-medium">
@@ -3615,7 +3686,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
 
             <section className={cn("order-3 space-y-3 border-t border-border/40 p-3 sm:p-4", activeDetailTab !== "treatment" && "hidden")}>
               {treatmentActionsPanel}
-              {requestActionsPanel}
             </section>
 
           </div>

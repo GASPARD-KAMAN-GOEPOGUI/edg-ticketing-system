@@ -23,8 +23,6 @@ import {
   FileText,
   Star,
   Download,
-  CalendarRange,
-  Filter,
   Loader2,
   MoreHorizontal,
 } from "lucide-react";
@@ -34,8 +32,7 @@ import { useState, useMemo } from "react";
 import { useRole, useUser } from "@/lib/session";
 import { useQuery } from "@tanstack/react-query";
 import { fetchRequests } from "@/lib/api/requests";
-import { fetchCsatStats, fetchCsatMonthly } from "@/lib/api/csat";
-import { downloadReport, fetchAgentReport, fetchUnityReport, type ExportFormat } from "@/lib/api/reports";
+import { downloadReport, fetchAgentReport, fetchCsatReport, fetchUnityReport, type ExportFormat } from "@/lib/api/reports";
 import { toast } from "sonner";
 import {
   ResponsiveContainer,
@@ -69,11 +66,12 @@ function isDirectionUnit(label?: string) {
 function ReportsPage() {
   const [role] = useRole();
   const sessionUser = useUser();
+  const isChiefService = role === "chief-service";
   const directorDirectionId = role === "director"
     ? (sessionUser?.direction_id ?? sessionUser?.unit_id)
     : undefined;
-  const [period, setPeriod] = useState("year");
-  const [direction, setDirection] = useState(
+  const [period] = useState("year");
+  const [direction] = useState(
     role === "director" ? (directorDirectionId ?? "all") : "all",
   );
   const [exportFormat, setExportFormat] = useState<ExportFormat>("excel");
@@ -85,6 +83,7 @@ function ReportsPage() {
       : direction === "all"
         ? undefined
         : direction;
+  const serviceReportReady = isChiefService || !!directionFilter;
 
   const { data: reqData, isLoading: loadReq } = useQuery({
     queryKey: ["report-requests", directionFilter],
@@ -93,28 +92,29 @@ function ReportsPage() {
     staleTime: 60_000,
   });
 
-  const { data: csat, isLoading: loadCsat } = useQuery({
-    queryKey: ["csat-stats"],
-    queryFn: fetchCsatStats,
+  const { data: csatReport, isLoading: loadCsat } = useQuery({
+    queryKey: ["report-csat", role, sessionUser?.unit_id],
+    queryFn: () => fetchCsatReport(),
     staleTime: 60_000,
   });
 
   const { data: directions = [] } = useQuery({
     queryKey: ["directions"],
     queryFn: fetchDirections,
+    enabled: !isChiefService,
     staleTime: 300_000,
   });
 
   const { data: agentReport = [], isLoading: loadAgent } = useQuery({
-    queryKey: ["report-agents"],
+    queryKey: ["report-agents", role, sessionUser?.unit_id],
     queryFn: () => fetchAgentReport(),
     staleTime: 60_000,
   });
 
   const { data: unityReport = [], isLoading: loadUnity } = useQuery({
-    queryKey: ["report-unity", directionFilter],
+    queryKey: ["report-unity", directionFilter, role, sessionUser?.unit_id],
     queryFn: () => fetchUnityReport(undefined, undefined, directionFilter),
-    enabled: !!directionFilter,
+    enabled: isChiefService || !!directionFilter,
     staleTime: 60_000,
   });
 
@@ -122,12 +122,6 @@ function ReportsPage() {
     queryKey: ["report-service-units", directionFilter],
     queryFn: () => fetchUnits(directionFilter),
     enabled: !!directionFilter,
-    staleTime: 60_000,
-  });
-
-  const { data: csatMonthly = [] } = useQuery({
-    queryKey: ["csat-monthly"],
-    queryFn: () => fetchCsatMonthly(12),
     staleTime: 60_000,
   });
 
@@ -147,8 +141,10 @@ function ReportsPage() {
   const slaActive = items.filter((r) => ACTIVE.has(r.status));
   const slaOk = slaActive.filter((r) => r.slaElapsed <= r.slaHours).length;
   const slaPct = slaActive.length > 0 ? Math.round((slaOk / slaActive.length) * 100) : null;
-  const csatScore = csat?.global != null ? csat.global.toFixed(1) : null;
-  const csatCount = csat?.count ?? 0;
+  const csatScore = csatReport?.summary?.avg_rating != null
+    ? Number(csatReport.summary.avg_rating).toFixed(1)
+    : null;
+  const csatCount = csatReport?.summary?.total_ratings ?? 0;
 
   const categoryData = useMemo(() => {
     const acc: Record<string, number> = {};
@@ -195,13 +191,22 @@ function ReportsPage() {
   }, [items]);
 
   const csatDistData = useMemo(() => {
-    if (!csat?.distribution) return [];
-    return Object.entries(csat.distribution)
-      .map(([k, v]) => ({ name: `${k}★`, value: Number(v) }))
+    if (!csatReport?.by_rating) return [];
+    return csatReport.by_rating
+      .map((row) => ({ name: `${row.rating}★`, value: Number(row.count) }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [csat]);
+  }, [csatReport]);
+  const csatMonthly = useMemo(
+    () => (csatReport?.monthly_evolution ?? []).map((row) => ({
+      month: row.month,
+      avg: Number(row.avg_rating ?? 0),
+      count: Number(row.total_ratings ?? 0),
+    })),
+    [csatReport],
+  );
 
   const visibleUnityReport = useMemo(() => {
+    if (isChiefService) return unityReport;
     if (!directionFilter) return [];
     const serviceUnits = scopedUnits.filter((unit) => !isDirectionUnit(unit.name));
     const byUnit = new Map(unityReport.map((row) => [String(row.unity_id), row]));
@@ -232,10 +237,10 @@ function ReportsPage() {
       if (bTotal !== aTotal) return bTotal - aTotal;
       return a.unity_label.localeCompare(b.unity_label);
     });
-  }, [directionFilter, scopedUnits, unityReport]);
+  }, [directionFilter, scopedUnits, unityReport, isChiefService]);
 
   const handleExport = async (type: Parameters<typeof downloadReport>[0], fmt?: ExportFormat) => {
-    if (type === "by-unity" && !directionFilter) {
+    if (type === "by-unity" && !directionFilter && !isChiefService) {
       toast.error("Sélectionnez une direction pour exporter ses services.");
       return;
     }
@@ -265,7 +270,7 @@ function ReportsPage() {
           params.year = String(now.getFullYear());
           params.month = String(now.getMonth() + 1);
         }
-        if (directionFilter) params.direction_id = String(directionFilter);
+        if (directionFilter && !isChiefService) params.direction_id = String(directionFilter);
       }
 
       await downloadReport(type, fmt ?? exportFormat, params);
@@ -353,7 +358,7 @@ function ReportsPage() {
                 <Download className="h-4 w-4" /> Par agent
               </DropdownMenuItem>
               <DropdownMenuItem
-                disabled={!directionFilter}
+                disabled={!serviceReportReady}
                 onSelect={() => handleExport("by-unity")}
               >
                 <Download className="h-4 w-4" /> Par service
@@ -368,48 +373,6 @@ function ReportsPage() {
           </DropdownMenu>
         </div>
       </header>
-
-      <GlassCard className="flex flex-wrap items-center gap-3 p-4">
-        <div className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-          <Filter className="h-3.5 w-3.5" /> Filtres
-        </div>
-        <Select value={period} onValueChange={setPeriod}>
-          <SelectTrigger className="h-9 w-full rounded-full sm:w-44">
-            <CalendarRange className="mr-1 h-3.5 w-3.5" />
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="month">Ce mois</SelectItem>
-            <SelectItem value="quarter">Ce trimestre</SelectItem>
-            <SelectItem value="year">Année en cours</SelectItem>
-            <SelectItem value="ytd">Glissant 12 mois</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select
-          value={direction}
-          onValueChange={setDirection}
-          disabled={role === "director"}
-        >
-          <SelectTrigger className="h-9 w-full rounded-full sm:w-56">
-            <SelectValue placeholder="Direction" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Toutes les directions</SelectItem>
-            {directions.map((d) => (
-              <SelectItem key={d.id} value={d.id}>
-                {d.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {isLoading ? (
-          <Loader2 className="ml-auto h-4 w-4 animate-spin text-muted-foreground" />
-        ) : (
-          <span className="ml-auto text-xs text-muted-foreground">
-            {total.toLocaleString("fr-FR")} tickets chargés
-          </span>
-        )}
-      </GlassCard>
 
       {/* KPIs réels */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -852,7 +815,7 @@ function ReportsPage() {
             size="sm"
             className="rounded-full"
             onClick={() => handleExport("by-unity")}
-            disabled={exportPending || !directionFilter}
+            disabled={exportPending || !serviceReportReady}
           >
             {exportPending
               ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
@@ -866,7 +829,7 @@ function ReportsPage() {
           </div>
         ) : visibleUnityReport.length === 0 ? (
           <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
-            {directionFilter
+            {serviceReportReady
               ? "Aucun service rattaché à cette direction pour cette période."
               : "Sélectionnez une direction pour voir ses services."}
           </div>

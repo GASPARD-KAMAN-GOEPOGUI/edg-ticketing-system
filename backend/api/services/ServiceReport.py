@@ -1516,6 +1516,7 @@ class ReportService(BaseService):
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
         direction_id: Optional[int] = None,
+        unity_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Tickets par unité organisationnelle sur une période.
@@ -1527,7 +1528,10 @@ class ReportService(BaseService):
         params = {"start": s, "end": e}
         unity_scope = "AND u.parent_direction_id IS NOT NULL"
         stmt_params = None
-        if direction_id is not None:
+        if unity_id is not None:
+            unity_scope = "AND u.id = :unity_id"
+            params["unity_id"] = int(unity_id)
+        elif direction_id is not None:
             unity_ids = await self._scoped_unity_ids(int(direction_id))
             if not unity_ids:
                 return []
@@ -1857,6 +1861,7 @@ class ReportService(BaseService):
         self,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        unity_ids: Optional[list[int]] = None,
     ) -> dict:
         """
         BR-TRACE-001 — statistiques agrégées sur les interventions (conteneurs
@@ -1876,7 +1881,7 @@ class ReportService(BaseService):
         range_start = datetime.combine(s, datetime.min.time())
         range_end = datetime.combine(e, datetime.min.time()) + timedelta(days=1)
 
-        result = await self.session.execute(
+        stmt = (
             select(RequestModel)
             # Ni sla_cycles/reopen_count ni interventions n'ont besoin des comptes
             # requester/assignee (seuls `timelines`/`workflows` sont parcourus) —
@@ -1889,6 +1894,26 @@ class ReportService(BaseService):
                 RequestModel.created_at < range_end,
             )
         )
+        if unity_ids is not None:
+            clean_unity_ids = [int(uid) for uid in unity_ids if uid is not None]
+            if not clean_unity_ids:
+                return {
+                    "report_type": "intervention_stats",
+                    "period": f"{s.isoformat()} → {e.isoformat()}",
+                    "total_interventions": 0,
+                    "distinct_agents": 0,
+                    "avg_duration_hours": None,
+                    "total_duration_hours": 0.0,
+                    "transmissions": 0,
+                    "resolutions": 0,
+                    "reopenings": 0,
+                    "by_agent": [],
+                    "by_service": [],
+                    "by_department": [],
+                }
+            stmt = stmt.where(RequestModel.unity_id.in_(clean_unity_ids))
+
+        result = await self.session.execute(stmt)
         requests = result.scalars().unique().all()
 
         durations: list[float] = []

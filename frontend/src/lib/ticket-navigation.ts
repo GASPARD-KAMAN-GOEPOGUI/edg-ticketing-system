@@ -2,8 +2,10 @@ import type { Role } from "@/lib/mock-data";
 
 export type TicketDetailRoute =
   | "/app/requests/$id"
+  | "/app/history/tickets/$id"
   | "/app/supervision/tickets/$id"
   | "/app/queue/tickets/$id"
+  | "/app/transmitted/tickets/$id"
   | "/app/my-tickets/tickets/$id"
   | "/app/chief-inbox/tickets/$id"
   | "/app/department-inbox/tickets/$id"
@@ -14,8 +16,10 @@ export type TicketDetailRoute =
 
 export type TicketListRoute =
   | "/app/requests"
+  | "/app/history"
   | "/app/supervision"
   | "/app/queue"
+  | "/app/transmitted"
   | "/app/my-tickets"
   | "/app/chief-inbox"
   | "/app/department-inbox"
@@ -27,6 +31,8 @@ export type TicketListRoute =
 export function ticketDetailRouteForList(route: TicketListRoute): TicketDetailRoute {
   if (route === "/app/supervision") return "/app/supervision/tickets/$id";
   if (route === "/app/queue") return "/app/queue/tickets/$id";
+  if (route === "/app/transmitted") return "/app/transmitted/tickets/$id";
+  if (route === "/app/history") return "/app/history/tickets/$id";
   if (route === "/app/my-tickets") return "/app/my-tickets/tickets/$id";
   if (route === "/app/chief-inbox") return "/app/chief-inbox/tickets/$id";
   if (route === "/app/department-inbox") return "/app/department-inbox/tickets/$id";
@@ -50,8 +56,10 @@ function explicitTicketDetailRouteFromSource(source?: string | null): TicketDeta
   const value = (source ?? "").toLowerCase();
 
   if (value.includes("/app/requests")) return "/app/requests/$id";
+  if (value.includes("/app/history")) return "/app/history/tickets/$id";
   if (value.includes("/app/supervision")) return "/app/supervision/tickets/$id";
   if (value.includes("/app/queue")) return "/app/queue/tickets/$id";
+  if (value.includes("/app/transmitted")) return "/app/transmitted/tickets/$id";
   if (value.includes("/app/my-tickets")) return "/app/my-tickets/tickets/$id";
   if (value.includes("/app/department-inbox")) return "/app/department-inbox/tickets/$id";
   if (value.includes("/app/chief-inbox")) return "/app/chief-inbox/tickets/$id";

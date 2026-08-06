@@ -11,6 +11,8 @@
 | `frontend/src/routes/app.requests.$id.tsx` | frontend | personal/request | detail personnel | `requests.ts`, timeline | mes demandes |
 | `frontend/src/routes/app.requests.index.tsx` | frontend | personal/request | liste mes demandes | `requests.ts` | demandes perso |
 | `frontend/src/routes/app.my-tickets.tsx` | frontend | agent | liste tickets agent | `requests.ts` | traitement agent |
+| `frontend/src/routes/app.transmitted.tsx` | frontend | agent/workflow | liste des tickets transmis par l'acteur courant | `requests.ts`, `ticket-navigation.ts` | tickets transmis |
+| `frontend/src/routes/app.transmitted_.tickets.$id.tsx` | frontend | agent/workflow | detail ticket dans le contexte Tickets transmis | `app.requests.$id.tsx` | tickets transmis, BR-NAV-001 |
 | `frontend/src/routes/app.queue.tsx` | frontend | queue | file, a qualifier | `requests.ts` | qualification |
 | `frontend/src/routes/app.chief-inbox.tsx` | frontend | chief | boite traitement chef | `requests.ts`, `accounts.ts` | assignation |
 | `frontend/src/routes/app.supervision.tsx` | frontend | supervision | centre supervision | `requests.ts`, stats | supervision |

@@ -185,6 +185,8 @@ function RequestsList() {
 
   useEffect(() => { setPage(1); }, [status, origin, debouncedQ, dateFrom, dateTo]);
 
+  const requesterId = sessionUser?.id ? String(sessionUser.id) : "";
+
   const applyQuickDate = useCallback((preset: "today" | "week" | "month" | "year") => {
     const now = new Date();
     if (preset === "today") { setDateFrom(isoDate(startOfDay(now))); setDateTo(isoDate(endOfDay(now))); }
@@ -205,6 +207,14 @@ function RequestsList() {
     else { applyQuickDate(val as "today" | "week" | "month" | "year"); }
   }, [clearDates, applyQuickDate, setPeriodPreset]);
 
+  const clearAllFilters = useCallback(() => {
+    setQ("");
+    setStatus("all");
+    setOrigin("all");
+    clearDates();
+    setPage(1);
+  }, [setQ, setStatus, setOrigin, clearDates]);
+
   const visibleStatus = PERSONAL_TERMINAL_STATUS_SET.has(status as RequestStatus) ? "all" : status;
 
   const filters = {
@@ -212,7 +222,7 @@ function RequestsList() {
     limit: pageSize,
     exclude_status: PERSONAL_TERMINAL_STATUSES.join(","),
     ...(visibleStatus !== "all" && { request_status: visibleStatus }),
-    ...(sessionUser?.id && { requester_id: sessionUser.id }),
+    ...(requesterId && { requester_id: requesterId }),
     ...(!isUser && origin === "internal" && { is_external: false }),
     ...(!isUser && origin === "external" && { is_external: true }),
     ...(debouncedQ && { search: debouncedQ }),
@@ -224,6 +234,7 @@ function RequestsList() {
     queryKey: ["requests", filters],
     queryFn: () => fetchRequests(filters),
     staleTime: 30_000,
+    enabled: !!requesterId,
   });
 
   const { data: directionsData } = useQuery({
@@ -295,6 +306,13 @@ function RequestsList() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            className="rounded-full"
+            onClick={clearAllFilters}
+          >
+            Réinitialiser les filtres
+          </Button>
           <LayoutToggle layout={layout} onChange={setLayout} />
           <Button asChild className="rounded-full gradient-primary shadow-lg shadow-primary/30">
             <Link to="/app/new">
@@ -309,7 +327,7 @@ function RequestsList() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.05 }}
       >
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(220px,1fr)_160px_150px_170px_auto]">
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(220px,1fr)_160px_150px]">
             {/* Recherche */}
             <div className="relative min-w-0 rounded-2xl border border-border/50 bg-background/60 shadow-sm backdrop-blur sm:col-span-2 lg:col-span-1">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -335,22 +353,6 @@ function RequestsList() {
                 </SelectContent>
               </Select>
             </div>
-
-            {/* Origine (non-user) */}
-            {!isUser && (
-              <div className="min-w-0 rounded-2xl border border-border/50 bg-background/60 shadow-sm backdrop-blur">
-                <Select value={origin} onValueChange={setOrigin}>
-                  <SelectTrigger className="h-11 w-full border-0 bg-transparent shadow-none focus:ring-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Toutes origines</SelectItem>
-                    <SelectItem value="internal">Interne</SelectItem>
-                    <SelectItem value="external">Externe</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
 
             {/* Période */}
             <div className="flex min-w-0 items-center gap-1.5 rounded-2xl border border-border/50 bg-background/60 px-3 shadow-sm backdrop-blur">
@@ -407,6 +409,8 @@ function RequestsList() {
             <p className="mt-1 text-sm text-muted-foreground">
               {isError
                 ? "Impossible de charger les tickets."
+                : dateFrom || dateTo
+                ? "Aucun ticket trouvé pour cette période. Réinitialisez les filtres de date ou cliquez sur Nouveau ticket."
                 : "Vous n'avez pas encore soumis de ticket. Cliquez sur « Nouveau ticket » pour commencer."}
             </p>
             {!isError && (

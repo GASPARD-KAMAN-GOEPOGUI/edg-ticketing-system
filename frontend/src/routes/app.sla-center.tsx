@@ -112,6 +112,7 @@ function SlaCenterPage() {
   const [role] = useRole();
   const sessionUser = useUser();
   const isDirector = role === "director";
+  const isChiefService = role === "chief-service";
   const isChief = role === "chief-service" || role === "chief-departement";
 
   const filters = useMemo(
@@ -208,7 +209,10 @@ function SlaCenterPage() {
   );
 
   const serviceLabel = (serviceId?: string) =>
-    serviceId ? (serviceLookup[String(serviceId)] ?? serviceId) : "—";
+    serviceId && serviceLookup[String(serviceId)] ? serviceLookup[String(serviceId)] : "—";
+
+  const directionLabel = (directionId?: string) =>
+    directionId && directionLookup[directionId] ? directionLookup[directionId] : "—";
 
   const breachedList = useMemo(
     () =>
@@ -246,7 +250,7 @@ function SlaCenterPage() {
           id,
           label: (isDirector || isChief)
             ? serviceLabel(id)
-            : (directionLookup[id] ?? id),
+            : directionLabel(id),
           total: items.length,
           compliant,
           breached: items.length - compliant,
@@ -464,55 +468,56 @@ function SlaCenterPage() {
         </GlassCard>
       )}
 
-      {/* Stats table — by direction or by service */}
-      <GlassCard>
-        <h2 className="mb-4 font-semibold capitalize">SLA par {groupLabel}</h2>
-        {groupRows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Aucun ticket actif.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-xs text-muted-foreground">
-                  <th className="py-2 pr-4 text-left capitalize">{groupLabel}</th>
-                  <th className="py-2 px-3 text-right">Actifs</th>
-                  <th className="py-2 px-3 text-right">Conformes</th>
-                  <th className="py-2 px-3 text-right">Breach</th>
-                  <th className="py-2 pl-3 text-right">Taux</th>
-                  <th className="w-32 py-2 pl-4"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/50">
-                {groupRows.map((row) => (
-                  <tr key={row.id} className="transition-colors hover:bg-muted/30">
-                    <td className="py-2.5 pr-4 font-medium">{row.label}</td>
-                    <td className="py-2.5 px-3 text-right tabular-nums">{row.total}</td>
-                    <td className="py-2.5 px-3 text-right tabular-nums text-emerald-600">
-                      {row.compliant}
-                    </td>
-                    <td className="py-2.5 px-3 text-right tabular-nums text-destructive">
-                      {row.breached}
-                    </td>
-                    <td
-                      className={`py-2.5 pl-3 text-right tabular-nums font-semibold ${complianceColor(row.rate)}`}
-                    >
-                      {row.rate.toFixed(1)}%
-                    </td>
-                    <td className="py-2.5 pl-4">
-                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                        <div
-                          className={`h-full rounded-full transition-all ${complianceBarColor(row.rate)}`}
-                          style={{ width: `${row.rate}%` }}
-                        />
-                      </div>
-                    </td>
+      {!isChiefService && (
+        <GlassCard>
+          <h2 className="mb-4 font-semibold capitalize">SLA par {groupLabel}</h2>
+          {groupRows.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Aucun ticket actif.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-xs text-muted-foreground">
+                    <th className="py-2 pr-4 text-left capitalize">{groupLabel}</th>
+                    <th className="py-2 px-3 text-right">Actifs</th>
+                    <th className="py-2 px-3 text-right">Conformes</th>
+                    <th className="py-2 px-3 text-right">Breach</th>
+                    <th className="py-2 pl-3 text-right">Taux</th>
+                    <th className="w-32 py-2 pl-4"></th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </GlassCard>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {groupRows.map((row) => (
+                    <tr key={row.id} className="transition-colors hover:bg-muted/30">
+                      <td className="py-2.5 pr-4 font-medium">{row.label}</td>
+                      <td className="py-2.5 px-3 text-right tabular-nums">{row.total}</td>
+                      <td className="py-2.5 px-3 text-right tabular-nums text-emerald-600">
+                        {row.compliant}
+                      </td>
+                      <td className="py-2.5 px-3 text-right tabular-nums text-destructive">
+                        {row.breached}
+                      </td>
+                      <td
+                        className={`py-2.5 pl-3 text-right tabular-nums font-semibold ${complianceColor(row.rate)}`}
+                      >
+                        {row.rate.toFixed(1)}%
+                      </td>
+                      <td className="py-2.5 pl-4">
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                          <div
+                            className={`h-full rounded-full transition-all ${complianceBarColor(row.rate)}`}
+                            style={{ width: `${row.rate}%` }}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </GlassCard>
+      )}
 
       {/* Breached tickets list */}
       <GlassCard>
@@ -558,7 +563,7 @@ function SlaCenterPage() {
                     <td className="py-2.5 pr-3 text-sm text-muted-foreground">
                       {isDirector || isChief
                         ? serviceLabel(r.serviceId)
-                        : (directionLookup[r.directionId] ?? r.directionId)}
+                        : directionLabel(r.directionId)}
                     </td>
                     <td className="py-2.5 pr-3 text-right font-semibold tabular-nums text-destructive">
                       {formatOverdue(r.slaElapsed - r.slaHours)}

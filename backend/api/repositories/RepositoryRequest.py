@@ -256,7 +256,7 @@ class RequestRepository(BaseRepository[Request]):
         )
 
     async def list_transmitted_by_actor(
-        self, actor_id: str, *, page: int = 1, limit: int = 20
+        self, actor_id: str, *, search: str | None = None, page: int = 1, limit: int = 20
     ) -> tuple[list[Request], int]:
         """
         BR-TRANSMIT-001 — tickets où `actor_id` a personnellement transmis le
@@ -272,8 +272,21 @@ class RequestRepository(BaseRepository[Request]):
         utilisé par ServiceStats.py (escalation_stats/global_kpis).
         """
         params = {"actor_id": str(actor_id)}
+        search_clause = ""
+        if search and search.strip():
+            params["search_like"] = f"%{search.strip().lower()}%"
+            search_clause = """
+                  AND (
+                    LOWER(COALESCE(r.ref, '')) LIKE :search_like
+                    OR LOWER(COALESCE(r.title, '')) LIKE :search_like
+                    OR LOWER(COALESCE(r.description, '')) LIKE :search_like
+                    OR LOWER(COALESCE(r.requester_name, '')) LIKE :search_like
+                    OR LOWER(COALESCE(r.requester_email, '')) LIKE :search_like
+                    OR LOWER(COALESCE(r.meter_number, '')) LIKE :search_like
+                  )
+            """
 
-        count_stmt = text("""
+        count_stmt = text(f"""
             SELECT COUNT(*) FROM (
                 SELECT wf.request_id
                 FROM workflow_detail wd
@@ -282,6 +295,7 @@ class RequestRepository(BaseRepository[Request]):
                 WHERE wd.event_type = 'treatment_transmitted'
                   AND wd.deleted_at IS NULL
                   AND JSON_UNQUOTE(JSON_EXTRACT(wd.infos, '$.actor_id')) = :actor_id
+                  {search_clause}
                 GROUP BY wf.request_id
             ) t
         """)
@@ -289,7 +303,7 @@ class RequestRepository(BaseRepository[Request]):
         if not total:
             return [], 0
 
-        ids_stmt = text("""
+        ids_stmt = text(f"""
             SELECT wf.request_id AS request_id, MAX(wd.created_at) AS last_transmitted_at
             FROM workflow_detail wd
             JOIN workflow wf ON wf.id = wd.workflow_id
@@ -297,6 +311,7 @@ class RequestRepository(BaseRepository[Request]):
             WHERE wd.event_type = 'treatment_transmitted'
               AND wd.deleted_at IS NULL
               AND JSON_UNQUOTE(JSON_EXTRACT(wd.infos, '$.actor_id')) = :actor_id
+              {search_clause}
             GROUP BY wf.request_id
             ORDER BY last_transmitted_at DESC
             LIMIT :limit OFFSET :offset

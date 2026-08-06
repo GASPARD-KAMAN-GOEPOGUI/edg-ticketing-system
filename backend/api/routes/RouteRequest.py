@@ -368,6 +368,7 @@ async def list_sla_breached(
 async def list_transmitted_by_me(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
+    search: Optional[str] = Query(None, min_length=1),
     actor=_staff,
     svc: RequestService = Depends(_svc),
 ):
@@ -375,7 +376,7 @@ async def list_transmitted_by_me(
     à un moment de leur historique (peu importe le porteur actuel ou le statut).
     Lecture seule, scope = ses propres actions passées ; ne touche à aucune
     règle de qualification/assignation/transmission."""
-    return await svc.list_transmitted_by_me(str(actor.id), page=page, limit=limit)
+    return await svc.list_transmitted_by_me(str(actor.id), search=search, page=page, limit=limit)
 
 
 @router.get("/stats/by-status")

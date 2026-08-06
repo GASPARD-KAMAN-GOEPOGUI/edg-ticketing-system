@@ -19,6 +19,7 @@ import {
 import { useRole, useUser, roleLabels, setUser, clearUser } from "@/lib/session";
 import { useTheme } from "@/lib/use-theme";
 import { fetchDirections, fetchUnits } from "@/lib/api/directions-units";
+import { ApiError } from "@/lib/api/client";
 import { toast } from "sonner";
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -162,11 +163,26 @@ function ProfilePage() {
     onSuccess: (updated) => {
       toast.success("Modifications enregistrées");
       if (sessionUser) {
-        setUser({ ...sessionUser, name: updated.name, firstname: updated.firstname ?? undefined, avatar: updated.avatar });
+        setUser({ ...sessionUser, name: updated.name, firstname: updated.firstname ?? undefined, email: updated.email, phone: updated.phone ?? undefined, avatar: updated.avatar });
       }
       queryClient.invalidateQueries({ queryKey: ["me"] });
     },
-    onError: () => toast.error("Erreur lors de la sauvegarde"),
+    onError: (err: unknown) => {
+      // Log pour debug
+      // eslint-disable-next-line no-console
+      console.error("updateMe error:", err);
+      // Si ApiError (détail backend), afficher message + hint
+      if (err instanceof ApiError || (err as any)?.errorCode) {
+        const e = err as any;
+        const parts = [e.message];
+        if (e.hint) parts.push(e.hint);
+        if (e.errorCode) parts.push(`(${e.errorCode})`);
+        toast.error(parts.filter(Boolean).join(" — "));
+        return;
+      }
+      const msg = (err as any)?.message ?? "Erreur lors de la sauvegarde";
+      toast.error(String(msg));
+    },
   });
 
   const changePwdMut = useMutation({
@@ -600,13 +616,14 @@ function ProfilePage() {
                     disabled={updateMeMut.isPending}
                     onClick={() =>
                       updateMeMut.mutate(
-                        {
-                          firstname: fName.trim() || undefined,
-                          name: lName.trim() || fName.trim(),
-                          phone: phone.trim() || undefined,
-                        },
-                        { onSuccess: () => setModalOpen(false) },
-                      )
+                          {
+                            firstname: fName.trim() || undefined,
+                            name: lName.trim() || fName.trim(),
+                            phone: phone.trim() || undefined,
+                            email: email.trim() || undefined,
+                          },
+                          { onSuccess: () => setModalOpen(false) },
+                        )
                     }
                   >
                     <CheckCircle2 className="mr-2 h-4 w-4" />

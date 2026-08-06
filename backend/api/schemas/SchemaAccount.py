@@ -57,6 +57,7 @@ class AccountUpdate(BaseModel):
     unit_id: Optional[int] = None      # alias frontend pour unity_id
     department_id: Optional[int] = None # alias formulaire admin pour unity_id
     direction_id: Optional[int] = None # ignoré (pas de colonne), accepté pour compatibilité
+    email: Optional[EmailStr] = None
     name: Optional[str] = None
     firstname: Optional[str] = None
     phone: Optional[str] = None

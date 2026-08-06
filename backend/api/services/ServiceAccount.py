@@ -320,6 +320,9 @@ class AccountService(BaseService):
                     value=data["email"],
                     hint="Utilisez une adresse email différente.",
                 )
+        # Si l'email change, invalider la vérification d'email (nécessite nouvelle vérification)
+        if data.get("email") and current.email and data.get("email") != current.email:
+            data["email_verified"] = False
 
         # Unicité matricule
         if data.get("matricule"):

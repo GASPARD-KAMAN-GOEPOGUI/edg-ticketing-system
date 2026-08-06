@@ -429,7 +429,7 @@ export async function fetchTriage(
 }
 
 export async function fetchTransmittedByMe(
-  filters?: { page?: number; limit?: number },
+  filters?: { page?: number; limit?: number; search?: string },
 ): Promise<{ items: RequestItem[]; total: number; page: number; pages: number; pageSize: number }> {
   const params = new URLSearchParams();
   if (filters) {

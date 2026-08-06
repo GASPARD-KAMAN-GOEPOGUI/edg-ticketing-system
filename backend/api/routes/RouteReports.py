@@ -95,6 +95,31 @@ async def _apply_decision_scope(
     return direction_id, unity_id
 
 
+async def _apply_intervention_scope(actor, svc: ReportService) -> list[int] | None:
+    """Retourne le périmètre organisationnel sûr pour les rapports d'interventions.
+
+    `None` signifie périmètre global explicitement autorisé (admin uniquement).
+    Une liste vide force une réponse vide et évite tout repli global accidentel.
+    """
+    role = normalize_role(getattr(actor, "role", None))
+    if role == "admin":
+        return None
+    if role == "director":
+        actor_direction_id = (
+            getattr(actor, "direction_id", None)
+            or getattr(actor, "unity_id", None)
+            or getattr(actor, "unit_id", None)
+        )
+        return await svc._scoped_unity_ids(int(actor_direction_id)) if actor_direction_id else []
+    if role == "chief-departement":
+        actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
+        return await svc._scoped_unity_ids(int(actor_unity_id)) if actor_unity_id else []
+    if role == "chief-service":
+        actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
+        return [int(actor_unity_id)] if actor_unity_id else []
+    return []
+
+
 # ── Rapport journalier ────────────────────────────────────────────────────────
 
 @router.get("/daily")
@@ -175,9 +200,13 @@ async def agent_report(
     start: Optional[date] = Query(None),
     end: Optional[date] = Query(None),
     unity_id: Optional[int] = Query(None),
+    actor=Depends(get_current_user),
     svc: ReportService = Depends(_svc),
 ):
     """Performance des agents sur une période."""
+    if normalize_role(getattr(actor, "role", None)) == "chief-service":
+        actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
+        unity_id = int(actor_unity_id) if actor_unity_id else -1
     return await svc.agent_report(start, end, unity_id)
 
 
@@ -187,9 +216,13 @@ async def export_by_agent(
     end: Optional[date] = Query(None),
     unity_id: Optional[int] = Query(None),
     fmt: ExportFormat = Query("excel", alias="format"),
+    actor=Depends(get_current_user),
     svc: ReportService = Depends(_svc),
 ):
     """Export du rapport par agent (csv | excel | pdf)."""
+    if normalize_role(getattr(actor, "role", None)) == "chief-service":
+        actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
+        unity_id = int(actor_unity_id) if actor_unity_id else -1
     rows = await svc.agent_report(start, end, unity_id)
     cols = ["agent_name", "unity_label", "assigned_total", "resolved_total", "escalated_total", "avg_resolution_hours", "resolution_rate"]
     hdrs = ["Agent", "Unité", "Assignés", "Résolus", "Escaladés", "Moy. résolution (h)", "Taux (%)"]
@@ -213,9 +246,15 @@ async def unity_report(
     svc: ReportService = Depends(_svc),
 ):
     """Tickets par unité organisationnelle."""
-    if actor.role == "director":
+    role = normalize_role(getattr(actor, "role", None))
+    unity_id = None
+    if role == "chief-service":
+        actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
+        unity_id = int(actor_unity_id) if actor_unity_id else -1
+        direction_id = None
+    elif role == "director":
         direction_id = int(actor.direction_id) if actor.direction_id else None
-    return await svc.unity_report(start, end, direction_id=direction_id)
+    return await svc.unity_report(start, end, direction_id=direction_id, unity_id=unity_id)
 
 
 @router.get("/by-unity/export")
@@ -228,9 +267,15 @@ async def export_by_unity(
     svc: ReportService = Depends(_svc),
 ):
     """Export du rapport par unité (csv | excel | pdf)."""
-    if actor.role == "director":
+    role = normalize_role(getattr(actor, "role", None))
+    unity_id = None
+    if role == "chief-service":
+        actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
+        unity_id = int(actor_unity_id) if actor_unity_id else -1
+        direction_id = None
+    elif role == "director":
         direction_id = int(actor.direction_id) if actor.direction_id else None
-    rows = await svc.unity_report(start, end, direction_id=direction_id)
+    rows = await svc.unity_report(start, end, direction_id=direction_id, unity_id=unity_id)
     cols = ["unity_label", "unity_codename", "total", "resolved", "active", "sla_breached", "resolution_rate"]
     hdrs = ["Service / Unité", "Code", "Total", "Résolus", "Actifs", "SLA breach", "Taux (%)"]
 
@@ -367,9 +412,13 @@ async def csat_report(
     start: Optional[date] = Query(None),
     end: Optional[date] = Query(None),
     unity_id: Optional[int] = Query(None),
+    actor=Depends(get_current_user),
     svc: ReportService = Depends(_svc),
 ):
     """Rapport CSAT détaillé : résumé + par agent + par catégorie + évolution."""
+    if normalize_role(getattr(actor, "role", None)) == "chief-service":
+        actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
+        unity_id = int(actor_unity_id) if actor_unity_id else -1
     return await svc.csat_report(start, end, unity_id)
 
 
@@ -379,9 +428,13 @@ async def export_csat(
     end: Optional[date] = Query(None),
     unity_id: Optional[int] = Query(None),
     fmt: ExportFormat = Query("excel", alias="format"),
+    actor=Depends(get_current_user),
     svc: ReportService = Depends(_svc),
 ):
     """Export du rapport CSAT (csv | excel | pdf)."""
+    if normalize_role(getattr(actor, "role", None)) == "chief-service":
+        actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
+        unity_id = int(actor_unity_id) if actor_unity_id else -1
     data = await svc.csat_report(start, end, unity_id)
     rows = data["by_agent"]
     cols = ["agent_name", "unity_label", "total_ratings", "avg_rating", "satisfied_count"]
@@ -465,9 +518,11 @@ async def sla_reopen_stats(
 async def intervention_stats(
     start: Optional[date] = Query(None),
     end: Optional[date] = Query(None),
+    actor=Depends(get_current_user),
     svc: ReportService = Depends(_svc),
 ):
     """BR-TRACE-001 — statistiques agrégées sur les interventions (nombre,
     intervenants distincts, durée moyenne/cumulée, transmissions/résolutions/
     réouvertures, temps passé par agent/service/département)."""
-    return await svc.intervention_stats(start, end)
+    unity_ids = await _apply_intervention_scope(actor, svc)
+    return await svc.intervention_stats(start, end, unity_ids=unity_ids)

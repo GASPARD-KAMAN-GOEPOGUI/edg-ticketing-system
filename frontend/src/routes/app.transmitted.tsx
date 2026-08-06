@@ -1,7 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { requireRole } from "@/lib/auth-guard";
-import { useRole } from "@/lib/session";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useQuery, useQueries } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { GlassCard } from "@/components/glass-card";
@@ -11,14 +10,14 @@ import { fetchUser, buildAvatarUrl } from "@/lib/api/accounts";
 import { fetchTransmittedByMe } from "@/lib/api/requests";
 import { priorityLabels } from "@/lib/mock-data";
 import type { Priority } from "@/lib/mock-data";
-import { Send, Clock, AlertTriangle, RotateCcw } from "lucide-react";
+import { Send, Clock, AlertTriangle, RotateCcw, Search, X } from "lucide-react";
 import { LayoutToggle, type LayoutMode } from "@/components/layout-toggle";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { PaginationBar } from "@/components/pagination-bar";
 import { AsyncSwap } from "@/components/async-states";
 import { cn, initialsFor } from "@/lib/utils";
-import { ticketDetailRouteForSource } from "@/lib/ticket-navigation";
+import { ticketDetailRouteForList } from "@/lib/ticket-navigation";
 
 export const Route = createFileRoute("/app/transmitted")({
   beforeLoad: () => requireRole("agent-support", "chief-service", "chief-departement", "director", "admin"),
@@ -34,20 +33,26 @@ const priorityDotClass: Record<Priority, string> = {
 };
 
 function TransmittedTicketsPage() {
-  const [role] = useRole();
   const navigate = useNavigate();
-  // Aucune source de liste dédiée dans ticket-navigation.ts pour cette page —
-  // repli volontaire sur le détail par défaut du rôle (un ticket transmis peut
-  // ne plus être dans le périmètre courant du visualiseur).
-  const detailRoute = ticketDetailRouteForSource(null, role);
+  const detailRoute = ticketDetailRouteForList("/app/transmitted");
 
-  const [layout, setLayout] = useState<LayoutMode>("list");
+  const [layout, setLayout] = useState<LayoutMode>("grid");
+  const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [pageSize, setPageSize] = useState(12);
+  const searchTerm = search.trim();
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm]);
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["transmitted-by-me", page, pageSize],
-    queryFn: () => fetchTransmittedByMe({ page, limit: pageSize }),
+    queryKey: ["transmitted-by-me", page, pageSize, searchTerm],
+    queryFn: () => fetchTransmittedByMe({
+      page,
+      limit: pageSize,
+      search: searchTerm || undefined,
+    }),
     staleTime: 30_000,
   });
 
@@ -103,7 +108,29 @@ function TransmittedTicketsPage() {
             Tickets dont vous avez personnellement transmis le traitement — quel que soit le porteur actuel.
           </p>
         </div>
-        <LayoutToggle layout={layout} onChange={setLayout} />
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-[360px] sm:flex-row sm:items-center sm:justify-end">
+          <div className="relative min-w-0 flex-1 sm:w-72">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Rechercher un ticket transmis"
+              className="h-10 w-full rounded-full border border-border/50 bg-background/70 pl-9 pr-9 text-sm shadow-sm outline-none transition focus:border-primary/50 focus:ring-2 focus:ring-primary/20"
+            />
+            {search && (
+              <button
+                type="button"
+                aria-label="Effacer la recherche"
+                onClick={() => setSearch("")}
+                className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          <LayoutToggle layout={layout} onChange={setLayout} />
+        </div>
       </motion.header>
 
       {/* ── Liste / Grille ─────────────────────────────────────────────────── */}
@@ -124,11 +151,17 @@ function TransmittedTicketsPage() {
               )}
             </motion.div>
             <h3 className="font-semibold">
-              {isError ? "Erreur de chargement" : "Aucun ticket transmis"}
+              {isError
+                ? "Erreur de chargement"
+                : searchTerm
+                ? "Aucun ticket transmis trouvé"
+                : "Aucun ticket transmis"}
             </h3>
             <p className="mt-1 text-sm text-muted-foreground">
               {isError
                 ? "Impossible de charger vos tickets transmis."
+                : searchTerm
+                ? "Essayez une autre référence, un titre ou un demandeur."
                 : "Vous n'avez encore transmis le traitement d'aucun ticket."}
             </p>
           </GlassCard>

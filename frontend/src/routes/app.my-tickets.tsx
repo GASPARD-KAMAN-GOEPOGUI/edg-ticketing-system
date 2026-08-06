@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { requireRole } from "@/lib/auth-guard";
 import { useUser } from "@/lib/session";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useQuery, useQueries } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { GlassCard } from "@/components/glass-card";
@@ -63,6 +63,10 @@ function MyTicketsPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const currentUserId = sessionUser?.id ? String(sessionUser.id) : "";
+  const role = sessionUser?.role;
+  const includeScopedEscalations = role === "chief-service" || role === "chief-departement";
+  const showScopedEscalations =
+    includeScopedEscalations && (filterStatus === "all" || filterStatus === "escalated");
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 400);
@@ -93,13 +97,30 @@ function MyTicketsPage() {
     ...(filterStatus !== "all" && { request_status: filterStatus }),
     ...(debouncedSearch && { search: debouncedSearch }),
   };
+  const scopedEscalationFilters = {
+    request_status: "escalated" as RequestStatus,
+    ...(filterPriority !== "all" && { priority: filterPriority }),
+    ...(debouncedSearch && { search: debouncedSearch }),
+  };
 
-  // Requête principale : paginée pour l'affichage
+  // Requête principale : tickets assignés à l'intervenant connecté.
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["my-tickets", baseFilters, page, pageSize],
-    queryFn: () => fetchRequests({ ...baseFilters, page, limit: pageSize }),
+    queryKey: ["my-tickets", baseFilters],
+    queryFn: () => fetchRequests({ ...baseFilters, page: 1, limit: 1000 }),
     staleTime: 30_000,
     enabled: !!currentUserId,
+  });
+
+  // Les escalades du périmètre chef sont traitées depuis Ma boîte, pas depuis Répartition.
+  const {
+    data: scopedEscalationsData,
+    isLoading: scopedEscalationsLoading,
+    isError: scopedEscalationsError,
+  } = useQuery({
+    queryKey: ["my-tickets", "scoped-escalations", scopedEscalationFilters, role],
+    queryFn: () => fetchRequests({ ...scopedEscalationFilters, page: 1, limit: 1000 }),
+    staleTime: 30_000,
+    enabled: !!currentUserId && showScopedEscalations,
   });
 
   // Requête stats : workload affectée à l'agent connecté.
@@ -109,14 +130,37 @@ function MyTicketsPage() {
     staleTime: 60_000,
     enabled: !!currentUserId,
   });
+  const { data: scopedEscalationsStatsData } = useQuery({
+    queryKey: ["my-tickets-stats", "scoped-escalations", currentUserId, role],
+    queryFn: () => fetchRequests({ request_status: "escalated", limit: 1000 }),
+    staleTime: 60_000,
+    enabled: !!currentUserId && includeScopedEscalations,
+  });
 
   const onlyMyAssignedTickets = (items?: RequestItem[]) =>
     (items ?? []).filter((r) => r.assigneeId === currentUserId);
-  const allItems = onlyMyAssignedTickets(data?.items);
-  const paged = allItems;
+  const mergeTickets = (assignedItems?: RequestItem[], scopedItems?: RequestItem[]) => {
+    const byId = new Map<string, RequestItem>();
+    for (const item of onlyMyAssignedTickets(assignedItems)) byId.set(item.id, item);
+    if (includeScopedEscalations) {
+      for (const item of scopedItems ?? []) {
+        if (item.status === "escalated") byId.set(item.id, item);
+      }
+    }
+    return Array.from(byId.values()).sort((a, b) => {
+      const aDate = new Date(a.updatedAt ?? a.createdAt).getTime();
+      const bDate = new Date(b.updatedAt ?? b.createdAt).getTime();
+      return bDate - aDate;
+    });
+  };
 
-  const total = data?.total ?? 0;
-  const totalPages = data?.pages ?? 1;
+  const allItems = useMemo(
+    () => mergeTickets(data?.items, showScopedEscalations ? scopedEscalationsData?.items : undefined),
+    [data?.items, scopedEscalationsData?.items, showScopedEscalations, includeScopedEscalations, currentUserId],
+  );
+  const total = allItems.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const paged = allItems.slice((page - 1) * pageSize, page * pageSize);
 
   // Avatars des demandeurs — un seul fetch par demandeur unique visible sur la page courante.
   const requesterIds = [...new Set(paged.map((r) => r.requesterId).filter(Boolean))];
@@ -131,7 +175,10 @@ function MyTicketsPage() {
     requesterIds.map((id, i) => [id, requesterAvatarQueries[i]?.data]),
   );
 
-  const assignedTickets = onlyMyAssignedTickets(statsData?.items);
+  const assignedTickets = useMemo(
+    () => mergeTickets(statsData?.items, scopedEscalationsStatsData?.items),
+    [statsData?.items, scopedEscalationsStatsData?.items, includeScopedEscalations, currentUserId],
+  );
   const activeAssignedTickets = assignedTickets.filter((r) => ACTIVE_STATUSES.includes(r.status));
   const resolvedTickets = assignedTickets.filter((r) => r.status === "resolved" || r.status === "closed");
   const measuredSlaTickets = assignedTickets.filter((r) => r.slaHours > 0);
@@ -156,9 +203,11 @@ function MyTicketsPage() {
     ? Math.round((resolutionDurations.reduce((sum, value) => sum + value, 0) / resolutionDurations.length) * 10) / 10
     : null;
 
-  const listState: "loading" | "empty" | "ready" = isLoading
+  const listLoading = isLoading || (showScopedEscalations && scopedEscalationsLoading);
+  const listError = isError || (showScopedEscalations && scopedEscalationsError);
+  const listState: "loading" | "empty" | "ready" = listLoading
     ? "loading"
-    : isError || paged.length === 0
+    : listError || paged.length === 0
     ? "empty"
     : "ready";
 
@@ -193,7 +242,7 @@ function MyTicketsPage() {
             <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Mes tickets</h1>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            Tickets qui vous sont personnellement assignés.
+            Tickets qui vous sont assignés ou escalades nécessitant votre traitement.
           </p>
         </div>
         <LayoutToggle layout={layout} onChange={setLayout} />
@@ -333,19 +382,19 @@ function MyTicketsPage() {
               animate={{ scale: 1, opacity: 1 }}
               transition={{ type: "spring", stiffness: 260, damping: 18 }}
             >
-              {isError ? (
+              {listError ? (
                 <AlertTriangle className="h-6 w-6 text-muted-foreground" />
               ) : (
                 <CheckCircle2 className="h-6 w-6 text-emerald-500" />
               )}
             </motion.div>
             <h3 className="font-semibold">
-              {isError ? "Erreur de chargement" : "Aucun ticket en cours"}
+              {listError ? "Erreur de chargement" : "Aucun ticket en cours"}
             </h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              {isError
+              {listError
                 ? "Impossible de charger vos tickets."
-                : "Vous n'avez aucun ticket actif assigné pour le moment."}
+                : "Vous n'avez aucun ticket actif à traiter pour le moment."}
             </p>
           </GlassCard>
         }

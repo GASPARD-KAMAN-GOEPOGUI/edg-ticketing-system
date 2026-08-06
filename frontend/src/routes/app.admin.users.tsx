@@ -434,6 +434,7 @@ function AdminUsers() {
       data: {
         name: form.name.trim() || undefined,
         firstname: form.firstname.trim() || undefined,
+        email: form.email.trim() || undefined,
         role: form.role,
         matricule: form.matricule || undefined,
         job: form.job || undefined,
@@ -697,7 +698,7 @@ function AdminUsers() {
             directions={activeDirections}
             departments={departments}
             units={units}
-            showEmail={false}
+            showEmail={true}
           />
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditUser(null)}>Annuler</Button>
@@ -854,7 +855,7 @@ function UserForm({
           <Input value={form.name} onChange={(e) => field("name", e.target.value)} placeholder="Nom" />
         </div>
         {showEmail && (
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 sm:col-span-2">
             <Label>Email <span className="text-destructive">*</span></Label>
             <Input type="email" value={form.email} onChange={(e) => field("email", e.target.value)} placeholder="adresse@edg.gn" />
           </div>

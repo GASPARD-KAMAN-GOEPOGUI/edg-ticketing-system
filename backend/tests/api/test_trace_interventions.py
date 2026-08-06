@@ -18,6 +18,7 @@ from httpx import ASGITransport, AsyncClient
 from api.dependencies import get_current_user
 from api.main import app
 from tests.api.test_requests_baseline import _ensure_test_account
+from tests.conftest import _TestSession
 
 _REQUEST_PAYLOAD_BASE = {
     "description": "Description de test pour la tracabilite des interventions (BR-TRACE-001).",
@@ -50,6 +51,22 @@ async def _assign_via_admin(auth_client, request_id: str, unity_id: int, assigne
             json={"category": "panne", "priority": "medium", "unit_id": unity_id, "assignee_id": assignee_id},
         )
         assert resp.status_code == 200, resp.text
+
+
+async def _ensure_test_unity(codename: str, label: str) -> int:
+    from sqlalchemy import select
+
+    from api.models.ModelUnity import Unity
+
+    async with _TestSession() as session:
+        existing = (await session.execute(select(Unity).where(Unity.codename == codename))).scalar_one_or_none()
+        if existing is not None:
+            return int(existing.id)
+        unity = Unity(codename=codename, label=label, aleas=codename, status=True)
+        session.add(unity)
+        await session.commit()
+        await session.refresh(unity)
+        return int(unity.id)
 
 
 async def _call_as(role_dep, method: str, url: str, json: dict | None = None):
@@ -329,6 +346,38 @@ async def test_intervention_report_aggregates_by_agent_service(auth_client, unit
     assert data["resolutions"] >= 1
     agent_ids = {row["label"] for row in data["by_agent"]}
     assert agent_ids  # au moins un intervenant agrege
+
+
+async def test_intervention_report_chief_service_is_scoped_to_own_service(auth_client, unity_id):
+    """Sécurité — un chef de service ne voit pas les interventions d'un autre service
+    en appelant directement /reports/interventions."""
+    other_unity_id = await _ensure_test_unity("TST-SCOPE-OTHER", "Service Test Hors Scope")
+    await _ensure_test_account(1020, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(1021, unity_id=other_unity_id, role="agent-support")
+
+    own_request_id = await _create_ticket(auth_client, unity_id, "scope-own-service")
+    await _assign_via_admin(auth_client, own_request_id, unity_id, assignee_id=1020)
+    own_resolve = await _call_as(
+        _dep(1020, "agent-support", unity_id), "POST", f"/api/v1/requests/{own_request_id}/resolve",
+        _FULL_RESOLVE_BODY,
+    )
+    assert own_resolve.status_code == 200, own_resolve.text
+
+    other_request_id = await _create_ticket(auth_client, other_unity_id, "scope-other-service")
+    await _assign_via_admin(auth_client, other_request_id, other_unity_id, assignee_id=1021)
+    other_resolve = await _call_as(
+        _dep(1021, "agent-support", other_unity_id), "POST", f"/api/v1/requests/{other_request_id}/resolve",
+        _FULL_RESOLVE_BODY,
+    )
+    assert other_resolve.status_code == 200, other_resolve.text
+
+    report_resp = await _call_as(
+        _dep(9001, "chief-service", unity_id), "GET", "/api/v1/reports/interventions"
+    )
+    assert report_resp.status_code == 200, report_resp.text
+    labels = {row["label"] for row in report_resp.json()["data"]["by_agent"]}
+    assert "Test Compte Test 1020" in labels
+    assert "Test Compte Test 1021" not in labels
 
 
 async def test_reopened_ticket_history_is_never_mutated_by_later_actions(auth_client, unity_id):

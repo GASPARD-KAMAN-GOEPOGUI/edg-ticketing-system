@@ -253,7 +253,7 @@ function ForWhoSection() {
       title: "Demandeur",
       subtitle: "Employé EDG — tout niveau",
       desc: "Créez vos tickets de support, suivez leur traitement en temps réel et échangez directement avec l'agent en charge de votre dossier.",
-      cta: "Accéder à mon espace",
+      cta: "Ouvrir un ticket",
       to: "/login",
     },
     {
@@ -350,7 +350,7 @@ function TrustSection() {
             >
               <Button asChild className="rounded-full gradient-primary shadow-lg shadow-primary/30">
                 <Link to="/login">
-                  Accéder à mon espace <ArrowRight className="ml-2 h-4 w-4" />
+                  Ouvrir un ticket <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
               </Button>
             </motion.div>
@@ -855,7 +855,7 @@ function Home() {
                     className="rounded-full gradient-primary shadow-xl shadow-primary/30 h-11 px-5 sm:h-12 sm:px-7 text-sm sm:text-base"
                   >
                     <Link to="/login">
-                      Accéder à mon espace <ArrowRight className="ml-2 h-4 w-4" />
+                      Ouvrir un ticket <ArrowRight className="ml-2 h-4 w-4" />
                     </Link>
                   </Button>
                 </motion.div>

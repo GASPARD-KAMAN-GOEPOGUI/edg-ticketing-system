@@ -514,8 +514,8 @@ function SupervisionPage() {
         <Kpi label="Agents surchargés"   value={kpis.overloadCount}    tone="warning"     icon={Users2}       hint="≥ 8 tickets ouverts"                       loading={loadingStats} />
       </div>
 
-      {/* ── Charts ── */}
-      <div className="grid gap-4 lg:grid-cols-3">
+      {/* ── Sections operationnelles masquees a la demande metier ── */}
+      <div className="hidden">
         <GlassCard className="lg:col-span-2">
           <div className="mb-4 flex items-center justify-between">
             <div>
@@ -578,7 +578,7 @@ function SupervisionPage() {
       </div>
 
       {/* ── Escalades en cours (C1 : lien ticket, C6 : actions, C12 : tri SLA) ── */}
-      <GlassCard className="space-y-4 p-5">
+      <GlassCard className="hidden">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="font-semibold">Escalades en cours</h3>

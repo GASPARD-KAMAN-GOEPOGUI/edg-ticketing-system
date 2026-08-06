@@ -58,6 +58,31 @@ export type UnityReportRow = {
   resolution_rate: number | null;
 };
 
+export type CsatReport = {
+  report_type: "csat";
+  period: string;
+  unity_id?: number | null;
+  summary: {
+    total_ratings: number;
+    avg_rating: number;
+    satisfaction_rate: number;
+    resolved_confirmed_rate: number;
+    satisfied_count: number;
+    dissatisfied_count: number;
+  };
+  by_rating: Array<{ rating: number; count: number }>;
+  by_agent: Array<{
+    agent_id: string | number;
+    agent_name: string;
+    unity_label?: string | null;
+    total_ratings: number;
+    avg_rating: number;
+    satisfied_count: number;
+  }>;
+  by_category: Array<{ category: string; total_ratings: number; avg_rating: number }>;
+  monthly_evolution: Array<{ month: string; total_ratings: number; avg_rating: number }>;
+};
+
 export type DecisionReportFilters = {
   start?: string;
   end?: string;
@@ -199,6 +224,19 @@ export async function fetchUnityReport(
   if (direction_id) params.set("direction_id", direction_id);
   const qs = params.toString() ? `?${params.toString()}` : "";
   return apiFetch<UnityReportRow[]>(`/reports/by-unity${qs}`);
+}
+
+export async function fetchCsatReport(
+  start?: string,
+  end?: string,
+  unity_id?: number,
+): Promise<CsatReport> {
+  const params = new URLSearchParams();
+  if (start) params.set("start", start);
+  if (end) params.set("end", end);
+  if (unity_id) params.set("unity_id", String(unity_id));
+  const qs = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch<CsatReport>(`/reports/csat${qs}`);
 }
 
 // BR-SLA-REOPEN-001

@@ -68,7 +68,7 @@ async def get_me(
 
 
 _SELF_UPDATE_ALLOWED = {
-    "name", "firstname", "phone", "job", "matricule", "avatar_url",
+    "name", "firstname", "phone", "email", "job", "matricule", "avatar_url",
     "notif_sla_alerts", "notif_escalations", "notif_comments", "notif_resolutions",
     "mfa_enabled",
 }

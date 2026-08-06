@@ -157,6 +157,7 @@ export async function updateMe(
     name: string;
     firstname: string;
     phone: string;
+    email: string;
     avatar_url: string;
     job: string;
     matricule: string;
@@ -202,6 +203,7 @@ export async function updateUser(
   data: Partial<{
     name: string;
     firstname: string;
+    email: string;
     job: string;
     matricule: string;
     role: string;

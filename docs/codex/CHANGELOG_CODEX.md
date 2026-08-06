@@ -1,5 +1,215 @@
 # Changelog Codex
 
+## 2026-08-06 - Rapports interventions : scope backend obligatoire
+
+Demande: étape 1 de la mise en œuvre des tableaux professionnels/exportables — sécuriser en priorité `GET /reports/interventions` avant toute modification UI.
+
+Correction:
+- ajout d'un helper de scope backend dédié aux statistiques d'interventions.
+- `chief-service` est limité à son service exact.
+- `chief-departement` et `director` utilisent le périmètre organigramme via `_scoped_unity_ids`.
+- `admin` conserve le périmètre global explicitement autorisé.
+- absence de rattachement organisationnel = réponse vide, jamais repli global.
+
+Fichiers modifies:
+- `backend/api/routes/RouteReports.py`
+- `backend/api/services/ServiceReport.py`
+- `backend/tests/api/test_trace_interventions.py`
+- `docs/codex/API_INDEX.md`
+- `docs/codex/BUSINESS_RULES.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Verification: `backend\venv\Scripts\pytest.exe backend\tests\api\test_trace_interventions.py -q` -> 8 tests passes, 1 warning tiers `python_multipart`.
+
+## 2026-08-06 - Centre SLA : masquage SLA par service pour chef de service
+
+Demande: masquer la section `SLA Par Service` dans le Centre SLA pour un chef de service.
+
+Correction:
+- masquage conditionnel du tableau `SLA par ...` pour le role `chief-service`.
+- conservation de la section pour `chief-departement`, `director` et `admin`.
+- aucun changement backend, calcul SLA ou liste des tickets en depassement.
+
+Fichiers modifies:
+- `frontend/src/routes/app.sla-center.tsx`
+- `docs/codex/BUSINESS_RULES.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Verification: `npm run build` dans `frontend/` OK. Warnings Vite/Rollup habituels sur taille de chunks/imports externes inutilises.
+
+## 2026-08-06 - Sidebar : retrait de Rapports Service pour chef de service
+
+Demande: masquer le bouton/menu `Rapports Service` pour un chef de service.
+
+Correction:
+- retrait de l'entree sidebar `Rapports Service` pour `chief-service`.
+- la route `/app/reports` et les rapports des autres roles restent inchanges.
+
+Fichiers modifies:
+- `frontend/src/components/app-layout.tsx`
+- `docs/codex/FEATURE_INDEX.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Verification: `npm run build` dans `frontend/` OK. Warnings Vite/Rollup habituels sur taille de chunks/imports externes inutilises.
+
+## 2026-08-06 - Rapports Service : retrait du bandeau filtres
+
+Demande: supprimer dans `Rapports & Analyses` le bandeau de filtres situe entre l'en-tete et les KPI.
+
+Correction:
+- retrait du rendu du bandeau `Filtres` / `Annee en cours` / compteur de tickets dans `/app/reports`.
+- conservation du filtrage interne par defaut pour les chargements et exports existants.
+- aucun changement backend ni modification des KPI/graphes.
+
+Fichiers modifies:
+- `frontend/src/routes/app.reports.tsx`
+- `docs/codex/FEATURE_INDEX.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Verification: `npm run build` dans `frontend/` OK. Warnings Vite/Rollup habituels sur taille de chunks/imports externes inutilises.
+
+## 2026-08-06 - Supervision : masquage des sections agents et escalades
+
+Demande: masquer dans la page `Supervision` les blocs `Charge & retards par agent`, `Distribution des escalades` et `Escalades en cours`.
+
+Correction:
+- masquage UI local des trois sections dans `/app/supervision`.
+- aucun changement de route, de donnees, de calcul statistique ou de workflow.
+
+Fichiers modifies:
+- `frontend/src/routes/app.supervision.tsx`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Verification: `npm run build` dans `frontend/` OK. Warnings Vite/Rollup habituels sur taille de chunks/imports externes inutilises.
+
+## 2026-08-06 - Navigation : retrait du menu Mon equipe
+
+Demande: masquer l'onglet/menu `Mon equipe` pour le chef de service.
+
+Correction:
+- retrait de l'entree sidebar `Mon equipe` (`/app/supervision?section=equipe`) pour `chief-service`.
+- la page `/app/supervision` reste disponible via le menu `Supervision`; aucun changement de donnees ni de route.
+
+Fichiers modifies:
+- `frontend/src/components/app-layout.tsx`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Verification: `npm run build` dans `frontend/` OK.
+
+## 2026-08-06 - Rapports Service : scope exact chef de service
+
+Demande: dans `Rapports Service`, retirer le filtre `Toutes les directions` pour un chef de service et garantir que les donnees affichees correspondent exactement a son service.
+
+Correction:
+- frontend: le selecteur direction est masque pour `chief-service`; les rapports services restent chargeables/exportables sans selection de direction.
+- backend: `/reports/by-agent`, `/reports/by-unity` et `/reports/csat` forcent `unity_id=actor.unity_id` pour `chief-service`, y compris pour les exports correspondants.
+- frontend: le bloc CSAT de `/app/reports` utilise maintenant `/reports/csat` au lieu des stats globales `/stats/csat`, afin de respecter le perimetre service.
+
+Fichiers modifies:
+- `frontend/src/routes/app.reports.tsx`
+- `frontend/src/lib/api/reports.ts`
+- `backend/api/routes/RouteReports.py`
+- `backend/api/services/ServiceReport.py`
+- `docs/codex/API_INDEX.md`
+- `docs/codex/BUSINESS_RULES.md`
+- `docs/codex/FEATURE_INDEX.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Verification: `python -m compileall backend/api/routes/RouteReports.py backend/api/services/ServiceReport.py` OK ; `npm run build` dans `frontend/` OK. Warnings Vite/Rollup habituels sur taille de chunks/imports externes inutilises.
+
+## 2026-08-06 - Navigation : retrait du menu Centre de repartition
+
+Demande: enlever le menu `Centre de repartition`.
+
+Correction:
+- retrait de l'entree sidebar `Centre de repartition` pour `chief-service`.
+- remplacement du raccourci mobile `Repartition` par `Ma boite`, afin de garder un acces direct au traitement.
+- la route `/app/chief-inbox` reste disponible techniquement pour compatibilite des liens profonds.
+
+Fichiers modifies:
+- `frontend/src/components/app-layout.tsx`
+- `docs/codex/BUSINESS_RULES.md`
+- `docs/codex/ROUTE_INDEX.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Verification: `npm run build` dans `frontend/` OK.
+
+## 2026-08-06 - Escalades : retrait de l'onglet Repartition et reprise dans Ma boite
+
+Demande: supprimer `Repartition > Escalades` et faire apparaitre les tickets escalades dans `Ma boite de traitement`.
+
+Correction:
+- retrait de l'onglet interne `Escalades` dans `app.chief-inbox.tsx` et des deep-links `?tab=escalated`.
+- suppression des raccourcis menu `Escalades` chief-service/chief-departement qui pointaient vers le centre de repartition/pilotage.
+- `Ma boite de traitement` fusionne maintenant les tickets assignes a l'utilisateur avec les tickets `escalated` de son perimetre operationnel pour `chief-service` et `chief-departement`.
+
+Fichiers modifies:
+- `frontend/src/routes/app.chief-inbox.tsx`
+- `frontend/src/routes/app.my-tickets.tsx`
+- `frontend/src/components/app-layout.tsx`
+- `docs/codex/BUSINESS_RULES.md`
+- `docs/codex/FEATURE_INDEX.md`
+- `docs/codex/ROUTE_INDEX.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Verification: `npm run build` dans `frontend/` OK. Warnings Vite/Rollup habituels sur taille de chunks/imports externes inutilises.
+
+## 2026-08-06 - Navigation : detail depuis Tickets transmis conserve son contexte
+
+Demande: depuis `/app/transmitted`, ouvrir le detail d'un ticket sans selectionner `Supervision` par defaut ; rester dans l'onglet/menu `Tickets transmis`.
+
+Correction:
+- ajout d'une route detail dediee `/app/transmitted/tickets/$id` qui reutilise `RequestDetailPage` avec le contexte `transmitted`.
+- `ticket-navigation.ts` mappe maintenant `/app/transmitted` vers cette route detail.
+- `RequestDetailPage` connait le contexte `Tickets transmis` et son bouton retour pointe vers `/app/transmitted`.
+- `app-layout.tsx` reconnait `/app/transmitted/tickets/...` pour garder l'item `Tickets transmis` actif.
+
+Fichiers modifiés:
+- `frontend/src/lib/ticket-navigation.ts`
+- `frontend/src/routes/app.transmitted.tsx`
+- `frontend/src/routes/app.transmitted_.tickets.$id.tsx`
+- `frontend/src/routes/app.requests.$id.tsx`
+- `frontend/src/components/app-layout.tsx`
+- `docs/codex/BUSINESS_RULES.md`
+- `docs/codex/FILE_INDEX.md`
+- `docs/codex/ROUTE_INDEX.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Verification: `npm run build` dans `frontend/` OK. La route detail dediee est prise en compte dans les chunks generes (`app.transmitted_.tickets._id`). Warnings Vite/Rollup habituels sur taille de chunks/imports externes inutilises.
+
+## 2026-08-06 - Tickets transmis : grille, recherche et pagination
+
+Demande: sur `/app/transmitted`, appliquer l'affichage en grille, ajouter une zone de recherche et conserver une pagination.
+
+Correction:
+- frontend: la page `Tickets transmis` s'ouvre en grille par defaut, garde le toggle liste/grille, affiche une recherche dans l'en-tete et utilise une pagination a 12 elements par page.
+- backend/API: `GET /requests/transmitted` accepte un parametre additif `search` qui filtre les tickets transmis dans le scope de l'acteur courant (ref, titre, description, demandeur, email, compteur), sans changer le workflow ni les permissions.
+
+Fichiers modifiés:
+- `backend/api/repositories/RepositoryRequest.py`
+- `backend/api/services/ServiceRequest.py`
+- `backend/api/routes/RouteRequest.py`
+- `frontend/src/lib/api/requests.ts`
+- `frontend/src/routes/app.transmitted.tsx`
+- `docs/codex/API_INDEX.md`
+- `docs/codex/BUSINESS_RULES.md`
+- `docs/codex/ROUTE_INDEX.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Verification: `python -m compileall backend/api/repositories/RepositoryRequest.py backend/api/services/ServiceRequest.py backend/api/routes/RouteRequest.py` OK ; `npm run build` dans `frontend/` OK. Warnings Vite/Rollup habituels sur taille de chunks/imports externes inutilises.
+
+## 2026-08-06 - Correctif UI : actions de traitement sans panneau vide
+
+Demande: dans l'onglet `Traitement` du detail ticket, supprimer la zone "Aucune action disponible dans l'etat actuel du ticket" et rattacher les actions qui pouvaient s'y afficher a la grille de boutons situee au-dessus.
+
+Correction: `RequestDetailPage` fusionne les actions demandeur (`Modifier`, `Annuler`, `Demander une reouverture`, `Confirmer la resolution`, `Votre avis`) dans la meme grille que les actions de traitement staff, conserve les conditions d'affichage existantes et ne rend plus le panneau vide quand aucune action demandeur n'est disponible.
+
+Fichiers modifiés:
+- `frontend/src/routes/app.requests.$id.tsx`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Verification: `npm run build` dans `frontend/` OK. Premier passage interrompu par timeout local a 120 s, second passage OK avec les warnings Vite/Rollup habituels sur taille de chunks/imports externes inutilises.
+
 ## 2026-08-05 - Correctif affichage : noms de services dans Centre SLA
 
 Demande: dans `/app/sla-center`, afficher les noms des services plutot que les valeurs/id bruts dans "SLA par service" et "Tickets en depassement SLA".

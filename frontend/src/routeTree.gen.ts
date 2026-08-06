@@ -31,6 +31,7 @@ import { Route as AppNotificationsRouteImport } from './routes/app.notifications
 import { Route as AppNewRouteImport } from './routes/app.new'
 import { Route as AppMyTicketsRouteImport } from './routes/app.my-tickets'
 import { Route as AppKnowledgeRouteImport } from './routes/app.knowledge'
+import { Route as AppHistoryRouteImport } from './routes/app.history'
 import { Route as AppDirectionRouteImport } from './routes/app.direction'
 import { Route as AppDgRouteImport } from './routes/app.dg'
 import { Route as AppDepartmentInboxRouteImport } from './routes/app.department-inbox'
@@ -54,10 +55,12 @@ import { Route as AppAdminDirectionsRouteImport } from './routes/app.admin.direc
 import { Route as AppAdminDepartmentsRouteImport } from './routes/app.admin.departments'
 import { Route as AppAdminCommunicationRouteImport } from './routes/app.admin.communication'
 import { Route as AppAdminAuditRouteImport } from './routes/app.admin.audit'
+import { Route as AppTransmittedTicketsIdRouteImport } from './routes/app.transmitted_.tickets.$id'
 import { Route as AppSupervisionTicketsIdRouteImport } from './routes/app.supervision_.tickets.$id'
 import { Route as AppSlaCenterTicketsIdRouteImport } from './routes/app.sla-center_.tickets.$id'
 import { Route as AppQueueTicketsIdRouteImport } from './routes/app.queue_.tickets.$id'
 import { Route as AppMyTicketsTicketsIdRouteImport } from './routes/app.my-tickets_.tickets.$id'
+import { Route as AppHistoryTicketsIdRouteImport } from './routes/app.history_.tickets.$id'
 import { Route as AppDirectionTicketsIdRouteImport } from './routes/app.direction_.tickets.$id'
 import { Route as AppDgTicketsIdRouteImport } from './routes/app.dg_.tickets.$id'
 import { Route as AppDepartmentInboxTicketsIdRouteImport } from './routes/app.department-inbox_.tickets.$id'
@@ -175,6 +178,11 @@ const AppKnowledgeRoute = AppKnowledgeRouteImport.update({
   path: '/knowledge',
   getParentRoute: () => AppRoute,
 } as any)
+const AppHistoryRoute = AppHistoryRouteImport.update({
+  id: '/history',
+  path: '/history',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppDirectionRoute = AppDirectionRouteImport.update({
   id: '/direction',
   path: '/direction',
@@ -290,6 +298,11 @@ const AppAdminAuditRoute = AppAdminAuditRouteImport.update({
   path: '/audit',
   getParentRoute: () => AppAdminRoute,
 } as any)
+const AppTransmittedTicketsIdRoute = AppTransmittedTicketsIdRouteImport.update({
+  id: '/transmitted_/tickets/$id',
+  path: '/transmitted/tickets/$id',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSupervisionTicketsIdRoute = AppSupervisionTicketsIdRouteImport.update({
   id: '/supervision_/tickets/$id',
   path: '/supervision/tickets/$id',
@@ -308,6 +321,11 @@ const AppQueueTicketsIdRoute = AppQueueTicketsIdRouteImport.update({
 const AppMyTicketsTicketsIdRoute = AppMyTicketsTicketsIdRouteImport.update({
   id: '/my-tickets_/tickets/$id',
   path: '/my-tickets/tickets/$id',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppHistoryTicketsIdRoute = AppHistoryTicketsIdRouteImport.update({
+  id: '/history_/tickets/$id',
+  path: '/history/tickets/$id',
   getParentRoute: () => AppRoute,
 } as any)
 const AppDirectionTicketsIdRoute = AppDirectionTicketsIdRouteImport.update({
@@ -358,6 +376,7 @@ export interface FileRoutesByFullPath {
   '/app/department-inbox': typeof AppDepartmentInboxRoute
   '/app/dg': typeof AppDgRoute
   '/app/direction': typeof AppDirectionRoute
+  '/app/history': typeof AppHistoryRoute
   '/app/knowledge': typeof AppKnowledgeRoute
   '/app/my-tickets': typeof AppMyTicketsRoute
   '/app/new': typeof AppNewRoute
@@ -394,10 +413,12 @@ export interface FileRoutesByFullPath {
   '/app/department-inbox/tickets/$id': typeof AppDepartmentInboxTicketsIdRoute
   '/app/dg/tickets/$id': typeof AppDgTicketsIdRoute
   '/app/direction/tickets/$id': typeof AppDirectionTicketsIdRoute
+  '/app/history/tickets/$id': typeof AppHistoryTicketsIdRoute
   '/app/my-tickets/tickets/$id': typeof AppMyTicketsTicketsIdRoute
   '/app/queue/tickets/$id': typeof AppQueueTicketsIdRoute
   '/app/sla-center/tickets/$id': typeof AppSlaCenterTicketsIdRoute
   '/app/supervision/tickets/$id': typeof AppSupervisionTicketsIdRoute
+  '/app/transmitted/tickets/$id': typeof AppTransmittedTicketsIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -414,6 +435,7 @@ export interface FileRoutesByTo {
   '/app/department-inbox': typeof AppDepartmentInboxRoute
   '/app/dg': typeof AppDgRoute
   '/app/direction': typeof AppDirectionRoute
+  '/app/history': typeof AppHistoryRoute
   '/app/knowledge': typeof AppKnowledgeRoute
   '/app/my-tickets': typeof AppMyTicketsRoute
   '/app/new': typeof AppNewRoute
@@ -450,10 +472,12 @@ export interface FileRoutesByTo {
   '/app/department-inbox/tickets/$id': typeof AppDepartmentInboxTicketsIdRoute
   '/app/dg/tickets/$id': typeof AppDgTicketsIdRoute
   '/app/direction/tickets/$id': typeof AppDirectionTicketsIdRoute
+  '/app/history/tickets/$id': typeof AppHistoryTicketsIdRoute
   '/app/my-tickets/tickets/$id': typeof AppMyTicketsTicketsIdRoute
   '/app/queue/tickets/$id': typeof AppQueueTicketsIdRoute
   '/app/sla-center/tickets/$id': typeof AppSlaCenterTicketsIdRoute
   '/app/supervision/tickets/$id': typeof AppSupervisionTicketsIdRoute
+  '/app/transmitted/tickets/$id': typeof AppTransmittedTicketsIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -472,6 +496,7 @@ export interface FileRoutesById {
   '/app/department-inbox': typeof AppDepartmentInboxRoute
   '/app/dg': typeof AppDgRoute
   '/app/direction': typeof AppDirectionRoute
+  '/app/history': typeof AppHistoryRoute
   '/app/knowledge': typeof AppKnowledgeRoute
   '/app/my-tickets': typeof AppMyTicketsRoute
   '/app/new': typeof AppNewRoute
@@ -508,10 +533,12 @@ export interface FileRoutesById {
   '/app/department-inbox_/tickets/$id': typeof AppDepartmentInboxTicketsIdRoute
   '/app/dg_/tickets/$id': typeof AppDgTicketsIdRoute
   '/app/direction_/tickets/$id': typeof AppDirectionTicketsIdRoute
+  '/app/history_/tickets/$id': typeof AppHistoryTicketsIdRoute
   '/app/my-tickets_/tickets/$id': typeof AppMyTicketsTicketsIdRoute
   '/app/queue_/tickets/$id': typeof AppQueueTicketsIdRoute
   '/app/sla-center_/tickets/$id': typeof AppSlaCenterTicketsIdRoute
   '/app/supervision_/tickets/$id': typeof AppSupervisionTicketsIdRoute
+  '/app/transmitted_/tickets/$id': typeof AppTransmittedTicketsIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -531,6 +558,7 @@ export interface FileRouteTypes {
     | '/app/department-inbox'
     | '/app/dg'
     | '/app/direction'
+    | '/app/history'
     | '/app/knowledge'
     | '/app/my-tickets'
     | '/app/new'
@@ -567,10 +595,12 @@ export interface FileRouteTypes {
     | '/app/department-inbox/tickets/$id'
     | '/app/dg/tickets/$id'
     | '/app/direction/tickets/$id'
+    | '/app/history/tickets/$id'
     | '/app/my-tickets/tickets/$id'
     | '/app/queue/tickets/$id'
     | '/app/sla-center/tickets/$id'
     | '/app/supervision/tickets/$id'
+    | '/app/transmitted/tickets/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -587,6 +617,7 @@ export interface FileRouteTypes {
     | '/app/department-inbox'
     | '/app/dg'
     | '/app/direction'
+    | '/app/history'
     | '/app/knowledge'
     | '/app/my-tickets'
     | '/app/new'
@@ -623,10 +654,12 @@ export interface FileRouteTypes {
     | '/app/department-inbox/tickets/$id'
     | '/app/dg/tickets/$id'
     | '/app/direction/tickets/$id'
+    | '/app/history/tickets/$id'
     | '/app/my-tickets/tickets/$id'
     | '/app/queue/tickets/$id'
     | '/app/sla-center/tickets/$id'
     | '/app/supervision/tickets/$id'
+    | '/app/transmitted/tickets/$id'
   id:
     | '__root__'
     | '/'
@@ -644,6 +677,7 @@ export interface FileRouteTypes {
     | '/app/department-inbox'
     | '/app/dg'
     | '/app/direction'
+    | '/app/history'
     | '/app/knowledge'
     | '/app/my-tickets'
     | '/app/new'
@@ -680,10 +714,12 @@ export interface FileRouteTypes {
     | '/app/department-inbox_/tickets/$id'
     | '/app/dg_/tickets/$id'
     | '/app/direction_/tickets/$id'
+    | '/app/history_/tickets/$id'
     | '/app/my-tickets_/tickets/$id'
     | '/app/queue_/tickets/$id'
     | '/app/sla-center_/tickets/$id'
     | '/app/supervision_/tickets/$id'
+    | '/app/transmitted_/tickets/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -855,6 +891,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppKnowledgeRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/history': {
+      id: '/app/history'
+      path: '/history'
+      fullPath: '/app/history'
+      preLoaderRoute: typeof AppHistoryRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/direction': {
       id: '/app/direction'
       path: '/direction'
@@ -1016,6 +1059,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminAuditRouteImport
       parentRoute: typeof AppAdminRoute
     }
+    '/app/transmitted_/tickets/$id': {
+      id: '/app/transmitted_/tickets/$id'
+      path: '/transmitted/tickets/$id'
+      fullPath: '/app/transmitted/tickets/$id'
+      preLoaderRoute: typeof AppTransmittedTicketsIdRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/supervision_/tickets/$id': {
       id: '/app/supervision_/tickets/$id'
       path: '/supervision/tickets/$id'
@@ -1042,6 +1092,13 @@ declare module '@tanstack/react-router' {
       path: '/my-tickets/tickets/$id'
       fullPath: '/app/my-tickets/tickets/$id'
       preLoaderRoute: typeof AppMyTicketsTicketsIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/history_/tickets/$id': {
+      id: '/app/history_/tickets/$id'
+      path: '/history/tickets/$id'
+      fullPath: '/app/history/tickets/$id'
+      preLoaderRoute: typeof AppHistoryTicketsIdRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/direction_/tickets/$id': {
@@ -1148,6 +1205,7 @@ interface AppRouteChildren {
   AppDepartmentInboxRoute: typeof AppDepartmentInboxRoute
   AppDgRoute: typeof AppDgRoute
   AppDirectionRoute: typeof AppDirectionRoute
+  AppHistoryRoute: typeof AppHistoryRoute
   AppKnowledgeRoute: typeof AppKnowledgeRoute
   AppMyTicketsRoute: typeof AppMyTicketsRoute
   AppNewRoute: typeof AppNewRoute
@@ -1167,10 +1225,12 @@ interface AppRouteChildren {
   AppDepartmentInboxTicketsIdRoute: typeof AppDepartmentInboxTicketsIdRoute
   AppDgTicketsIdRoute: typeof AppDgTicketsIdRoute
   AppDirectionTicketsIdRoute: typeof AppDirectionTicketsIdRoute
+  AppHistoryTicketsIdRoute: typeof AppHistoryTicketsIdRoute
   AppMyTicketsTicketsIdRoute: typeof AppMyTicketsTicketsIdRoute
   AppQueueTicketsIdRoute: typeof AppQueueTicketsIdRoute
   AppSlaCenterTicketsIdRoute: typeof AppSlaCenterTicketsIdRoute
   AppSupervisionTicketsIdRoute: typeof AppSupervisionTicketsIdRoute
+  AppTransmittedTicketsIdRoute: typeof AppTransmittedTicketsIdRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -1179,6 +1239,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppDepartmentInboxRoute: AppDepartmentInboxRoute,
   AppDgRoute: AppDgRoute,
   AppDirectionRoute: AppDirectionRoute,
+  AppHistoryRoute: AppHistoryRoute,
   AppKnowledgeRoute: AppKnowledgeRoute,
   AppMyTicketsRoute: AppMyTicketsRoute,
   AppNewRoute: AppNewRoute,
@@ -1198,10 +1259,12 @@ const AppRouteChildren: AppRouteChildren = {
   AppDepartmentInboxTicketsIdRoute: AppDepartmentInboxTicketsIdRoute,
   AppDgTicketsIdRoute: AppDgTicketsIdRoute,
   AppDirectionTicketsIdRoute: AppDirectionTicketsIdRoute,
+  AppHistoryTicketsIdRoute: AppHistoryTicketsIdRoute,
   AppMyTicketsTicketsIdRoute: AppMyTicketsTicketsIdRoute,
   AppQueueTicketsIdRoute: AppQueueTicketsIdRoute,
   AppSlaCenterTicketsIdRoute: AppSlaCenterTicketsIdRoute,
   AppSupervisionTicketsIdRoute: AppSupervisionTicketsIdRoute,
+  AppTransmittedTicketsIdRoute: AppTransmittedTicketsIdRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

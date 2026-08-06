@@ -53,7 +53,7 @@ import type { Priority, RequestItem } from "@/lib/mock-data";
 
 const isoDate = (d: Date) => format(d, "yyyy-MM-dd");
 
-export const Route = createFileRoute("/app/requests/history")({
+export const Route = createFileRoute("/app/history")({
   beforeLoad: () => requireAuth(),
   head: () => ({ meta: [{ title: "Historique — EDG Support" }] }),
   component: RequestHistory,
