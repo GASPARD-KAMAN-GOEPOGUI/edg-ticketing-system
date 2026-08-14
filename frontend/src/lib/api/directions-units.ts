@@ -173,7 +173,7 @@ export async function updateDirection(
   },
 ): Promise<Direction> {
   const raw = await apiFetch<RawDirection>(`/directions/${id}`, {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify(data),
   });
   return mapDirection(raw);
@@ -232,7 +232,7 @@ export async function updateDepartment(
   data: { name?: string; code?: string; direction_id?: string; description?: string; status?: boolean },
 ): Promise<Department> {
   const raw = await apiFetch<RawDepartment>(`/departments/${id}`, {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify(data),
   });
   return mapDepartment(raw);
@@ -296,7 +296,7 @@ export async function updateUnit(
   data: { name?: string; code?: string; department_id?: string; description?: string; status?: boolean },
 ): Promise<Unit> {
   const raw = await apiFetch<RawUnit>(`/units/${id}`, {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify(data),
   });
   return mapUnit(raw);

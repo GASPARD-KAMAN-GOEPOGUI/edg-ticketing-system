@@ -127,8 +127,6 @@ def test_action_roles_allow_expected_actions(role, action):
     [
         ("user", "resolve"),
         ("agent", "reject"),
-        ("agent", "reopen"),
-        ("agent", "reject_reopen"),
         ("admin", "merge"),
         ("admin", "duplicate"),
         ("dg", "assign"),
@@ -175,18 +173,20 @@ def test_privileged_actor_cannot_process_own_request(role, action):
         )
 
 
-@pytest.mark.parametrize("action", ["close", "cancel", "request_reopen"])
+@pytest.mark.parametrize("action", ["close", "cancel", "reopen"])
 def test_requester_actions_remain_allowed_on_own_request(action):
     current_actor = actor("director", id=42, unity_id=1)
     assert_ticket_scope(current_actor, ticket(requester_id=42), action=action)
 
 
-def test_request_reopen_is_only_for_the_requester():
+def test_reopen_is_only_for_the_requester():
+    """BR-REOPEN-QUEUE-001 (révision — réouverture immédiate) : réservé au
+    demandeur, quel que soit le rôle de qui que ce soit d'autre (même admin)."""
     current_ticket = ticket(status="resolved", requester_id=10)
-    assert_ticket_scope(actor("user", id=10, unity_id=None), current_ticket, action="request_reopen")
+    assert_ticket_scope(actor("user", id=10, unity_id=None), current_ticket, action="reopen")
 
     with pytest.raises(ForbiddenException):
-        assert_ticket_scope(actor("admin", id=6, unity_id=None), current_ticket, action="request_reopen")
+        assert_ticket_scope(actor("admin", id=6, unity_id=None), current_ticket, action="reopen")
 
 
 def test_agent_scope_accepts_same_unity_assigned_ticket_and_triage():

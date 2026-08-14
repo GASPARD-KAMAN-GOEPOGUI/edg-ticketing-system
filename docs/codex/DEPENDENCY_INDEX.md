@@ -122,7 +122,7 @@ frontend/src/routes/app.admin.routing.tsx
 frontend/src/routes/app.admin.users.tsx
 -> frontend/src/lib/api/accounts.ts
 -> frontend/src/lib/api/directions-units.ts pour directions/departements/unites actifs
--> GET/POST/PATCH/DELETE /api/v1/users*
+-> GET/POST/PUT/DELETE /api/v1/users*
 -> GET /api/v1/directions*
 -> GET /api/v1/departments*
 -> GET /api/v1/units*
@@ -138,9 +138,9 @@ frontend/src/routes/app.admin.users.tsx
 frontend/src/routes/app.admin.directions.tsx / frontend/src/routes/app.admin.directions.$id.tsx / frontend/src/routes/app.admin.departments.tsx / frontend/src/routes/app.admin.units.tsx / frontend/src/routes/app.admin.org.tsx
 -> frontend/src/lib/api/directions-units.ts
 -> frontend/src/lib/api/accounts.ts pour le personnel de l'arbre direction
--> GET/POST/PATCH/DELETE /api/v1/directions*
--> GET/POST/PATCH/DELETE /api/v1/departments*
--> GET/POST/PATCH/DELETE /api/v1/units*
+-> GET/POST/PUT/DELETE /api/v1/directions*
+-> GET/POST/PUT/DELETE /api/v1/departments*
+-> GET/POST/PUT/DELETE /api/v1/units*
 -> POST /api/v1/{directions|departments|units}/{id}/activate|deactivate
 -> backend/api/routes/RouteDirectionsUnits.py
 -> backend/api/seed_references.py au demarrage pour les donnees builtin Unity/Organigram

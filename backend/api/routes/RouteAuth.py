@@ -1,97 +1,63 @@
 """
-Routes d'authentification JWT — EDG Connect.
+Routes d'authentification — plateforme centrale manager-user.
 
 Endpoints :
-  POST /auth/register          Inscription (crée un compte + retourne les tokens)
-  POST /auth/login             Connexion (email/matricule + mot de passe)
-  POST /auth/refresh           Rafraîchissement de l'access token
-  POST /auth/logout            Révocation session + access + refresh tokens
-  GET  /auth/me                Profil de l'utilisateur connecté
-  POST /auth/change-password   Changement de mot de passe
-  POST /auth/set-password/{id} Réinitialisation admin (réservé admin)
+  POST /auth/register          Inscription publique (rôle "user" forcé) via le central
+  POST /auth/forgot-password   Étape 1 — envoi d'un code de vérification par email (OTP local)
+  POST /auth/reset-password    Étape 3 — vérification du code + reset central du mot de passe
+  POST /auth/login             Connexion (email/matricule + mot de passe) via le central
+  POST /auth/refresh           Rafraîchissement de l'access token via le central
+  POST /auth/logout            Déconnexion (aucune révocation locale, tokens émis par le central)
+  GET  /auth/me                Profil de l'utilisateur connecté (compte local)
+  GET  /auth/me/scopes         Relais des scopes centraux (métadonnées, debug uniquement)
+  GET  /auth/me/groups         Relais des groupes centraux (métadonnées, debug uniquement)
+
+Le mot de passe est géré par la plateforme centrale manager-user — voir
+backend/README-integration-plateforme-centrale/README-integration-plateforme-centrale.md.
+La plateforme centrale n'exposant aucun endpoint self-service de reset (seul un
+reset admin existe, §12), forgot-password/reset-password reconstituent un OTP par
+email localement — le code (hashé), son expiration et le compteur de tentatives
+sont stockés dans account.infos (pas de table dédiée), qui déverrouille ensuite
+ce même appel central.
 """
 from __future__ import annotations
 
-import asyncio
+import hashlib
 import logging
-import random
-import string
-import uuid
-from datetime import datetime, timedelta, timezone
+import secrets
+from datetime import datetime, timedelta
+from typing import NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.dependencies import get_db, get_current_user, require_roles, oauth2_scheme
+from api.core import central_auth, mailer
+from api.core.exceptions import ValidationException
+from api.dependencies import (
+    get_db,
+    get_current_user,
+    get_current_user_optional,
+    oauth2_scheme,
+    resolve_central_account,
+)
+from api.repositories import AccountRepository
 from api.schemas.SchemaAuth import (
-    LoginRequest,
     RegisterRequest,
+    LoginRequest,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
     RefreshRequest,
     LogoutRequest,
-    ChangePasswordRequest,
-    SetPasswordRequest,
     TokenResponse,
     AccessTokenResponse,
 )
 from api.schemas.SchemaAccount import AccountResponse
 from api.services import AccountService
-from api.core.security import (
-    create_access_token,
-    create_refresh_token,
-    decode_token,
-    access_token_expire_seconds,
-)
-from api.core.token_blacklist import token_blacklist
-from api.core.exceptions import UnauthorizedException, EDGException
-from api.core.event_bus import event_bus, AppEvent
-
-# ── Stockage des codes de réinitialisation (in-memory, TTL 15 min) ────────────
-# { email_lower: (code, expires_at) }
-_reset_codes: dict[str, tuple[str, datetime]] = {}
-_reset_lock = asyncio.Lock()
-_RESET_TTL = timedelta(minutes=15)
-
-
-async def _create_reset_code(email: str) -> str:
-    """Génère un code à 6 chiffres et le stocke avec expiry."""
-    code = "".join(random.choices(string.digits, k=6))
-    expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + _RESET_TTL
-    async with _reset_lock:
-        _reset_codes[email.lower()] = (code, expires_at)
-    return code
-
-
-async def _check_reset_code(email: str, code: str) -> str:
-    """Retourne 'valid', 'expired' ou 'invalid'."""
-    async with _reset_lock:
-        entry = _reset_codes.get(email.lower())
-    if entry is None:
-        return "invalid"
-    stored_code, expires_at = entry
-    if datetime.now(timezone.utc).replace(tzinfo=None) > expires_at:
-        return "expired"
-    if stored_code != code:
-        return "invalid"
-    return "valid"
-
-
-async def _consume_reset_code(email: str) -> None:
-    """Supprime le code après utilisation (usage unique)."""
-    async with _reset_lock:
-        _reset_codes.pop(email.lower(), None)
-
-
-class ForgotPasswordRequest(BaseModel):
-    email: str
-
-
-class ResetPasswordRequest(BaseModel):
-    email: str
-    code: str
-    new_password: str
 
 logger = logging.getLogger(__name__)
+
+_RESET_CODE_TTL_MINUTES = 15
+_RESET_CODE_MAX_ATTEMPTS = 5
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -100,8 +66,12 @@ def _svc(db: AsyncSession = Depends(get_db)) -> AccountService:
     return AccountService(db)
 
 
-# ── Helper — log d'activité (best-effort : échec avalé, ne bloque pas la réponse
-#    en cas d'erreur, mais reste awaited — profilage a mesuré <0.05s en pratique) ─
+def _client_ip(request: Request) -> str | None:
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else None
+
 
 async def _log_auth_event(
     db: AsyncSession,
@@ -130,32 +100,13 @@ async def _log_auth_event(
         logger.warning("Impossible d'écrire le log auth : %s", exc)
 
 
-def _build_token_response(user, session_id: str, include_refresh: bool = True) -> dict:
-    access = create_access_token(user.id, user.email, user.role, session_id)
-    refresh = create_refresh_token(user.id, session_id) if include_refresh else ""
-    return {
-        "access_token": access,
-        "refresh_token": refresh,
-        "token_type": "bearer",
-        "expires_in": access_token_expire_seconds(),
-        "user": user,
-    }
-
-
-def _client_ip(request: Request) -> str | None:
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else None
-
-
 # ── Inscription ───────────────────────────────────────────────────────────────
 
 @router.post(
     "/register",
-    response_model=TokenResponse,
+    response_model=AccountResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Créer un compte et obtenir les tokens",
+    summary="Inscription publique (rôle utilisateur, via la plateforme centrale)",
 )
 async def register(
     request: Request,
@@ -164,14 +115,122 @@ async def register(
     svc: AccountService = Depends(_svc),
 ):
     data = body.dict()
-    user = await svc.register(data)  # force role="user" dans le service
-    session_id = str(uuid.uuid4())
+    data["role"] = "user"  # C-01 — auto-élévation impossible, jamais depuis le payload client
+    account = await svc.create(data, validate_org_assignment=False)
     await _log_auth_event(
-        db, actor=user.email, actor_id=user.id, actor_role=user.role,
-        action="register", target=f"account:{user.id}",
-        ip_address=_client_ip(request),
+        db, actor=account.email, actor_id=account.id, actor_role=account.role,
+        action="register", target=f"account:{account.id}", ip_address=_client_ip(request),
     )
-    return _build_token_response(user, session_id)
+    return account
+
+
+# ── Mot de passe oublié ──────────────────────────────────────────────────────
+# La plateforme centrale n'expose aucun endpoint self-service pour ça (README §12 :
+# seul un reset déclenché par un admin, au token machine, existe). Ce flux
+# reconstitue donc un OTP par email côté EDG Connect, qui ne fait que déverrouiller
+# ce même appel central (central_auth.reset_central_password) avec le mot de passe
+# choisi par l'utilisateur, une fois le code vérifié.
+
+@router.post(
+    "/forgot-password",
+    summary="Étape 1 — demander un code de vérification par email",
+)
+async def forgot_password(
+    body: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    email = body.email.strip().lower()
+    account_repo = AccountRepository(db)
+    account = await account_repo.find_by_email(email)
+
+    response: dict = {"sent": True}
+    # Ne jamais révéler si l'email existe (anti-énumération) — toujours 200,
+    # mais on ne génère/envoie un code que si un compte correspond réellement.
+    if account is not None:
+        code = f"{secrets.randbelow(1_000_000):06d}"
+        code_hash = hashlib.sha256(code.encode()).hexdigest()
+        expires_at = datetime.utcnow() + timedelta(minutes=_RESET_CODE_TTL_MINUTES)
+        # Pas de table dédiée — le code (hashé), son expiration et le compteur de
+        # tentatives vivent dans account.infos (merge JSON, cf. update_infos()).
+        await account_repo.update_infos(account.id, {
+            "reset_code_hash": code_hash,
+            "reset_code_expires_at": expires_at.isoformat(),
+            "reset_code_attempts": 0,
+        })
+        email_sent = False
+        full_name = (f"{account.firstname or ''} {account.name or ''}".strip() or account.name or "").upper()
+        try:
+            email_sent = await mailer.send_reset_code_email(email, code, full_name)
+        except Exception as exc:
+            logger.error("Envoi de l'email de réinitialisation échoué pour %r : %s", email, exc)
+
+        # Le code n'apparaît dans la réponse que si l'email n'a vraiment pas pu être
+        # envoyé (SMTP non configuré ou échec) — jamais quand l'envoi a réussi, pour ne
+        # pas l'exposer dans l'UI alors qu'il part réellement dans la boîte mail.
+        if not email_sent:
+            response["dev_code"] = code
+
+    return response
+
+
+@router.post(
+    "/reset-password",
+    summary="Étape 3 — vérifier le code et réinitialiser le mot de passe",
+)
+async def reset_password_route(
+    request: Request,
+    body: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    email = body.email.strip().lower()
+    account_repo = AccountRepository(db)
+    account = await account_repo.find_by_email(email)
+
+    def _expired() -> NoReturn:
+        raise ValidationException(
+            "Code expiré ou introuvable. Demandez un nouveau code.",
+            error_code="RESET_CODE_EXPIRED",
+        )
+
+    if account is None or not account.central_user_uuid:
+        _expired()
+
+    infos = account.infos or {}
+    code_hash = infos.get("reset_code_hash")
+    expires_at_raw = infos.get("reset_code_expires_at")
+    attempts = int(infos.get("reset_code_attempts") or 0)
+
+    if not code_hash or not expires_at_raw:
+        _expired()
+    try:
+        expires_at = datetime.fromisoformat(expires_at_raw)
+    except (TypeError, ValueError):
+        _expired()
+    if datetime.utcnow() > expires_at or attempts >= _RESET_CODE_MAX_ATTEMPTS:
+        _expired()
+
+    submitted_hash = hashlib.sha256(body.code.strip().encode()).hexdigest()
+    if not secrets.compare_digest(submitted_hash, code_hash):
+        await account_repo.update_infos(account.id, {"reset_code_attempts": attempts + 1})
+        raise ValidationException(
+            "Code invalide ou déjà utilisé. Vérifiez le code saisi.",
+            error_code="RESET_CODE_INVALID",
+        )
+
+    machine_token = await central_auth.get_machine_token()
+    await central_auth.reset_central_password(
+        account.central_user_uuid, machine_token, new_password=body.new_password,
+    )
+    # Invalide le code après usage (empêche le replay).
+    await account_repo.update_infos(account.id, {
+        "reset_code_hash": None, "reset_code_expires_at": None, "reset_code_attempts": 0,
+    })
+
+    await _log_auth_event(
+        db, actor=account.email, actor_id=account.id, actor_role=account.role,
+        action="reset_password", target=f"account:{account.id}", ip_address=_client_ip(request),
+    )
+    return {"reset": True}
 
 
 # ── Connexion ─────────────────────────────────────────────────────────────────
@@ -179,34 +238,68 @@ async def register(
 @router.post(
     "/login",
     response_model=TokenResponse,
-    summary="Connexion (email/matricule + mot de passe)",
+    summary="Connexion (email/matricule + mot de passe) via la plateforme centrale",
 )
 async def login(
     request: Request,
     body: LoginRequest,
     db: AsyncSession = Depends(get_db),
-    svc: AccountService = Depends(_svc),
 ):
     ip = _client_ip(request)
-    try:
-        user = await svc.authenticate(body.identifier, body.password)
-    except UnauthorizedException as exc:
-        await _log_auth_event(
-            db, actor=body.identifier, actor_id=None, actor_role="unknown",
-            action="login_failed", target="auth",
-            ip_address=ip, log_status="error",
-        )
-        raise  # edg_exception_handler retourne error_code structuré (ex: ACCOUNT_DISABLED)
+    email = body.identifier.strip()
 
-    session_id = str(uuid.uuid4())
+    if "@" not in email:
+        # Identifiant non-email (matricule) : résolution locale, le central n'accepte que l'email
+        from api.repositories import AccountRepository
+        local = await AccountRepository(db).find_by_matricule(email)
+        if local is None:
+            await _log_auth_event(
+                db, actor=body.identifier, actor_id=None, actor_role="unknown",
+                action="login_failed", target="auth", ip_address=ip, log_status="error",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Identifiant ou mot de passe incorrect.",
+            )
+        email = local.email
+
+    try:
+        tokens = await central_auth.central_login(email, body.password)
+    except central_auth.CentralInvalidCredentials:
+        await _log_auth_event(
+            db, actor=email, actor_id=None, actor_role="unknown",
+            action="login_failed", target="auth", ip_address=ip, log_status="error",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Identifiant ou mot de passe incorrect.",
+        )
+    except (central_auth.CentralUnavailableError, central_auth.CentralInvalidClientCredentials) as exc:
+        logger.error("central_auth: échec login (%s)", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service d'authentification central indisponible.",
+        )
+
+    bearer_token = tokens["bearer_token"]
+    account = await resolve_central_account(bearer_token, db)
 
     await _log_auth_event(
-        db, actor=user.email, actor_id=user.id, actor_role=user.role,
-        action="login", target=f"account:{user.id}",
-        ip_address=ip,
+        db, actor=account.email, actor_id=account.id, actor_role=account.role,
+        action="login", target=f"account:{account.id}", ip_address=ip,
+    )
+    await central_auth.log_central_event(
+        bearer_token, object_id=str(account.id), action="login", status="success",
+        message=f"Connexion réussie : {account.email}",
     )
 
-    return _build_token_response(user, session_id)
+    return {
+        "access_token": bearer_token,
+        "refresh_token": tokens.get("refresh_token", ""),
+        "token_type": tokens.get("token_type", "bearer"),
+        "expires_in": tokens.get("expires_in", 0),
+        "user": account,
+    }
 
 
 # ── Rafraîchissement du token ─────────────────────────────────────────────────
@@ -214,52 +307,27 @@ async def login(
 @router.post(
     "/refresh",
     response_model=AccessTokenResponse,
-    summary="Obtenir un nouveau access token depuis le refresh token",
+    summary="Obtenir un nouveau access token depuis le refresh token (relais central)",
 )
-async def refresh_token(
-    body: RefreshRequest,
-    db: AsyncSession = Depends(get_db),
-):
+async def refresh_token(body: RefreshRequest):
     try:
-        payload = decode_token(body.refresh_token)
-    except UnauthorizedException as exc:
+        tokens = await central_auth.central_refresh(body.refresh_token)
+    except central_auth.CentralInvalidCredentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=exc.message,
+            detail="Session expirée. Veuillez vous reconnecter.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
-    if payload.get("type") != "refresh":
+    except central_auth.CentralUnavailableError:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token invalide : ce n'est pas un refresh token.",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service d'authentification central indisponible.",
         )
 
-    jti = payload.get("jti", "")
-    if await token_blacklist.is_revoked(jti):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh token révoqué. Veuillez vous reconnecter.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    session_id = payload.get("session_id", "")
-    account_id = int(payload.get("sub", 0))
-    from api.repositories import AccountRepository
-    user = await AccountRepository(db).get_by_id(account_id)
-    if user is None or not user.status or user.deleted_at is not None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Compte introuvable ou désactivé.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    new_access = create_access_token(user.id, user.email, user.role, session_id)
     return {
-        "access_token": new_access,
-        "token_type": "bearer",
-        "expires_in": access_token_expire_seconds(),
+        "access_token": tokens["bearer_token"],
+        "token_type": tokens.get("token_type", "bearer"),
+        "expires_in": tokens.get("expires_in", 0),
     }
 
 
@@ -268,73 +336,25 @@ async def refresh_token(
 @router.post(
     "/logout",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Déconnexion — révoque la session + access token + refresh token",
+    summary="Déconnexion",
 )
 async def logout(
     request: Request,
     body: LogoutRequest,
     db: AsyncSession = Depends(get_db),
     bearer_token: str | None = Depends(oauth2_scheme),
+    current_user=Depends(get_current_user_optional),
 ):
-    """
-    H-03 — Révoque les deux tokens :
-      - refresh_token (body, obligatoire)
-      - access_token (body optionnel OU Authorization header)
-    H-08 — Révoque la session en base.
-    """
-    session_id_to_revoke: str | None = None
-    actor_info: tuple[str, int | None, str] = ("anonymous", None, "unknown")
-
-    # 1. Révoquer le refresh token
-    try:
-        ref_payload = decode_token(body.refresh_token)
-        ref_jti = ref_payload.get("jti", "")
-        session_id_to_revoke = ref_payload.get("session_id")
-        exp_ts = ref_payload.get("exp")
-        exp_dt = (
-            datetime.fromtimestamp(exp_ts, tz=timezone.utc).replace(tzinfo=None)
-            if exp_ts else None
+    if current_user is not None:
+        await _log_auth_event(
+            db, actor=current_user.email, actor_id=current_user.id, actor_role=current_user.role,
+            action="logout", target=f"account:{current_user.id}", ip_address=_client_ip(request),
         )
-        if ref_jti:
-            await token_blacklist.revoke(ref_jti, exp_dt)
-    except UnauthorizedException:
-        pass  # refresh token déjà invalide — acceptable
-
-    # 2. Révoquer l'access token (depuis le body ou le header Authorization)
-    access_raw = body.access_token or bearer_token
-    if access_raw:
-        try:
-            acc_payload = decode_token(access_raw)
-            acc_jti = acc_payload.get("jti", "")
-            acc_exp_ts = acc_payload.get("exp")
-            acc_exp_dt = (
-                datetime.fromtimestamp(acc_exp_ts, tz=timezone.utc).replace(tzinfo=None)
-                if acc_exp_ts else None
+        if bearer_token:
+            await central_auth.log_central_event(
+                bearer_token, object_id=str(current_user.id), action="logout", status="success",
+                message=f"Déconnexion : {current_user.email}",
             )
-            if acc_jti:
-                await token_blacklist.revoke(acc_jti, acc_exp_dt)
-            # Si pas de session_id dans le refresh, essayer l'access
-            if not session_id_to_revoke:
-                session_id_to_revoke = acc_payload.get("session_id")
-            sub = acc_payload.get("sub", "")
-            actor_info = (
-                acc_payload.get("email", sub),
-                int(sub) if sub else None,
-                acc_payload.get("role", "unknown"),
-            )
-        except UnauthorizedException:
-            pass
-
-    # 3. Log
-    await _log_auth_event(
-        db,
-        actor=actor_info[0],
-        actor_id=actor_info[1],
-        actor_role=actor_info[2],
-        action="logout",
-        target="auth",
-        ip_address=_client_ip(request),
-    )
 
 
 # ── Profil courant ────────────────────────────────────────────────────────────
@@ -348,300 +368,31 @@ async def get_me(current_user=Depends(get_current_user)):
     return current_user
 
 
-# ── Changement de mot de passe ────────────────────────────────────────────────
-
-@router.post(
-    "/change-password",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Changer son propre mot de passe",
+@router.get(
+    "/me/scopes",
+    summary="Relais des scopes centraux de l'utilisateur connecté (debug/metadata)",
 )
-async def change_password(
-    request: Request,
-    body: ChangePasswordRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
-    svc: AccountService = Depends(_svc),
-):
+async def get_me_scopes(bearer_token: str | None = Depends(oauth2_scheme)):
+    if not bearer_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentification requise.")
     try:
-        await svc.change_password(
-            current_user.id,
-            body.current_password,
-            body.new_password,
-        )
-    except UnauthorizedException as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=exc.message,
-        )
-
-    await _log_auth_event(
-        db,
-        actor=current_user.email,
-        actor_id=current_user.id,
-        actor_role=current_user.role,
-        action="change_password",
-        target=f"account:{current_user.id}",
-        ip_address=_client_ip(request),
-    )
+        return await central_auth.get_scopes(bearer_token)
+    except central_auth.CentralUnavailableError:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Service central indisponible.")
+    except central_auth.CentralAuthError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session invalide ou expirée.")
 
 
-# ── Réinitialisation admin ────────────────────────────────────────────────────
-
-@router.post(
-    "/set-password/{account_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Admin — définir/réinitialiser le mot de passe d'un compte",
-    dependencies=[Depends(require_roles("admin"))],
+@router.get(
+    "/me/groups",
+    summary="Relais des groupes centraux de l'utilisateur connecté (debug/metadata)",
 )
-async def admin_set_password(
-    account_id: int,
-    body: SetPasswordRequest,
-    svc: AccountService = Depends(_svc),
-):
-    await svc.set_password(account_id, body.password)
-
-
-# ── Mot de passe oublié ───────────────────────────────────────────────────────
-
-@router.post(
-    "/forgot-password",
-    summary="Demander un code de réinitialisation du mot de passe",
-)
-async def forgot_password(
-    body: ForgotPasswordRequest,
-    svc: AccountService = Depends(_svc),
-):
-    """
-    Génère un code à 6 chiffres (TTL 15 min) et le stocke.
-    En développement : retourne le code directement dans la réponse.
-    En production : envoie un email (TODO: brancher SMTP) et ne retourne pas le code.
-    Volontairement silencieux si l'email n'existe pas (anti-énumération).
-    """
-    from api.configs.Environment import get_environment
-    env = get_environment()
-
+async def get_me_groups(bearer_token: str | None = Depends(oauth2_scheme)):
+    if not bearer_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentification requise.")
     try:
-        user = await svc.get_by_email(body.email.strip().lower())
-    except Exception:
-        # Anti-énumération : ne pas révéler l'existence du compte
-        if env.APP_ENV != "production":
-            return {"sent": False, "dev_code": None}
-        return {"sent": False}
-
-    code = await _create_reset_code(body.email.strip().lower())
-    logger.info(
-        "Password reset requested for %s — code generated (TTL 15 min)", user.email
-    )
-
-    # TODO prod: envoyer l'email via SMTP
-    # await send_password_reset_email(user.email, user.name, code)
-
-    if env.APP_ENV != "production":
-        # Dev : code renvoyé directement (affiché dans l'UI)
-        return {"sent": True, "dev_code": code}
-    return {"sent": True}
-
-
-# ── Vérification biométrique (reconnaissance faciale DeepFace) ───────────────
-
-class BiometricVerifyRequest(BaseModel):
-    image: str       # base64 data URL ou base64 pur — image webcam
-    identifier: str  # email de l'administrateur
-
-
-@router.post(
-    "/biometric-verify",
-    summary="Vérification biométrique par reconnaissance faciale (ArcFace / InsightFace)",
-)
-async def biometric_verify(
-    request: Request,
-    body: BiometricVerifyRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    from api.services.ServiceBiometric import (
-        verify_faces,
-        load_reference_image,
-        SpoofDetectedError,
-    )
-    from api.repositories.RepositoryAccount import AccountRepository
-
-    ip = _client_ip(request)
-    account_repo = AccountRepository(db)
-
-    # 1. Récupérer le compte administrateur
-    user = await account_repo.find_by_email(body.identifier.strip().lower())
-    if not user or user.role != "admin" or user.account_status != "active":
-        return {"match": False, "confidence": 0.0}
-
-    # 2. Vérifier la présence d'une photo de référence
-    if not user.avatar_url:
-        logger.warning(
-            "Biometric: aucune photo de référence pour l'admin %s", user.email
-        )
-        return {"match": False, "confidence": 0.0, "error": "no_reference_photo"}
-
-    # 3. Charger la photo de référence
-    ref_b64 = await asyncio.to_thread(load_reference_image, user.avatar_url)
-    if not ref_b64:
-        logger.error("Biometric: impossible de charger la photo de référence pour %s", user.email)
-        return {"match": False, "confidence": 0.0}
-
-    # 4. Préparer l'image en direct (strip data URL prefix si présent)
-    live_b64 = body.image
-    if "," in live_b64:
-        live_b64 = live_b64.split(",", 1)[1]
-
-    # 5. Vérification faciale
-    match = False
-    confidence = 0.0
-    spoof_detected = False
-
-    try:
-        match, confidence = await verify_faces(live_b64, ref_b64)
-    except SpoofDetectedError:
-        spoof_detected = True
-        logger.warning("Biometric: tentative de fraude anti-spoofing pour %s", user.email)
-    except ValueError as exc:
-        logger.warning("Biometric: visage non détecté pour %s — %s", user.email, exc)
-    except Exception as exc:
-        logger.error("Biometric: erreur inattendue pour %s — %s", user.email, exc)
-
-    # 6. Journalisation d'audit
-    action = (
-        "biometric_spoof_attempt" if spoof_detected
-        else ("biometric_auth_success" if match else "biometric_auth_failed")
-    )
-    await _log_auth_event(
-        db,
-        actor=user.email,
-        actor_id=user.id,
-        actor_role=user.role,
-        action=action,
-        target=f"account:{user.id}",
-        ip_address=ip,
-        log_status="success" if match else "error",
-    )
-
-    # 7. Accès refusé
-    if not match:
-        return {
-            "match": False,
-            "confidence": confidence,
-            **({"spoof": True} if spoof_detected else {}),
-        }
-
-    # 8. Accès accordé — émettre tokens
-    session_id = str(uuid.uuid4())
-    access = create_access_token(user.id, user.email, user.role, session_id)
-    refresh = create_refresh_token(user.id, session_id)
-
-    logger.info(
-        "Biometric auth SUCCESS: user=%s confidence=%.1f%%", user.email, confidence
-    )
-
-    return {
-        "match": True,
-        "confidence": confidence,
-        "access_token": access,
-        "refresh_token": refresh,
-        "expires_in": access_token_expire_seconds(),
-        "user": {
-            "id": str(user.id),
-            "name": user.name,
-            "email": user.email,
-            "role": user.role,
-            "avatar": user.avatar_url,
-            "unity_id": str(user.unity_id) if user.unity_id else None,
-        },
-    }
-
-
-# ── Rapport d'incident de sécurité ────────────────────────────────────────────
-
-class SecurityIncidentRequest(BaseModel):
-    identifier: str
-    captured_image: str
-    timestamp: str
-    user_agent: str
-    browser: str | None = None
-    os_info: str | None = None
-    device_type: str | None = None
-    location_approx: str | None = None
-    attempt_count: int = 1
-
-
-@router.post(
-    "/security-incident",
-    status_code=status.HTTP_201_CREATED,
-    summary="Signaler une tentative d'accès non autorisée (photo + métadonnées)",
-)
-async def report_security_incident(
-    request: Request,
-    body: SecurityIncidentRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    from api.services.ServiceSecurityIncident import SecurityIncidentService
-    svc = SecurityIncidentService(db)
-    await svc.create_incident(
-        identifier=body.identifier,
-        captured_image=body.captured_image,
-        timestamp=body.timestamp,
-        user_agent=body.user_agent,
-        ip_address=_client_ip(request),
-        browser=body.browser,
-        os_info=body.os_info,
-        device_type=body.device_type,
-        location_approx=body.location_approx,
-        attempt_count=body.attempt_count,
-    )
-    return {"recorded": True}
-
-
-@router.post(
-    "/reset-password",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Réinitialiser le mot de passe avec le code reçu par email",
-)
-async def reset_password(
-    body: ResetPasswordRequest,
-    svc: AccountService = Depends(_svc),
-):
-    """
-    Vérifie le code de réinitialisation et met à jour le mot de passe.
-    Le code est à usage unique — il est supprimé après utilisation.
-    """
-    if len(body.new_password) < 6:
-        raise EDGException(
-            "Le mot de passe doit contenir au moins 6 caractères.",
-            error_code="VALIDATION_ERROR",
-            status_code=422,
-        )
-
-    result = await _check_reset_code(body.email.strip().lower(), body.code.strip())
-
-    if result == "expired":
-        raise EDGException(
-            "Ce code de réinitialisation a expiré. Recommencez la procédure.",
-            error_code="RESET_CODE_EXPIRED",
-            status_code=422,
-        )
-
-    if result == "invalid":
-        raise EDGException(
-            "Code invalide ou déjà utilisé. Recommencez la procédure.",
-            error_code="RESET_CODE_INVALID",
-            status_code=422,
-        )
-
-    try:
-        user = await svc.get_by_email(body.email.strip().lower())
-    except Exception:
-        raise EDGException(
-            "Code invalide ou déjà utilisé.",
-            error_code="RESET_CODE_INVALID",
-            status_code=422,
-        )
-
-    await svc.set_password(user.id, body.new_password)
-    await _consume_reset_code(body.email.strip().lower())
-    logger.info("Password reset completed for user id=%s", user.id)
+        return await central_auth.get_groups(bearer_token)
+    except central_auth.CentralUnavailableError:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Service central indisponible.")
+    except central_auth.CentralAuthError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session invalide ou expirée.")

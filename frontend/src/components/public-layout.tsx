@@ -10,7 +10,6 @@ const navLinks = [
   { to: "/", label: "Accueil" },
   { to: "/track", label: "Suivre mon ticket" },
   { to: "/knowledge", label: "Base de connaissance" },
-  { to: "/help", label: "Aide" },
 ];
 
 export function PublicLayout({ children }: { children: ReactNode }) {

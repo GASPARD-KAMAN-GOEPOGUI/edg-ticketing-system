@@ -52,19 +52,10 @@
                                     </span>
                                 </td>
                                 <td align="right" class="email-header-right" style="vertical-align:middle;color:#516158;font-size:11px;">
-                                    Plateforme de gestion des demandes
+                                    Plateforme de gestion des tickets
                                 </td>
                             </tr>
                         </table>
-                    </td>
-                </tr>
-                <tr>
-                    <td style="background:{{ soft_color }};height:42px;line-height:42px;text-align:right;padding-right:22px;">
-                        {% if number %}
-                        <span style="display:inline-block;background:{{ color }};color:#ffffff;border-radius:8px;padding:4px 9px;font-size:13px;font-weight:700;line-height:1;">
-                            {{ number }}
-                        </span>
-                        {% endif %}
                     </td>
                 </tr>
                 <tr>
@@ -84,10 +75,10 @@
                             {% if value %}
                             <tr>
                                 <td class="email-detail-label" style="padding:8px 16px;color:#53655c;font-size:12px;font-weight:700;text-align:left;width:45%;{% if not loop.last %}border-bottom:1px solid #edf2ef;{% endif %}">
-                                    {{ label }}
+                                    {{ label }}&nbsp;:
                                 </td>
                                 <td class="email-detail-value" style="padding:8px 16px;color:#17241d;font-size:12px;text-align:left;word-break:break-word;overflow-wrap:anywhere;{% if not loop.last %}border-bottom:1px solid #edf2ef;{% endif %}">
-                                    : {{ value }}
+                                    {{ value }}
                                 </td>
                             </tr>
                             {% endif %}

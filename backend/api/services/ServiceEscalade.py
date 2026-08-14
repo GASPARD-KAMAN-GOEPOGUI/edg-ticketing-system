@@ -25,7 +25,11 @@ _TERMINAL = ("resolved", "closed", "cancelled", "rejected", "escalated")
 
 
 async def find_hierarchical_chief(
-    session: AsyncSession, unity_id: int | None, exclude_account_id: int | None = None,
+    session: AsyncSession,
+    unity_id: int | None,
+    exclude_account_id: int | None = None,
+    *,
+    exclude_requester_id: int | None = None,
 ) -> int | None:
     """Chef hierarchique le plus proche pour une unite donnee.
 
@@ -34,6 +38,12 @@ async def find_hierarchical_chief(
     est elle-meme un chef — on doit alors remonter au niveau superieur), sinon
     remonte l'organigramme jusqu'a trouver un chef ou un directeur dans l'unite
     parente.
+
+    BR-REQUESTER-NO-SELF-TREATMENT-001 — `exclude_requester_id` (demandeur du
+    ticket escalade) est exclu au meme titre que exclude_account_id, a chaque
+    niveau : le demandeur ne doit jamais devenir intervenant de son propre
+    ticket via une escalade, meme si l'organigramme le designerait normalement
+    comme chef hierarchique.
     """
     if not unity_id:
         return None
@@ -46,6 +56,8 @@ async def find_hierarchical_chief(
     ]
     if exclude_account_id is not None:
         filters.append(Account.id != exclude_account_id)
+    if exclude_requester_id is not None:
+        filters.append(Account.id != exclude_requester_id)
     row = await session.execute(select(Account.id).where(*filters).limit(1))
     chief_id = row.scalar_one_or_none()
     if chief_id:
@@ -77,6 +89,8 @@ async def find_hierarchical_chief(
     ]
     if exclude_account_id is not None:
         filters.append(Account.id != exclude_account_id)
+    if exclude_requester_id is not None:
+        filters.append(Account.id != exclude_requester_id)
     row = await session.execute(select(Account.id).where(*filters).limit(1))
     return row.scalar_one_or_none()
 
@@ -178,8 +192,8 @@ class EscaladeService:
         )
 
         # Traitement individuel : WorkflowDetail + réassignation + notification
-        for t_id, t_ref, t_assignee, t_unity_id, _t_requester in tickets:
-            chief_id = await self._find_chief(t_unity_id)
+        for t_id, t_ref, t_assignee, t_unity_id, t_requester in tickets:
+            chief_id = await self._find_chief(t_unity_id, exclude_requester_id=t_requester)
             workflow_id = await self._get_or_create_workflow(t_id)
 
             label = "Escalade automatique — délai SLA dépassé"
@@ -262,9 +276,13 @@ class EscaladeService:
         await self.session.flush()
         return wf.id
 
-    async def _find_chief(self, unity_id: int | None) -> int | None:
+    async def _find_chief(
+        self, unity_id: int | None, *, exclude_requester_id: int | None = None,
+    ) -> int | None:
         """Chef dans la même unité ; sinon chef/directeur dans l'unité parente."""
-        return await find_hierarchical_chief(self.session, unity_id)
+        return await find_hierarchical_chief(
+            self.session, unity_id, exclude_requester_id=exclude_requester_id,
+        )
 
     async def _notify(
         self,
@@ -274,6 +292,7 @@ class EscaladeService:
         body: str,
         notif_type: str = "warning",
         request_id: str | None = None,
+        send_email: bool = True,
     ) -> None:
         try:
             from api.services.NotificationEmitter import emit
@@ -287,6 +306,7 @@ class EscaladeService:
                 request_id=request_id,
                 action_label="Voir le ticket",
                 action_url=f"/app/requests/{request_id}" if request_id else None,
+                send_email=send_email,
             )
         except Exception as exc:
             logger.warning("EscaladeService : notification échouée : %s", exc)
@@ -310,6 +330,79 @@ class EscaladeService:
             self.session.add_all(entries)
         except Exception as exc:
             logger.warning("EscaladeService : journalisation échouée : %s", exc)
+
+    async def warn_sla_approaching(self, threshold_ratio: float = 0.8) -> int:
+        """
+        BR-NOTIFICATION-WORKFLOW-001 §14 — alerte préventive App-only à
+        l'intervenant actuel quand un ticket approche (mais n'a pas encore
+        atteint) son échéance SLA.
+
+        Anti-répétition : réutilise `request.infos` (même pattern déjà en place
+        pour `reopen_requested`/pointeurs d'intervention — aucune nouvelle
+        colonne) pour marquer `sla_warning_sent_at` dès le premier avertissement
+        du cycle SLA courant, afin qu'un même cycle ne redéclenche jamais cette
+        alerte au passage suivant du scheduler (10 min). Le flag est remis à
+        zéro à chaque réouverture (`ServiceRequest.reopen`, nouveau cycle SLA).
+        """
+        # Filtrage seuil/anti-répétition en SQL brut : ne renvoie que des ids (pas
+        # `infos`, dont le décodage JSON via text() brut n'est pas garanti — voir
+        # relecture/merge ORM ci-dessous, seul chemin sûr pour écrire `infos` sans
+        # écraser son contenu existant, ex. pointeurs BR-TRACE-001).
+        id_rows = await self.session.execute(
+            text("""
+                SELECT r.id
+                FROM request r
+                JOIN request_status rs ON rs.id = r.request_status_id
+                LEFT JOIN (
+                    SELECT w.request_id, MAX(wd.created_at) AS last_reopened_at
+                    FROM workflow_detail wd
+                    JOIN workflow w ON w.id = wd.workflow_id
+                    WHERE wd.event_type = 'reopened' AND wd.deleted_at IS NULL
+                    GROUP BY w.request_id
+                ) rw ON rw.request_id = r.id
+                WHERE r.deleted_at IS NULL
+                  AND r.sla_hours > 0
+                  AND r.sla_breached = 0
+                  AND r.assignee_id IS NOT NULL
+                  AND rs.code NOT IN ('resolved', 'closed', 'cancelled', 'rejected', 'escalated')
+                  AND TIMESTAMPDIFF(
+                        MINUTE, COALESCE(rw.last_reopened_at, r.created_at), NOW()
+                      ) >= (r.sla_hours * 60 * :threshold)
+                  AND JSON_UNQUOTE(JSON_EXTRACT(r.infos, '$.sla_warning_sent_at')) IS NULL
+            """),
+            {"threshold": threshold_ratio},
+        )
+        candidate_ids = [row[0] for row in id_rows.all()]
+        if not candidate_ids:
+            return 0
+
+        warned = 0
+        for t_id in candidate_ids:
+            obj_row = await self.session.execute(
+                select(RequestModel.ref, RequestModel.assignee_id, RequestModel.infos)
+                .where(RequestModel.id == t_id)
+            )
+            row = obj_row.first()
+            if row is None or not row.assignee_id:
+                continue
+            current_infos = dict(row.infos) if isinstance(row.infos, dict) else {}
+            current_infos["sla_warning_sent_at"] = "now"
+            await self.session.execute(
+                update(RequestModel).where(RequestModel.id == t_id).values(infos=current_infos)
+            )
+            await self._notify(
+                recipient_id=str(row.assignee_id),
+                title="SLA bientôt dépassé",
+                body=f"Attention : le ticket {row.ref} a consommé {int(threshold_ratio * 100)} % de son délai SLA.",
+                notif_type="warning",
+                request_id=str(t_id),
+                # Lot finition §2 — App uniquement par défaut pour l'alerte préventive.
+                send_email=False,
+            )
+            warned += 1
+        if warned:
+            logger.info("EscaladeService : %d ticket(s) avertis (SLA proche de l'échéance).", warned)
+        return warned
 
     async def mark_sla_breached(self) -> int:
         """

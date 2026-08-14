@@ -10,17 +10,10 @@ pydantic>=1.7.4,<2.0.0
 email-validator>=2.0.0
 python-dotenv>=1.0.0
 python-multipart>=0.0.6
-python-jose[cryptography]>=3.3.0
-passlib[argon2]>=1.7.4
-argon2-cffi>=23.1.0
 aiosmtplib>=3.0.0
 sse-starlette>=1.6.1,<2.0
-# Redis — blacklist JWT persistante (optionnel : fallback en mémoire si absent)
+# Redis — rate limiting distribué (optionnel : fallback en mémoire si absent)
 redis[hiredis]>=4.6.0
-# Biométrie — reconnaissance faciale ArcFace via InsightFace (ONNX, sans TensorFlow)
-insightface>=1.0.0
-onnxruntime>=1.20.0
-opencv-python-headless>=4.10.0
 # Planificateur de tâches (escalade automatique SLA)
 apscheduler>=3.10.0
 # Exports rapports (Excel + PDF)

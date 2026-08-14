@@ -56,6 +56,7 @@ class ErrorCode(str, Enum):
     INVALID_FIELD_VALUE      = "INVALID_FIELD_VALUE"
     BUSINESS_RULE_VIOLATION  = "BUSINESS_RULE_VIOLATION"
     BUILTIN_PROTECTED        = "BUILTIN_PROTECTED"
+    REQUESTER_CANNOT_TREAT_OWN_TICKET = "REQUESTER_CANNOT_TREAT_OWN_TICKET"
 
     # ── 403 / 401 ──────────────────────────────────────────────────────────
     FORBIDDEN                = "FORBIDDEN"

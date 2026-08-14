@@ -151,7 +151,6 @@ function DirectionView() {
   const inProgress   = allItems.filter((r) => r.status === "in_progress").length;
   const pendingCount = allItems.filter((r) => r.status === "pending").length;
   const escalated    = allItems.filter((r) => r.status === "escalated").length;
-  const slaBreached  = allItems.filter((r) => r.slaElapsed > r.slaHours && ACTIVE_STATUSES.has(r.status)).length;
   const critical     = allItems.filter((r) => r.priority === "critical" && ACTIVE_STATUSES.has(r.status)).length;
   const resolved     = allItems.filter((r) => ["resolved", "closed"].includes(r.status)).length;
 
@@ -170,19 +169,17 @@ function DirectionView() {
   }, [allItems]);
 
   const serviceData = useMemo(() => {
-    const map: Record<string, { open: number; resolved: number; slaBreached: number }> = {};
+    const map: Record<string, { open: number; resolved: number }> = {};
     allItems.forEach((r) => {
       const s = r.serviceId ?? "unknown";
-      if (!map[s]) map[s] = { open: 0, resolved: 0, slaBreached: 0 };
+      if (!map[s]) map[s] = { open: 0, resolved: 0 };
       if (ACTIVE_STATUSES.has(r.status)) map[s].open++;
       if (["resolved", "closed"].includes(r.status)) map[s].resolved++;
-      if (r.slaElapsed > r.slaHours && ACTIVE_STATUSES.has(r.status)) map[s].slaBreached++;
     });
     return Object.entries(map).map(([id, st]) => ({
       name: (unitLookup[id] ?? id).substring(0, 14),
       Ouvertes: st.open,
       Résolues: st.resolved,
-      "Hors délai": st.slaBreached,
     }));
   }, [allItems, unitLookup]);
 
@@ -193,8 +190,7 @@ function DirectionView() {
       const reqs = allItems.filter((r) => r.serviceId === c.unit_id);
       const cOpen     = reqs.filter((r) => ACTIVE_STATUSES.has(r.status)).length;
       const cResolved = reqs.filter((r) => ["resolved", "closed"].includes(r.status)).length;
-      const cSla      = reqs.filter((r) => r.slaElapsed > r.slaHours && ACTIVE_STATUSES.has(r.status)).length;
-      return { chief: c, open: cOpen, resolved: cResolved, slaBreached: cSla, total: reqs.length };
+      return { chief: c, open: cOpen, resolved: cResolved, total: reqs.length };
     }),
   [chiefs, allItems]);
 
@@ -296,7 +292,7 @@ function DirectionView() {
         status: true,
       };
       if (editingRule && editingRule.id !== "new") {
-        return apiFetch(`/admin/routing/${editingRule.id}`, { method: "PATCH", body: JSON.stringify(body) });
+        return apiFetch(`/admin/routing/${editingRule.id}`, { method: "PUT", body: JSON.stringify(body) });
       }
       return apiFetch("/admin/routing", { method: "POST", body: JSON.stringify(body) });
     },
@@ -312,7 +308,7 @@ function DirectionView() {
 
   const toggleRuleMut = useMutation({
     mutationFn: ({ id }: { id: string; active: boolean }) =>
-      apiFetch(`/admin/routing/${id}/toggle`, { method: "PATCH", body: "{}" }),
+      apiFetch(`/admin/routing/${id}/toggle`, { method: "PUT", body: "{}" }),
     onSuccess: () => refetchRules(),
   });
 
@@ -384,7 +380,7 @@ function DirectionView() {
         </div>
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 stagger">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 stagger">
             <GlassCard className="flex flex-col gap-3">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">Total direction</span>
@@ -411,15 +407,6 @@ function DirectionView() {
                 </span>
               </div>
               <div className="text-3xl font-bold tracking-tight text-success">{resolved}</div>
-            </GlassCard>
-            <GlassCard className="flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Hors délai</span>
-                <span className="grid h-9 w-9 place-items-center rounded-xl bg-destructive/15 text-destructive">
-                  <AlertTriangle className="h-4 w-4" />
-                </span>
-              </div>
-              <div className="text-3xl font-bold tracking-tight text-destructive">{slaBreached}</div>
             </GlassCard>
           </div>
 
@@ -459,7 +446,6 @@ function DirectionView() {
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 <Bar dataKey="Ouvertes" fill="var(--color-chart-3)" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="Résolues" fill="var(--color-chart-1)" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="Hors délai" fill="var(--color-destructive)" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </GlassCard>
@@ -523,9 +509,6 @@ function DirectionView() {
                       ) : (
                         <span className="font-mono text-xs font-medium">{esc.requestRef}</span>
                       )}
-                      <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-semibold text-destructive">
-                        +{esc.slaOverHours}h délai
-                      </span>
                       <span className={cn(
                         "rounded-full px-2 py-0.5 text-[10px] font-semibold",
                         esc.status === "open"
@@ -582,14 +565,12 @@ function DirectionView() {
                   <th className="pb-2.5 text-left font-semibold">Chef de Service</th>
                   <th className="pb-2.5 text-center font-semibold">Ouvertes</th>
                   <th className="pb-2.5 text-center font-semibold">Résolues</th>
-                  <th className="pb-2.5 text-center font-semibold">Délai dépassé</th>
                   <th className="hidden pb-2.5 text-center font-semibold sm:table-cell">Taux résolution</th>
                 </tr>
               </thead>
               <tbody>
-                {chiefStats.map(({ chief, open: cOpen, resolved: cRes, slaBreached: cSla, total: cTotal }) => {
+                {chiefStats.map(({ chief, open: cOpen, resolved: cRes, total: cTotal }) => {
                   const rate = cTotal > 0 ? Math.round((cRes / cTotal) * 100) : 0;
-                  const slaClass = cSla > 2 ? "text-destructive" : cSla > 0 ? "text-warning" : "text-success";
                   return (
                     <tr key={chief.id} className="border-t border-border/40">
                       <td className="py-2.5">
@@ -602,7 +583,6 @@ function DirectionView() {
                       </td>
                       <td className="py-2.5 text-center font-semibold">{cOpen}</td>
                       <td className="py-2.5 text-center font-semibold text-success">{cRes}</td>
-                      <td className={cn("py-2.5 text-center font-semibold", slaClass)}>{cSla}</td>
                       <td className="hidden py-2.5 text-center sm:table-cell">
                         <span className={cn(
                           "rounded-full px-2 py-0.5 text-xs font-semibold",

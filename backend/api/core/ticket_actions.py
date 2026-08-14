@@ -13,7 +13,10 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     "qualifying": {"new", "reopened", "qualified", "assigned", "in_progress", "pending", "escalated"},
     "qualified": {"qualifying"},
     "assigned": {"qualified", "qualifying", "new", "reopened"},
-    "in_progress": {"assigned", "qualifying", "qualified", "pending", "escalated"},
+    # BR-QUEUE-AUTO-START-001 : "new"/"reopened" ajoutés — une prise/assignation
+    # effective depuis la File d'attente (qualify_triage()/assign()) démarre
+    # désormais directement le traitement, sans étape "assigned" intermédiaire.
+    "in_progress": {"assigned", "qualifying", "qualified", "new", "reopened", "pending", "escalated"},
     "pending": {"in_progress", "assigned"},
     "escalated": {"in_progress", "assigned", "pending", "qualifying"},
     "resolved": {"in_progress", "assigned", "escalated", "pending"},
@@ -25,7 +28,7 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
 
 BYPASS_TRANSITION_ROLES = frozenset({"admin"})
 GLOBAL_SCOPE_ROLES = frozenset({"admin"})
-OWN_REQUEST_ALLOWED_ACTIONS = frozenset({"close", "cancel", "request_reopen"})
+OWN_REQUEST_ALLOWED_ACTIONS = frozenset({"close", "cancel", "reopen"})
 
 # BR-TRANSMIT-001 — workflow collaboratif dynamique post-file d'attente. Rôles
 # traitants pouvant devenir "intervenant actuel" (request.assignee_id) et donc
@@ -58,9 +61,10 @@ ACTION_ALLOWED_ROLES: dict[str, set[str]] = {
     # transmission (assert_is_current_handler verifie assignee_id == actor.id).
     "resolve": {"agent-support", "chief-service", "chief-departement", "director", "admin"},
     "close": {"user", "agent-support", "chief-service", "chief-departement", "director", "admin"},
-    "request_reopen": {"user", "agent-support", "chief-service", "chief-departement", "director", "admin"},
-    "reopen": {"chief-service", "chief-departement", "director", "admin"},
-    "reject_reopen": {"chief-service", "chief-departement", "director", "admin"},
+    # BR-REOPEN-QUEUE-001 (révision — réouverture immédiate) : réservé au demandeur,
+    # quel que soit son rôle professionnel (cf. assert_ticket_scope, garde réelle) —
+    # le rôle ne sert ici que de filtre de sécurité général comme ailleurs dans ce module.
+    "reopen": {"user", "agent-support", "chief-service", "chief-departement", "director", "admin"},
     "cancel": {"user", "agent-support", "chief-service", "chief-departement", "director", "admin"},
     # Lot 2.5 : "Changer de service" retire a chief-service — reste chief-departement
     # (pilotage multi-services), director (transfert au sein de sa direction) et admin.
@@ -143,11 +147,11 @@ def assert_ticket_scope(
     request_assignee_id = _value(request, "assignee_id")
     request_requester_id = _value(request, "requester_id")
 
-    if action == "request_reopen":
+    if action == "reopen":
         if str(request_requester_id) == str(actor_id):
             return
         raise ForbiddenException(
-            "Acces refuse : seul le demandeur peut demander la reouverture.",
+            "Acces refuse : seul le demandeur peut reouvrir ce ticket.",
             error_code=ErrorCode.FORBIDDEN,
         )
 
@@ -469,4 +473,28 @@ def assert_is_current_handler(
         raise BusinessException(
             f"Impossible d'effectuer cette action : le ticket est actuellement {current_status!r}.",
             error_code=ErrorCode.INVALID_STATUS_TRANSITION,
+        )
+
+
+def assert_requester_is_not_handler(request: Any, target_actor_id: Any) -> None:
+    """
+    BR-REQUESTER-NO-SELF-TREATMENT-001 — le demandeur d'un ticket ne peut jamais
+    devenir son intervenant (request.assignee_id), quel que soit son rôle
+    professionnel. S'applique à toute cible d'une affectation vers un état de
+    traitement actif (prise en charge, assignation, qualification directe,
+    transmission, réaffectation de service, escalade) — jamais au marqueur
+    terminal posé par `reject()` (assignee_id = requester_id, statut `rejected`,
+    hors COLLABORATIVE_STATUSES), qui reste un cas distinct et volontaire.
+
+    Le workflow collaboratif dynamique n'est pas restreint par ailleurs : un
+    intervenant autre que le demandeur peut revenir autant de fois que
+    nécessaire (voir assert_is_current_handler / BR-TRANSMIT-001).
+    """
+    if target_actor_id is None:
+        return
+    requester_id = _value(request, "requester_id")
+    if requester_id is not None and str(requester_id) == str(target_actor_id):
+        raise BusinessException(
+            "Le demandeur ne peut pas être désigné comme intervenant de son propre ticket.",
+            error_code=ErrorCode.REQUESTER_CANNOT_TREAT_OWN_TICKET,
         )

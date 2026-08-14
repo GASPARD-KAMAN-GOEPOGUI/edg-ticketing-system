@@ -3,8 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, EmailStr, root_validator, validator
+from pydantic import BaseModel, EmailStr, Field, root_validator, validator
 
+from api.core.phone import validate_guinea_phone
 from api.core.rbac import normalize_role
 
 from .base import BaseResponse
@@ -32,9 +33,13 @@ class AccountBase(BaseModel):
     def _normalize_role(cls, v):
         return normalize_role(v)
 
+    @validator("phone")
+    def _validate_phone(cls, v):
+        return validate_guinea_phone(v)
+
 
 class AccountCreate(AccountBase):
-    keycloak_id: Optional[str] = None
+    password: str = Field(..., min_length=8, description="Mot de passe initial — transmis à la plateforme centrale à la création.")
     unit_id: Optional[int] = None       # alias frontend pour unity_id
     department_id: Optional[int] = None # alias formulaire admin pour unity_id
     direction_id: Optional[int] = None  # alias formulaire admin pour unity_id
@@ -80,6 +85,10 @@ class AccountUpdate(BaseModel):
     def _normalize_role(cls, v):
         return normalize_role(v) if v is not None else v
 
+    @validator("phone")
+    def _validate_phone(cls, v):
+        return validate_guinea_phone(v)
+
     @root_validator(pre=True)
     def _alias_unit_id(cls, values):
         if values.get("unity_id"):
@@ -98,7 +107,8 @@ class AccountResponse(BaseResponse):
     unity_id: Optional[int] = None
     unit_id: Optional[int] = None       # alias de unity_id — compatibilité frontend
     direction_id: Optional[int] = None  # réservé (pas de colonne direction séparée)
-    keycloak_id: Optional[str] = None
+    central_user_id: Optional[int] = None
+    central_user_uuid: Optional[str] = None
     name: str
     firstname: Optional[str] = None
     email: str
@@ -126,5 +136,25 @@ class AccountResponse(BaseResponse):
     def _normalize_role(cls, v):
         return normalize_role(v)
 
+    @validator("avatar_url", always=True)
+    def _bust_avatar_cache(cls, v, values):
+        """
+        Ajoute un paramètre de version (?v=<updated_at>) à l'URL de l'avatar.
+        Le nom de fichier stocké est déterministe (<account_id>.<ext>) — sans
+        ce cache-buster, remplacer sa photo garde une URL identique et le
+        navigateur continue d'afficher l'ancienne image depuis son cache.
+        """
+        if not v:
+            return v
+        updated_at = values.get("updated_at")
+        if updated_at is None:
+            return v
+        return f"{v}?v={int(updated_at.timestamp())}"
+
     class Config:
         orm_mode = True
+
+
+class ResetPasswordResponse(BaseModel):
+    ok: bool = True
+    default_password: str

@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 class Account(Base, BaseColumns):
     """
-    Auth JWT auto-hébergée. password_hash stocké avec Argon2.
+    Identité déléguée à la plateforme centrale manager-user (central_user_id/central_user_uuid).
     is_edg_employee = 1 pour les agents/employés EDG — positionné automatiquement
     quand un matricule valide est fourni.
     unity_id pointe vers la Unity (Direction / Service) à laquelle appartient le compte.
@@ -30,11 +30,11 @@ class Account(Base, BaseColumns):
     )
 
     # ── Attributs métier ──────────────────────────────────────────────────────
-    keycloak_id: Mapped[Optional[str]] = mapped_column(
-        String(255), unique=True, nullable=True
+    central_user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, unique=True, nullable=True
     )
-    password_hash: Mapped[Optional[str]] = mapped_column(
-        String(255), nullable=True
+    central_user_uuid: Mapped[Optional[str]] = mapped_column(
+        String(64), unique=True, nullable=True
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     firstname: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
@@ -100,5 +100,6 @@ class Account(Base, BaseColumns):
         Index("idx_account_role", "role"),
         Index("idx_account_unity", "unity_id"),
         Index("idx_account_status", "status", "deleted_at"),
+        Index("idx_account_central_user_id", "central_user_id"),
         MYSQL_ARGS,
     )

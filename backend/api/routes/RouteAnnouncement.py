@@ -134,7 +134,7 @@ async def create_announcement(
     return await svc.create(body.dict())
 
 
-@router.patch("/{id}", response_model=AnnouncementResponse)
+@router.put("/{id}", response_model=AnnouncementResponse)
 async def update_announcement(
     id: str,
     body: AnnouncementUpdate,

@@ -20,13 +20,13 @@ class Environment(BaseSettings):
     DATABASE_USERNAME: str = "root"
     DATABASE_PASSWORD: str = ""
 
-    # Sécurité / JWT
-    SECRET_KEY: str = "changeme_in_production"
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # Plateforme centrale d'authentification manager-user
+    CENTRAL_AUTH_BASE_URL: str = ""
+    CLIENT_APP_CODE: str = ""
+    CLIENT_APP_SECRET: str = ""
+    HTTP_TIMEOUT_MS: int = 8000
 
-    # Redis — blacklist JWT persistante + rate limiting distribué (optionnel)
+    # Redis — rate limiting distribué (optionnel)
     REDIS_URL: str = ""
 
     # ClamAV — antivirus pour les pièces jointes (optionnel)

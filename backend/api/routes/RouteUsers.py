@@ -8,8 +8,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.dependencies import get_db, get_current_user, require_roles
-from api.schemas.SchemaAccount import AccountCreate, AccountUpdate, AccountResponse
+from api.dependencies import get_db, get_current_user, oauth2_scheme, require_roles
+from api.schemas.SchemaAccount import AccountCreate, AccountUpdate, AccountResponse, ResetPasswordResponse
 
 from api.schemas.base import PaginatedResponse
 from api.services import AccountService
@@ -74,18 +74,19 @@ _SELF_UPDATE_ALLOWED = {
 }
 
 
-@me_router.patch("/me", response_model=AccountResponse)
+@me_router.put("/me", response_model=AccountResponse)
 async def update_me(
     body: AccountUpdate,
     actor=Depends(get_current_user),
+    token: Optional[str] = Depends(oauth2_scheme),
     svc: AccountService = Depends(_svc),
 ):
     # Filtrer les champs sensibles — role/direction/unit/status non modifiables par l'utilisateur
     safe = {k: v for k, v in body.dict(exclude_unset=True).items() if k in _SELF_UPDATE_ALLOWED}
-    return await svc.update(actor.id, safe)
+    return await svc.update(actor.id, safe, actor_bearer_token=token)
 
 
-@me_router.patch("/me/availability", response_model=AccountResponse)
+@me_router.put("/me/availability", response_model=AccountResponse)
 async def set_my_availability(
     availability: str = Query(...),
     actor=Depends(get_current_user),
@@ -148,12 +149,23 @@ async def list_users(
     search: Optional[str] = Query(None),
     direction_id: Optional[int] = Query(None),
     unit_id: Optional[int] = Query(None),
+    ids: Optional[str] = Query(None, description="IDs séparés par des virgules — fetch batch"),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=200),
     svc: AccountService = Depends(_svc),
 ):
+    if ids:
+        # Fetch batch (ex. auteurs de commentaires, demandeurs de tickets) —
+        # évite un appel HTTP par ID unique côté frontend. Pas de pagination :
+        # la taille est bornée par l'appelant (liste finie d'IDs connus).
+        id_list = [int(v) for v in ids.split(",") if v.strip().isdigit()]
+        return await svc.list_by_ids(id_list)
     if search:
-        return await svc.search(search, page=page, limit=limit)
+        # Combine la recherche libre avec les filtres organigramme déjà posés
+        # (Direction/Département/Service) au lieu de les ignorer — sélecteur @mention.
+        return await svc.search(
+            search, direction_id=direction_id, unit_id=unit_id, page=page, limit=limit,
+        )
     if role and unit_id:
         return await svc.list_by_role_and_unit(role, unit_id, page=page, limit=limit)
     if role and direction_id:
@@ -172,57 +184,83 @@ async def get_user(id: int, svc: AccountService = Depends(_svc)):
     return await svc.get_by_id(id)
 
 
-@router.patch("/{id}", response_model=AccountResponse)
+@router.put("/{id}", response_model=AccountResponse)
 async def update_user(
     id: int,
     body: AccountUpdate,
+    token: Optional[str] = Depends(oauth2_scheme),
     svc: AccountService = Depends(_svc),
 ):
-    return await svc.update(id, body.dict(exclude_unset=True), validate_org_assignment=True)
+    return await svc.update(
+        id, body.dict(exclude_unset=True), validate_org_assignment=True, actor_bearer_token=token,
+    )
 
 
 class RoleBody(BaseModel):
     role: str
 
 
-class PasswordBody(BaseModel):
-    new_password: str
-
-
 @router.post("/", response_model=AccountResponse, status_code=status.HTTP_201_CREATED)
-async def create_user(body: AccountCreate, svc: AccountService = Depends(_svc)):
-    return await svc.create(body.dict(), validate_org_assignment=True)
+async def create_user(
+    body: AccountCreate,
+    token: Optional[str] = Depends(oauth2_scheme),
+    svc: AccountService = Depends(_svc),
+):
+    return await svc.create(body.dict(), validate_org_assignment=True, actor_bearer_token=token)
 
 
-@router.patch("/{id}/role", response_model=AccountResponse)
+@router.put("/{id}/role", response_model=AccountResponse)
 async def set_user_role(
     id: int,
     body: RoleBody,
+    token: Optional[str] = Depends(oauth2_scheme),
     svc: AccountService = Depends(_svc),
 ):
-    return await svc.set_role(id, body.role)
+    return await svc.set_role(id, body.role, actor_bearer_token=token)
 
 
 @router.post("/{id}/activate", status_code=status.HTTP_200_OK)
-async def activate_user(id: int, svc: AccountService = Depends(_svc)):
-    await svc.get_by_id(id)  # lève 404 si l'utilisateur n'existe pas
-    await svc.update(id, {"status": True, "account_status": "active"})
+async def activate_user(
+    id: int,
+    token: Optional[str] = Depends(oauth2_scheme),
+    svc: AccountService = Depends(_svc),
+):
+    await svc.set_active(id, True, actor_bearer_token=token)
     return {"ok": True}
 
 
 @router.post("/{id}/deactivate", status_code=status.HTTP_200_OK)
-async def deactivate_user(id: int, svc: AccountService = Depends(_svc)):
-    await svc.get_by_id(id)  # lève 404 si l'utilisateur n'existe pas
-    await svc.update(id, {"status": False, "account_status": "inactive"})
+async def deactivate_user(
+    id: int,
+    actor=Depends(get_current_user),
+    token: Optional[str] = Depends(oauth2_scheme),
+    svc: AccountService = Depends(_svc),
+):
+    if id == actor.id:
+        raise HTTPException(status_code=403, detail="Vous ne pouvez pas désactiver votre propre compte.")
+    await svc.set_active(id, False, actor_bearer_token=token)
     return {"ok": True}
 
 
-@router.post("/{id}/reset-password", status_code=status.HTTP_200_OK)
-async def reset_user_password(id: int, body: PasswordBody, svc: AccountService = Depends(_svc)):
-    await svc.set_password(id, body.new_password)
-    return {"ok": True}
+@router.post("/{id}/reset-password", response_model=ResetPasswordResponse)
+async def reset_user_password(
+    id: int,
+    token: Optional[str] = Depends(oauth2_scheme),
+    svc: AccountService = Depends(_svc),
+):
+    default_password = await svc.reset_password(id, actor_bearer_token=token)
+    return {"ok": True, "default_password": default_password}
 
 
 @router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_user(id: int, svc: AccountService = Depends(_svc)):
-    await svc.delete(id)
+async def delete_user(
+    id: int,
+    actor=Depends(get_current_user),
+    token: Optional[str] = Depends(oauth2_scheme),
+    svc: AccountService = Depends(_svc),
+):
+    if id == actor.id:
+        raise HTTPException(status_code=403, detail="Vous ne pouvez pas supprimer votre propre compte.")
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentification requise pour cette action.")
+    await svc.delete(id, actor_bearer_token=token)

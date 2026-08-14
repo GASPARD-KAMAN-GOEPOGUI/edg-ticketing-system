@@ -72,7 +72,7 @@ async def submit_request_appreciation(
     return await svc.create_for_request(request_id, body.dict())
 
 
-@router.patch("/{request_id}/appreciation", response_model=AppreciationResponse)
+@router.put("/{request_id}/appreciation", response_model=AppreciationResponse)
 async def update_request_appreciation(
     request_id: str,
     body: AppreciationUpdateRequest,

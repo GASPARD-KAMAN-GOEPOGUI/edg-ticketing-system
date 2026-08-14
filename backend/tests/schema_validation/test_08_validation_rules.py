@@ -75,7 +75,7 @@ class TestEmailValidator:
     """AccountCreate.email : doit être une adresse email valide (EmailStr)."""
 
     def test_valid_email(self):
-        obj = AccountCreate(name="Test", email="valid@edg.gn")
+        obj = AccountCreate(name="Test", email="valid@edg.gn", password="Password123!")
         assert obj.email == "valid@edg.gn"
 
     def test_invalid_email_no_at(self):
@@ -91,7 +91,7 @@ class TestEmailValidator:
             AccountCreate(name="Test", email="user@domain")
 
     def test_email_with_subdomain_valid(self):
-        obj = AccountCreate(name="Test", email="user@mail.edg.gn")
+        obj = AccountCreate(name="Test", email="user@mail.edg.gn", password="Password123!")
         assert "edg.gn" in obj.email
 
 
@@ -137,7 +137,7 @@ class TestTypeCoercion:
         assert isinstance(obj.response_h, int)
 
     def test_bool_coercion_account(self):
-        obj = AccountCreate(name="Test", email="t@edg.gn", is_edg_employee=1)
+        obj = AccountCreate(name="Test", email="t@edg.gn", password="Password123!", is_edg_employee=1)
         assert obj.is_edg_employee is True
 
 
@@ -154,5 +154,5 @@ class TestOptionalFields:
         assert obj.meter_number is None
 
     def test_account_optional_unity(self):
-        obj = AccountCreate(name="User", email="u@edg.gn")
+        obj = AccountCreate(name="User", email="u@edg.gn", password="Password123!")
         assert obj.unity_id is None

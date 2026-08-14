@@ -126,18 +126,15 @@ async def _backdate_last_event(request_id: str, event_type: str, delta: timedelt
         await session.commit()
 
 
-async def _reopen_cycle(auth_client, request_id: str, unity_id: int, *, chief_id: int, reason: str, delta: timedelta) -> None:
-    """Demande + approuve une reouverture, puis recule artificiellement l'horodatage
-    de l'evenement `reopened` pour simuler le temps ecoule reel du cycle suivant."""
+async def _reopen_cycle(auth_client, request_id: str, unity_id: int, *, reason: str, delta: timedelta) -> None:
+    """Reouvre immediatement le ticket (BR-REOPEN-QUEUE-001, demandeur seul, sans
+    approbation), puis recule artificiellement l'horodatage de l'evenement
+    `reopened` pour simuler le temps ecoule reel du cycle suivant."""
     async with auth_client("user") as user_client:
         resp = await user_client.post(
-            f"/api/v1/requests/{request_id}/request-reopen", json={"reason": reason},
+            f"/api/v1/requests/{request_id}/reopen", json={"reason": reason},
         )
         assert resp.status_code == 200, resp.text
-    approve_resp = await _call_as(
-        _dep(chief_id, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/reopen",
-    )
-    assert approve_resp.status_code == 200, approve_resp.text
     await _backdate_last_event(request_id, "reopened", delta)
 
 
@@ -182,7 +179,7 @@ async def test_first_sla_cycle_frozen_and_never_recalculated(auth_client, unity_
     # reouvertures successives sont toujours strictement ordonnees dans le temps.
     await _reopen_cycle(
         auth_client, request_id, unity_id,
-        chief_id=902, reason="Le probleme persiste.", delta=timedelta(minutes=90),
+        reason="Le probleme persiste.", delta=timedelta(minutes=90),
     )
     detail_after_reopen = await _detail(auth_client, request_id)
     assert detail_after_reopen["request_status"] == "reopened"
@@ -210,7 +207,7 @@ async def test_first_sla_cycle_frozen_and_never_recalculated(auth_client, unity_
     # ── Cycle 3 : 2e reouverture (1h10), cible SLA abaissee a 1h -> depasse ──────
     await _reopen_cycle(
         auth_client, request_id, unity_id,
-        chief_id=902, reason="Nouvelle panne apres la 2e resolution.",
+        reason="Nouvelle panne apres la 2e resolution.",
         delta=timedelta(hours=1, minutes=10),
     )
     # Simule un changement de priorite/cible SLA survenu pendant ce 3e cycle —
@@ -251,18 +248,14 @@ async def test_reopen_resets_live_sla_counters(auth_client, unity_id):
     assert resolve_resp.status_code == 200, resolve_resp.text
 
     # Remet volontairement les compteurs live a un etat "en retard" avant la
-    # reouverture, pour verifier que l'approbation les reinitialise bien.
+    # reouverture, pour verifier que la reouverture immediate les reinitialise bien.
     await _set_request_fields(request_id, sla_breached=True, sla_elapsed=50)
     async with auth_client("user") as user_client:
         req_resp = await user_client.post(
-            f"/api/v1/requests/{request_id}/request-reopen", json={"reason": "Test reset live."},
+            f"/api/v1/requests/{request_id}/reopen", json={"reason": "Test reset live."},
         )
         assert req_resp.status_code == 200, req_resp.text
-    approve_resp = await _call_as(
-        _dep(906, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/reopen",
-    )
-    assert approve_resp.status_code == 200, approve_resp.text
-    data = approve_resp.json()["data"]
+    data = req_resp.json()["data"]
     assert data["sla_breached"] is False
     assert data["sla_elapsed"] == 0
 
@@ -291,7 +284,7 @@ async def test_scheduler_anchors_live_sla_on_last_reopening(auth_client, unity_i
 
     await _reopen_cycle(
         auth_client, request_id, unity_id,
-        chief_id=908, reason="Reouverture recente.", delta=timedelta(hours=1),
+        reason="Reouverture recente.", delta=timedelta(hours=1),
     )
 
     async with _TestSession() as session:

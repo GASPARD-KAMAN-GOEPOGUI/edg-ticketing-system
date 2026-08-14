@@ -16,7 +16,6 @@ import {
   Users,
   BookOpen,
   ListChecks,
-  TrendingUp,
   Building2,
   Sun,
   Moon,
@@ -24,27 +23,23 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Activity,
-  ClipboardList,
   History,
   Ticket,
-  Route as RouteIcon,
   Timer,
   ShieldAlert,
-  ShieldX,
   Megaphone,
   Database,
   Network,
   Layers,
   Library,
   Settings2,
-  Gauge,
-  AlarmClock,
   GitBranch,
   Flag,
   FolderTree,
   Compass,
   AlertTriangle,
   Send,
+  Search,
 } from "lucide-react";
 import { useState, useRef, useCallback, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -140,12 +135,9 @@ const navItems: NavItem[] = [
   { to: "/app/transmitted", label: "Tickets transmis", icon: Send, roles: ["agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Mon travail" },
 
   // ── Pilotage — supervision/répartition, distinct du traitement personnel ──
-  { to: "/app/department-inbox", label: "Centre de pilotage",    icon: ClipboardList, roles: ["chief-departement"],                group: "Pilotage" },
   { to: "/app/supervision", label: "Supervision", icon: ShieldAlert, roles: ["chief-service", "chief-departement", "director"], group: "Pilotage" },
   { to: "/app/direction",        label: "Escalades", icon: AlertTriangle, roles: ["director"],          group: "Pilotage", search: { section: "escalades-l3" } },
   { to: "/app/strategic-dashboard", label: "Tableau de bord DSI", icon: Compass, roles: ["director"],   group: "Pilotage" },
-  { to: "/app/dg",         label: "Supervision globale", icon: TrendingUp, roles: ["admin"],            group: "Pilotage" },
-  { to: "/app/sla-center", label: "Centre SLA",    icon: AlarmClock, roles: ["chief-service", "chief-departement", "director", "admin"],       group: "Pilotage" },
 
   // ── Analyse — rapports/statistiques, séparé du pilotage opérationnel ──────
   { to: "/app/reports", label: "Rapports Département", icon: BarChart3, roles: ["chief-departement"],  group: "Analyse" },
@@ -163,18 +155,15 @@ const navItems: NavItem[] = [
 
   // ── Admin — Gestion tickets ───────────────────────────────────────────────
   { to: "/app/admin/references", label: "Types de tickets", icon: Database,  roles: ["admin"], group: "Gestion tickets" },
-  { to: "/app/admin/routing",    label: "Règles de routage", icon: RouteIcon, roles: ["admin"], group: "Gestion tickets" },
 
   // ── Admin — SLA & Escalades ───────────────────────────────────────────────
   { to: "/app/admin/sla",        label: "SLA & Politiques",    icon: Timer, roles: ["admin"], group: "SLA & Escalades" },
   { to: "/app/admin/priorities", label: "Niveaux de priorité", icon: Flag,  roles: ["admin"], group: "SLA & Escalades" },
 
   // ── Admin — Audit & Traçabilité ───────────────────────────────────────────
-  { to: "/app/admin/logs",     label: "Journaux d'activité", icon: Activity, roles: ["admin"], group: "Audit & Traçabilité" },
-  { to: "/app/admin/security", label: "Incidents sécurité",  icon: ShieldX,  roles: ["admin"], group: "Audit & Traçabilité" },
+  { to: "/app/admin/ticket-trace", label: "Traçabilité ticket", icon: Search, roles: ["admin"], group: "Audit & Traçabilité" },
 
   // ── Admin — Système ───────────────────────────────────────────────────────
-  { to: "/app/admin/audit",         label: "Santé système",        icon: Gauge,     roles: ["admin"], group: "Système" },
   { to: "/app/admin/communication", label: "Communication",         icon: Megaphone, roles: ["admin"], group: "Système" },
   { to: "/app/admin/knowledge",     label: "Base de connaissances", icon: Library,   roles: ["admin"], group: "Système" },
 
@@ -213,7 +202,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
     queryFn: () => fetchNotifications({ meId: sessionUser!.id, unread: true, limit: 1 }),
     enabled: !!sessionUser?.id,
     staleTime: 30_000,
-    refetchInterval: 30_000,
+    // Pas de refetchInterval : notification.created/read (SSE) invalident déjà
+    // ["notifications"] en temps réel (voir invalidation-map.ts) — un polling
+    // en parallèle double la charge réseau sans gagner en fraîcheur.
   });
   const unreadCount = notifData?.total ?? 0;
 
@@ -703,7 +694,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
                       ? [
                           { to: "/app/queue",              icon: ListChecks,      label: "File att." },
                           { to: "/app/supervision",       icon: ShieldAlert,     label: "Superviser" },
-                          { to: "/app/department-inbox",  icon: ClipboardList,   label: "Pilotage", primary: true },
+                          { to: "/app/my-tickets",        icon: Ticket,          label: "Ma boîte", primary: true },
                           { to: "/app/notifications",     icon: Bell,            label: "Alertes" },
                           { to: "/app/profile",           icon: Settings,        label: "Profil" },
                         ]

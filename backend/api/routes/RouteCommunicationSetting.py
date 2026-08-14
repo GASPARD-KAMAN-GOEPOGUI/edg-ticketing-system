@@ -27,7 +27,7 @@ async def get_current(svc: CommunicationSettingService = Depends(_svc)):
     return await svc.get_or_create_default()
 
 
-@router.patch("/", response_model=CommunicationSettingResponse)
+@router.put("/", response_model=CommunicationSettingResponse)
 async def update_settings(
     body: CommunicationSettingUpdate,
     updated_by: Optional[str] = Query(None),

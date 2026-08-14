@@ -80,7 +80,7 @@ async def create_knowledge(
     return await svc.create(body.dict())
 
 
-@router.patch("/{id}", response_model=KnowledgeArticleResponse)
+@router.put("/{id}", response_model=KnowledgeArticleResponse)
 async def update_knowledge(
     id: str,
     body: KnowledgeArticleUpdate,
@@ -94,7 +94,7 @@ class PublishBody(BaseModel):
     published: bool = True
 
 
-@router.patch("/{id}/publish", response_model=KnowledgeArticleResponse)
+@router.put("/{id}/publish", response_model=KnowledgeArticleResponse)
 async def toggle_publish(
     id: str,
     body: PublishBody = PublishBody(),

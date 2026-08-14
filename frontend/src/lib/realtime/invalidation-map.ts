@@ -8,6 +8,8 @@
  *  ["my-tickets"]     → liste mes tickets (/app/my-tickets)
  *  ["my-tickets-stats"]→ stats KPI my-tickets
  *  ["my-stats"]       → stats personnelles agent (/stats/my)
+ *  ["requests-history"] → historique demandes clôturées/annulées/rejetées (/app/history)
+ *  ["tickets-supervision"] / ["agents-supervision"] / ["chiefs-supervision"] → /app/supervision
  *  ["workflow"]       → préfixe : couvre ["workflow", id, "details"]
  *  ["sla-center"]     → centre SLA
  */
@@ -21,6 +23,7 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
     ["requests"],         // liste
     ["queue"],            // file d'attente
     ["my-tickets"],       // mes tickets
+    ["requests-history"],
     ["my-tickets-stats"],
     ["stats"],
     ["dashboard-stats"],
@@ -31,7 +34,9 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
     ["request"],
     ["requests"],
     ["queue"],
+    ["tickets-supervision"],
     ["my-tickets"],
+    ["requests-history"],
     ["my-tickets-stats"],
     ["stats"],
     ["dashboard-stats"],
@@ -41,7 +46,9 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
     ["request"],
     ["requests"],
     ["queue"],
+    ["tickets-supervision"],
     ["my-tickets"],
+    ["requests-history"],
     ["my-tickets-stats"],
     ["my-stats"],
     ["stats"],
@@ -53,7 +60,9 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
     ["request"],
     ["requests"],
     ["queue"],
+    ["tickets-supervision"],
     ["my-tickets"],
+    ["requests-history"],
     ["my-tickets-stats"],
     ["my-stats"],
     ["stats"],
@@ -62,7 +71,9 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
     ["request"],
     ["requests"],
     ["queue"],
+    ["tickets-supervision"],
     ["my-tickets"],
+    ["requests-history"],
     ["my-tickets-stats"],
     ["my-stats"],
     ["stats"],
@@ -74,6 +85,7 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
     ["request"],
     ["requests"],
     ["my-tickets"],
+    ["requests-history"],
     ["my-tickets-stats"],
     ["my-stats"],
     ["stats"],
@@ -85,7 +97,9 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
     ["request"],
     ["requests"],
     ["queue"],
+    ["tickets-supervision"],
     ["my-tickets"],
+    ["requests-history"],
     ["my-tickets-stats"],
     ["stats"],
     ["dashboard-stats"],
@@ -95,7 +109,9 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
     ["request"],
     ["requests"],
     ["queue"],
+    ["tickets-supervision"],
     ["my-tickets"],
+    ["requests-history"],
     ["my-tickets-stats"],
     ["stats"],
     ["dashboard-stats"],
@@ -104,7 +120,9 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
     ["request"],
     ["requests"],
     ["queue"],
+    ["tickets-supervision"],
     ["my-tickets"],
+    ["requests-history"],
     ["my-tickets-stats"],
     ["stats"],
     ["dashboard-stats"],
@@ -115,7 +133,9 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
     ["request"],
     ["requests"],
     ["queue"],
+    ["tickets-supervision"],
     ["my-tickets"],
+    ["requests-history"],
     ["my-tickets-stats"],
     ["stats"],
     ["triage"],
@@ -124,7 +144,9 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
     ["request"],
     ["requests"],
     ["queue"],
+    ["tickets-supervision"],
     ["my-tickets"],
+    ["requests-history"],
     ["my-tickets-stats"],
     ["my-stats"],
     ["stats"],
@@ -135,7 +157,9 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
     ["request"],
     ["requests"],
     ["queue"],
+    ["tickets-supervision"],
     ["my-tickets"],
+    ["requests-history"],
     ["my-tickets-stats"],
     ["my-stats"],
     ["stats"],
@@ -144,7 +168,9 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
     ["request"],
     ["requests"],
     ["queue"],
+    ["tickets-supervision"],
     ["my-tickets"],
+    ["requests-history"],
     ["my-tickets-stats"],
     ["stats"],
     ["dashboard-stats"],
@@ -154,6 +180,7 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
     ["request"],
     ["requests"],
     ["queue"],
+    ["tickets-supervision"],
     ["stats"],
     ["dashboard-stats"],
     ["sla-center"],
@@ -162,7 +189,9 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
     ["request"],
     ["requests"],
     ["queue"],
+    ["tickets-supervision"],
     ["my-tickets"],
+    ["requests-history"],
     ["my-tickets-stats"],
     ["stats"],
     ["dashboard-stats"],
@@ -172,12 +201,15 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
     ["request"],
     ["requests"],
     ["my-tickets"],
+    ["requests-history"],
     ["queue"],
+    ["tickets-supervision"],
   ],
   "request.reopen_rejected": [
     ["request"],
     ["requests"],
     ["my-tickets"],
+    ["requests-history"],
   ],
 
   // ── Escalades ───────────────────────────────────────────────────────────────
@@ -186,6 +218,7 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
     ["request"],
     ["requests"],
     ["my-tickets"],
+    ["requests-history"],
     ["stats"],
   ],
   "escalation.updated": [
@@ -203,6 +236,7 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
     ["request"],
     ["requests"],
     ["my-tickets"],
+    ["requests-history"],
     ["my-tickets-stats"],
     ["stats"],
   ],
@@ -222,6 +256,7 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
     ["request"],
     ["requests"],
     ["my-tickets"],
+    ["requests-history"],
     ["stats"],
   ],
   "task.approved": [
@@ -276,9 +311,9 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
   ],
 
   // ── Utilisateurs ─────────────────────────────────────────────────────────────
-  "user.created": [["users"]],
-  "user.updated": [["users"]],
-  "user.deleted": [["users"]],
+  "user.created": [["users"], ["agents-supervision"], ["chiefs-supervision"]],
+  "user.updated": [["users"], ["agents-supervision"], ["chiefs-supervision"]],
+  "user.deleted": [["users"], ["agents-supervision"], ["chiefs-supervision"]],
 
   // ── Référentiels ─────────────────────────────────────────────────────────────
   "reference.updated": [["references"]],

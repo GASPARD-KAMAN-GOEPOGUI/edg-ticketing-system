@@ -13,16 +13,11 @@ from __future__ import annotations
 
 from typing import Any, List, Optional
 
-from pathlib import Path
-
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-_SECURITY_PHOTO_DIR = Path(__file__).parent.parent.parent / "uploads" / "security"
-
-from api.dependencies import get_db, get_current_user, require_roles
+from api.dependencies import get_db, require_roles
 from api.services.ServiceSlaPolicy import SlaPolicyService
 from api.services.ServiceRoutingRule import RoutingRuleService
 from api.services.ServiceReferences import (
@@ -191,13 +186,13 @@ async def create_sla(body: SlaPolicyCreate, svc: SlaPolicyService = Depends(_sla
     return await svc.create(body.dict())
 
 
-@router.patch("/sla/{id}", response_model=SlaPolicyResponse)
+@router.put("/sla/{id}", response_model=SlaPolicyResponse)
 async def update_sla(id: int, body: SlaPolicyUpdate, svc: SlaPolicyService = Depends(_sla_svc)):
     # TODO auth: rôle admin
     return await svc.update(id, body.dict(exclude_none=True))
 
 
-@router.patch("/sla/{id}/toggle", response_model=SlaPolicyResponse)
+@router.put("/sla/{id}/toggle", response_model=SlaPolicyResponse)
 async def toggle_sla(id: int, svc: SlaPolicyService = Depends(_sla_svc)):
     # TODO auth: rôle admin
     return await svc.toggle(id)
@@ -225,14 +220,14 @@ async def create_priority(body: PriorityDefinitionCreate, svc: PriorityDefinitio
     return await svc.create(body.dict())
 
 
-@router.patch("/priorities/reorder", status_code=status.HTTP_200_OK)
+@router.put("/priorities/reorder", status_code=status.HTTP_200_OK)
 async def reorder_priorities(body: ReorderRequest, svc: PriorityDefinitionService = Depends(_prio_svc)):
     # TODO auth: rôle admin
     items = await svc.reorder(body.ordered_ids)
     return {"reordered": len(items)}
 
 
-@router.patch("/priorities/{id}", response_model=PriorityDefinitionResponse)
+@router.put("/priorities/{id}", response_model=PriorityDefinitionResponse)
 async def update_priority(id: int, body: PriorityDefinitionUpdate, svc: PriorityDefinitionService = Depends(_prio_svc)):
     # TODO auth: rôle admin
     return await svc.update(id, body.dict(exclude_none=True))
@@ -286,7 +281,7 @@ async def create_routing(body: RoutingRuleAdminCreate, db: AsyncSession = Depend
     return _fmt_rule(rule)
 
 
-@router.patch("/routing/reorder", status_code=status.HTTP_200_OK)
+@router.put("/routing/reorder", status_code=status.HTTP_200_OK)
 async def reorder_routing(body: ReorderRequest, svc: RoutingRuleService = Depends(_routing_svc)):
     # TODO auth: rôle admin
     items = await svc.reorder(body.ordered_ids)
@@ -299,7 +294,7 @@ async def apply_routing_test(body: dict, svc: RoutingRuleService = Depends(_rout
     return await svc.apply_test(body)
 
 
-@router.patch("/routing/{id}")
+@router.put("/routing/{id}")
 async def update_routing(id: int, body: RoutingRuleAdminUpdate, db: AsyncSession = Depends(get_db)):
     patch: dict = {}
     if body.name is not None:
@@ -338,7 +333,7 @@ async def update_routing(id: int, body: RoutingRuleAdminUpdate, db: AsyncSession
     return _fmt_rule(rule)
 
 
-@router.patch("/routing/{id}/toggle")
+@router.put("/routing/{id}/toggle")
 async def toggle_routing(id: int, svc: RoutingRuleService = Depends(_routing_svc)):
     # TODO auth: rôle admin
     rule = await svc.toggle(id)
@@ -370,7 +365,7 @@ async def create_ref(table: str, body: RefCreate, db: AsyncSession = Depends(get
     return await svc.create(body.dict(exclude_none=True))
 
 
-@router.patch("/ref/{table}/{id}")
+@router.put("/ref/{table}/{id}")
 async def update_ref(table: str, id: int, body: RefUpdate, db: AsyncSession = Depends(get_db)):
     # TODO auth: rôle admin
     svc = _get_ref_service(table, db)
@@ -384,70 +379,8 @@ async def delete_ref(table: str, id: int, db: AsyncSession = Depends(get_db)):
     await svc.delete(id)
 
 
-@router.patch("/ref/{table}/{id}/restore")
+@router.put("/ref/{table}/{id}/restore")
 async def restore_ref(table: str, id: int, db: AsyncSession = Depends(get_db)):
     # TODO auth: rôle admin
     svc = _get_ref_service(table, db)
     return await svc.restore(id)
-
-
-# ── Incidents de sécurité ─────────────────────────────────────────────────────
-
-def _sec_svc(db: AsyncSession = Depends(get_db)):
-    from api.services.ServiceSecurityIncident import SecurityIncidentService
-    return SecurityIncidentService(db)
-
-
-class _ResolveBody(BaseModel):
-    notes: Optional[str] = None
-
-
-@router.get("/security-incidents", summary="Lister tous les incidents de sécurité")
-async def list_security_incidents(
-    page: int = 1,
-    limit: int = 50,
-    svc=Depends(_sec_svc),
-):
-    return await svc.list_all(page=page, limit=limit)
-
-
-@router.get("/security-incidents/unresolved", summary="Incidents non résolus")
-async def list_unresolved_incidents(svc=Depends(_sec_svc)):
-    items = await svc.list_unresolved()
-    return {"items": items, "total": len(items)}
-
-
-@router.patch(
-    "/security-incidents/{id}/resolve",
-    summary="Marquer un incident de sécurité comme résolu",
-)
-async def resolve_security_incident(
-    id: int,
-    body: _ResolveBody,
-    actor=Depends(get_current_user),
-    svc=Depends(_sec_svc),
-):
-    incident = await svc.resolve(id, resolver_id=actor.id, notes=body.notes)
-    return {"id": incident.id, "resolved": incident.resolved}
-
-
-@router.delete(
-    "/security-incidents/{id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Supprimer (soft-delete) un incident de sécurité",
-)
-async def delete_security_incident(id: int, svc=Depends(_sec_svc)):
-    await svc.delete_incident(id)
-
-
-@router.get(
-    "/security-photos/{filename}",
-    summary="Servir une photo de tentative d'accès (admin uniquement)",
-    include_in_schema=False,
-)
-async def get_security_photo(filename: str):
-    safe = Path(filename).name
-    path = _SECURITY_PHOTO_DIR / safe
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Photo introuvable.")
-    return FileResponse(str(path), media_type="image/jpeg")

@@ -65,7 +65,7 @@ export async function fetchHomepageConfig(): Promise<HomepageConfig> {
 
 export async function saveHomepageConfigApi(config: HomepageConfig): Promise<HomepageConfig> {
   const raw = await apiFetch<RawHomepageConfig>("/admin/homepage-config", {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify({
       sections: config.sections.map((s) => ({
         section_id: s.id,
@@ -117,7 +117,7 @@ export async function updateSectionByIdApi(
   }
 ): Promise<HomepageConfig> {
   const raw = await apiFetch<RawHomepageConfig>(`/admin/homepage-config/sections/${id}`, {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify(data),
   });
   return mapConfig(raw);
@@ -166,7 +166,7 @@ export async function createSlideApi(data: Partial<HomepageSlide>): Promise<Home
 
 export async function updateSlideApi(id: number, data: Partial<HomepageSlide>): Promise<HomepageSlide> {
   return apiFetch<HomepageSlide>(`/admin/homepage/slides/${id}`, {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify(data),
   });
 }

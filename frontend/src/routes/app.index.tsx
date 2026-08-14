@@ -1,10 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useRole, useUser } from "@/lib/session";
+import { useUser } from "@/lib/session";
 import { GlassCard } from "@/components/glass-card";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { statusLabels } from "@/lib/mock-data";
-import type { RequestItem, Role } from "@/lib/mock-data";
+import type { RequestItem } from "@/lib/mock-data";
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchCsatStats } from "@/lib/api/csat";
@@ -34,7 +34,6 @@ import {
   ArrowUpRight,
   RotateCcw,
   SlidersHorizontal,
-  Compass,
 } from "lucide-react";
 import {
   PieChart,
@@ -59,14 +58,18 @@ export const Route = createFileRoute("/app/")({
 
 function Dashboard() {
   const sessionUser = useUser();
-  const firstName = sessionUser?.name?.split(" ")[0] || null;
+  const fullName = sessionUser
+    ? sessionUser.firstname
+      ? `${sessionUser.firstname} ${sessionUser.name}`
+      : sessionUser.name
+    : null;
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-            {firstName ? `Bonjour, ${firstName} 👋` : "Bonjour 👋"}
+            {fullName ? `Bonjour, ${fullName} 👋` : "Bonjour 👋"}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Voici l'état de vos tickets personnels.
@@ -299,77 +302,6 @@ function StatusPie({ data, isLoading }: { data: RequestItem[]; isLoading?: boole
 
 /* ─── Accueil personnel ───────────────────────────────────────────────────── */
 
-function PersonalRoleShortcuts() {
-  const [role] = useRole();
-  const shortcutsByRole: Record<Role, { to: string; label: string; description: string; icon: typeof Inbox }[]> = {
-    public: [],
-    user: [],
-    "agent-support": [
-      { to: "/app/my-tickets", label: "Mes tickets", description: "Tickets qui me sont assignés", icon: Users2 },
-      { to: "/app/queue", label: "File d'attente", description: "Tickets orientés à traiter", icon: Inbox },
-    ],
-    "chief-service": [
-      { to: "/app/chief-inbox", label: "Centre de répartition", description: "Tickets du service à organiser", icon: MessageSquareWarning },
-      { to: "/app/queue", label: "File d'attente", description: "Tickets orientés et à qualifier", icon: Inbox },
-      { to: "/app/supervision", label: "Supervision", description: "Suivi de l'activité du service", icon: AlertTriangle },
-      { to: "/app/reports", label: "Rapports", description: "Indicateurs du service", icon: TrendingUp },
-    ],
-    "chief-departement": [
-      { to: "/app/department-inbox", label: "Centre de pilotage", description: "Vue agrégée par service du département", icon: MessageSquareWarning },
-      { to: "/app/supervision", label: "Supervision", description: "Suivi de l'activité du département", icon: AlertTriangle },
-      { to: "/app/reports", label: "Rapports", description: "Indicateurs du département", icon: TrendingUp },
-    ],
-    director: [
-      { to: "/app/strategic-dashboard", label: "Tableau de bord stratégique", description: "Vue consultative agrégée de la direction", icon: Compass },
-      { to: "/app/supervision", label: "Supervision", description: "Tickets escaladés ou à arbitrer", icon: AlertTriangle },
-      { to: "/app/direction", label: "Vue direction", description: "Pilotage des services de la direction", icon: Building2 },
-      { to: "/app/sla-center", label: "Centre SLA", description: "Suivi des délais et risques", icon: Clock },
-      { to: "/app/reports", label: "Rapports Direction", description: "Performance par service", icon: TrendingUp },
-    ],
-    admin: [
-      { to: "/app/dg", label: "Vue globale", description: "Pilotage inter-directions", icon: Building2 },
-      { to: "/app/admin/users", label: "Utilisateurs & rôles", description: "Administration des comptes", icon: Users2 },
-      { to: "/app/admin/directions", label: "Directions", description: "Structure de l'organisation", icon: Building2 },
-      { to: "/app/admin/routing", label: "Routage", description: "Règles métier des tickets", icon: SlidersHorizontal },
-      { to: "/app/admin/sla", label: "SLA & politiques", description: "Paramètres de délais", icon: Clock },
-    ],
-  };
-  const shortcuts = shortcutsByRole[role] ?? [];
-  if (shortcuts.length === 0) return null;
-
-  return (
-    <GlassCard className="p-4 sm:p-6">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <h3 className="font-semibold">Accès métier séparé</h3>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Ces raccourcis ouvrent les espaces de traitement, pilotage ou administration. Ils ne changent pas vos données personnelles.
-          </p>
-        </div>
-        <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-      </div>
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-        {shortcuts.map((shortcut) => {
-          const Icon = shortcut.icon;
-          return (
-            <Link
-              key={shortcut.to}
-              to={shortcut.to as never}
-              className="flex items-start gap-3 rounded-2xl border border-border/50 bg-background/50 p-4 transition hover:border-primary/40 hover:bg-primary/5"
-            >
-              <Icon className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
-              <span className="min-w-0">
-                <span className="block text-sm font-semibold">{shortcut.label}</span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">{shortcut.description}</span>
-              </span>
-            </Link>
-          );
-        })}
-      </div>
-    </GlassCard>
-  );
-}
-
 function PersonalDashboard() {
   const sessionUser = useUser();
   const { data, isLoading } = useQuery({
@@ -404,7 +336,6 @@ function PersonalDashboard() {
         <RecentList items={recentActiveItems} isLoading={isLoading} limit={3} />
         <StatusPie  data={items}  isLoading={isLoading} />
       </div>
-      <PersonalRoleShortcuts />
     </>
   );
 }
@@ -453,7 +384,6 @@ function AgentDashboard() {
   const pendingCount = assigned.filter((r) => r.status === "pending").length;
   const escalatedMine = assigned.filter((r) => r.status === "escalated").length;
   const reopenedCount = assigned.filter((r) => r.status === "reopened").length;
-  const slaBreachedMine = assigned.filter((r) => r.slaElapsed > r.slaHours).length;
 
   return (
     <>
@@ -464,10 +394,9 @@ function AgentDashboard() {
         <Stat label="Mes tickets" value={myRequestsData?.total ?? 0} icon={Plus} tone="success" loading={loadMyRequests} hint="Créés par moi" />
         <Stat label="Non lues" value={unreadNotifications?.total ?? 0} icon={Bell} tone="destructive" loading={loadNotifications} hint="Notifications" />
       </div>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <Stat label="En cours" value={inProgress} icon={Clock} tone="accent" loading={loadAssigned} hint="Mes tickets actifs" />
         <Stat label="En attente" value={pendingCount} icon={MessageSquareWarning} tone="warning" loading={loadAssigned} hint="Attente demandeur" />
-        <Stat label="Délais dépassés" value={slaBreachedMine} icon={AlertTriangle} tone="destructive" loading={loadAssigned} hint="Mes tickets en retard" />
         <Stat label="Réouverts / escaladés" value={reopenedCount + escalatedMine} icon={ArrowUpRight} tone="warning" loading={loadAssigned} />
       </div>
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.55fr)]">
@@ -553,7 +482,6 @@ function ChiefDashboard() {
   const escalated    = items.filter((r) => r.status === "escalated").length;
   const reopened     = items.filter((r) => r.status === "reopened").length;
   const critical     = items.filter((r) => r.priority === "critical" && ACTIVE_ST.includes(r.status)).length;
-  const slaBreached  = items.filter((r) => r.slaElapsed > r.slaHours && ACTIVE_ST.includes(r.status)).length;
 
   return (
     <>
@@ -564,9 +492,8 @@ function ChiefDashboard() {
         <Stat label="En attente"      value={pendingCount} icon={MessageSquareWarning} tone="warning"     loading={isLoading} />
         <Stat label="CSAT service"    value={(csat?.global ?? 0) > 0 ? `${csat!.global}/5` : "—"} icon={Star} tone="primary" />
       </div>
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
         <Stat label="Escaladées"    value={escalated}   icon={AlertTriangle} tone="warning"     loading={isLoading} />
-        <Stat label="Délais dépassés"  value={slaBreached} icon={ArrowUpRight}  tone="destructive" loading={isLoading} hint="Tickets en retard" />
         <Stat label="Réouvertes"    value={reopened}    icon={RotateCcw}     tone="warning"     loading={isLoading} />
         <Stat label="Critiques"     value={critical}    icon={AlertTriangle} tone="destructive" loading={isLoading} hint="Priorité critique active" />
       </div>
@@ -622,7 +549,6 @@ function DirectorDashboard() {
   const escalated    = items.filter((r) => r.status === "escalated").length;
   const reopened     = items.filter((r) => r.status === "reopened").length;
   const critical     = items.filter((r) => r.priority === "critical" && ACTIVE_ST.includes(r.status)).length;
-  const slaBreached  = items.filter((r) => r.slaElapsed > r.slaHours && ACTIVE_ST.includes(r.status)).length;
 
   return (
     <>
@@ -633,9 +559,8 @@ function DirectorDashboard() {
         <Stat label="En attente"       value={pendingCount} icon={MessageSquareWarning} tone="warning"      loading={isLoading} />
         <Stat label="CSAT direction"   value={(csat?.global ?? 0) > 0 ? `${csat!.global}/5` : "—"} icon={Star} tone="success" />
       </div>
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
         <Stat label="Escaladées"    value={escalated}   icon={AlertTriangle} tone="warning"     loading={isLoading} />
-        <Stat label="Délais dépassés"  value={slaBreached} icon={ArrowUpRight}  tone="destructive" loading={isLoading} hint="Tickets en retard" />
         <Stat label="Réouvertes"    value={reopened}    icon={RotateCcw}     tone="warning"     loading={isLoading} />
         <Stat label="Critiques"     value={critical}    icon={AlertTriangle} tone="destructive" loading={isLoading} />
       </div>
@@ -698,39 +623,6 @@ function GlobalDashboard() {
         <Stat label="Résolues"         value={resolved}                            icon={CheckCircle2} tone="success"  loading={isLoading} />
         <Stat label="CSAT global"      value={(csat?.global ?? 0) > 0 ? `${csat!.global}/5` : "—"} icon={Star} tone="warning" />
       </div>
-      <GlassCard>
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="font-semibold">Performance par direction</h3>
-          <TrendingUp className="h-4 w-4 text-muted-foreground" />
-        </div>
-        {loadAllReq ? (
-          <div className="flex h-24 items-center justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground/40" />
-          </div>
-        ) : dirStats.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Aucune donnée disponible.</p>
-        ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {dirStats.map((s) => {
-              const tone =
-                s.slaRespect > 80
-                  ? "bg-success/20 text-success border-success/30"
-                  : s.slaRespect > 60
-                    ? "bg-info/15 text-info border-info/30"
-                    : s.slaRespect > 45
-                      ? "bg-warning/20 text-warning border-warning/30"
-                      : "bg-destructive/15 text-destructive border-destructive/30";
-              return (
-                <div key={s.id} className={"rounded-2xl border p-4 " + tone}>
-                  <div className="text-xs font-medium uppercase tracking-wider opacity-70">{s.id.toUpperCase()}</div>
-                  <div className="mt-3 text-2xl font-bold">{s.slaRespect}%</div>
-                  <div className="text-[11px] opacity-70">Délai respecté · {s.total} dem.</div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </GlassCard>
     </>
   );
 }

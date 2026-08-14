@@ -59,7 +59,7 @@ async def list_notifications(
     )
 
 
-@router.patch("/{id}/read", response_model=NotificationResponse)
+@router.put("/{id}/read", response_model=NotificationResponse)
 async def mark_as_read(
     id: str,
     actor=Depends(get_current_user),

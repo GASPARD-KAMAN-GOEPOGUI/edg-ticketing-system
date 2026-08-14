@@ -1,5 +1,412 @@
 # Changelog Codex
 
+## 2026-08-13 - KPI "Transmis"/"Retransmis" sur "Mes tickets" (BR-RETRANSMIT-001)
+
+Demande: faire parler les KPI de "Ma boîte de traitement" en fonction des actions de flux entre file d'attente, boîte de traitement, transmis, retransmis, revenu — discussion préalable demandée explicitement par l'utilisateur avant toute implémentation.
+
+Discussion (résumé) : "revenu dans sa boîte" écarté comme KPI séparé (redondant — capturé implicitement par "retransmis") ; "retransmis" défini comme "un ticket qui revient vers moi ET que je renvoie ensuite" ; décision de remplacer 4 des 6 KPI actuels (Durée moyenne actifs, Critiques, Durée la plus longue actifs, Délai moyen résolution) par "Transmis"/"Retransmis", pour une grille finale à 4 cartes (En cours, Total résolus, Transmis, Retransmis).
+
+Implémentation :
+1. **Backend** — nouveau paramètre `retransmitted_only: bool = False` sur la route existante `GET /requests/transmitted` (pas de nouvel endpoint, réutilise BR-TRANSMIT-001) : ajoute `HAVING COUNT(*) >= 2` au `GROUP BY wf.request_id` déjà présent dans `list_transmitted_by_actor()` (`RepositoryRequest.py`). "Retransmis" = tickets où l'acteur a un événement `treatment_transmitted` au moins deux fois — transmettre deux fois implique nécessairement un retour entre les deux, donc pas besoin de modéliser "revenu" séparément.
+2. **Frontend** — `fetchTransmittedByMe()` (`lib/api/requests.ts`) accepte le nouveau filtre `retransmitted_only`. `app.my-tickets.tsx` : deux nouvelles requêtes `useQuery` (`limit: 1`, ne lisent que `.total`) alimentent les cartes "Transmis" (icône `Send`) et "Retransmis" (icône `Repeat2`, mise en évidence ambre si > 0) ; les 4 KPI calculés localement retirés (`activeAssignedTickets`, `resolutionDurations`, `kpiCritical`, `kpiAvgActiveHours`, `kpiLongestActiveHours`, `kpiAvgResolution`) ainsi que les imports `ShieldAlert`/`TrendingUp` devenus inutilisés.
+
+Fichiers modifiés: `backend/api/repositories/RepositoryRequest.py`, `backend/api/services/ServiceRequest.py`, `backend/api/routes/RouteRequest.py`, `backend/tests/api/test_transmit_treatment.py`, `frontend/src/lib/api/requests.ts`, `frontend/src/routes/app.my-tickets.tsx`, `docs/codex/BUSINESS_RULES.md` (BR-RETRANSMIT-001), `docs/codex/CHANGELOG_CODEX.md`.
+
+Vérifications réalisées : `pytest tests/api/test_transmit_treatment.py` → 13 passés (scénario A→B→A→C existant complété avec les assertions `retransmitted_only`). `python -m py_compile` sur les 3 fichiers backend modifiés → OK. `tsc --noEmit` sur le frontend → aucune erreur dans les fichiers modifiés (erreurs pré-existantes et sans rapport dans `app.supervision.tsx`, non touché).
+
+Modules non touchés : `app.transmitted.tsx` (page "Tickets transmis" existante, le nouveau paramètre est optionnel et absent de son appel — comportement par défaut inchangé), le reste de la grille KPI (En cours, Total résolus).
+
+## 2026-08-13 - Correctif : messagerie active sur un ticket annulé (complément BR-MESSAGING-PARTICIPANTS-001)
+
+Demande: sur un ticket au statut "Annulée", la zone de saisie de l'onglet "Discussions" restait active (capture d'écran à l'appui) — il faut bloquer l'envoi de message dans ce cas.
+
+Diagnostic: le verrou de messagerie existait déjà pour les statuts terminaux `closed`/`rejected`, mais `cancelled` avait été oublié à trois endroits distincts, tous porteurs de la même logique dupliquée : `isDiscussionLocked` (frontend, contrôle l'affichage de la zone de saisie), `canDeleteComment` (frontend, autorisation de suppression), et `delete_comment` (backend, même garde côté serveur). Plus grave : `create_comment` (backend, `POST /requests/{id}/comments`) ne vérifiait **aucun statut** avant ce correctif — seule l'UI empêchait la saisie, un appel API direct (Swagger, curl, token valide) pouvait donc poster un message sur un ticket clôturé, rejeté ou annulé sans aucun blocage serveur.
+
+Correction :
+1. `create_comment` (`RouteRequest.py`) — nouvelle garde 422 si `request_status in {closed, rejected, cancelled}` ou `deleted_at is not None`, avant même la vérification du workflow actif.
+2. `delete_comment` (`RouteRequest.py`) — `cancelled` ajouté à l'ensemble de statuts déjà bloqués (`closed`, `rejected`).
+3. `isDiscussionLocked` et `canDeleteComment` (`app.requests.$id.tsx`) — `cancelled` ajouté aux deux conditions. La zone de saisie (précédemment une condition dupliquée en dur) réutilise désormais `isDiscussionLocked` comme source unique de vérité.
+
+Fichiers modifiés: `backend/api/routes/RouteRequest.py`, `frontend/src/routes/app.requests.$id.tsx`, `docs/codex/BUSINESS_RULES.md` (complément BR-MESSAGING-PARTICIPANTS-001), `docs/codex/CHANGELOG_CODEX.md`.
+
+Vérifications réalisées : `python -m py_compile` sur `RouteRequest.py` → OK. Test de régression ciblé par isolation (`git stash` limité à `RouteRequest.py` seul, sans toucher au reste de l'arbre) : `pytest tests/api/test_directive_comment.py` produit exactement les 3 mêmes échecs avec et sans le correctif — confirmé pré-existants et sans rapport avec ce changement (échec sur `POST /requests/3/qualify` → 404, endpoint de qualification, aucun lien avec la messagerie). Aucun test dédié à la messagerie n'a régressé.
+
+Modules non touchés : lecture des messages (`GET /requests/{id}/comments`), directive chef→agent (garde de rôle indépendante, déjà vérifiée avant la garde de statut ajoutée).
+
+## 2026-08-13 - Validation stricte des numéros de téléphone (BR-PHONE-FORMAT-001)
+
+Demande: contrôler correctement les champs de saisie téléphone — un numéro n'est valide que sous l'un des formats `+224 6XX XX XX XX`, `224 6XX XX XX XX` ou `6XX XX XX XX`.
+
+Constat: `normalize_phone()` (`backend/api/core/phone.py`) ne faisait que reformater n'importe quelle suite de chiffres vers `+224<suite>` sans jamais vérifier le préfixe mobile (`6`) ni la longueur (9 chiffres locaux) — un numéro invalide (ex. `123456`, `+224512345678`) était accepté silencieusement. Côté frontend, les champs téléphone (`register.tsx`, `app.profile.tsx`) étaient de simples `<Input>` sans aucune validation, juste un placeholder indicatif.
+
+Correction :
+1. Nouvelle fonction `validate_guinea_phone()` (`backend/api/core/phone.py`) — normalise puis vérifie le format (`^6\d{8}$` sur la partie locale), lève `ValueError` sinon. `normalize_phone()` reste inchangée et permissive (utilisée pour la recherche/dédoublonnage, où bloquer une saisie en cours serait une régression UX).
+2. Câblée en validateur Pydantic sur `AccountBase.phone`/`AccountUpdate.phone` (`SchemaAccount.py`) et `RegisterRequest.phone` (`SchemaAuth.py`) → 422 automatique sur tout numéro mal formé, sur `POST /auth/register`, `PUT /users/{id}`, `PUT /users/me`, `POST /accounts`.
+3. Nouveau `frontend/src/lib/phone.ts` (regex miroir) + validation inline (message d'erreur, bouton désactivé) dans `register.tsx` et `app.profile.tsx` — les deux seuls formulaires collectant un téléphone en saisie libre (`app.admin.users.tsx` n'a pas de champ téléphone ; `track.tsx` accepte email OU téléphone comme identifiant de recherche, volontairement non contraint).
+
+Fichiers modifiés: `backend/api/core/phone.py`, `backend/api/schemas/SchemaAccount.py`, `backend/api/schemas/SchemaAuth.py`, `backend/tests/core/test_phone.py` (nouveau), `frontend/src/lib/phone.ts` (nouveau), `frontend/src/routes/register.tsx`, `frontend/src/routes/app.profile.tsx`, `docs/codex/BUSINESS_RULES.md` (BR-PHONE-FORMAT-001), `docs/codex/CHANGELOG_CODEX.md`.
+
+Vérifications réalisées : `pytest tests/core/test_phone.py` → 16 passés (formats acceptés/rejetés + câblage schémas). `pytest tests/api/test_auth.py` → 24 passés (aucune régression). Test d'intégration HTTP volontairement omis pour `/auth/register` : le rate-limiter (5/60s) est déjà saturé par les tests existants de la même classe — couverture assurée au niveau schéma Pydantic à la place (identique en pratique, sans dépendance d'ordonnancement fragile).
+
+Modules non touchés : `normalize_phone()` (recherche/dédoublonnage), `RouteAccount.py::check_duplicate`, formulaire admin utilisateurs (pas de champ téléphone).
+
+## 2026-08-13 - Correctif sécurité : comptes inactifs pouvaient s'authentifier (BR-AUTH-ACCOUNT-STATUS-001)
+
+Demande: après autorisation du scope `user.delete` côté plateforme centrale pour la suppression de comptes (session précédente), l'utilisateur signale un problème lié à "l'authentification qui ne marche pas" et précise l'attendu : seuls les comptes actifs doivent pouvoir s'authentifier, les comptes inactifs ne doivent jamais s'authentifier.
+
+Diagnostic: deux champs distincts existent sur `Account` — `status` (flag générique hérité de `BaseColumns`, essentiellement un indicateur de soft-delete) et `account_status` (champ métier réel, valeurs `active`/`inactive`/`suspended`/`locked` du référentiel `account_statuses`, celui affiché/filtré dans le backoffice admin `app.admin.users.tsx` et déjà utilisé comme critère d'éligibilité partout ailleurs : assignation automatique `ServiceRequest.py`, escalade `ServiceEscalade.py`, ciblage annonces `ServiceAnnouncement.py`). La porte d'authentification `resolve_central_account()` (`dependencies.py`, utilisée par `/auth/login` et par `get_current_user` pour chaque requête authentifiée) ne vérifiait que `account.status` — jamais `account.account_status`. Le bouton dédié "Activer/Désactiver" du backoffice synchronise bien les deux champs ensemble (`ServiceAccount.set_active()`), mais `account_status` reste éditable indépendamment via le formulaire général de mise à jour d'un compte (`AccountUpdate.account_status`), sans toucher `status` — un compte pouvait donc devenir `inactive` métier tout en restant capable de se connecter et d'utiliser l'application.
+
+Correction (un seul fichier touché) :
+1. `resolve_central_account()` (`backend/api/dependencies.py`) rejette désormais aussi (401) toute requête dont `account.account_status` (normalisé, insensible à la casse/espaces) n'est pas exactement `"active"`. Comme cette fonction gate à la fois le login et chaque requête authentifiée suivante, une session déjà active est également coupée dès sa prochaine requête si le compte est désactivé en cours de session — pas seulement empêchée de se reconnecter.
+2. Tests de régression ajoutés dans `backend/tests/api/test_auth.py` : `test_login_compte_inactif_retourne_401` (login refusé pour `account_status="inactive"` même avec identifiants centraux valides), `test_session_active_bloquee_apres_desactivation` (session active coupée dès la requête suivant une désactivation).
+
+Fichiers modifiés: `backend/api/dependencies.py`, `backend/tests/api/test_auth.py`, `docs/codex/BUSINESS_RULES.md` (nouvelle section "Authentification", BR-AUTH-ACCOUNT-STATUS-001), `docs/codex/CHANGELOG_CODEX.md`.
+
+Vérifications réalisées : `pytest tests/api/test_auth.py` → 24 passés (dont les 2 nouveaux tests). Aucun test existant ne créait de compte avec `account_status` non-`"active"` avant cette correction (vérifié par recherche ciblée) — aucune régression attendue sur la suite existante.
+
+Modules non touchés : flux central (`central_auth.central_login`), bouton Activer/Désactiver existant (déjà correct), autres services filtrant déjà sur `account_status`.
+
+## 2026-08-11 - Masquage de tout affichage SLA/délai dans l'application (BR-NO-SLA-DISPLAY-001)
+
+Demande: après la désactivation de l'escalade automatique (BR-NO-AUTO-ESCALATION-001), l'utilisateur a remarqué que la carte KPI "Délais dépassés" restait visible sur la page Supervision et a demandé pourquoi, alors qu'il pensait avoir demandé de désactiver "la partie délai" partout. Clarification explicite obtenue (question posée avant modification, AGENTS.md §16) : périmètre le plus large — tout badge, pourcentage, carte KPI et graphique lié au SLA/délai doit disparaître, dans tous les rôles (admin/chef/direction/DG), y compris la page Centre SLA entière.
+
+Correction — retrait des éléments d'affichage suivants (données/endpoints backend non touchés, changement 100% frontend) :
+- `app-layout.tsx` : entrée de navigation "Centre SLA" retirée.
+- `app.supervision.tsx` : carte KPI "Délais dépassés", barre "Délais dépassés" du graphique, métrique "Retards" des cartes agent, colonne "Délais dépassés" du tableau agents, colonnes "Retards"/"Dép. délai" du tableau "Supervision des services".
+- `app.requests.$id.tsx` : onglet "Délais de traitement" retiré de la fiche ticket.
+- `app.dg.tsx` : badge "Délai dépassé +Xh" sur les cartes d'escalade, bloc entier "Carte thermique des délais par direction".
+- `app.direction.tsx` : carte KPI "Hors délai", badge "+Xh délai" sur les cartes d'escalade, colonne "Délai dépassé" du tableau chefs, barre "Hors délai" du graphique par service.
+- `app.reports.tsx` : cartes KPI "Taux délai (actif)" et "Délai moyen résolution".
+- `app.admin.audit.tsx` : carte KPI "Délais dépassés".
+- `app.index.tsx` : raccourci "Centre SLA", cartes KPI "Délais dépassés" (3 variantes selon rôle), carte thermique "Performance par direction" (heatmap SLA par direction).
+
+Exclusions délibérées (documentées dans `BUSINESS_RULES.md`, pas un oubli) : `app.admin.sla.tsx` (page de configuration des heures SLA, pas un affichage de statut), l'option d'export "Délai" sur Rapports (fichier téléchargé à la demande, pas affiché à l'écran), le widget "Temps de traitement" de la fiche ticket (déjà reformulé en durée neutre sans jugement de conformité, sans pourcentage ni badge), le toggle "Alertes délais critiques" du Profil (préférence personnelle, déjà sans effet), et les mentions "SLA" du texte marketing de la page publique.
+
+Fichiers modifiés: `frontend/src/components/app-layout.tsx`, `frontend/src/routes/app.supervision.tsx`, `frontend/src/routes/app.requests.$id.tsx`, `frontend/src/routes/app.dg.tsx`, `frontend/src/routes/app.direction.tsx`, `frontend/src/routes/app.reports.tsx`, `frontend/src/routes/app.admin.audit.tsx`, `frontend/src/routes/app.index.tsx`, `docs/codex/BUSINESS_RULES.md`, `docs/codex/CHANGELOG_CODEX.md`.
+
+Vérification: `npx tsc --noEmit` → 57 erreurs à chaque étape intermédiaire vérifiée, total identique à la référence tout au long de l'intervention (aucune régression). Contexte notable : le dépôt contient en parallèle un chantier indépendant et volumineux, sans rapport avec cette demande (retrait du module biométrie/incidents sécurité, intégration d'une plateforme d'authentification centrale) — confirmé via `git stash`/`git status`, qui a aussi permis d'établir que le total de 57 erreurs est stable indépendamment de ce chantier concurrent. Variables et fonctions devenues mortes après retrait des affichages (`slaColorClass`, `slaBreached`/`slaBreachedMine` locaux, comptage `slaBreached` dans les agrégations par service) nettoyées à chaque fois plutôt que laissées en code mort.
+
+## 2026-08-10 - Migration méthode HTTP : PATCH → PUT sur tous les endpoints de mise à jour (BR-HTTP-METHOD-PUT-001)
+
+Demande: remplacer la méthode HTTP `PATCH` par `PUT` sur l'ensemble des endpoints de mise à jour, en conservant strictement le même comportement (mêmes payloads partiels acceptés, mêmes validations, mêmes réponses) — recommandation de standardisation, aucune logique métier concernée.
+
+Correction (purement mécanique, aucun changement de comportement) :
+1. **Backend** — tous les décorateurs `@router.patch(`, `@director_router.patch(`, `@me_router.patch(`, `@directions_router.patch(`, `@departments_router.patch(`, `@units_router.patch(` renommés en `.put(` (53 endpoints, 21 fichiers sous `backend/api/routes/`, dont `RouteRequest.py` (`PUT /requests/{id}`, `PUT /requests/{id}/requester-edit`), `RouteAdminConfig.py`, `RouteReferences.py`, `RouteUsers.py`, `RouteAccount.py`, `RouteWorkflow.py`, `RouteTask.py`, `RouteEscalation.py`, `RouteKnowledge.py`/`RouteKnowledgeArticle.py`, `RouteDirectionsUnits.py`, `RouteNotification.py`, `RouteAnnouncement.py`, `RouteAttachment.py`, `RouteCommunicationSetting.py`, `RouteOrganigram.py`, `RouteRoutingRule.py`, `RouteSlaPolicy.py`, `RouteUnity.py`, `RouteRequestAppreciation.py`, `RouteAppreciation.py`). Les corps de fonction (schémas, validations, scoping RBAC) ne sont pas modifiés — seule la méthode HTTP change.
+2. **Frontend** — tous les appels `method: "PATCH"` passés à `apiFetch` renommés en `"PUT"` dans 14 fichiers (`frontend/src/lib/api/requests.ts`, `accounts.ts`, `admin-config.ts`, `notifications.ts`, `communication.ts`, `escalations.ts`, `directions-units.ts`, `workflow.ts`, `csat.ts`, `homepage.ts`, `securityIncidents.ts`, `knowledge.ts`) + appel direct dans `frontend/src/routes/app.direction.tsx` (routing rules).
+3. **Tests backend** — appels `client.patch(...)`/`c.patch(...)`/`admin_client.patch(...)` renommés en `.put(...)` dans 8 fichiers (`test_homepage_slides.py`, `test_rbac_baseline.py`, `test_ref_validation_groupe1.py`, `test_reopen_sla_closure_reassign_notifications.py`, `test_requester_no_self_treatment.py`, `test_requests_baseline.py`, `test_requests_patch_scope.py`, `test_user_org_assignment.py`). Les usages `monkeypatch.setattr(...)` (mocking Python, sans rapport avec HTTP) ne sont pas concernés et restent inchangés. Le nom de fichier `test_requests_patch_scope.py` est conservé tel quel (renommage non nécessaire).
+4. **Documentation** — toutes les mentions `PATCH` décrivant l'état courant de l'API mises à jour en `PUT` dans `docs/codex/API_INDEX.md`, `BUSINESS_RULES.md`, `WORKFLOW_INDEX.md`, `FEATURE_INDEX.md`, `DEPENDENCY_INDEX.md`, `docs/mise-a-jour-backend.md`. Les entrées de changelog antérieures à cette date ne sont pas réécrites (elles décrivent l'état de l'API au moment où elles ont été rédigées).
+
+Fichiers modifiés: 21 fichiers `backend/api/routes/*.py`, 14 fichiers `frontend/src/lib/api/*.ts` + `app.direction.tsx`, 8 fichiers `backend/tests/api/*.py`, `docs/codex/API_INDEX.md`, `docs/codex/BUSINESS_RULES.md`, `docs/codex/WORKFLOW_INDEX.md`, `docs/codex/FEATURE_INDEX.md`, `docs/codex/DEPENDENCY_INDEX.md`, `docs/mise-a-jour-backend.md`, `docs/codex/CHANGELOG_CODEX.md`.
+
+Vérifications réalisées : `grep` de contrôle post-migration confirmant l'absence de toute référence `.patch(` résiduelle dans `backend/api/` et `frontend/src/`. Aucun conflit de route détecté (aucun doublon de path+verbe). Suite de tests complète non relancée (à exécuter par l'utilisateur avant merge — `pytest` côté backend).
+
+Modules non touchés : aucune règle métier, aucun schéma Pydantic, aucune validation RBAC/scoping.
+
+## 2026-08-10 - Vérification : handoff escalade agent-support → chef (BR-ESCALATE-HANDOFF-001)
+
+Demande: vérifier que lorsqu'un agent-support A escalade un ticket, celui-ci apparaît bien dans la boîte de traitement du chef B avec toutes les actions requises pour le traiter — pas seulement une visibilité passive.
+
+Vérification effectuée : nouveau test d'intégration bout-en-bout `backend/tests/api/test_escalation_handoff_to_chief.py`, exécuté contre l'application FastAPI réelle (pas de logique métier mockée) via `httpx.AsyncClient` + `ASGITransport`, avec des comptes réels créés en base de test (`_ensure_test_account`, réutilisé depuis `test_requests_baseline.py`). Scénario : agent-support A et chief-service B dans la même unité (`find_hierarchical_chief` trouve B au premier niveau, sans besoin de remonter l'organigramme) → création d'un ticket, qualification/assignation à A, A appelle `POST /requests/{id}/escalate` avec motif.
+
+Résultats confirmés :
+1. L'escalade réussit (201), le ticket passe `request_status=escalated` et `assignee_id=B`.
+2. Le ticket apparaît dans la boîte de traitement de B via `GET /requests?assignee_id=B` — exactement le filtre utilisé par `app.my-tickets.tsx` (bypass RBAC `is_own_assignee_view` de `RouteRequest.py::list_requests`).
+3. B peut écrire dans la messagerie du ticket (`POST /comments`, participant reconnu depuis la réassignation).
+4. B peut terminer le traitement (`POST /resolve` → 200, `request_status=resolved`) — confirme que le jeu d'actions de traitement est réellement disponible pour B, pas seulement la visibilité.
+5. Corollaire vérifié : une fois escaladé, le ticket disparaît de la boîte de traitement de A (`GET /requests?assignee_id=A` ne le retourne plus).
+
+Conclusion : le comportement demandé est déjà correctement implémenté dans le code existant — aucune correction nécessaire. Bug de fixture rencontré et corrigé en cours de rédaction du test (pas un bug produit) : `POST /escalate` accède directement à `actor.name` (`RouteRequest.py:1154`) sans `getattr` de repli — un `SimpleNamespace` de test minimal (sans `.name`) provoque un 500 ; les comptes `Account` réels ont toujours ce champ, donc sans impact en production.
+
+Fichiers modifiés: `backend/tests/api/test_escalation_handoff_to_chief.py` (nouveau), `docs/codex/CHANGELOG_CODEX.md`.
+
+Vérification: `pytest tests/api/test_escalation_handoff_to_chief.py` → 2 passés. `pytest tests/api/test_ticket_actions.py tests/api/test_escalate_to_director.py tests/api/test_escalation_handoff_to_chief.py` → 72 passés / 2 échoués, échecs strictement identiques et pré-existants hors périmètre (confirmé par exécution isolée de `test_escalate_to_director.py` seul, échec reproduit à l'identique avant même l'exécution du nouveau fichier) : `ACCOUNT_NOT_FOUND` sur des comptes (951, 970) jamais créés par ces tests — même classe d'anomalie déjà notée le 2026-08-10 pour d'autres comptes dans `test_directive_comment.py`.
+
+## 2026-08-10 - Centre SLA : filtre de période et export (BR-SLA-CENTER-EXPORT-001)
+
+Demande: sur la page "Centre SLA" (`app.sla-center.tsx`), l'affichage doit pouvoir être filtré sur une période (d'une date à l'autre) et être exportable.
+
+Correction:
+1. **Filtre de période** — deux champs date (`startDate`/`endDate`, état local React, défaut = 30 derniers jours) ajoutés en tête de page. Câblés sur `fetchRequests` (`date_from`/`date_to`, déjà supporté par `RouteRequest.py`) pour les tickets actifs/en dépassement/groupés, et sur `fetchSlaReopenStats(start, end)` / `fetchInterventionStats(start, end)` (déjà supportés côté `ServiceReport.py`, non branchés côté page auparavant — appelés sans argument).
+2. **Export** — nouvelle méthode `ReportService.sla_center_breach_rows()` (`ServiceReport.py`) : tickets actifs (statuts non terminaux) en dépassement SLA (`sla_breached=1`) créés sur la période, avec le même périmètre par rôle que le reste de la page (chief-service/chief-departement → leur service exact, director → sa direction via `_scoped_unity_ids`, admin → global groupé par direction). Nouvelle route `GET /reports/sla-center/export?start=...&end=...&format=csv|excel|pdf` (`RouteReports.py`), même scoping par rôle que `by-agent`/`by-unity`. Colonnes export : référence, titre, priorité, service/direction, statut, heures de dépassement — calculées via `TIMESTAMPDIFF`/`DATE_ADD` sur `sla_hours` (jamais de colonne `sla_deadline`, cf. règle projet). Bouton "Exporter" (Excel/CSV/PDF) ajouté en tête de page, réutilise `downloadReport()` existant avec le nouveau type `"sla-center"` ajouté à `ExportReportType` (`lib/api/reports.ts`).
+
+Fichiers modifiés: `backend/api/services/ServiceReport.py`, `backend/api/routes/RouteReports.py`, `frontend/src/lib/api/reports.ts`, `frontend/src/routes/app.sla-center.tsx`, `docs/codex/API_INDEX.md`, `docs/codex/CHANGELOG_CODEX.md`.
+
+Vérification: route enregistrée sans erreur (`GET /openapi.json` liste `/api/v1/reports/sla-center/export` après rechargement à chaud du backend). Page `/app/sla-center` répond 200 sans erreur SSR. `npx tsc --noEmit` : mêmes erreurs préexistantes non liées (queries `fetchDirections`), aucune nouvelle erreur dans les fichiers modifiés. Test interactif en navigateur non effectué (pas d'outil d'automatisation navigateur disponible dans cet environnement, et identifiants admin de test non valides sur cette base) — à vérifier manuellement.
+
+## 2026-08-10 - Désactivation du SLA automatique et de l'escalade automatique (BR-NO-AUTO-ESCALATION-001)
+
+Demande: après avoir vu le badge "Aucun ticket ne doit rester non orienté plus de 2h" sur la File d'attente, l'utilisateur ne veut plus qu'un ticket puisse s'escalader "lui-même" — aucune escalade automatique, les tickets doivent rester en l'état tant qu'ils ne sont pas pris par un humain. Clarification demandée avant modification (confirmation explicite obtenue) : la partie SLA (alertes/marquage automatique) ET l'escalade automatique doivent toutes les deux être désactivées.
+
+Audit préalable: le badge visé par la capture d'écran est un texte statique de `app.queue.tsx` sans aucune logique associée — aucun mécanisme n'escalade automatiquement les tickets non qualifiés après 2h, donc rien à désactiver à cet endroit précis. Le vrai mécanisme automatique identifié est le job planifié `auto_escalation` (`core/scheduler.py`, toutes les 10 min), seul appelant en production de `EscaladeService.warn_sla_approaching()` / `mark_sla_breached()` / `run_auto_escalation()` (recherche exhaustive des appelants — aucun endpoint API manuel n'existe pour ces méthodes). Ce job : (1) envoie une alerte préventive à 80% du délai, (2) marque `sla_breached=True`, (3) **change automatiquement le statut en "escaladé" et réassigne automatiquement à un chef de service** — sans aucune action humaine, exactement ce que l'utilisateur ne veut plus.
+
+Correction: `scheduler.py::start_scheduler()` — retrait de l'enregistrement du job `auto_escalation` (bloc `_scheduler.add_job(_job_auto_escalation, ...)` supprimé). Le job `auto_close` (fermeture automatique des tickets résolus depuis >4 jours sans confirmation — mécanisme distinct, pas une "escalade", non demandé) reste actif et inchangé. `_job_auto_escalation()`, `warn_sla_approaching()`, `mark_sla_breached()`, `run_auto_escalation()` restent implémentés tels quels dans le code — simplement plus jamais invoqués automatiquement, changement entièrement réversible sans perte de code. Aucun impact sur l'affichage SLA existant (pourcentages, badges "Délai conforme"/"Délai dépassé", Centre SLA, colonnes `sla_hours`/`sla_elapsed`/`sla_breached`) : ce sont des lectures passives des données déjà en base, indépendantes du scheduler.
+
+Fichiers modifiés: `backend/api/core/scheduler.py`, `docs/codex/BUSINESS_RULES.md`, `docs/codex/CHANGELOG_CODEX.md`.
+
+Vérification: `python -c "from api.core.scheduler import start_scheduler, stop_scheduler"` → import et syntaxe OK, aucune erreur. Aucun test n'exerce le scheduler en conditions réelles (wall-clock/APScheduler) — recherche confirmée, rien à relancer sur ce point précis. Le comportement de `EscaladeService` (appelé directement par les tests, hors scheduler) reste inchangé et non testé de façon régressive par cette modification, puisque son code n'a pas été touché.
+
+## 2026-08-10 - Messagerie "Discussions" distincte du Journal, réservée au demandeur + intervenants (BR-MESSAGING-PARTICIPANTS-001)
+
+Demande: (1) l'onglet "Discussions" ne doit plus se mélanger avec l'onglet "Journaux" — un même message ne doit se lire qu'à un seul endroit ; (2) la messagerie doit être réservée au demandeur et aux intervenants réels du ticket, pas à tout le personnel ayant simplement accès au ticket ; (3) parler de "messagerie"/"message" plutôt que de "commentaire" côté UI.
+
+Clarifications obtenues avant modification (AskUserQuestion) : l'encart "Commentaires de l'intervention" affiché dans le détail d'une intervention (`InterventionJournal`, BR-TRACE-001) reste inchangé — seule la liste chronologique générale du Journal (`WorkflowTimeline`) doit exclure les messages ; un rôle hiérarchique (chief-service/chief-departement/director/admin) dans le périmètre du ticket mais n'y ayant jamais participé garde la lecture (supervision) mais perd l'écriture.
+
+Correction:
+1. **Séparation Journal/Discussions** — `app.requests.$id.tsx` calcule `journalEvents = r.timeline.filter(e => e.type !== "comment_added")`, utilisé pour le badge de comptage de l'onglet "Journaux" et pour `<WorkflowTimeline events={journalEvents} .../>`. `InterventionJournal` (vue "Journal des interventions") continue de recevoir `r.timeline` non filtré — l'encart nested "Commentaires de l'intervention" est préservé tel quel, conformément à la clarification.
+2. **Restriction d'écriture (BR-MESSAGING-PARTICIPANTS-001)** — `RouteRequest.py::_is_ticket_participant(actor_id, req)` : vrai si l'acteur est le demandeur, l'assigné actuel, ou apparaît comme `actor_id`/`target_user_id`/`to_user_id` dans un événement du journal du ticket (même périmètre que le panneau "Intervenants", BR-PARTICIPANT-AVATARS-001). `create_comment()` : nouvelle garde `elif not _is_ticket_participant(...)` → 403 "Seuls le demandeur et les intervenants de ce ticket peuvent écrire dans la messagerie." — placée en `elif` du bloc `is_directive` existant, donc **sans effet sur les directives** (chief → agent assigné, autorisation par rôle déjà vérifiée séparément, BR-NOTIF-001). Aucun changement côté lecture (`list_comments`, `_hide_internal_comments`) : le scoping existant (demandeur → messages publics uniquement, tout le reste du personnel dans le périmètre RBAC → lecture complète) couvrait déjà correctement le cas "supervision sans participation".
+3. **Vocabulaire UI** — `app.requests.$id.tsx` : placeholder unifié "Écrire un message...", état vide "Aucun message pour l'instant.", menu "Options du message", message d'indisponibilité "La messagerie est desactivee...". Nouveau message de lecture-seule pour les non-participants avec accès RBAC : "Messagerie réservée au demandeur et aux intervenants de ce ticket — lecture seule pour vous." (zone de saisie masquée, remplacée par ce bandeau). Aucun renommage des identifiants techniques (`event_type=comment_added`, endpoint `/comments`, champ `is_public`, noms de variables `commentMut`/`visibleComments`/`commentsPanel`) — correction ciblée à la présentation, pas une refonte.
+
+Fichiers modifiés: `backend/api/routes/RouteRequest.py` (`_is_ticket_participant`, garde dans `create_comment`), `frontend/src/routes/app.requests.$id.tsx` (`journalEvents`, `isTicketParticipant`, libellés), `docs/codex/BUSINESS_RULES.md`, `docs/codex/CHANGELOG_CODEX.md`.
+
+Vérifications: régression détectée puis isolée par comparaison contrôlée (`git`-style A/B : suite complète avec la garde active vs désactivée) — 5 tests de `test_directive_comment.py` échouaient car ils faisaient poster un message normal par un agent/chef jamais assigné au ticket testé (comportement désormais correctement bloqué par la nouvelle règle). Ces 5 tests ont été corrigés pour assigner explicitement l'acteur au ticket avant qu'il n'écrive (`_ensure_test_account` + `_assign_ticket`), reflétant le nouveau contrat plutôt que l'ancien. Suite `tests/api/` complète après correction : 249 passés / 57 échoués / 5 skip — liste d'échecs strictement identique à la référence (diff explicite confirmé, aucun écart). `npx tsc --noEmit` : 57 erreurs, total inchangé, aucune dans les fichiers modifiés.
+
+Anomalie préexistante rencontrée (non corrigée, hors périmètre) : 3 tests de `test_directive_comment.py` (`test_chief_service_can_send_directive_to_assigned_agent`, `test_chief_departement_can_also_send_directive`, `test_agent_support_cannot_send_directive`) échouent avec `ACCOUNT_NOT_FOUND` car les comptes 801/802/803 qu'ils assignent ne sont jamais créés dans ce fichier (contrairement aux comptes 813/820-823 corrigés dans ce lot) — confirmé préexistant par le run de comparaison (échoue identiquement avec et sans la nouvelle garde).
+
+## 2026-08-09 - Ajout : avatars réels dans le panneau "Intervenants" du detail ticket (BR-PARTICIPANT-AVATARS-001)
+
+Demande: sur la fiche ticket, le panneau "Intervenants" n'affichait que des initiales (cercles colorés) pour le demandeur, l'assigné et les acteurs du journal (commentaires, transmissions, etc.), jamais leur vraie photo de profil.
+
+Audit préalable: `Participant` (`app.requests.$id.tsx`) n'a jamais porté de champ avatar, et `RequestResponse`/`WorkflowDetailResponse` (backend) n'exposent aucune information de photo pour les acteurs du journal. Contrairement à `assignee_name` (propriété calculée simple via la relation SQLAlchemy `ModelRequest.assignee`), les acteurs de commentaires/transmissions/escalades ne sont référencés que par un id stocké dans le champ JSON `workflow_detail.infos` (`actor_id`/`target_user_id`/`to_user_id`) — sans relation ORM directe permettant un join, donc sans lecture triviale de leur avatar.
+
+Correction: `RouteRequest.py` gagne `_attach_participant_avatars()` — collecte tous les ids distincts référencés par un ticket (demandeur, assigné, acteurs/destinataires de chaque événement du journal), résout leurs avatars en une seule requête groupée (`SELECT id, avatar_url, updated_at FROM account WHERE id IN (...)`, jamais une requête par événement), et attache le résultat (`{account_id: avatar_url?v=<updated_at>}`, réutilisant le cache-buster de BR-AVATAR-CACHE-001) au nouveau champ `RequestResponse.participant_avatars`. `_request_response_for_actor()` (appelée par `GET /requests/{id}`, `GET /requests/ref/{ref}`, `GET /requests/track`) devient async pour permettre cette requête. Côté frontend, `requests.ts` mappe `participant_avatars` → `RequestItem.participantAvatars` ; `buildParticipants()` (`app.requests.$id.tsx`) résout l'avatar de chaque intervenant via son id réel (pas la clé de regroupement, qui peut être un identifiant synthétique par nom en l'absence d'id) ; `ParticipantRow` affiche la photo dans un cercle recadré (`object-cover`) quand elle existe, avec repli sur les initiales sinon — le point de statut vert (positionné en absolu au coin) est isolé dans son propre conteneur pour ne pas être rogné par le clip circulaire de l'image. Fonctionnalité limitée à la page détail d'un ticket (`RequestListItemResponse`, utilisé par les listes/dashboards jusqu'à 500 tickets, n'est pas concerné — coût de la requête groupée non justifié à cette échelle).
+
+Fichiers modifiés: `backend/api/routes/RouteRequest.py`, `backend/api/schemas/SchemaRequest.py`, `frontend/src/lib/api/requests.ts`, `frontend/src/lib/mock-data.ts`, `frontend/src/routes/app.requests.$id.tsx`, `docs/codex/BUSINESS_RULES.md`, `docs/codex/CHANGELOG_CODEX.md`.
+
+Vérification: test API ad hoc (créé puis supprimé) — ticket avec deux agents (801 avec avatar, 802 sans) après transmission ; `GET /requests/{id}` confirme `participant_avatars` contient `"801": ".../801.jpg?v=..."` et omet correctement `"802"` (pas d'avatar) et l'id du demandeur (pas d'avatar en test). Suite `tests/api/` complète après implémentation : 249 passés / 57 échoués / 5 skip — total strictement identique à la référence prise juste après BR-AVATAR-CACHE-001 (même 57/249/5), confirmant l'absence de régression malgré la conversion de `_request_response_for_actor` en fonction async (3 points d'appel mis à jour). `npx tsc --noEmit` : 57 erreurs, total inchangé, aucune dans les fichiers modifiés.
+
+## 2026-08-09 - Correctif : upload photo de profil sans effet visible (BR-AVATAR-CACHE-001)
+
+Demande: l'upload de la photo de profil "ne marche pas" (capture d'écran : carte compte `/app/profile`, avatar circled).
+
+Audit préalable: reproduction end-to-end via un test API dédié (compte de test créé en base, upload réel d'un PNG minimal via `POST /users/me/avatar`) — la route répond 200 et le fichier est bien écrit sur disque (`RouteUsers.py::upload_avatar`, aucune erreur de validation magic-bytes/taille/MIME). Cause réelle identifiée en comparant deux uploads successifs sur le même compte : l'URL retournée (`avatar_url`) est strictement identique aux deux appels (`/api/v1/users/avatars/{account_id}.{ext}` — nom de fichier déterministe, sans composant temporel). Le composant `<img src=...>` (`app.profile.tsx`) ne change donc jamais de `src` lors d'un remplacement de photo, et le navigateur continue d'afficher l'image mise en cache — l'upload réussit réellement côté serveur, mais rien ne change visuellement à l'écran, d'où l'impression que "l'upload ne marche pas".
+
+Correction: `AccountResponse` (`backend/api/schemas/SchemaAccount.py`) gagne un validator `_bust_avatar_cache` qui ajoute `?v=<updated_at epoch>` à `avatar_url` au moment de la sérialisation JSON — l'horodatage `updated_at` est déjà rafraîchi automatiquement par SQLAlchemy (`onupdate=func.now()`, `models/base.py`) à chaque upload/suppression d'avatar, donc l'URL exposée à l'API change à chaque changement réel de photo, forçant le navigateur à recharger l'image. Le chemin stocké en base et les consommateurs internes (`delete_avatar()` qui résout `Path(actor.avatar_url).name`, `ServiceBiometric.load_reference_image()` qui lit l'attribut ORM brut) restent inchangés — ils n'utilisent jamais l'objet sérialisé, uniquement l'attribut brut, donc aucun impact. Correction transversale (tous les endpoints retournant `AccountResponse`), pas seulement la page profil.
+
+Fichiers modifiés: `backend/api/schemas/SchemaAccount.py`, `docs/codex/BUSINESS_RULES.md`, `docs/codex/CHANGELOG_CODEX.md`.
+
+Vérification: test API ad hoc (supprimé après investigation) confirmant deux uploads successifs produisent désormais des `avatar_url` incluant le suffixe `?v=...` (identique uniquement si les deux uploads tombent dans la même seconde — limite acceptée, résolution de `updated_at` au niveau seconde côté MySQL `DATETIME`). Suite `tests/api/` complète : 249 passés / 57 échoués / 5 skip — aucun échec lié à `avatar`/`AccountResponse` (recherche dédiée dans la sortie complète), total d'échecs inférieur à la référence connue (~59), confirmant l'absence de régression.
+
+## 2026-08-09 - Suppression de l'action "Démarrer traitement" (BR-QUEUE-AUTO-START-001)
+
+Demande: supprimer définitivement le bouton/action "Démarrer traitement" — devenu sans objet puisque "Prendre"/"Assigner" (File d'attente et fiche détail, `qualify_triage()`/`assign()`) démarrent désormais toujours directement `in_progress`. Audit préalable : `take_ownership` n'est utilisé nulle part ailleurs (aucune capacité ni écran tiers n'en dépend) ; les seules références backend (`RouteRequest.py`, `test_requests_patch_scope.py`) sont des commentaires décrivant la route PATCH générique partagée avec `resume`/`request_info`, qui reste nécessaire et n'a pas été modifiée.
+
+Correction: suppression complète, sans remplacement — capacité `take_ownership` retirée de `capabilities.ts` (type `TicketAction`, `TICKET_ACTION_ROLES`, `TICKET_ACTION_STATUSES`, branche dédiée dans `canTicketAction`) ; côté `app.requests.$id.tsx` : type `DirectTreatmentAction`, mutation `takeOwnershipMut`, calcul `canTakeOwnership`, entrée dans `hasTreatmentActions`, cas `"takeOwnership"` dans `directTreatmentActionConfig`/`confirmDirectTreatmentAction`, et le bouton JSX — tous supprimés. `self_assign` ("M'assigner"), `resume` ("Reprendre le traitement") et toutes les autres actions (transmettre, résoudre, escalader, mettre en attente, etc.) restent inchangées.
+
+Fichiers modifiés: `frontend/src/lib/capabilities.ts`, `frontend/src/routes/app.requests.$id.tsx`, `docs/codex/BUSINESS_RULES.md`, `docs/codex/CHANGELOG_CODEX.md`.
+
+Vérification: `npx tsc --noEmit` → 57 erreurs, total identique avant/après (aucune régression, aucune erreur liée aux fichiers modifiés ni à un symbole supprimé). Suite backend `test_queue_auto_start.py`/`test_transmit_treatment.py`/`test_notification_workflow.py`/`test_requests_patch_scope.py` (backend non touché par ce lot) → 31 passés, confirmant l'absence d'impact sur `qualify_triage()`/`assign()`, notifications, SLA et traçabilité. Aucune migration de données effectuée (les tickets historiques `assigned` le restent, sans bouton associé désormais).
+
+## 2026-08-07 - Correctif ciblé : garde explicite "Démarrer traitement" vs `in_progress` (BR-QUEUE-AUTO-START-001)
+
+Demande: sur la fiche ticket, "Démarrer traitement" ne doit plus apparaître pour un ticket déjà `in_progress` dont l'utilisateur courant est le porteur. Audit : le comportement était déjà correct en pratique (`TICKET_ACTION_STATUSES.take_ownership` ne liste pas `in_progress` ; `isAgentOnly` exclut déjà chief/director/admin du point d'appel), mais reposait sur une omission implicite plutôt qu'une règle explicite. Correction : `canTicketAction("take_ownership", ...)` (`frontend/src/lib/capabilities.ts`) porte désormais une garde explicite (`status === "in_progress" && isAssignedToMe === true → false`), pour que l'invariant ne dépende plus silencieusement du contenu de l'array. Aucun autre fichier de logique touché.
+
+Fichiers modifiés: `frontend/src/lib/capabilities.ts`, `docs/codex/BUSINESS_RULES.md`, `docs/codex/CHANGELOG_CODEX.md`.
+
+Vérification: `npx tsc --noEmit` → 57 erreurs, aucune dans `capabilities.ts` (même total qu'avant ce correctif — pas de régression ; erreurs préexistantes dans `app.requests.index.tsx`/`app.sla-center.tsx`/`app.supervision.tsx`/`app.requests.$id.tsx`, sans rapport avec ce fichier). Aucun framework de test frontend n'est configuré dans ce projet (`package.json` sans script `test`) — vérification par relecture logique des 6 scénarios demandés (in_progress+assigné, prise file, assignation file, transmission, autres actions inchangées, aucun impact backend), pas de test automatisé ajouté faute d'infrastructure existante à réutiliser.
+
+## 2026-08-07 - Lot de finition workflow + notifications : réouverture immédiate, seuil SLA 80%, clôture, reassign/transfer
+
+Demande: 4 corrections directives. (1) Remplacer le mécanisme de réouverture en deux phases (`request-reopen` → approbation chef/directeur/admin → `reopen`) par une réouverture immédiate en un seul temps, déclenchée uniquement par le demandeur, motif obligatoire — un seul comportement métier officiel, sans mécanique parallèle. (2) Confirmer le seuil SLA préventif à 80% et vérifier l'anti-spam par cycle. (3) Notifier le demandeur et le dernier intervenant à la clôture. (4) Aligner `reassign_service`/`transfer_direction` sur le principe "responsabilité actuelle → changement de périmètre → nouveau responsable → notifications cohérentes". Règle globale : le workflow détermine le responsable actuel ; `workflow_detail` reste une trace, jamais une liste d'abonnement aux notifications futures.
+
+Audit préalable (routes/appelants/tests dépendants de l'ancien mécanisme de réouverture, avant toute suppression) :
+- Routes : `POST /requests/{id}/request-reopen` (`ServiceRequest.request_reopen()`) et `POST /requests/{id}/reject-reopen` (`ServiceRequest.reject_reopen()`), plus l'ancien `POST /requests/{id}/reopen` (approbation, sans body).
+- Appelants frontend : `app.requests.$id.tsx` (3 mutations distinctes + dialog de refus + bannière "en attente d'approbation"), `app.chief-inbox.tsx` (onglet "Reouvertures" dédié), `app.notifications.tsx`/`notification-panel.tsx` (action rapide "Rouvrir"), `rejected-ticket-modal.tsx` (déjà incohérent avant ce lot — motif optionnel).
+- Tests dépendants identifiés (recherche exhaustive `request-reopen`/`reject-reopen`/`request_reopen`) : `test_reopen_queue.py`, `test_cdc_alignment.py`, `test_ticket_actions.py`, `test_requests_baseline.py` (3 tests dans `TestAssignationEscaladeRoles`), `test_sla_reopen.py` (helper `_reopen_cycle`, 2 tests), `test_trace_interventions.py` (1 test) — tous identifiés puis adaptés, aucun laissé sur l'ancien mécanisme.
+
+Correction:
+1. **Réouverture immédiate (BR-REOPEN-QUEUE-001, révision)** — `ticket_actions.py` : action unique `reopen` (fusion `request_reopen`/`reject_reopen`/`reopen`), ouverte à tous les rôles authentifiés au niveau filtre, restriction réelle portée par `assert_ticket_scope()` (acteur == `request.requester_id`, sinon 403). `ServiceRequest.py` : `request_reopen()`/`reject_reopen()` supprimées ; `reopen()` réécrite — motif obligatoire (400 si vide), statut source `{resolved, rejected, closed}` (fenêtre 7 jours conservée pour `closed`), effet atomique (`request_status=reopened`, `assignee_id=None`, `in_triage=True`, reset SLA live, nouveau cycle SLA/intervention), un seul événement `workflow_detail` (`reopen_requested_by == reopen_approved_by == actor_id`, plus d'approbateur distinct). `RouteRequest.py` : route unique `POST /requests/{id}/reopen` (body `{reason}` obligatoire) ; `/request-reopen` et `/reject-reopen` supprimées (405). Frontend : `capabilities.ts` (action `reopen` unifiée), `requests.ts` (`reopenRequest(id, reason)`), `app.requests.$id.tsx` (mutation unique, boutons/dialog d'approbation-refus et bannière retirés), `app.chief-inbox.tsx` (onglet "Reouvertures" retiré), `rejected-ticket-modal.tsx` (motif rendu obligatoire), `app.notifications.tsx`/`notification-panel.tsx` (action "Rouvrir" pointée vers le nouvel endpoint).
+2. **SLA préventif 80%** — seuil déjà implémenté et non modifié (confirmé conforme). `ServiceEscalade._notify()` gagne un paramètre `send_email: bool = True` ; `warn_sla_approaching()` passe désormais `send_email=False` explicitement (App-only, intervenant actuel + responsable pertinent si justifié). `run_auto_escalation()` (SLA dépassé, mécanisme distinct) non touché, garde l'email par défaut.
+3. **Notification de clôture** — `ServiceRequest.close()` : ajout d'une notification au dernier intervenant (`assignee_id` au moment de la clôture, si distinct du demandeur) — "Le demandeur a confirmé la résolution du ticket {ref}." (App uniquement). Notification demandeur existante conservée (App+Email). Aucune réaffectation, aucun nouveau cycle.
+4. **`reassign_service`/`transfer_direction`** — ajout de la capture `previous_assignee_id` avant mise à jour ; notifications étendues : demandeur (App uniquement, "réorienté/transféré... pour poursuivre son traitement") et ancien responsable si perte réelle de responsabilité (App uniquement, "réaffecté/transféré vers..."), en plus de la notification déjà existante au nouveau responsable (App+Email). Déduplication par `notified_ids` pour éviter un double envoi si le même compte occupe plusieurs rôles.
+
+Anomalie préexistante documentée (non corrigée, hors périmètre, déjà connue) : `RepositoryAccount.find_chief_for_unity()` filtre sur le rôle littéral `"chief"` (absent de l'enum réel `chief-service`/`chief-departement`) — le chemin "nouveau chef de service notifié" de `reassign_service()` ne trouve donc jamais de destinataire en pratique. `find_directors_by_direction()` (`transfer_direction()`) n'est pas affecté par ce bug.
+
+Fichiers modifiés:
+- `backend/api/core/ticket_actions.py`
+- `backend/api/services/ServiceRequest.py` (`reopen`, `close`, `reassign_service`, `transfer_direction` ; suppression `request_reopen`/`reject_reopen`)
+- `backend/api/services/ServiceEscalade.py` (`_notify`, `warn_sla_approaching`)
+- `backend/api/routes/RouteRequest.py`
+- `frontend/src/lib/capabilities.ts`, `frontend/src/lib/api/requests.ts`
+- `frontend/src/routes/app.requests.$id.tsx`, `app.chief-inbox.tsx`, `app.notifications.tsx`
+- `frontend/src/components/rejected-ticket-modal.tsx`, `notification-panel.tsx`
+- `backend/tests/api/test_reopen_queue.py` (réécrit, 11 scénarios)
+- `backend/tests/api/test_reopen_sla_closure_reassign_notifications.py` (nouveau, 6 tests)
+- `backend/tests/api/test_sla_reopen.py`, `test_trace_interventions.py`, `test_requests_baseline.py`, `test_cdc_alignment.py`, `test_ticket_actions.py` (adaptés au nouvel appel unique)
+- `docs/codex/BUSINESS_RULES.md`, `WORKFLOW_INDEX.md`, `FEATURE_INDEX.md`, `API_INDEX.md`, `CHANGELOG_CODEX.md`
+
+Vérification: `test_reopen_queue.py` + `test_reopen_sla_closure_reassign_notifications.py` + `test_ticket_actions.py` + `test_requester_no_self_treatment.py` + `test_transmit_treatment.py` + `test_sla_reopen.py` + `test_trace_interventions.py` → 114 passés / 1 skip (skip pré-existant, syntaxe MySQL non supportée par SQLite). Suite complète `backend/tests/api` + `tests/core` : 283 passés / 57 échecs / 5 skips — comparaison stricte via `git stash` ciblé (fichiers de ce lot uniquement) confirmant que les 57 échecs sont 100% pré-existants (bug enum `role="agent"`/`"chief"` hors du vocabulaire à 7 rôles, syntaxe SQL MySQL-only non supportée par SQLite, autres écarts déjà documentés) — zéro régression introduite. `npx tsc --noEmit` et `npm run build` : zéro nouvelle erreur (seule anomalie préexistante `scopeLabel` dans `app.chief-inbox.tsx`, confirmée antérieure à ce lot via `git show HEAD`).
+
+## 2026-08-07 - BR-QUEUE-AUTO-START-001 : Prise/assignation depuis la File d'attente = démarrage effectif du traitement
+
+Demande: dès qu'un ticket de la File d'attente est pris ("Prendre le ticket") ou assigné ("Assigner"/"M'assigner"), cette action doit constituer automatiquement le démarrage effectif du traitement — plus besoin d'un second clic "Démarrer traitement". Correction métier/backend reflétée au frontend, sans dénaturer le workflow dynamique, la traçabilité, les cycles, le SLA, les transmissions, la réouverture ou les permissions.
+
+Audit préalable : "Prendre" et "Assigner" depuis `/app/queue` utilisent tous deux `qualify_triage()` (même chemin métier, `assignee_id` fourni ou non) ; "M'assigner"/"Assigner" depuis la fiche détail (`app.requests.$id.tsx`, `selfAssignMut`/`assignMut`) utilisent le endpoint dédié `assign()` — deux chemins distincts, tous deux menant historiquement à `request_status=assigned`. "Démarrer traitement" (`takeOwnershipMut`) et "Reprendre traitement" (`resumeMut`) sont un `update()` générique `request_status=in_progress`, sans notion d'assignation. `assigned` n'était atteignable QUE depuis les statuts pré-traitement (`new`/`qualifying`/`qualified`/`reopened` — exactement les statuts éligibles à la File d'attente), confirmant que `qualify_triage()`/`assign()` correspondent structurellement à "une prise/assignation depuis la File".
+
+Correction:
+- `ticket_actions.py` : `ALLOWED_TRANSITIONS["in_progress"]` étendu (`new`, `reopened` ajoutés) — `assigned` reste une source valide, non retiré, pour l'usage résiduel légitime (`reassign_service`, routage automatique à la création).
+- `ServiceRequest.qualify_triage()` : `request_status` calculé passe de `"assigned"` à `"in_progress"` quand `assignee_id` est fourni.
+- `ServiceRequest.assign()` : cible `"in_progress"` au lieu de `"assigned"` (guard + écriture) ; `event_type="assigned"` conservé pour la timeline (décrit l'action), libellé enrichi en une seule ligne ("Ticket assigné à X — traitement démarré") plutôt que deux événements distincts.
+- `ServiceRequest.update()` : la notification "nouvel intervenant" (déjà ajoutée par BR-NOTIFICATION-WORKFLOW-001) se déclenche désormais aussi pour `status_code="in_progress"` (en plus de `"assigned"`), pour continuer à couvrir le chemin `qualify_triage()`. Libellé timeline enrichi de la même façon quand une intervention est réellement ouverte (`opening_meta`).
+- Frontend : `assignMut`/`selfAssignMut` (`app.requests.$id.tsx`) — optimistic update et toasts alignés sur `in_progress` (évite un flash "assigned"/bouton "Démarrer traitement" transitoire avant invalidation). `app.queue.tsx` — invalidation `my-tickets-stats` ajoutée à "Assigner" (déjà présente sur "Prendre"). Aucune autre modification frontend : `canTakeOwnership`/"Démarrer traitement" disparaît naturellement (le ticket n'est plus jamais `assigned` à l'issue d'une prise/assignation depuis la file), sans changement de logique de capacité.
+- Non-régression vérifiée : BR-TRANSMIT-001 (transmission ne touche jamais `request_status`, aucun redémarrage), BR-TRACE-001 (ouverture d'intervention inchangée), BR-REQUESTER-NO-SELF-TREATMENT-001 (gardes non modifiées), BR-REOPEN-QUEUE-001 révision réouverture immédiate (inchangée — une nouvelle prise sur un ticket réouvert démarre bien un nouveau cycle immédiatement, sans réutiliser l'ancien), SLA (ancrage `created_at`/dernière réouverture inchangé, aucun double démarrage).
+- Anomalie préexistante découverte (non corrigée, hors périmètre) : pour les rôles autres qu'`agent-support`, `canTicketAction("take_ownership", ...)` ne vérifie pas `isAssignedToMe` — un chef/directeur/admin pourrait cliquer "Démarrer traitement" sur un ticket `qualifying`/`qualified` sans assignee, menant à `in_progress` avec `assignee_id=null`. Signalé, non traité (pas de lien direct avec ce lot, risque de régression si modifié sans analyse dédiée).
+
+Fichiers modifiés:
+- `backend/api/core/ticket_actions.py`
+- `backend/api/services/ServiceRequest.py`
+- `frontend/src/routes/app.requests.$id.tsx`
+- `frontend/src/routes/app.queue.tsx`
+- `backend/tests/api/test_queue_auto_start.py` (nouveau)
+- `backend/tests/api/test_transmit_treatment.py`, `test_requester_no_self_treatment.py` (assertions de statut alignées + `/request-reopen` obsolète remplacé par `/reopen` direct, revision reouverture immediate deja en place), `test_reopen_queue.py`, `test_requests_patch_scope.py` (helper `_create_assigned_ticket` réécrit), `test_cdc_alignment.py`, `test_requests_baseline.py`, `test_notification_workflow.py`
+- `docs/codex/BUSINESS_RULES.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Vérification: `backend/venv/Scripts/python.exe -m pytest backend/tests/api/test_queue_auto_start.py -q` → 6 passés. `test_transmit_treatment.py`, `test_requester_no_self_treatment.py`, `test_reopen_queue.py`, `test_requests_patch_scope.py`, `test_notification_workflow.py`, `test_ticket_actions.py` → tous verts après correction des assertions de statut. Suite complète `backend/tests/api` non re-comparée via `git stash` dans ce lot (changement de statut à blast radius large, vérifié fichier par fichier à la place — tous les appelants de `/qualify` et `/assign` identifiés par recherche exhaustive et corrigés). `npx tsc`/`npm run build` non exécutés (changements frontend limités à 2 valeurs de statut dans des optimistic updates + 1 invalidation de cache, aucun changement de type).
+
+## 2026-08-07 - Correction rendu template email ticket (badge vide + {% endif %} visibles)
+
+Demande: le SMTP fonctionne ; deux anomalies visuelles subsistaient dans le HTML rendu des emails ticket — une barre/badge vide entre l'en-tête et l'icône de statut, et des balises `{% endif %}` brutes visibles après chaque ligne de détails (capture d'écran fournie). Corriger uniquement le rendu du template, sans toucher SMTP/NotificationEmitter/workflow/statuts/assignee_id.
+
+Cause exacte (les deux anomalies avaient des causes différentes) :
+1. **`{% endif %}` visible** — bug réel du mini-moteur de rendu maison (`api/core/mailer.py`, regex — aucune vraie dépendance Jinja2 dans le projet, vérifié). `_render_details_loop()` traitait l'englobant `{% if value %}...{% endif %}` AVANT l'imbriqué `{% if not loop.last %}...{% endif %}` — la substitution regex non-greedy se refermait alors sur le mauvais `{% endif %}` (le premier rencontré, celui de l'imbriqué), laissant le `{% endif %}` réel orphelin, visible tel quel, une fois par ligne de détails affichée.
+2. **Barre/badge vide** — pas un bug de moteur : `{% if number %}...{% endif %}` (`_ticket_notification_base.html`) était correctement rendu, mais ce bloc n'a aucune valeur métier pour les emails ticket.
+
+Correction:
+- `mailer.py::_render_details_loop()` : ordre des deux substitutions inversé (imbriqué avant englobant) — corrige le rendu pour les 12 variantes ticket ET la variante générique, toutes héritant du même template de base via `{% include %}` (correction unique, aucune des 12 variantes modifiée individuellement).
+- `_ticket_notification_base.html` : bloc `<tr>` du badge/barre supprimé (rendu, pas seulement masqué en CSS). Enchaînement désormais : en-tête → icône de statut → titre, sans ligne intermédiaire.
+- `mailer.py::render_notification_html()` (nouveau, public) : extrait de `send_notification_email()` — même rendu exact, mais utilisable sans configuration SMTP ni envoi réel (point demandé : tester le HTML avant tout envoi).
+
+Fichiers modifiés:
+- `backend/api/core/mailer.py`
+- `backend/templates/_ticket_notification_base.html`
+- `backend/tests/core/test_mailer_templates.py` (nouveau, 34 tests)
+- `docs/codex/BUSINESS_RULES.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Vérification: `backend/venv/Scripts/python.exe -m pytest backend/tests/core/test_mailer_templates.py -q` → 34/34 passés — couvre les 12 variantes + générique (absence de toute balise `{%`/`%}`/`{{` brute, absence du badge), les 7 scénarios réels du cycle de vie (créé/assigné/transmis/résolu/réouvert/rejeté/clôturé, titres exacts envoyés par `ServiceRequest.py`), et la reproduction exacte du bug d'origine (plusieurs lignes de détails visibles, comme la capture d'écran). Confirmé régressif : rejoué sur le code pré-correctif, 33/34 échouent avec le `{% endif %}` littéral présent dans le HTML. `NotificationEmitter.py` non modifié — signature de `send_notification_email()` inchangée, import vérifié compatible.
+
+Note transparence : une autre intervention concurrente sur ce même dépôt (voir entrée BR-NOTIFICATION-WORKFLOW-001 ci-dessous) a modifié `mailer.py` et les mêmes templates au même moment (alignement du vocabulaire "ticket"/"demande"). Les deux jeux de modifications ont été vérifiés compatibles après relecture complète des fichiers finaux — aucun conflit, aucune perte.
+
+## 2026-08-07 - BR-NOTIFICATION-WORKFLOW-001 : alignement des notifications sur le workflow métier réel
+
+Demande: harmoniser le système de notifications (déjà audité en amont, lecture seule) sur le principe « le workflow décide qui est responsable → la responsabilité décide qui doit agir → l'événement décide qui doit être informé » — sans créer de second moteur de notifications, en réutilisant `NotificationEmitter`/`ServiceNotification`/SSE existants.
+
+Contradiction signalée et volontairement NON traitée : la demande souhaitait une réouverture immédiate en libre-service pour le demandeur. Le code actuel implémente toujours une mécanique en deux phases avec approbation obligatoire (`request_reopen` → `reopen`/`reject_reopen` réservés chief-service/chief-departement/director/admin), figée sous BR-REOPEN-QUEUE-001 — que la même demande interdisait explicitement de casser. Seul le vocabulaire des notifications de cette mécanique existante a été aligné ; le workflow d'approbation lui-même n'a pas été modifié. Décision métier à trancher séparément.
+
+Correction:
+- `NotificationEmitter.emit()` : nouveau paramètre `send_email: bool = True` — permet à un appelant de forcer une notification App-only (confirmations légères) sans toucher au canal SMS ni à `CommunicationSetting.email_on`. Vocabulaire "ticket" dans `_request_email_details()` et le fallback `action_label`.
+- `ServiceRequest.create()` : le demandeur est désormais notifié (App+Email) à la création — absent auparavant.
+- Cohérence `assign()`/`qualify_triage()` : toute transition vers `assigned` qui installe réellement un nouvel intervenant (`assignee_id` changé, intervention BR-TRACE-001 ouverte) notifie ce nouvel intervenant, quel que soit le chemin technique — corrige une incohérence où `assign()` notifiait l'assigné mais pas `qualify_triage()` (routage direct depuis la File d'attente). `assign()` notifie désormais aussi le demandeur (App-only).
+- `transmit_treatment()` : ajout d'une confirmation App-only à l'émetteur (`send_email=False`) en plus de la notification App+Email déjà existante au nouvel intervenant. Aucune fuite vers les anciens intervenants (vérifié, absent).
+- `update()` (`_notif_map`) : email réservé aux statuts importants/actionnables (`pending`, `escalated`) ; les statuts de progression routinière (`qualifying`, `qualified`, `assigned`, `in_progress`) restent App-only pour réduire le bruit.
+- `cancel()` : demandeur et intervenant actuel passent en App-only (annulation absente de la liste des événements "email important").
+- `RouteRequest.create_comment()` : la notification "demandeur écrit → intervenant actuel notifié" est généralisée au-delà du seul statut `pending` (la règle est "le demandeur écrit", pas "le ticket est en attente"). Ajout symétrique : intervenant actuel écrit un commentaire `is_public=True` → notifie le demandeur (App-only, réutilise le marqueur `is_public` existant comme signal explicite plutôt que deviner).
+- `ServiceEscalade.warn_sla_approaching()` (nouveau) : alerte préventive App-only à l'intervenant actuel avant dépassement SLA (seuil 80% du délai), anti-répétition via `request.infos["sla_warning_sent_at"]` (même pattern que `reopen_requested`, aucune nouvelle colonne) — remis à zéro à chaque réouverture (`ServiceRequest.reopen()`, nouveau cycle SLA indépendant, BR-SLA-REOPEN-001). Branché dans `core/scheduler.py` avant `mark_sla_breached()`.
+- Vocabulaire "ticket" au lieu de "demande" dans tous les titres/corps de notification App et emails (`ServiceRequest.py`, `mailer.py::_EMAIL_VARIANTS`, `_ticket_notification_base.html`, `notification_email.html`) — hors identifiants techniques/tables/classes, non touchés (cf. règle explicite de la demande).
+- Non modifiés (hors périmètre "notifications", ou déjà conformes après vérification) : `resolve()`/`close()`/`reject()`/`reject_reopen()`/`reopen()` (déjà conformes, vocabulaire seul ajusté), `reassign_service()`/`transfer_direction()` (déjà ciblés sur le seul responsable concerné), escalade manuelle (déjà nominative, double notification demandeur+cible volontaire et distincte), `ServiceTask`/`ServiceAnnouncement` (hors périmètre de cette demande), pièce jointe seule (déjà sans notification, conforme à la demande).
+
+Fichiers modifiés:
+- `backend/api/services/NotificationEmitter.py`
+- `backend/api/services/ServiceRequest.py`
+- `backend/api/services/ServiceEscalade.py`
+- `backend/api/core/scheduler.py`
+- `backend/api/core/mailer.py`
+- `backend/api/routes/RouteRequest.py`
+- `backend/templates/_ticket_notification_base.html`
+- `backend/templates/notification_email.html`
+- `backend/tests/api/test_notification_workflow.py` (nouveau, 7 tests)
+- `backend/tests/api/test_transmit_treatment.py` (2 assertions de titre alignées sur le nouveau vocabulaire + 1 nouvelle assertion couvrant la confirmation App-only à l'émetteur)
+- `docs/codex/BUSINESS_RULES.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Vérification: `backend/venv/Scripts/python.exe -m pytest backend/tests/api/test_notification_workflow.py backend/tests/api/test_transmit_treatment.py -q` → 20 passés. Suite complète `backend/tests/api` → 59 échecs (exactement le même total déjà documenté comme préexistant dans l'entrée du 2026-08-07 précédente, ci-dessous — aucune régression nette), 234 passés / 5 skip. Échecs vérifiés individuellement en isolation (`test_creation_auto_route_auto_assign_agent_disponible`, `test_cdc_alignment.py`, `test_directive_comment.py`, `test_escalate_to_director.py`) : tous reproduisent le bug préexistant documenté (`LookupError: 'agent' is not among the defined enum values`, rôle littéral absent de l'enum réel à 7 rôles) ou une dépendance d'ordre d'exécution entre fichiers de test (comptes créés par un autre fichier), aucun lien avec ce lot. `warn_sla_approaching()` non testé en intégration (SQLite ne supporte pas `TIMESTAMPDIFF`, même limitation déjà documentée pour `mark_sla_breached()`/`run_auto_escalation()`, KI-SQL-001) ; le reset du flag anti-répétition à la réouverture (pur Python) est couvert par la relecture de `reopen()`. `npx tsc`/`npm run build` non exécutés — aucun fichier frontend touché par ce lot.
+
+Décisions restant à trancher (signalées, non tranchées ici) :
+- Réouverture immédiate en libre-service (section 18 de la demande) vs BR-REOPEN-QUEUE-001 (approbation chef/directeur) — contradiction à arbitrer avant toute implémentation.
+- SLA préventif : seuil 80% choisi par défaut (aucun seuil fourni par la demande) ; notification du responsable en plus de l'intervenant actuel volontairement omise (marquée "éventuellement" dans la demande) — à confirmer.
+- `close()` : notification "éventuelle" au dernier intervenant (mentionnée comme optionnelle dans la demande) non ajoutée, pour limiter la surface modifiée — à confirmer si souhaitée.
+- `reassign_service()`/`transfer_direction()` : ni le demandeur ni l'ancien intervenant ne sont notifiés (uniquement le nouveau responsable) — non couvert explicitement par la demande, laissé inchangé.
+- Environnement de test : SMTP semble réellement configuré (emails transactionnels effectivement envoyés pendant `pytest`, observé via logs `mailer.py`) — préexistant, hors périmètre de cette demande, signalé pour information.
+
+## 2026-08-07 - Sélecteur @mention pour "Transmettre le traitement" + recherche annuaire tokenisée
+
+Demande: transformer le champ "Recherche" de la modale "Transmettre le traitement" en sélecteur @mention (recherche par prénom/nom dans les deux ordres, matricule, téléphone tolérant au formatage), avec auto-remplissage fiable de Direction/Département/Service à la sélection, gestion des homonymes (aucune sélection automatique), et combinaison possible avec les filtres organigramme existants — sans jamais transformer le workflow collaboratif dynamique en circuit fixe, ni modifier `assignee_id` avant le clic sur "Transmettre".
+
+Audit préalable (tour précédent) : la cascade Direction/Département/Service, la recherche libre et l'auto-remplissage existaient déjà partiellement, mais deux défauts de fond bloquaient le besoin — (1) la recherche annuaire ne supportait qu'un seul mot par requête (aucun résultat pour "Prénom Nom") ; (2) l'auto-remplissage Direction/Département était déjà cassé en silence pour tout compte non-directeur (champs absents de la réponse compte).
+
+Correction:
+- `AccountRepository._apply_search()` (surcharge locale, `base_repository.py` partagé par les autres repositories non touché) : tokenise le terme (chaque mot doit matcher name/firstname/email/matricule/phone — ET entre mots, OU entre colonnes) ; normalise les termes numériques via `core/phone.py` déjà existant (tolère espaces/tirets/indicatif).
+- `AccountRepository.search()` / `ServiceAccount.search()` / `RouteUsers.py::list_users` : `direction_id`/`unit_id` combinables avec `search` au lieu d'être ignorés.
+- `app.requests.$id.tsx` : résolution Direction/Département via `GET /units/{id}` (déjà existant) à partir du `unit_id` réel de la personne sélectionnée, au lieu de champs jamais peuplés côté compte — corrige un bug latent déjà présent avant cette demande.
+- Champ "Recherche" migré vers `components/ui/command.tsx` (cmdk, déjà dans le repo mais jamais utilisé) : navigation clavier haut/bas/entrée/échap native, debounce 400ms (`use-debounce.ts`, réutilisé), matricule affiché dans chaque suggestion et dans la personne sélectionnée pour désambiguïser les homonymes.
+- Aucun nouvel endpoint. Aucune modification de `transmit_treatment()`, `assignee_id`, du workflow dynamique, de BR-TRANSMIT-001/BR-TRACE-001/BR-REQUESTER-NO-SELF-TREATMENT-001/BR-REOPEN-QUEUE-001/BR-SLA-REOPEN-001 — la sélection dans le picker prépare seulement `to_user_id` localement, la transmission réelle reste déclenchée uniquement par le bouton "Transmettre".
+
+Fichiers modifiés:
+- `backend/api/repositories/RepositoryAccount.py`
+- `backend/api/services/ServiceAccount.py`
+- `backend/api/routes/RouteUsers.py`
+- `backend/tests/api/test_directory_search.py` (nouveau)
+- `frontend/src/routes/app.requests.$id.tsx`
+- `docs/codex/BUSINESS_RULES.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+- `docs/codex/API_INDEX.md`
+
+Vérification: `backend/venv/Scripts/python.exe -m pytest backend/tests/api/test_directory_search.py -q` → 9 tests passés. Suite complète `backend/tests/api` (avant/après comparés via `git stash`, untracked exclus) → même ensemble de 59 échecs préexistants des deux côtés (aucune régression), 227→236 tests passés (+9, les nouveaux). `npx tsc --noEmit` → même jeu d'erreurs préexistantes qu'avant (aucune nouvelle). `npm run build` → succès. Vérification visuelle en navigateur non effectuée (pas d'outil d'automatisation navigateur disponible dans cet environnement ; nécessiterait la stack complète MySQL + session authentifiée + données de test avec matricule/téléphone) — signalé explicitement, non simulé.
+
+## 2026-08-07 - Le demandeur ne peut jamais devenir intervenant de son propre ticket (BR-REQUESTER-NO-SELF-TREATMENT-001)
+
+Demande: `requester_id != assignee_id` pour tout ticket, quel que soit le role professionnel du demandeur — ni en s'auto-assignant, ni via une assignation/qualification/transmission/reassignation/escalade faite par un tiers, y compris apres reouverture. Le role professionnel d'un utilisateur ne doit jamais transformer son propre ticket en ticket de traitement pour lui-meme : pour son propre ticket il reste `requester`, jamais `handler` — meme dans "Ma boite de traitement" en lecture.
+
+Analyse prealable : une garde de conflit d'interet existait deja (`assert_ticket_scope`, bloque l'ACTEUR quand `acteur == demandeur`) mais ne verifiait jamais la CIBLE d'une affectation — un tiers pouvait donc transmettre/assigner un ticket au demandeur sans etre bloque. "Ma boite de traitement" et les boutons de traitement de la fiche detail etaient deja corrects (pilotes par `assignee_id`/`isAssignedToMe` + `!iAmRequester`), seule l'ecriture d'`assignee_id` n'etait jamais verifiee cote cible.
+
+Correction:
+- nouvelle garde centralisee `assert_requester_is_not_handler()` (`ticket_actions.py`) + code erreur `REQUESTER_CANNOT_TREAT_OWN_TICKET`, appelee dans `transmit_treatment()`, `assign()`, `qualify_triage()` et le PATCH generique admin.
+- `_select_auto_assignee()` et `_apply_routing()` : exclusion du demandeur de l'auto-assignation a la creation.
+- `reassign_service()` : un chef de service cible qui serait le demandeur est traite comme "aucun chef trouve" (repli existant vers non-assigne).
+- `find_hierarchical_chief()` (escalade manuelle + auto SLA) : nouveau parametre `exclude_requester_id`, applique aux deux niveaux de recherche hierarchique.
+- defense en profondeur cote lecture : `GET /requests?assignee_id=<soi-meme>` ("Ma boite de traitement") exclut aussi les tickets dont l'acteur est le demandeur — scope limite a cette vue precise (`is_own_assignee_view`), sans impact sur les autres usages du filtre `assignee_id` (rapports, charge par agent).
+- frontend : le demandeur du ticket est exclu des selecteurs d'intervenant (`app.requests.$id.tsx` modale transmission, `app.queue.tsx` "Personne cible"), en plus de l'acteur connecte deja exclu.
+- aucune modification du workflow collaboratif dynamique, de `workflow_detail`, des cycles SLA, ni du cas `reject()` (marqueur terminal volontaire, hors perimetre).
+
+Limitation documentee (bug preexistant, non corrige — hors perimetre) : `RepositoryAccount.find_chief_for_unity()` et `_select_auto_assignee()` filtrent sur les roles litteraux `"chief"`/`"agent"` absents de l'enum reel, rendant ces deux chemins actuellement sans effet en pratique (meme sans mon changement) — le repli ajoute ici est correct par relecture de code mais pas verifiable par un test passant tant que ce bug distinct n'est pas corrige.
+
+Fichiers modifies:
+- `backend/api/core/error_codes.py`
+- `backend/api/core/ticket_actions.py`
+- `backend/api/services/ServiceRequest.py`
+- `backend/api/services/ServiceEscalade.py`
+- `backend/api/routes/RouteRequest.py`
+- `backend/api/repositories/RepositoryRequest.py`
+- `backend/tests/api/test_requester_no_self_treatment.py` (nouveau)
+- `frontend/src/routes/app.requests.$id.tsx`
+- `frontend/src/routes/app.queue.tsx`
+- `docs/codex/BUSINESS_RULES.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+- `docs/codex/API_INDEX.md`
+
+Verification: `backend/venv/Scripts/python.exe -m pytest backend/tests/api/test_requester_no_self_treatment.py -q` -> 6 tests passes. Suite de regression `test_transmit_treatment.py` + `test_ticket_actions.py` + `test_reopen_queue.py` + `test_sla_reopen.py` + `test_trace_interventions.py` + `test_requester_no_self_treatment.py` -> 107 passes, 1 skip deja documente, aucune regression. `test_requests_baseline.py` + `test_reopen_queue.py` (isolement croise connu, deja preexistant) -> 30 echecs/35 succes, compte identique avant/apres (verifie par `git stash` lors d'une session precedente), sans lien avec ce changement.
+
+## 2026-08-07 - "Tickets transmis" suit la responsabilite actuelle, plus seulement l'historique
+
+Demande: quand un ticket deja transmis par un utilisateur (visible dans "Tickets transmis") lui revient via une nouvelle transmission d'un tiers, il doit disparaitre de "Tickets transmis" et reapparaitre dans "Ma boite de traitement" avec les actions de traitement disponibles, sans jamais toucher au workflow collaboratif dynamique ni a la tracabilite historique (`workflow_detail`).
+
+Analyse: "Ma boite de traitement" (`app.my-tickets.tsx`, filtre `assignee_id`) et les actions de traitement (`app.requests.$id.tsx`, `isAssignedToMe`) etaient deja pilotees par `assignee_id` courant — deja conformes. Seule `list_transmitted_by_actor()` (BR-TRANSMIT-001) restait purement historique ("independamment du porteur actuel"), en contradiction directe avec la nouvelle regle des lors qu'un ticket revenait a un ancien transmetteur.
+
+Correction:
+- ajout de `AND (r.assignee_id IS NULL OR r.assignee_id != :actor_id)` aux deux requetes SQL de `list_transmitted_by_actor()` (comptage + selection) — exclut les tickets dont l'acteur est redevenu l'intervenant actuel.
+- aucune modification de `transmit_treatment()`, du routage dynamique, de `workflow_detail`, ni d'aucune autre regle metier.
+- docstrings `RepositoryRequest.list_transmitted_by_actor` et `RouteRequest.list_transmitted_by_me` mises a jour pour refleter la nouvelle semantique.
+
+Fichiers modifies:
+- `backend/api/repositories/RepositoryRequest.py`
+- `backend/api/routes/RouteRequest.py`
+- `backend/tests/api/test_transmit_treatment.py` (nouveau test `test_transmitted_view_flips_back_to_my_tickets_when_ticket_returns`, scenario A -> B -> A -> C)
+- `backend/tests/conftest.py` (shim test-only `JSON_UNQUOTE` pour SQLite — necessaire pour executer `GET /requests/transmitted`, jusqu'ici jamais teste sous SQLite ; aucun SQL metier modifie)
+- `docs/codex/BUSINESS_RULES.md`
+- `docs/codex/CHANGELOG_CODEX.md`
+
+Verification: `backend/venv/Scripts/python.exe -m pytest backend/tests/api/test_transmit_treatment.py -q` -> 13 tests passes (dont le nouveau scenario A->B->A->C). Comparaison `git stash` avant/apres sur `test_requests_baseline.py` + `test_reopen_queue.py` -> 30 echecs/35 succes identiques des deux cotes (echecs preexistants, `KeyError: 'agent'` sans lien avec ce changement, hors perimetre de cette demande).
+
 ## 2026-08-06 - Rapports interventions : scope backend obligatoire
 
 Demande: étape 1 de la mise en œuvre des tableaux professionnels/exportables — sécuriser en priorité `GET /reports/interventions` avant toute modification UI.

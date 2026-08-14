@@ -42,9 +42,6 @@ from api.services.ServiceCommunicationSetting import CommunicationSettingService
 from api.services.ServiceAnnouncement import AnnouncementService
 from api.services.ServiceAppreciation import AppreciationService
 
-# ── Sécurité incidents ────────────────────────────────────────────────────────
-from api.services.ServiceSecurityIncident import SecurityIncidentService
-
 # ── Stats ─────────────────────────────────────────────────────────────────────
 from api.services.ServiceStats import StatsService
 
@@ -61,6 +58,5 @@ __all__ = [
     "NotificationService", "ActivityLogService", "KnowledgeArticleService",
     "CommunicationSettingService",
     "AnnouncementService", "AppreciationService",
-    "SecurityIncidentService",
     "StatsService",
 ]

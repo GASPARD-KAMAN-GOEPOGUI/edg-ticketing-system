@@ -277,6 +277,9 @@ export type RequestItem = {
   reopenCount?: number;
   // BR-TRACE-001 — interventions (détail ticket uniquement, absent des listes).
   interventions?: Intervention[];
+  // Avatars des intervenants (demandeur, assigné, acteurs/destinataires du journal),
+  // cle = account id -> avatar_url (détail ticket uniquement, absent des listes).
+  participantAvatars?: Record<string, string>;
   infos?: Record<string, unknown>;
   comments: {
     id: string;

@@ -129,18 +129,7 @@ function ReportsPage() {
   const items = reqData?.items ?? [];
   const total = reqData?.total ?? 0;
 
-  const avgResolutionH = useMemo(() => {
-    const resolved = items.filter(
-      (r) => ["resolved", "closed"].includes(r.status) && r.slaElapsed > 0,
-    );
-    if (resolved.length === 0) return null;
-    return Math.round(resolved.reduce((acc, r) => acc + r.slaElapsed, 0) / resolved.length);
-  }, [items]);
-
   const openCount = items.filter((r) => ACTIVE.has(r.status)).length;
-  const slaActive = items.filter((r) => ACTIVE.has(r.status));
-  const slaOk = slaActive.filter((r) => r.slaElapsed <= r.slaHours).length;
-  const slaPct = slaActive.length > 0 ? Math.round((slaOk / slaActive.length) * 100) : null;
   const csatScore = csatReport?.summary?.avg_rating != null
     ? Number(csatReport.summary.avg_rating).toFixed(1)
     : null;
@@ -375,7 +364,7 @@ function ReportsPage() {
       </header>
 
       {/* KPIs réels */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2">
         <GlassCard>
           <div className="text-sm text-muted-foreground">Volume total</div>
           {isLoading ? (
@@ -387,38 +376,6 @@ function ReportsPage() {
               </div>
               <div className="mt-1 text-xs text-muted-foreground">
                 {openCount} en cours
-              </div>
-            </>
-          )}
-        </GlassCard>
-        <GlassCard>
-          <div className="text-sm text-muted-foreground">Taux délai (actif)</div>
-          {isLoading ? (
-            <Loader2 className="mt-2 h-6 w-6 animate-spin text-muted-foreground" />
-          ) : (
-            <>
-              <div
-                className={`mt-2 text-3xl font-bold tracking-tight ${
-                  slaPct != null && slaPct >= 90 ? "text-success" : "text-warning"
-                }`}
-              >
-                {slaPct != null ? `${slaPct}%` : "—"}
-              </div>
-              <div className="mt-1 text-xs text-muted-foreground">Objectif ≥ 90%</div>
-            </>
-          )}
-        </GlassCard>
-        <GlassCard>
-          <div className="text-sm text-muted-foreground">Délai moyen résolution</div>
-          {isLoading ? (
-            <Loader2 className="mt-2 h-6 w-6 animate-spin text-muted-foreground" />
-          ) : (
-            <>
-              <div className="mt-2 text-3xl font-bold tracking-tight">
-                {avgResolutionH != null ? `${avgResolutionH}h` : "—"}
-              </div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                {avgResolutionH != null ? "Moyenne sur tickets résolus" : "Aucun ticket résolu"}
               </div>
             </>
           )}
@@ -682,197 +639,6 @@ function ReportsPage() {
           )}
         </GlassCard>
       </div>
-
-      {/* Évolution CSAT mensuelle */}
-      <GlassCard>
-        <h3 className="mb-1 font-semibold">Évolution CSAT mensuelle</h3>
-        <p className="mb-4 text-xs text-muted-foreground">
-          Score moyen sur les 12 derniers mois (1 à 5)
-        </p>
-        {csatMonthly.length === 0 ? (
-          <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
-            Aucune donnée mensuelle disponible
-          </div>
-        ) : (
-          <div className="h-56">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={csatMonthly} margin={{ left: -8 }}>
-                <CartesianGrid
-                  stroke="var(--border)"
-                  strokeDasharray="3 3"
-                  vertical={false}
-                />
-                <XAxis
-                  dataKey="month"
-                  tick={{ fontSize: 11 }}
-                  stroke="var(--muted-foreground)"
-                />
-                <YAxis
-                  domain={[0, 5]}
-                  tickCount={6}
-                  tick={{ fontSize: 11 }}
-                  stroke="var(--muted-foreground)"
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: "var(--popover)",
-                    border: "1px solid var(--border)",
-                    borderRadius: 12,
-                    fontSize: 12,
-                  }}
-                  formatter={(v: number) => [`${v.toFixed(2)} / 5`, "Score CSAT"]}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="avg"
-                  name="Score CSAT"
-                  stroke="var(--chart-4)"
-                  strokeWidth={2.5}
-                  dot={{ r: 4, fill: "var(--chart-4)" }}
-                  activeDot={{ r: 6 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-      </GlassCard>
-
-      {/* Rapport par agent */}
-      <GlassCard>
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="font-semibold">Performance par agent</h3>
-            <p className="text-xs text-muted-foreground">
-              Tickets assignés, résolus et taux de résolution par agent DSI
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="rounded-full"
-            onClick={() => handleExport("by-agent")}
-            disabled={exportPending}
-          >
-            {exportPending
-              ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              : <Download className="mr-1.5 h-3.5 w-3.5" />}
-            Exporter agents
-          </Button>
-        </div>
-        {loadAgent ? (
-          <div className="flex h-32 items-center justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
-        ) : agentReport.length === 0 ? (
-          <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
-            Aucune donnée agent disponible pour cette période.
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border/40 text-left">
-                  <th className="pb-2 pr-4 text-xs font-medium text-muted-foreground">Agent</th>
-                  <th className="pb-2 pr-4 text-xs font-medium text-muted-foreground">Unité</th>
-                  <th className="pb-2 pr-4 text-right text-xs font-medium text-muted-foreground">Assignés</th>
-                  <th className="pb-2 pr-4 text-right text-xs font-medium text-muted-foreground">Résolus</th>
-                  <th className="pb-2 pr-4 text-right text-xs font-medium text-muted-foreground">Escaladés</th>
-                  <th className="pb-2 pr-4 text-right text-xs font-medium text-muted-foreground">Moy. résol. (h)</th>
-                  <th className="pb-2 text-right text-xs font-medium text-muted-foreground">Taux</th>
-                </tr>
-              </thead>
-              <tbody>
-                {agentReport.map((row, i) => (
-                  <tr key={i} className="border-b border-border/20 last:border-0">
-                    <td className="py-2.5 pr-4 font-medium">{row.agent_name}</td>
-                    <td className="py-2.5 pr-4 text-muted-foreground">{row.unity_label}</td>
-                    <td className="py-2.5 pr-4 text-right">{row.assigned_total}</td>
-                    <td className="py-2.5 pr-4 text-right text-success">{row.resolved_total}</td>
-                    <td className="py-2.5 pr-4 text-right text-warning">{row.escalated_total}</td>
-                    <td className="py-2.5 pr-4 text-right">{row.avg_resolution_hours?.toFixed(1) ?? "—"}</td>
-                    <td className={`py-2.5 text-right font-semibold ${row.resolution_rate >= 80 ? "text-success" : row.resolution_rate >= 50 ? "text-warning" : "text-destructive"}`}>
-                      {row.resolution_rate}%
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </GlassCard>
-
-      {/* Rapport par service */}
-      <GlassCard>
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="font-semibold">Performance par service</h3>
-            <p className="text-xs text-muted-foreground">
-              Tickets traités, résolus et taux de résolution par service (unité)
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="rounded-full"
-            onClick={() => handleExport("by-unity")}
-            disabled={exportPending || !serviceReportReady}
-          >
-            {exportPending
-              ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              : <Download className="mr-1.5 h-3.5 w-3.5" />}
-            Exporter services
-          </Button>
-        </div>
-        {loadUnity || (!!directionFilter && loadScopedUnits) ? (
-          <div className="flex h-32 items-center justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
-        ) : visibleUnityReport.length === 0 ? (
-          <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
-            {serviceReportReady
-              ? "Aucun service rattaché à cette direction pour cette période."
-              : "Sélectionnez une direction pour voir ses services."}
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border/40 text-left">
-                  <th className="pb-2 pr-4 text-xs font-medium text-muted-foreground">Service</th>
-                  <th className="pb-2 pr-4 text-right text-xs font-medium text-muted-foreground">Assignés</th>
-                  <th className="pb-2 pr-4 text-right text-xs font-medium text-muted-foreground">Résolus</th>
-                  <th className="pb-2 pr-4 text-right text-xs font-medium text-muted-foreground">En attente</th>
-                  <th className="pb-2 pr-4 text-right text-xs font-medium text-muted-foreground">Escaladés</th>
-                  <th className="pb-2 pr-4 text-right text-xs font-medium text-muted-foreground">Moy. résol. (h)</th>
-                  <th className="pb-2 text-right text-xs font-medium text-muted-foreground">Taux</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleUnityReport.map((row, i) => {
-                  const assigned = row.assigned_total ?? row.total ?? 0;
-                  const resolved = row.resolved_total ?? row.resolved ?? 0;
-                  const pending = row.pending_total ?? 0;
-                  const escalated = row.escalated_total ?? 0;
-                  const rate = Number(row.resolution_rate ?? 0);
-                  return (
-                    <tr key={i} className="border-b border-border/20 last:border-0">
-                      <td className="py-2.5 pr-4 font-medium">{row.unity_label}</td>
-                      <td className="py-2.5 pr-4 text-right">{assigned}</td>
-                      <td className="py-2.5 pr-4 text-right text-success">{resolved}</td>
-                      <td className="py-2.5 pr-4 text-right text-warning">{pending}</td>
-                      <td className="py-2.5 pr-4 text-right text-destructive">{escalated}</td>
-                      <td className="py-2.5 pr-4 text-right">{row.avg_resolution_hours?.toFixed(1) ?? "—"}</td>
-                      <td className={`py-2.5 text-right font-semibold ${rate >= 80 ? "text-success" : rate >= 50 ? "text-warning" : "text-destructive"}`}>
-                        {rate}%
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </GlassCard>
 
     </div>
   );

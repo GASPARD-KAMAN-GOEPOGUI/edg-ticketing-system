@@ -90,7 +90,7 @@ function ForgotPassword() {
   const [resetError, setResetError] = useState<string | null>(null);
 
   const pwdMismatch = confirmPwd.length > 0 && newPwd !== confirmPwd;
-  const pwdValid = newPwd.length >= 6 && newPwd === confirmPwd;
+  const pwdValid = newPwd.length >= 8 && newPwd === confirmPwd;
 
   // ── Step 1 : demander le code ──────────────────────────────────────────────
   const sendCode = async () => {
@@ -146,7 +146,7 @@ function ForgotPassword() {
         } else if (err.errorCode === "RESET_CODE_INVALID") {
           setResetError("Code invalide ou déjà utilisé. Vérifiez le code saisi.");
         } else if (err.status === 422) {
-          setResetError("Le mot de passe doit contenir au moins 6 caractères.");
+          setResetError("Le mot de passe doit contenir au moins 8 caractères.");
         } else {
           setResetError(err.message || "Une erreur est survenue.");
         }
@@ -300,7 +300,7 @@ function ForgotPassword() {
           {step === 3 && (
             <div className="mt-6 space-y-4 animate-fade-in">
               <p className="text-sm text-muted-foreground">
-                Choisissez un nouveau mot de passe (6 caractères minimum).
+                Choisissez un nouveau mot de passe (8 caractères minimum).
               </p>
 
               <div>
@@ -309,11 +309,11 @@ function ForgotPassword() {
                   id="newPwd"
                   value={newPwd}
                   onChange={(e) => { setNewPwd(e.target.value); setResetError(null); }}
-                  placeholder="6 caractères minimum"
+                  placeholder="8 caractères minimum"
                 />
-                {newPwd.length > 0 && newPwd.length < 6 && (
+                {newPwd.length > 0 && newPwd.length < 8 && (
                   <p className="mt-1.5 text-xs text-destructive">
-                    Le mot de passe doit contenir au moins 6 caractères.
+                    Le mot de passe doit contenir au moins 8 caractères.
                   </p>
                 )}
               </div>

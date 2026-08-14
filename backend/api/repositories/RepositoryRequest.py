@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import noload
 
@@ -66,6 +66,7 @@ class RequestRepository(BaseRepository[Request]):
         date_to = filters.pop("date_to", None)
         exclude_request_status = filters.pop("exclude_request_status", None)
         unassigned_only = filters.pop("unassigned_only", None)
+        exclude_requester_id = filters.pop("exclude_requester_id", None)
         if date_from:
             stmt = stmt.where(Request.created_at >= date_from)
         if date_to:
@@ -79,6 +80,17 @@ class RequestRepository(BaseRepository[Request]):
             stmt = stmt.where(Request.request_status_id.notin_(self._status_in_sub(excluded_codes)))
         if unassigned_only:
             stmt = stmt.where(Request.assignee_id.is_(None))
+        if exclude_requester_id is not None:
+            # BR-REQUESTER-NO-SELF-TREATMENT-001 — defense en profondeur cote lecture
+            # pour "Ma boite de traitement" (voir is_own_assignee_view, RouteRequest.py) :
+            # un ticket ne doit jamais apparaitre comme travail a faire pour son propre
+            # demandeur, meme en cas d'anomalie de donnees en amont.
+            stmt = stmt.where(
+                or_(
+                    Request.requester_id.is_(None),
+                    Request.requester_id != exclude_requester_id,
+                )
+            )
 
         regular: dict = {}
         for key, val in filters.items():
@@ -86,6 +98,11 @@ class RequestRepository(BaseRepository[Request]):
                 fk_col, ref_model, code_attr = self._CODE_FK_MAP[key]
                 ref_col = getattr(ref_model, code_attr)
                 sub = select(ref_model.id).where(ref_model.deleted_at.is_(None))
+                # Un query param HTTP ne peut porter qu'une string — accepte
+                # "closed,cancelled,rejected" comme liste, même convention que
+                # exclude_request_status ci-dessus (ex. Historique "tous statuts").
+                if isinstance(val, str) and "," in val:
+                    val = [v.strip() for v in val.split(",") if v.strip()]
                 if isinstance(val, (list, tuple, set)):
                     if key == "request_status":
                         val = self._expand_status_codes([str(v) for v in val])
@@ -256,12 +273,18 @@ class RequestRepository(BaseRepository[Request]):
         )
 
     async def list_transmitted_by_actor(
-        self, actor_id: str, *, search: str | None = None, page: int = 1, limit: int = 20
+        self, actor_id: str, *, search: str | None = None, page: int = 1, limit: int = 20,
+        retransmitted_only: bool = False,
     ) -> tuple[list[Request], int]:
         """
         BR-TRANSMIT-001 — tickets où `actor_id` a personnellement transmis le
         traitement (event_type='treatment_transmitted') à un moment de
-        l'historique, indépendamment du porteur actuel ou du statut courant.
+        l'historique, ET dont `actor_id` n'est pas l'intervenant actuel
+        (r.assignee_id != actor_id). L'historique de transmission (workflow_detail)
+        reste permanent ; seule cette vue opérationnelle exclut les tickets qui
+        sont revenus depuis à cet acteur (voir "Ma boîte de traitement",
+        pilotée par assignee_id) — un ticket ne peut pas être simultanément
+        "à traiter" et "transmis" pour la même personne.
 
         L'émetteur ne vit que dans infos.actor_id (JSON) : create_event() écrit
         dest_id (destinataire) dans la colonne réelle agent_id quand dest_id est
@@ -270,6 +293,12 @@ class RequestRepository(BaseRepository[Request]):
         (cycles différents) — dédupliqué ici (GROUP BY), classé par la
         transmission la plus récente. Même style de requête JSON brute déjà
         utilisé par ServiceStats.py (escalation_stats/global_kpis).
+
+        retransmitted_only=True (BR-RETRANSMIT-001) — ne garde que les tickets
+        où `actor_id` a transmis AU MOINS DEUX FOIS (`HAVING COUNT(*) >= 2`) :
+        pour transmettre deux fois le même ticket, il faut nécessairement qu'il
+        lui soit revenu entre-temps (réassignation/réouverture) — pas besoin de
+        modéliser ce "retour" séparément, le comptage des transmissions suffit.
         """
         params = {"actor_id": str(actor_id)}
         search_clause = ""
@@ -285,6 +314,7 @@ class RequestRepository(BaseRepository[Request]):
                     OR LOWER(COALESCE(r.meter_number, '')) LIKE :search_like
                   )
             """
+        having_clause = "HAVING COUNT(*) >= 2" if retransmitted_only else ""
 
         count_stmt = text(f"""
             SELECT COUNT(*) FROM (
@@ -295,8 +325,10 @@ class RequestRepository(BaseRepository[Request]):
                 WHERE wd.event_type = 'treatment_transmitted'
                   AND wd.deleted_at IS NULL
                   AND JSON_UNQUOTE(JSON_EXTRACT(wd.infos, '$.actor_id')) = :actor_id
+                  AND (r.assignee_id IS NULL OR r.assignee_id != :actor_id)
                   {search_clause}
                 GROUP BY wf.request_id
+                {having_clause}
             ) t
         """)
         total = (await self.session.execute(count_stmt, params)).scalar_one() or 0
@@ -311,8 +343,10 @@ class RequestRepository(BaseRepository[Request]):
             WHERE wd.event_type = 'treatment_transmitted'
               AND wd.deleted_at IS NULL
               AND JSON_UNQUOTE(JSON_EXTRACT(wd.infos, '$.actor_id')) = :actor_id
+              AND (r.assignee_id IS NULL OR r.assignee_id != :actor_id)
               {search_clause}
             GROUP BY wf.request_id
+            {having_clause}
             ORDER BY last_transmitted_at DESC
             LIMIT :limit OFFSET :offset
         """)

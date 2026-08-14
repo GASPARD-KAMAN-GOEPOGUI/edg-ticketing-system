@@ -206,12 +206,17 @@ function RequestHistory() {
       page,
       limit: pageSize,
       request_status: safeTab,
-      ...(sessionUser?.id && { requester_id: sessionUser.id }),
+      // requester_id n'est envoyé que pour le rôle "user" (historique = mes
+      // propres tickets). Pour les autres rôles, le laisser absent permet au
+      // backend d'appliquer son scoping RBAC naturel (unité/direction/global) —
+      // sinon le backend bascule en "vue personnelle" et court-circuite ce
+      // scoping, quel que soit le rôle (cf. RouteRequest.py is_own_view).
+      ...(sessionUser?.id && sessionUser.role === "user" && { requester_id: sessionUser.id }),
       ...(debouncedQ && { search: debouncedQ }),
       ...(dateFrom && { date_from: dateFrom }),
       ...(dateTo && { date_to: dateTo }),
     }),
-    [dateFrom, dateTo, debouncedQ, page, pageSize, sessionUser?.id, safeTab],
+    [dateFrom, dateTo, debouncedQ, page, pageSize, sessionUser?.id, sessionUser?.role, safeTab],
   );
 
   const { data, isLoading, isError } = useQuery({

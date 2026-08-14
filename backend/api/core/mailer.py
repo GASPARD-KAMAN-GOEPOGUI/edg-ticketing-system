@@ -35,8 +35,8 @@ _EMAIL_VARIANTS = {
         "color": "#008D24",
         "soft_color": "#eaf8ee",
         "icon": "&#10004;",
-        "headline": "Votre demande a bien ete enregistree !",
-        "subtitle": "Merci. Nous avons bien recu votre demande. Notre equipe va l'analyser dans les plus brefs delais.",
+        "headline": "Votre ticket a bien ete enregistre !",
+        "subtitle": "Merci. Nous avons bien recu votre ticket. Notre equipe va l'analyser dans les plus brefs delais.",
     },
     "received": {
         "template": "ticket_accuse_reception.html",
@@ -44,8 +44,8 @@ _EMAIL_VARIANTS = {
         "color": "#1d6fd8",
         "soft_color": "#eaf3ff",
         "icon": "&#9993;",
-        "headline": "Nous avons bien recu votre demande",
-        "subtitle": "Votre demande est en cours d'analyse par notre equipe support.",
+        "headline": "Nous avons bien recu votre ticket",
+        "subtitle": "Votre ticket est en cours d'analyse par notre equipe support.",
     },
     "assigned": {
         "template": "ticket_affectation.html",
@@ -53,8 +53,8 @@ _EMAIL_VARIANTS = {
         "color": "#f28c00",
         "soft_color": "#fff3df",
         "icon": "&#128100;",
-        "headline": "Votre demande a ete assignee",
-        "subtitle": "Un agent a ete designe pour traiter votre demande.",
+        "headline": "Votre ticket a ete assigne",
+        "subtitle": "Un agent a ete designe pour traiter votre ticket.",
     },
     "status": {
         "template": "ticket_changement_statut.html",
@@ -62,8 +62,8 @@ _EMAIL_VARIANTS = {
         "color": "#f4b400",
         "soft_color": "#fff8d9",
         "icon": "&#128339;",
-        "headline": "Mise a jour du statut de votre demande",
-        "subtitle": "Le statut de votre demande a ete modifie.",
+        "headline": "Mise a jour du statut de votre ticket",
+        "subtitle": "Le statut de votre ticket a ete modifie.",
     },
     "validated": {
         "template": "ticket_validation.html",
@@ -71,7 +71,7 @@ _EMAIL_VARIANTS = {
         "color": "#008D24",
         "soft_color": "#eaf8ee",
         "icon": "&#128737;",
-        "headline": "Votre demande a ete validee",
+        "headline": "Votre ticket a ete valide",
         "subtitle": "La solution proposee a ete validee.",
     },
     "resolved": {
@@ -80,8 +80,8 @@ _EMAIL_VARIANTS = {
         "color": "#0b9da8",
         "soft_color": "#e5fbfb",
         "icon": "&#9881;",
-        "headline": "Votre demande a ete resolue",
-        "subtitle": "L'agent a marque votre demande comme resolue.",
+        "headline": "Votre ticket a ete resolu",
+        "subtitle": "L'agent a marque votre ticket comme resolu.",
     },
     "closed": {
         "template": "ticket_cloture.html",
@@ -89,8 +89,8 @@ _EMAIL_VARIANTS = {
         "color": "#008D24",
         "soft_color": "#eaf8ee",
         "icon": "&#10004;",
-        "headline": "Votre demande est cloturee",
-        "subtitle": "Votre demande a ete cloturee avec succes.",
+        "headline": "Votre ticket est cloture",
+        "subtitle": "Votre ticket a ete cloture avec succes.",
     },
     "reopened": {
         "template": "ticket_reouverture.html",
@@ -98,8 +98,8 @@ _EMAIL_VARIANTS = {
         "color": "#6f52d9",
         "soft_color": "#f1edff",
         "icon": "&#8635;",
-        "headline": "Votre demande a ete rouverte",
-        "subtitle": "Votre demande a ete rouverte pour traitement.",
+        "headline": "Votre ticket a ete rouvert",
+        "subtitle": "Votre ticket a ete rouvert pour traitement.",
     },
     "transfer": {
         "template": "ticket_transfert.html",
@@ -107,8 +107,8 @@ _EMAIL_VARIANTS = {
         "color": "#1d6fd8",
         "soft_color": "#eaf3ff",
         "icon": "&#8644;",
-        "headline": "Votre demande a ete transferee",
-        "subtitle": "Votre demande a ete transferee a une autre direction.",
+        "headline": "Votre ticket a ete transfere",
+        "subtitle": "Votre ticket a ete transfere a une autre direction.",
     },
     "sla": {
         "template": "ticket_alerte_sla.html",
@@ -117,7 +117,7 @@ _EMAIL_VARIANTS = {
         "soft_color": "#fff8d9",
         "icon": "&#9888;",
         "headline": "Delai de traitement depasse",
-        "subtitle": "Le delai de traitement de votre demande est depasse.",
+        "subtitle": "Le delai de traitement de votre ticket est depasse.",
     },
     "rejected": {
         "template": "ticket_rejet_annulation.html",
@@ -125,8 +125,8 @@ _EMAIL_VARIANTS = {
         "color": "#ef2f32",
         "soft_color": "#ffecec",
         "icon": "&#10005;",
-        "headline": "Votre demande a ete rejetee",
-        "subtitle": "Votre demande ne peut pas etre traitee.",
+        "headline": "Votre ticket a ete rejete",
+        "subtitle": "Votre ticket ne peut pas etre traite.",
     },
     "payment": {
         "template": "ticket_recu_paiement.html",
@@ -180,7 +180,15 @@ def _render_details_loop(template: str, details: object) -> str:
         visible_items = [(key, value) for key, value in details.items() if value]
         for index, (label, value) in enumerate(visible_items):
             row = row_template
-            row = re.sub(r"{%\s*if\s+value\s*%}(.*?){%\s*endif\s*%}", r"\1", row, flags=re.DOTALL)
+            # BR-EMAIL-TEMPLATE-001 — `{% if not loop.last %}` est imbriqué à
+            # l'intérieur de `{% if value %}` dans le template de base. Ces
+            # substitutions regex ne comprennent pas l'imbrication : chaque
+            # `.*?{% endif %}` s'arrête au PREMIER `{% endif %}` rencontré, quel
+            # que soit son propriétaire réel. Résoudre l'imbriqué (`not loop.last`)
+            # AVANT l'englobant (`value`) est donc obligatoire — dans l'ordre
+            # inverse, `{% if value %}` se referme sur le mauvais `{% endif %}`
+            # (celui d'un `not loop.last`), laissant un `{% endif %}` orphelin
+            # visible tel quel dans l'email final.
             border = index != len(visible_items) - 1
             row = re.sub(
                 r"{%\s*if\s+not\s+loop\.last\s*%}(.*?){%\s*endif\s*%}",
@@ -188,6 +196,7 @@ def _render_details_loop(template: str, details: object) -> str:
                 row,
                 flags=re.DOTALL,
             )
+            row = re.sub(r"{%\s*if\s+value\s*%}(.*?){%\s*endif\s*%}", r"\1", row, flags=re.DOTALL)
             row = row.replace("{{ label }}", escape(str(label)))
             row = row.replace("{{ value }}", escape(str(value)))
             rows.append(row)
@@ -310,33 +319,36 @@ async def send_reset_code_email(to_email: str, code: str, name: str = "") -> boo
         return False
 
     subject = "Votre code de réinitialisation EDG Connect"
+    greeting = f"Bonjour {name}, v" if name else "V"
     html = _render_template(
         "reset_code_email.html",
         title="Réinitialisation du mot de passe",
-        greeting_name=name,
-        intro="Vous avez demandé une réinitialisation de votre mot de passe. Voici votre code de vérification à 6 chiffres :",
-        code=code,
-        warning=(
-            "Ce code est valable 15 minutes. Ne le partagez avec personne. "
-            "Si vous n'avez pas demandé cette réinitialisation, ignorez cet email."
+        color="#1d6fd8",
+        icon="&#128273;",
+        headline="Code de vérification",
+        subtitle=(
+            f"{greeting}oici le code à 6 chiffres pour réinitialiser votre mot de passe. "
+            "Il est valable 15 minutes et ne doit être partagé avec personne. "
+            "Si vous n'êtes pas à l'origine de cette demande, ignorez cet email."
         ),
+        details={"Code de vérification": code, "Expire dans": "15 minutes"},
+        support_email="support@edg-support.gn",
+        support_phone="(+224) 153 456 789",
     )
 
-    msg = MIMEMultipart("alternative")
+    # multipart/related (+ alternative imbriqué) et _attach_logo() — même structure
+    # que send_notification_email(), nécessaire pour que le <img src="cid:edg-logo">
+    # du template partagé (_ticket_notification_base.html) s'affiche réellement.
+    msg = MIMEMultipart("related")
+    msg_alt = MIMEMultipart("alternative")
     msg["From"] = f"EDG Connect <{_env.SMTP_USER}>"
     msg["To"] = to_email
     msg["Subject"] = subject
-    msg.attach(MIMEText(html, "html", "utf-8"))
+    msg_alt.attach(MIMEText(html, "html", "utf-8"))
+    msg.attach(msg_alt)
+    _attach_logo(msg)
 
-    import aiosmtplib  # import tardif — optionnel si non installé
-    await aiosmtplib.send(
-        msg,
-        hostname=_env.SMTP_HOST,
-        port=_env.SMTP_PORT,
-        username=_env.SMTP_USER,
-        password=_env.SMTP_PASSWORD,
-        start_tls=True,
-    )
+    await _smtp_send(msg)
     logger.info("Email reset envoyé à %r", to_email)
     return True
 
@@ -353,6 +365,32 @@ async def _smtp_send(msg: MIMEMultipart) -> None:
     )
 
 
+def render_notification_html(
+    *,
+    title: str,
+    body: str,
+    recipient_name: str = "",
+    action_url: str | None = None,
+    action_label: str = "Voir le ticket",
+    notification_type: str | None = None,
+    request_details: dict[str, object] | None = None,
+) -> str:
+    """
+    Rend le HTML final d'un email de notification ticket — sans envoi SMTP.
+    Réutilisée par `send_notification_email()` (source unique de rendu) et par
+    les tests (générer/valider le HTML avant tout envoi réel).
+    """
+    template_name, context = _notification_context(
+        title=title,
+        body=body,
+        action_url=action_url,
+        action_label=action_label,
+        notification_type=notification_type,
+        request_details=request_details,
+    )
+    return _render_template(template_name, greeting_name=recipient_name, **context)
+
+
 async def send_notification_email(
     *,
     to_email: str,
@@ -360,7 +398,7 @@ async def send_notification_email(
     title: str,
     body: str,
     action_url: str | None = None,
-    action_label: str = "Voir la demande",
+    action_label: str = "Voir le ticket",
     notification_type: str | None = None,
     request_details: dict[str, object] | None = None,
 ) -> bool:
@@ -371,15 +409,15 @@ async def send_notification_email(
     if not _is_configured():
         return False
 
-    template_name, context = _notification_context(
+    html = render_notification_html(
         title=title,
         body=body,
+        recipient_name=recipient_name,
         action_url=action_url,
         action_label=action_label,
         notification_type=notification_type,
         request_details=request_details,
     )
-    html = _render_template(template_name, greeting_name=recipient_name, **context)
 
     msg = MIMEMultipart("related")
     msg_alt = MIMEMultipart("alternative")

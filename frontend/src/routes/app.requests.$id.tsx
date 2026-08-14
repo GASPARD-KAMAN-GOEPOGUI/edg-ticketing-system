@@ -3,7 +3,7 @@ import { requireAuth } from "@/lib/auth-guard";
 import { WorkflowTimeline } from "@/components/workflow-timeline";
 import { InterventionJournal } from "@/components/intervention-journal";
 import { useState, useRef, useEffect, useMemo } from "react";
-import { useQuery, useMutation, useQueryClient, useQueries } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { GlassCard } from "@/components/glass-card";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ import { StatusBadge, PriorityBadge } from "@/components/status-badge";
 import type { RequestItem, Appreciation } from "@/lib/mock-data";
 import { roleLabels } from "@/lib/mock-data";
 import { AppreciationForm } from "@/components/appreciation-form";
-import { cn } from "@/lib/utils";
+import { cn, formatElapsedHours } from "@/lib/utils";
 import { useRole, useUser } from "@/lib/session";
 import {
   Dialog,
@@ -39,9 +39,7 @@ import {
   assignRequest,
   createComment,
   deleteComment,
-  requestReopen,
   reopenRequest,
-  rejectReopenRequest,
   closeRequest,
   updateRequest,
   changeRequestPriority,
@@ -58,13 +56,21 @@ import {
   type RawAttachment,
 } from "@/lib/api/requests";
 import { fetchRefTable } from "@/lib/api/admin-config";
-import { buildAvatarUrl, fetchUser, fetchUsers, type AccountUser } from "@/lib/api/accounts";
-import { fetchDirections, fetchDepartments, fetchUnits } from "@/lib/api/directions-units";
+import { buildAvatarUrl, fetchUser, fetchUsers, fetchUsersByIds, type AccountUser } from "@/lib/api/accounts";
+import { fetchDirections, fetchDepartments, fetchUnits, fetchUnit } from "@/lib/api/directions-units";
 import type { Direction, Unit } from "@/lib/api/directions-units";
+import { useDebounce } from "@/lib/hooks/use-debounce";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { submitAppreciation, updateRequestAppreciation } from "@/lib/api/csat";
 import {
   fetchRequestWorkflows,
-  createAutoCircuit,
   type WorkflowItem,
 } from "@/lib/api/workflow";
 
@@ -118,6 +124,21 @@ import { canTicketAction, isRequester } from "@/lib/capabilities";
 export const Route = createFileRoute("/app/requests/$id")({
   beforeLoad: () => requireAuth(),
   head: () => ({ meta: [{ title: "Détail ticket — EDG Support" }] }),
+  // Précharge le ticket + ses pièces jointes en parallèle au survol du lien —
+  // mêmes queryKeys que les useQuery du composant (context="requests" ici).
+  loader: ({ context: { queryClient }, params: { id } }) =>
+    Promise.all([
+      queryClient.ensureQueryData({
+        queryKey: ["request", id, "active"],
+        queryFn: () => fetchRequest(id, { includeDeleted: false }),
+        staleTime: 15_000,
+      }),
+      queryClient.ensureQueryData({
+        queryKey: ["request", id, "active", "attachments"],
+        queryFn: () => fetchAttachments(id),
+        staleTime: 30_000,
+      }),
+    ]),
   component: RequestDetail,
   notFoundComponent: () => (
     <div className="mx-auto max-w-md p-10 text-center">
@@ -128,6 +149,11 @@ export const Route = createFileRoute("/app/requests/$id")({
     </div>
   ),
 });
+
+// Anciennement masqué temporairement — remis visible sur demande. Repasser à
+// false pour masquer à nouveau l'onglet "Discussions" + le bouton "Ouvrir une
+// discussion" (ex. pendant la refonte titulaire actuel + demandeur en attente).
+const DISCUSSIONS_TAB_ENABLED = true;
 
 const DETAIL_CONTEXTS = {
   requests: {
@@ -207,9 +233,7 @@ const DETAIL_CONTEXTS = {
 export type RequestDetailContext = keyof typeof DETAIL_CONTEXTS;
 type DetailTab = "description" | "journal" | "comments" | "files" | "sla" | "treatment";
 type DirectTreatmentAction =
-  | "approveReopen"
   | "selfAssign"
-  | "takeOwnership"
   | "resume"
   | "close";
 
@@ -229,6 +253,7 @@ type Participant = {
   role?: string;
   detail: string;
   lastAt?: string;
+  avatar?: string;
 };
 
 const COMMENT_EMOJIS = [
@@ -258,7 +283,17 @@ function ParticipantRow({ participant }: { participant: Participant }) {
   return (
     <li className="flex items-start gap-3 rounded-2xl bg-background/30 p-3 transition hover:bg-background/50">
       <span className="relative grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-bold text-primary ring-2 ring-primary/10">
-        {initialsFor(participant.name)}
+        <span className="absolute inset-0 grid place-items-center overflow-hidden rounded-full">
+          {participant.avatar ? (
+            <img
+              src={buildAvatarUrl(participant.avatar)}
+              alt={participant.name}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            initialsFor(participant.name)
+          )}
+        </span>
         <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-background bg-primary" />
       </span>
       <div className="min-w-0 flex-1">
@@ -290,6 +325,7 @@ function buildParticipants(
   visibleComments: RequestItem["comments"],
   assigneeName?: string,
 ): Participant[] {
+  const avatars = request.participantAvatars ?? {};
   const participants = new Map<string, Participant>();
   const add = (candidate: Participant) => {
     const normalized = candidate.key || `${candidate.name}-${candidate.role ?? ""}`;
@@ -304,6 +340,7 @@ function buildParticipants(
       role: existing.role ?? candidate.role,
       detail: shouldReplaceDate ? candidate.detail : existing.detail,
       lastAt: shouldReplaceDate ? candidate.lastAt : existing.lastAt,
+      avatar: existing.avatar ?? candidate.avatar,
     });
   };
 
@@ -314,6 +351,7 @@ function buildParticipants(
       role: "user",
       detail: "Créateur",
       lastAt: request.createdAt,
+      avatar: request.requesterId ? avatars[request.requesterId] : undefined,
     });
   }
 
@@ -325,6 +363,7 @@ function buildParticipants(
       role: "agent-support",
       detail: "Assigné",
       lastAt: request.updatedAt,
+      avatar: request.assigneeId ? avatars[request.assigneeId] : undefined,
     });
   }
 
@@ -336,6 +375,7 @@ function buildParticipants(
         role: event.actorRole,
         detail: event.label,
         lastAt: event.at,
+        avatar: event.actorId ? avatars[event.actorId] : undefined,
       });
     }
     if (event.targetUserName) {
@@ -345,6 +385,7 @@ function buildParticipants(
         role: event.targetRole,
         detail: "Destinataire",
         lastAt: event.at,
+        avatar: event.targetUserId ? avatars[event.targetUserId] : undefined,
       });
     }
   }
@@ -353,8 +394,9 @@ function buildParticipants(
     add({
       key: comment.authorId || `comment-${comment.author}`,
       name: comment.author,
-      detail: "Commentaire",
+      detail: "Message",
       lastAt: comment.createdAt,
+      avatar: comment.authorId ? avatars[comment.authorId] : undefined,
     });
   }
 
@@ -489,7 +531,7 @@ const FIXED_LIFECYCLE_STEPS = [
   { key: "closure", label: "Fermeture" },
 ] as const;
 
-type FixedStepState = "done" | "active" | "pending" | "warning";
+type FixedStepState = "done" | "active" | "pending" | "cancelled";
 
 // Position (0-4) du statut courant dans le cycle de vie fixe CDC
 // Ouverture -> Qualification -> Traitement -> Validation -> Fermeture.
@@ -504,8 +546,11 @@ const STATUS_STEP_INDEX: Record<string, number> = {
   reopened: 2,
   resolved: 3,
   closed: 4,
-  rejected: 2,
-  cancelled: 2,
+  // rejected/cancelled reviennent au point initial (étape "Ouverture") plutôt
+  // que de rester bloqués sur l'étape où l'annulation/le rejet a eu lieu — le
+  // marqueur rouge à l'étape 1 signale l'arrêt du cycle de vie.
+  rejected: 0,
+  cancelled: 0,
 };
 
 function buildFixedLifecycleSteps(request: RequestItem) {
@@ -548,12 +593,12 @@ function buildFixedLifecycleSteps(request: RequestItem) {
   return FIXED_LIFECYCLE_STEPS.map((step, index) => {
     let state: FixedStepState;
     if (index < currentIndex || (isTerminalDone && index === currentIndex)) state = "done";
-    else if (index === currentIndex) state = isRejectedOrCancelled ? "warning" : "active";
+    else if (index === currentIndex) state = isRejectedOrCancelled ? "cancelled" : "active";
     else state = "pending";
 
     const dateLabel =
       state === "done" ? (formatTraceDate(stepDates[index]) ?? "—")
-      : state === "warning" ? (DETAIL_STATUS_LABELS[status] ?? status)
+      : state === "cancelled" ? (DETAIL_STATUS_LABELS[status] ?? status)
       : state === "active" ? "En cours"
       : "—";
 
@@ -583,7 +628,7 @@ function TicketLifecycleStepper({ request }: { request: RequestItem }) {
                     "grid h-7 w-7 place-items-center rounded-full border text-[11px] font-semibold shadow-sm sm:h-8 sm:w-8 sm:text-xs",
                     step.state === "done" && "border-emerald-500 bg-emerald-500 text-white shadow-emerald-500/25",
                     step.state === "active" && "border-primary bg-primary text-primary-foreground shadow-primary/25",
-                    step.state === "warning" && "border-amber-500 bg-amber-500 text-white shadow-amber-500/25",
+                    step.state === "cancelled" && "border-destructive bg-destructive text-white shadow-destructive/25",
                     step.state === "pending" && "border-border/70 bg-background/60 text-muted-foreground",
                   )}>
                     {step.state === "done" ? <CheckCircle2 className="h-3.5 w-3.5" /> : index + 1}
@@ -631,16 +676,12 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const { data: attachments = [], isLoading: attachmentsLoading } = useQuery({
     queryKey: attachmentsQueryKey,
     queryFn: () => fetchAttachments(id),
-    enabled: !!r?.id,
     staleTime: 30_000,
   });
 
   const [comment, setComment] = useState("");
-  const [replyTarget, setReplyTarget] = useState<string | null>(null);
-  const [replyToId, setReplyToId] = useState<string | null>(null);
   const [stagedFile, setStagedFile] = useState<File | null>(null);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
-  const [isPublic, setIsPublic] = useState(false);
   const [isDirective, setIsDirective] = useState(false);
   const [role] = useRole();
   // Dans "Mes demandes", le propriétaire garde la vue demandeur. Dans les espaces
@@ -710,25 +751,22 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const [showPriorityPicker, setShowPriorityPicker] = useState(false);
   const [showRejectConfirm, setShowRejectConfirm] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
-  const [showRejectReopenConfirm, setShowRejectReopenConfirm] = useState(false);
-  const [rejectReopenNote, setRejectReopenNote] = useState("");
   const [showServicePicker, setShowServicePicker] = useState(false);
   const [showDirectionTransfer, setShowDirectionTransfer] = useState(false);
   const [transferDirectionId, setTransferDirectionId] = useState("");
   const [transferReason, setTransferReason] = useState("");
-  const [showCircuitDialog, setShowCircuitDialog] = useState(false);
   const [showClosedRequestDialog, setShowClosedRequestDialog] = useState(false);
   const [showAppreciationDialog, setShowAppreciationDialog] = useState(false);
   const [directTreatmentAction, setDirectTreatmentAction] =
     useState<DirectTreatmentAction | null>(null);
-  const [circuitDirectionId, setCircuitDirectionId] = useState("");
-  const [circuitUnitId, setCircuitUnitId] = useState("");
   // Espaces de traitement (queue, boîtes de chef, supervision, direction…) :
   // on ouvre directement sur "Traitement" puisque c'est là que se trouvent
   // désormais les actions (déplacées depuis les boutons de la card liste).
   // Le contexte personnel ("Mes demandes") reste sur la description.
   const [activeDetailTab, setActiveDetailTab] = useState<DetailTab>(
-    wantsCommentsDeepLink ? "comments" : isPersonalContext ? "journal" : "treatment",
+    wantsCommentsDeepLink && DISCUSSIONS_TAB_ENABLED
+      ? "comments"
+      : isPersonalContext ? "journal" : "treatment",
   );
   const [showAllParticipants, setShowAllParticipants] = useState(false);
   const [showAllDetails, setShowAllDetails] = useState(false);
@@ -905,14 +943,16 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     onMutate: async (assigneeId) => {
       await qc.cancelQueries({ queryKey: requestQueryKey });
       const previous = qc.getQueryData<RequestItem>(requestQueryKey);
+      // BR-QUEUE-AUTO-START-001 : une assignation démarre directement le
+      // traitement (`in_progress`), plus d'étape "assigned" intermédiaire.
       qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
-        old ? { ...old, assigneeId, status: "assigned" } : old,
+        old ? { ...old, assigneeId, status: "in_progress" } : old,
       );
       return { previous };
     },
     onSuccess: (_, assigneeId) => {
       const agent = agentPool.find((u) => u.id === assigneeId);
-      toast.success(`Réassigné à ${agent?.name ?? assigneeId}`);
+      toast.success(`Réassigné à ${agent?.name ?? assigneeId} — traitement démarré.`);
       setShowReassign(false);
     },
     onError: (_err, _vars, context) => {
@@ -927,20 +967,22 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     onMutate: async () => {
       await qc.cancelQueries({ queryKey: requestQueryKey });
       const previous = qc.getQueryData<RequestItem>(requestQueryKey);
+      // BR-QUEUE-AUTO-START-001 : "M'assigner" démarre directement le
+      // traitement (`in_progress`), plus d'étape "assigned" intermédiaire.
       qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
         old
           ? {
               ...old,
               assigneeId: String(sessionUser?.id ?? ""),
               assigneeName: authorName,
-              status: "assigned",
+              status: "in_progress",
             }
           : old,
       );
       return { previous };
     },
     onSuccess: () => {
-      toast.success("Ticket assigné à vous.");
+      toast.success("Ticket pris en charge — traitement démarré.");
       setDirectTreatmentAction(null);
     },
     onError: (_err, _vars, context) => {
@@ -959,19 +1001,21 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
 
   const activeWorkflow = workflows.find((w) => w.workflowStatus === "active") ?? workflows[0];
 
-  // Phase 1 : utilisateur demande la réouverture (motif obligatoire)
+  // BR-REOPEN-QUEUE-001 (révision — réouverture immédiate) : un seul appel, motif
+  // obligatoire, aucune approbation hiérarchique — le ticket retourne directement
+  // en File d'attente pour un nouveau cycle de traitement.
   const requestReopenMut = useMutation({
-    mutationFn: (reason: string) => requestReopen(id, reason),
+    mutationFn: (reason: string) => reopenRequest(id, reason),
     onMutate: async () => {
       await qc.cancelQueries({ queryKey: requestQueryKey });
       const previous = qc.getQueryData<RequestItem>(requestQueryKey);
       qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
-        old ? { ...old, infos: { ...(old.infos ?? {}), reopen_requested: true } } : old,
+        old ? { ...old, status: "reopened" } : old,
       );
       return { previous };
     },
     onSuccess: () => {
-      toast.success("Demande de réouverture envoyée — le chef de service sera notifié.");
+      toast.success("Ticket réouvert et replacé dans la File d'attente.");
       setShowReopenForm(false);
       setShowClosedRequestDialog(false);
       setReopenReason("");
@@ -979,53 +1023,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     onError: (err: unknown, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
       const msg = (err as { message?: string })?.message;
-      toast.error(msg ?? "Impossible d'envoyer la demande de réouverture.");
-    },
-    onSettled: () => invalidate(),
-  });
-
-  const approveReopenMut = useMutation({
-    mutationFn: () => reopenRequest(id),
-    onMutate: async () => {
-      await qc.cancelQueries({ queryKey: requestQueryKey });
-      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
-      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
-        old ? { ...old, status: "reopened", infos: { ...(old.infos ?? {}), reopen_requested: false } } : old,
-      );
-      return { previous };
-    },
-    onSuccess: () => {
-      toast.success("Réouverture approuvée — le ticket retourne en traitement.");
-      setDirectTreatmentAction(null);
-    },
-    onError: (_err, _vars, context) => {
-      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible d'approuver la réouverture.");
-    },
-    onSettled: () => invalidate(),
-  });
-
-  const rejectReopenMut = useMutation({
-    mutationFn: () => rejectReopenRequest(id, rejectReopenNote.trim()),
-    onMutate: async () => {
-      await qc.cancelQueries({ queryKey: requestQueryKey });
-      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
-      qc.setQueryData<RequestItem>(requestQueryKey, (old) => {
-        if (!old) return old;
-        const infos = { ...(old.infos ?? {}) };
-        delete infos.reopen_requested;
-        return { ...old, infos };
-      });
-      return { previous };
-    },
-    onSuccess: () => {
-      toast.success("Réouverture refusée avec motif.");
-      setShowRejectReopenConfirm(false);
-      setRejectReopenNote("");
-    },
-    onError: (_err, _vars, context) => {
-      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible de refuser la réouverture.");
+      toast.error(msg ?? "Impossible de réouvrir le ticket.");
     },
     onSettled: () => invalidate(),
   });
@@ -1089,52 +1087,26 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     onSettled: () => invalidate(),
   });
 
-  const takeOwnershipMut = useMutation({
-    mutationFn: () => updateRequest(id, { request_status: "in_progress" }),
-    onMutate: async () => {
-      await qc.cancelQueries({ queryKey: requestQueryKey });
-      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
-      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
-        old ? { ...old, status: "in_progress" } : old,
-      );
-      return { previous };
-    },
-    onSuccess: () => {
-      toast.success("Ticket pris en charge — traitement en cours.");
-      setDirectTreatmentAction(null);
-    },
-    onError: (_err, _vars, context) => {
-      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible de prendre en charge le ticket.");
-    },
-    onSettled: () => invalidate(),
-  });
-
   const requestInfoMut = useMutation({
-    mutationFn: async () => {
-      await createComment(id, {
+    // Le ticket reste "En cours" — on ne bascule plus vers "En attente" pour
+    // cette action (sur demande explicite : plus de bouton "Reprendre le
+    // traitement" à faire réapparaître). Le demandeur est quand même notifié
+    // par mail + in-app via la notification standard "nouveau message"
+    // déclenchée par la création d'un commentaire public de l'intervenant
+    // assigné (RouteRequest.py create_comment, send_email par défaut).
+    mutationFn: () =>
+      createComment(id, {
         author_id: authorId,
         author_name: authorName,
         body: infoQuestion.trim(),
         is_public: true,
-      });
-      return updateRequest(id, { request_status: "pending", status_reason: "info_request" });
-    },
-    onMutate: async () => {
-      await qc.cancelQueries({ queryKey: requestQueryKey });
-      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
-      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
-        old ? { ...old, status: "pending" } : old,
-      );
-      return { previous };
-    },
+      }),
     onSuccess: () => {
-      toast.success("Le demandeur a été notifié — ticket mis en attente.");
+      toast.success("Le demandeur a été notifié.");
       setShowRequestInfoForm(false);
       setInfoQuestion("");
     },
-    onError: (_err, _vars, context) => {
-      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
+    onError: () => {
       toast.error("Impossible d'envoyer la demande d'informations.");
     },
     onSettled: () => invalidate(),
@@ -1236,21 +1208,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     onSettled: () => invalidate(),
   });
 
-  const createCircuitMut = useMutation({
-    mutationFn: () => createAutoCircuit(id, {
-      direction_id: circuitDirectionId ? Number(circuitDirectionId) : undefined,
-      unit_id: circuitUnitId ? Number(circuitUnitId) : undefined,
-    }),
-    onSuccess: () => {
-      toast.success("Circuit de validation créé avec succès");
-      setShowCircuitDialog(false);
-      setCircuitDirectionId("");
-      setCircuitUnitId("");
-      invalidateWorkflows();
-    },
-    onError: () => toast.error("Impossible de créer le circuit de validation"),
-  });
-
   const escalateMut = useMutation({
     mutationFn: () => escalateRequest(id, {
       reason: escalateReason.trim() || "Escalade manuelle",
@@ -1314,15 +1271,13 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
         );
         attachmentId = uploaded.id;
       }
-      const finalBody = replyTarget ? `@${replyTarget} ${comment.trim()}` : comment.trim();
       return createComment(id, {
         author_id: authorId,
         author_name: authorName,
-        body: finalBody,
-        is_public: isRequesterView ? true : isPublic,
+        body: comment.trim(),
+        is_public: true,
         attachment_id: attachmentId,
         is_directive: canSendDirective ? isDirective : false,
-        reply_to_id: replyToId ?? undefined,
       });
     },
     onMutate: async () => {
@@ -1332,9 +1287,8 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
         id: `temp-${Date.now()}`,
         authorId: String(authorId),
         author: authorName,
-        body: replyTarget ? `@${replyTarget} ${comment.trim()}` : comment.trim(),
-        isPublic: isRequesterView ? true : isPublic,
-        replyToId: replyToId ?? undefined,
+        body: comment.trim(),
+        isPublic: true,
         isEdited: false,
         createdAt: new Date().toISOString(),
         attachmentName: stagedFile?.name,
@@ -1348,18 +1302,16 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       toast.success(
         canSendDirective && isDirective
           ? "Directive envoyée à l'agent"
-          : stagedFile ? "Commentaire et pièce jointe envoyés" : "Commentaire ajouté",
+          : stagedFile ? "Message et pièce jointe envoyés" : "Message envoyé",
       );
       setComment("");
-      setReplyTarget(null);
-      setReplyToId(null);
       setStagedFile(null);
       setIsDirective(false);
       if (attachRef.current) attachRef.current.value = "";
     },
     onError: (_err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible d'ajouter le commentaire.");
+      toast.error("Impossible d'envoyer le message.");
     },
     onSettled: () => invalidate(),
   });
@@ -1374,10 +1326,10 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       );
       return { previous };
     },
-    onSuccess: () => toast.success("Commentaire supprimé."),
+    onSuccess: () => toast.success("Message supprimé."),
     onError: (_err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible de supprimer le commentaire.");
+      toast.error("Impossible de supprimer le message.");
     },
     onSettled: () => invalidate(),
   });
@@ -1406,13 +1358,11 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     return Array.from(ids).slice(0, 20);
   }, [r?.requesterId, r?.assigneeId, r?.comments]);
 
-  const commentAuthorQueries = useQueries({
-    queries: commentAuthorIds.map((authorId) => ({
-      queryKey: ["user", authorId],
-      queryFn: () => fetchUser(authorId),
-      enabled: !!r?.id && !!authorId,
-      staleTime: 300_000,
-    })),
+  const { data: commentAuthorsData } = useQuery({
+    queryKey: ["users", "batch", commentAuthorIds],
+    queryFn: () => fetchUsersByIds(commentAuthorIds),
+    enabled: !!r?.id && commentAuthorIds.length > 0,
+    staleTime: 300_000,
   });
 
   const { data: directions = [] } = useQuery({
@@ -1451,13 +1401,33 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     staleTime: 5 * 60_000,
   });
   const currentUserId = String(sessionUser?.id ?? "");
+  const requesterIdForFilter = r?.requesterId ? String(r.requesterId) : "";
+  // BR-REQUESTER-NO-SELF-TREATMENT-001 — le demandeur du ticket ne doit jamais
+  // être sélectionnable comme prochain intervenant (en plus de l'acteur courant).
   const filterCurrentUser = (users: AccountUser[]) =>
-    users.filter((user) => String(user.id) !== currentUserId);
+    users.filter((user) => String(user.id) !== currentUserId && String(user.id) !== requesterIdForFilter);
+  // Sélecteur @mention — préfixe "@" facultatif (purement cosmétique, le champ est
+  // entièrement dédié à la recherche de personne), débounce 400ms (même hook et
+  // délai que app.admin.logs.tsx) avant de solliciter le backend.
+  const debouncedTransmitSearch = useDebounce(transmitSearch, 400);
+  const transmitSearchTerm = debouncedTransmitSearch.trim().replace(/^@+/, "").trim();
   const { data: transmitPeople = [], isFetching: transmitPeopleLoading } = useQuery({
-    queryKey: ["transmit-people", transmitSearch, transmitUnitId, transmitDepartmentId, transmitDirectionId, currentUserId],
+    queryKey: [
+      "transmit-people", transmitSearchTerm, transmitUnitId, transmitDepartmentId, transmitDirectionId, currentUserId,
+    ],
     queryFn: async () => {
-      if (transmitSearch.trim()) {
-        const res = await fetchUsers({ search: transmitSearch.trim(), limit: 50 });
+      if (transmitSearchTerm) {
+        // Recherche libre combinée au filtre organigramme déjà posé (le plus
+        // précis en premier) — le backend applique désormais les deux ensemble
+        // au lieu de les ignorer (voir RepositoryAccount.search côté API).
+        const scope = transmitUnitId
+          ? { unit_id: transmitUnitId }
+          : transmitDepartmentId
+            ? { unit_id: transmitDepartmentId }
+            : transmitDirectionId
+              ? { direction_id: transmitDirectionId }
+              : {};
+        const res = await fetchUsers({ search: transmitSearchTerm, ...scope, limit: 50 });
         return filterCurrentUser(res.items.filter((u) => TREATING_ROLES.has(u.role)));
       }
       if (transmitUnitId) {
@@ -1486,18 +1456,30 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     [transmitPeople, transmitTargetId],
   );
 
+  // Résolution Direction/Département réelle de la personne sélectionnée : les
+  // comptes non-directeurs n'exposent pas direction_id/department_id (aucune
+  // colonne dédiée côté compte, cf. audit), donc on résout via /units/{id}
+  // (déjà utilisé ailleurs, department_id/direction_id/*_name déjà résolus
+  // côté backend) plutôt que de dépendre de champs vides sur la personne.
+  const { data: selectedPersonUnit } = useQuery({
+    queryKey: ["unit-detail", selectedTransmitPerson?.unit_id],
+    queryFn: () => fetchUnit(selectedTransmitPerson!.unit_id!),
+    enabled: !!transmitTargetId && !!selectedTransmitPerson?.unit_id,
+    staleTime: 5 * 60_000,
+  });
+
   useEffect(() => {
-    if (!transmitTargetId || !selectedTransmitPerson) return;
-    if (selectedTransmitPerson.direction_id && transmitDirectionId !== selectedTransmitPerson.direction_id) {
-      setTransmitDirectionId(selectedTransmitPerson.direction_id);
+    if (!transmitTargetId || !selectedPersonUnit) return;
+    if (selectedPersonUnit.direction_id && transmitDirectionId !== selectedPersonUnit.direction_id) {
+      setTransmitDirectionId(selectedPersonUnit.direction_id);
     }
-    if (selectedTransmitPerson.department_id && transmitDepartmentId !== selectedTransmitPerson.department_id) {
-      setTransmitDepartmentId(selectedTransmitPerson.department_id);
+    if (selectedPersonUnit.department_id && transmitDepartmentId !== selectedPersonUnit.department_id) {
+      setTransmitDepartmentId(selectedPersonUnit.department_id);
     }
-    if (selectedTransmitPerson.unit_id && transmitUnitId !== selectedTransmitPerson.unit_id) {
-      setTransmitUnitId(selectedTransmitPerson.unit_id);
+    if (transmitUnitId !== selectedPersonUnit.id) {
+      setTransmitUnitId(selectedPersonUnit.id);
     }
-  }, [selectedTransmitPerson, transmitTargetId, transmitDirectionId, transmitDepartmentId, transmitUnitId]);
+  }, [selectedPersonUnit, transmitTargetId, transmitDirectionId, transmitDepartmentId, transmitUnitId]);
 
   if (isLoading) {
     return (
@@ -1520,8 +1502,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
 
   const localStatus = localAppreciation ? r.status : r.status;
   const authorType = (r.requesterType === "external" || r.isExternal) ? "external" : "internal";
-  const slaPct = r.slaHours > 0 ? Math.min(100, Math.round((r.slaElapsed / r.slaHours) * 100)) : 0;
-  const slaOver = r.slaHours > 0 && r.slaElapsed > r.slaHours;
   const assignedUnit = units.find((u) => String(u.id) === String(r.serviceId));
   const unitName = assignedUnit?.name ?? "—";
   const departmentName = assignedUnit?.department_name ?? "—";
@@ -1550,11 +1530,17 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
 
   const visibleComments = isRequesterView ? r.comments.filter((c) => c.isPublic) : r.comments;
   const participants = buildParticipants(r, visibleComments, assigneeUser?.name);
+  // La messagerie (Discussions) doit rester distincte du Journal — un message
+  // n'y apparaît plus comme entrée générique de la chronologie complète (BR-MESSAGING-PARTICIPANTS-001).
+  const journalEvents = r.timeline.filter((e) => e.type !== "comment_added");
+  // BR-MESSAGING-PARTICIPANTS-001 — messagerie réservée au demandeur + intervenants
+  // réels du ticket (= la liste "Intervenants" déjà calculée juste au-dessus).
+  const isTicketParticipant = isRequesterView
+    || participants.some((p) => isRequester(p.key, sessionUser?.id));
   const commentAuthorProfiles = new Map<string, AccountUser>();
-  commentAuthorQueries.forEach((query, index) => {
-    const authorId = commentAuthorIds[index];
-    if (authorId && query.data) commentAuthorProfiles.set(authorId, query.data);
-  });
+  for (const account of commentAuthorsData ?? []) {
+    commentAuthorProfiles.set(String(account.id), account);
+  }
   for (const account of agentPool) {
     commentAuthorProfiles.set(String(account.id), account);
   }
@@ -1584,25 +1570,15 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     );
   };
   const canDeleteComment = (item: RequestItem["comments"][number]) => {
-    if (isArchived || r.status === "closed" || r.status === "rejected") return false;
+    if (isArchived || r.status === "closed" || r.status === "rejected" || r.status === "cancelled") return false;
     if (!sessionUser?.id || !item.authorId) return false;
     if (String(item.authorId) === String(sessionUser.id)) return true;
     const isOwnerView = Boolean(r.requesterId && String(sessionUser.id) === String(r.requesterId));
     return sessionUser.role !== "user" && !isOwnerView;
   };
-  const lastVisibleComment = visibleComments[visibleComments.length - 1];
-  // Badge "reponse attendue" bidirectionnel par camp (demandeur <-> personnel) :
-  // s'allume pour le viewer dont ce n'est pas le camp qui a parle en dernier,
-  // tant que le ticket reste actif (meme garde que le bouton "Repondre" ci-dessous).
-  const isDiscussionLocked = isArchived || r.status === "closed" || r.status === "rejected";
-  const lastCommentFromRequesterSide = isRequester(r.requesterId, lastVisibleComment?.authorId);
-  const needsUserResponse =
-    !isDiscussionLocked &&
-    Boolean(lastVisibleComment) &&
-    (isRequesterView ? !lastCommentFromRequesterSide : lastCommentFromRequesterSide);
+  const isDiscussionLocked = isArchived || r.status === "closed" || r.status === "rejected" || r.status === "cancelled";
   const isAssignedToMe = isRequester(r.assigneeId, sessionUser?.id);
   const hasAssignee = Boolean(r.assigneeId);
-  const hasReopenRequest = (r.infos as Record<string, unknown> | undefined)?.reopen_requested === true;
 
   // Fenêtre réouverture ticket fermé (7 jours après fermeture)
   const canReopenClosed = r.closedAt
@@ -1612,17 +1588,13 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const canEdit = !isArchived && iAmRequester && canTicketAction(role, "requester_edit", r.status, ownershipOptions);
   const canCancel = !isArchived && iAmRequester && canTicketAction(role, "cancel", r.status, ownershipOptions);
   const canClose = !isArchived && iAmRequester && canTicketAction(role, "close", r.status, ownershipOptions);
-  const canRequestReopen = !isArchived && iAmRequester && canTicketAction(role, "request_reopen", r.status, {
+  const canRequestReopen = !isArchived && iAmRequester && canTicketAction(role, "reopen", r.status, {
     ...ownershipOptions,
     canReopenClosed,
   });
   const canSelfAssign = !isArchived && isAgentOnly && canTicketAction(role, "self_assign", r.status, {
     ...ownershipOptions,
     hasAssignee,
-    isAssignedToMe,
-  });
-  const canTakeOwnership = !isArchived && isAgentOnly && canTicketAction(role, "take_ownership", r.status, {
-    ...ownershipOptions,
     isAssignedToMe,
   });
   const canRequestInfo = !isArchived && isAgentOnly && canTicketAction(role, "request_info", r.status, ownershipOptions);
@@ -1649,39 +1621,24 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const canSendDirective = !isRequesterView
     && (role === "chief-service" || role === "chief-departement")
     && !!r.assigneeId;
-  const canCreateCircuit = !isArchived && !iAmRequester && canTicketAction(role, "create_circuit", r.status, ownershipOptions);
   const canChangePriority = !isArchived && !iAmRequester && canTicketAction(role, "change_priority", r.status, ownershipOptions);
   const canChangeService = !isArchived && !iAmRequester && canTicketAction(role, "change_service", r.status, ownershipOptions);
   const canTransferDirection = !isArchived && !iAmRequester && canTicketAction(role, "transfer_direction", r.status, ownershipOptions);
   const canRejectTicket = !isArchived && !iAmRequester && canTicketAction(role, "reject", r.status, ownershipOptions);
-  const canApproveReopen = !isArchived && !iAmRequester && canTicketAction(role, "approve_reopen", r.status, {
-    ...ownershipOptions,
-    hasReopenRequest,
-  });
-  const canRejectReopen = !isArchived && !iAmRequester && canTicketAction(role, "reject_reopen", r.status, {
-    ...ownershipOptions,
-    hasReopenRequest,
-  });
-  const canDecideReopen = canApproveReopen || canRejectReopen;
   const canShowClosedRequestAction = isRequesterView && r.status === "closed";
-  const canOpenAppreciation = isRequesterView && (r.status === "resolved" || r.status === "closed");
   const assigneeDisplayName = assigneeUser?.name ?? r.assigneeName ?? (r.assigneeId ? "Agent assigné" : "Non assigné");
   const createdAtLabel = formatTicketDateTime(r.createdAt);
   const updatedAtLabel = formatTicketDateTime(r.updatedAt);
-  const canShowQuickActions = canEdit || canCancel || canClose || canRequestReopen || canShowClosedRequestAction || canOpenAppreciation;
+  const canShowQuickActions = canEdit || canCancel || canClose || canRequestReopen || canShowClosedRequestAction;
   const hasRequestActions = canShowQuickActions;
   const hasTreatmentActions = !isRequesterView && (
     (r.status === "reopened" && !r.assigneeId) ||
-    canApproveReopen ||
-    canRejectReopen ||
     canSelfAssign ||
-    canTakeOwnership ||
     canRequestInfo ||
     canResumeTreatment ||
     canEscalateTicket ||
     canEscalateToDirector ||
     canAssignTicket ||
-    canCreateCircuit ||
     canChangePriority ||
     canRejectTicket ||
     canChangeService ||
@@ -1691,10 +1648,11 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   );
   const detailTabs: Array<{ key: DetailTab; label: string; count?: number; icon: LucideIcon }> = [
     { key: "description", label: "Description", icon: FileText },
-    { key: "journal", label: "Journals", count: r.timeline.length, icon: GitBranch },
-    { key: "comments", label: "Discussions", count: visibleComments.length, icon: MessageSquare },
+    { key: "journal", label: "Journals", count: journalEvents.length, icon: GitBranch },
+    ...(DISCUSSIONS_TAB_ENABLED
+      ? [{ key: "comments" as DetailTab, label: "Discussions", count: visibleComments.length, icon: MessageSquare }]
+      : []),
     { key: "files", label: "Fichiers", count: attachments.length, icon: Paperclip },
-    { key: "sla", label: "Délais de traitement", icon: Clock },
     { key: "treatment", label: "Traitement", icon: Wrench },
   ];
   const sideParticipants = participants.slice(0, 4);
@@ -1702,14 +1660,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const sideCardClass = "glass-strong rounded-[18px] p-4 sm:p-5";
   const directTreatmentActionConfig = (() => {
     switch (directTreatmentAction) {
-      case "approveReopen":
-        return {
-          icon: RotateCcw,
-          title: "Approuver la réouverture",
-          description: "Le ticket retournera en traitement et le demandeur sera notifié.",
-          confirmLabel: "Approuver",
-          isPending: approveReopenMut.isPending,
-        };
       case "selfAssign":
         return {
           icon: UserCheck,
@@ -1717,14 +1667,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
           description: "Le ticket vous sera attribué pour prise en charge.",
           confirmLabel: "M'assigner",
           isPending: selfAssignMut.isPending,
-        };
-      case "takeOwnership":
-        return {
-          icon: UserCheck,
-          title: "Démarrer le traitement",
-          description: "Le ticket passera en cours de traitement.",
-          confirmLabel: "Démarrer",
-          isPending: takeOwnershipMut.isPending,
         };
       case "resume":
         return {
@@ -1734,40 +1676,23 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
           confirmLabel: "Reprendre",
           isPending: resumeMut.isPending,
         };
-      case "close":
-        return {
-          icon: CheckCircle2,
-          title: "Confirmer la résolution",
-          description: "Le ticket sera clôturé et le traitement sera considéré comme terminé.",
-          confirmLabel: "Confirmer",
-          isPending: closeMut.isPending,
-        };
       default:
         return null;
     }
   })();
   const confirmDirectTreatmentAction = () => {
     switch (directTreatmentAction) {
-      case "approveReopen":
-        approveReopenMut.mutate();
-        break;
       case "selfAssign":
         selfAssignMut.mutate();
         break;
-      case "takeOwnership":
-        takeOwnershipMut.mutate();
-        break;
       case "resume":
         resumeMut.mutate();
-        break;
-      case "close":
-        closeMut.mutate();
         break;
     }
   };
 
   const treatmentActionsPanel = (
-    !isRequesterView && (isFinal && !canDecideReopen) ? (
+    !isRequesterView && isFinal ? (
       <div className="flex w-full flex-wrap items-center gap-2 rounded-full border border-border/40 bg-muted/30 px-4 py-2 text-sm text-muted-foreground">
         <Lock className="h-3.5 w-3.5" />
         Ticket {isArchived ? "archivé" : r.status === "closed" ? "clôturé" : r.status === "rejected" ? "rejeté" : "résolu"} — aucune action disponible
@@ -1781,35 +1706,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             <RotateCcw className="h-3.5 w-3.5 shrink-0" />
             Ce ticket réouvert attend une nouvelle prise en charge.
           </div>
-        )}
-        {canApproveReopen && (
-          <button
-            type="button"
-            className="flex items-start gap-3 rounded-xl border border-success/40 bg-success/10 p-3 text-left transition hover:bg-success/15 disabled:opacity-60"
-            onClick={() => setDirectTreatmentAction("approveReopen")}
-            disabled={approveReopenMut.isPending}
-          >
-            {approveReopenMut.isPending
-              ? <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-success" />
-              : <RotateCcw className="mt-0.5 h-4 w-4 shrink-0 text-success" />}
-            <span>
-              <span className="block text-sm font-semibold text-success">Approuver réouverture</span>
-              <span className="text-xs text-muted-foreground">Le ticket retourne en traitement</span>
-            </span>
-          </button>
-        )}
-        {canRejectReopen && (
-          <button
-            type="button"
-            className="flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-left transition hover:bg-destructive/15"
-            onClick={() => setShowRejectReopenConfirm(true)}
-          >
-            <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-            <span>
-              <span className="block text-sm font-semibold text-destructive">Refuser réouverture</span>
-              <span className="text-xs text-muted-foreground">Le ticket reste dans son état actuel</span>
-            </span>
-          </button>
         )}
         {/* Agent — auto-assignation d'un ticket libre de son périmètre */}
         {canSelfAssign && (
@@ -1828,25 +1724,8 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             </span>
           </button>
         )}
-        {/* C1/C9 — Prendre en charge : ASSIGNED, agent seulement */}
-        {canTakeOwnership && (
-          <button
-            type="button"
-            className="flex items-start gap-3 rounded-xl border border-primary/40 bg-primary/10 p-3 text-left transition hover:bg-primary/15 disabled:opacity-60"
-            onClick={() => setDirectTreatmentAction("takeOwnership")}
-            disabled={takeOwnershipMut.isPending}
-          >
-            {takeOwnershipMut.isPending
-              ? <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary" />
-              : <UserCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" />}
-            <span>
-              <span className="block text-sm font-semibold text-primary">Démarrer traitement</span>
-              <span className="text-xs text-muted-foreground">Passer le ticket en cours</span>
-            </span>
-          </button>
-        )}
         {/* C2 — Demander des informations : IN_PROGRESS, agent seulement */}
-        {canRequestInfo && (
+        {DISCUSSIONS_TAB_ENABLED && canRequestInfo && (
           <button
             type="button"
             className="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-left transition hover:bg-amber-500/10"
@@ -1855,7 +1734,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             <MessageSquareWarning className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
             <span>
               <span className="block text-sm font-semibold text-amber-500">Ouvrir une discussion</span>
-              <span className="text-xs text-muted-foreground">Mettre en attente du demandeur</span>
+              <span className="text-xs text-muted-foreground">Demander une précision au demandeur</span>
             </span>
           </button>
         )}
@@ -1877,7 +1756,8 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
           </button>
         )}
         {/* C5 — Escalader : agent, chef, directeur, admin seulement */}
-        {canEscalateTicket && (
+        {/* Masqué temporairement à la demande du métier (2026-08-13) — repasser à `canEscalateTicket` pour réactiver. */}
+        {false && canEscalateTicket && (
           <button
             type="button"
             className="flex items-start gap-3 rounded-xl border border-orange-600/40 bg-orange-600/10 p-3 text-left transition hover:bg-orange-600/15"
@@ -1916,20 +1796,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             <span>
               <span className="block text-sm font-semibold text-primary">Réassigner</span>
               <span className="text-xs text-muted-foreground">Choisir un autre agent</span>
-            </span>
-          </button>
-        )}
-        {/* Créer circuit : agent, chef, admin */}
-        {canCreateCircuit && workflows.length === 0 && (
-          <button
-            type="button"
-            className="flex items-start gap-3 rounded-xl border border-indigo-600/40 bg-indigo-600/10 p-3 text-left transition hover:bg-indigo-600/15"
-            onClick={() => setShowCircuitDialog(true)}
-          >
-            <GitBranch className="mt-0.5 h-4 w-4 shrink-0 text-indigo-600" />
-            <span>
-              <span className="block text-sm font-semibold text-indigo-600">Créer circuit</span>
-              <span className="text-xs text-muted-foreground">Circuit de validation automatique</span>
             </span>
           </button>
         )}
@@ -2087,7 +1953,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
           <button
             type="button"
             className="flex items-start gap-3 rounded-xl border border-success/40 bg-success/10 p-3 text-left transition hover:bg-success/15 disabled:opacity-60"
-            onClick={() => setDirectTreatmentAction("close")}
+            onClick={() => setShowAppreciationDialog(true)}
             disabled={closeMut.isPending}
           >
             {closeMut.isPending
@@ -2096,19 +1962,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             <span>
               <span className="block text-sm font-semibold text-success">Confirmer la résolution</span>
               <span className="text-xs text-muted-foreground">Après traitement</span>
-            </span>
-          </button>
-        )}
-        {canOpenAppreciation && (
-          <button
-            type="button"
-            className="flex items-start gap-3 rounded-xl border border-border/40 bg-background/30 p-3 text-left transition hover:bg-foreground/5"
-            onClick={() => setShowAppreciationDialog(true)}
-          >
-            <Star className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-            <span>
-              <span className="block text-sm font-semibold">Votre avis</span>
-              <span className="text-xs text-muted-foreground">Évaluer la prise en charge</span>
             </span>
           </button>
         )}
@@ -2121,11 +1974,11 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       <div>
         {visibleComments.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-border/50 bg-background/35 px-4 py-5 text-sm text-muted-foreground">
-            Aucun commentaire pour l'instant.
+            Aucun message pour l'instant.
           </p>
         ) : (
           <ul className="relative space-y-4 pb-1">
-            {visibleComments.map((c, index) => {
+            {visibleComments.map((c) => {
               const fullAttachment = c.attachmentName
                 ? attachments.find((a) => a.id === c.attachmentId)
                 : undefined;
@@ -2135,7 +1988,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
               const isMine = isRequester(c.authorId, sessionUser?.id);
               const attachmentSize = c.attachmentSize ?? fullAttachment?.size_bytes;
               const attachmentMime = c.attachmentMime ?? fullAttachment?.mime_type ?? "";
-              const isAwaitingReply = needsUserResponse && index === visibleComments.length - 1;
 
               return (
                 <li key={c.id} className={cn("relative flex min-w-0 gap-3", isMine && "flex-row-reverse")}>
@@ -2198,7 +2050,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                             <button
                               type="button"
                               className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full text-muted-foreground opacity-80 transition hover:bg-background/80 hover:text-foreground"
-                              title="Options du commentaire"
+                              title="Options du message"
                             >
                               <MoreVertical className="h-4 w-4" />
                             </button>
@@ -2220,29 +2072,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                       isMine ? "pr-1" : "pl-1",
                     )}>
                       <span>{formatCommentDate(c.createdAt)}</span>
-                      {!(isArchived || r.status === "closed" || r.status === "rejected") && (
-                        <>
-                          <span aria-hidden>-</span>
-                          <button
-                            type="button"
-                            className={cn(
-                              "rounded-full font-medium transition",
-                              isAwaitingReply
-                                ? "animate-pulse bg-success/20 px-2.5 py-1 text-success ring-1 ring-success/50"
-                                : "hover:text-foreground",
-                            )}
-                            title={isAwaitingReply ? "Une réponse est attendue à ce message" : undefined}
-                            onClick={() => {
-                              setReplyTarget(c.author);
-                              setReplyToId(c.id);
-                              commentRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-                              commentRef.current?.focus();
-                            }}
-                          >
-                            Repondre
-                          </button>
-                        </>
-                      )}
                     </div>
                   </div>
                 </li>
@@ -2251,28 +2080,18 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
           </ul>
         )}
 
-        {isArchived || r.status === "closed" || r.status === "rejected" ? (
+        {isDiscussionLocked ? (
           <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/30 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
             <Lock className="h-3.5 w-3.5 shrink-0" />
-            Les commentaires sont desactives - ticket {isArchived ? "archive" : r.status === "closed" ? "cloture" : "rejete"}.
+            La messagerie est desactivee - ticket {isArchived ? "archive" : r.status === "closed" ? "cloture" : r.status === "cancelled" ? "annule" : "rejete"}.
+          </div>
+        ) : !isTicketParticipant ? (
+          <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/30 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+            <Lock className="h-3.5 w-3.5 shrink-0" />
+            Messagerie réservée au demandeur et aux intervenants de ce ticket — lecture seule pour vous.
           </div>
         ) : (
           <div className="mt-5 rounded-2xl border border-border/40 bg-background/45 p-2 shadow-sm">
-            {replyTarget && (
-              <div className="mb-2 flex items-center justify-between gap-2 px-2 py-1">
-                <span className="min-w-0 truncate text-sm font-medium text-success">
-                  Répondre à @{replyTarget}
-                </span>
-                <button
-                  type="button"
-                  className="grid h-5 w-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-                  title="Annuler la réponse"
-                  onClick={() => { setReplyTarget(null); setReplyToId(null); }}
-                >
-                  <XCircle className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            )}
             {stagedFile && (
               <div className="mb-2 ml-0 flex items-center gap-2 rounded-xl border border-border/40 bg-background/70 px-3 py-2 text-xs sm:ml-12">
                 <FileText className="h-3.5 w-3.5 shrink-0 text-primary" />
@@ -2294,7 +2113,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
               <div className="flex min-w-0 flex-1 items-end gap-1 rounded-xl border border-border/35 bg-background/70 px-3 py-1.5">
                 <Textarea
                   ref={commentRef}
-                  placeholder={isRequesterView ? "Ecrire un commentaire..." : "Ajouter un commentaire..."}
+                  placeholder="Écrire un message..."
                   value={comment}
                   onChange={(e) => setComment(e.target.value)}
                   className="max-h-28 min-h-10 resize-none border-0 bg-transparent px-0 py-2 text-sm shadow-none focus-visible:ring-0"
@@ -2355,22 +2174,14 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                 {commentMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Envoyer"}
               </Button>
             </div>
-            {!isRequesterView && (
+            {!isRequesterView && canSendDirective && (
               <div className="mt-2 flex flex-wrap items-center gap-4 pl-0 sm:pl-12">
                 <div className="flex items-center gap-2">
-                  <Switch id="public" checked={isPublic} onCheckedChange={setIsPublic} />
-                  <Label htmlFor="public" className="text-sm">
-                    Visible par le demandeur
+                  <Switch id="directive" checked={isDirective} onCheckedChange={setIsDirective} />
+                  <Label htmlFor="directive" className="text-sm font-medium text-warning-foreground dark:text-warning">
+                    Marquer comme directive
                   </Label>
                 </div>
-                {canSendDirective && (
-                  <div className="flex items-center gap-2">
-                    <Switch id="directive" checked={isDirective} onCheckedChange={setIsDirective} />
-                    <Label htmlFor="directive" className="text-sm font-medium text-warning-foreground dark:text-warning">
-                      Marquer comme directive
-                    </Label>
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -2431,24 +2242,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
               Créée le <span className="text-foreground">{createdAtLabel}</span> par{" "}
               <span className="text-foreground">{isRequesterView ? "vous" : r.requesterName}</span>
             </p>
-          </div>
-
-          <div className="w-full border-t border-border/40 pt-5 xl:w-72 xl:shrink-0 xl:border-l xl:border-t-0 xl:pl-6 xl:pt-0">
-            <div className={cn("flex items-center gap-2 text-sm font-semibold", slaOver ? "text-destructive" : "text-success")}>
-              {slaOver ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
-              {slaOver ? "Délai dépassé" : "Délai conforme"}
-            </div>
-            <div className="mt-2 text-3xl font-bold sm:text-4xl">{slaPct}%</div>
-            <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
-              <Clock className="h-4 w-4" />
-              {r.slaHours > 0 ? `${r.slaElapsed}h / ${r.slaHours}h` : "Délai non configuré"}
-            </div>
-            <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
-              <div
-                className={cn("h-full rounded-full", slaOver ? "bg-destructive" : "gradient-primary")}
-                style={{ width: `${slaPct}%` }}
-              />
-            </div>
           </div>
         </div>
 
@@ -2645,7 +2438,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                     Ouvrir une discussion
                   </DialogTitle>
                   <DialogDescription>
-                    Le demandeur recevra une notification. Le ticket passera en attente jusqu'à sa réponse.
+                    Le demandeur recevra une notification (email + app). Le ticket reste en cours de traitement.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-2 py-2">
@@ -2918,21 +2711,35 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                   chaîne fixe, le ticket reste dans son statut de traitement actif.
                 </DialogDescription>
               </DialogHeader>
-              <div className="space-y-3 py-2">
+              <Command
+                shouldFilter={false}
+                className="contents space-y-3 py-2"
+                onKeyDown={(e) => {
+                  // §17 — Échap ferme les suggestions (efface la recherche) sans
+                  // fermer toute la modale ; flèches haut/bas + Entrée déjà gérées
+                  // nativement par cmdk sur CommandInput/CommandItem.
+                  if (e.key === "Escape" && transmitSearch) {
+                    e.stopPropagation();
+                    setTransmitSearch("");
+                  }
+                }}
+              >
                 <div className="space-y-1.5">
                   <Label htmlFor="transmit-search" className="text-sm font-medium">
                     Recherche
                   </Label>
-                  <input
-                    id="transmit-search"
-                    value={transmitSearch}
-                    onChange={(e) => {
-                      setTransmitSearch(e.target.value);
-                      setTransmitTargetId("");
-                    }}
-                    placeholder="Nom d'un intervenant, dans toute l'organisation…"
-                    className="w-full rounded-xl border border-border/50 bg-background/60 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                  />
+                  <div className="rounded-xl border border-border/50 bg-background/60 focus-within:ring-2 focus-within:ring-primary/40">
+                    <CommandInput
+                      id="transmit-search"
+                      value={transmitSearch}
+                      onValueChange={(value) => {
+                        setTransmitSearch(value);
+                        setTransmitTargetId("");
+                      }}
+                      placeholder="@Nom, matricule ou téléphone…"
+                      className="h-9 border-b-0"
+                    />
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                   <div className="space-y-1.5">
@@ -3001,7 +2808,8 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                             {[selectedTransmitPerson.firstname, selectedTransmitPerson.name].filter(Boolean).join(" ")}
                           </div>
                           <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                            {selectedTransmitPerson.email} · {roleLabels[selectedTransmitPerson.role as keyof typeof roleLabels] ?? selectedTransmitPerson.role}
+                            {selectedTransmitPerson.matricule ? `${selectedTransmitPerson.matricule} · ` : ""}
+                            {roleLabels[selectedTransmitPerson.role as keyof typeof roleLabels] ?? selectedTransmitPerson.role}
                             {(selectedTransmitPerson.service ?? selectedTransmitPerson.direction) ? ` · ${selectedTransmitPerson.service ?? selectedTransmitPerson.direction}` : ""}
                           </div>
                         </div>
@@ -3018,47 +2826,45 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                       </div>
                     </div>
                   ) : (
-                    <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-border/40 bg-background/40 p-1.5">
+                    <CommandList className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-border/40 bg-background/40 p-1.5">
                       {transmitPeopleLoading ? (
-                        <p className="px-2 py-3 text-center text-xs text-muted-foreground">Recherche en cours…</p>
+                        <CommandEmpty className="px-2 py-3 text-center text-xs text-muted-foreground">
+                          Recherche en cours…
+                        </CommandEmpty>
                       ) : transmitPeople.length === 0 ? (
-                        <p className="px-2 py-3 text-center text-xs text-muted-foreground">
-                          {transmitSearch.trim() || transmitUnitId || transmitDepartmentId || transmitDirectionId
+                        <CommandEmpty className="px-2 py-3 text-center text-xs text-muted-foreground">
+                          {transmitSearchTerm || transmitUnitId || transmitDepartmentId || transmitDirectionId
                             ? "Aucun intervenant actif trouvé pour ces critères."
-                            : "Recherchez un nom ou affinez par direction/département/service."}
-                        </p>
+                            : "Recherchez @Prénom Nom, un matricule ou un téléphone, ou affinez par direction/département/service."}
+                        </CommandEmpty>
                       ) : (
-                        transmitPeople.map((person) => (
-                          <button
-                            key={person.id}
-                            type="button"
-                            onClick={() => {
-                              setTransmitTargetId(person.id);
-                              setTransmitDirectionId(person.direction_id ?? "");
-                              setTransmitDepartmentId(person.department_id ?? "");
-                              setTransmitUnitId(person.unit_id ?? "");
-                            }}
-                            className={cn(
-                              "flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition",
-                              transmitTargetId === person.id
-                                ? "bg-primary/15 text-primary"
-                                : "hover:bg-foreground/5",
-                            )}
-                          >
-                            <span className="min-w-0">
-                              <span className="block truncate font-medium">
-                                {[person.firstname, person.name].filter(Boolean).join(" ")}
+                        <CommandGroup>
+                          {transmitPeople.map((person) => (
+                            <CommandItem
+                              key={person.id}
+                              value={person.id}
+                              onSelect={() => setTransmitTargetId(person.id)}
+                              className={cn(
+                                "flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-sm",
+                                transmitTargetId === person.id && "bg-primary/15 text-primary",
+                              )}
+                            >
+                              <span className="min-w-0">
+                                <span className="block truncate font-medium">
+                                  {[person.firstname, person.name].filter(Boolean).join(" ")}
+                                </span>
+                                <span className="block truncate text-xs text-muted-foreground">
+                                  {person.matricule ? `${person.matricule} · ` : ""}
+                                  {roleLabels[person.role as keyof typeof roleLabels] ?? person.role}
+                                  {(person.service ?? person.direction) ? ` · ${person.service ?? person.direction}` : ""}
+                                </span>
                               </span>
-                              <span className="block truncate text-xs text-muted-foreground">
-                                {person.email} · {roleLabels[person.role as keyof typeof roleLabels] ?? person.role}
-                                {(person.service ?? person.direction) ? ` · ${person.service ?? person.direction}` : ""}
-                              </span>
-                            </span>
-                            {transmitTargetId === person.id && <BadgeCheck className="h-4 w-4 shrink-0 text-primary" />}
-                          </button>
-                        ))
+                              {transmitTargetId === person.id && <BadgeCheck className="h-4 w-4 shrink-0 text-primary" />}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
                       )}
-                    </div>
+                    </CommandList>
                   )}
                 </div>
                 <div className="space-y-1.5">
@@ -3097,7 +2903,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                     className="min-h-14 bg-background"
                   />
                 </div>
-              </div>
+              </Command>
               <DialogFooter className="gap-2">
                 <Button variant="ghost" className="rounded-full"
                   onClick={() => setShowTransmitForm(false)}>
@@ -3164,66 +2970,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
               </DialogContent>
             </Dialog>
           )}
-
-          {canRejectReopen && (
-            <Dialog
-              open={showRejectReopenConfirm}
-              onOpenChange={(open) => {
-                if (!open) {
-                  setShowRejectReopenConfirm(false);
-                  setRejectReopenNote("");
-                }
-              }}
-            >
-              <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
-                <DialogHeader>
-                  <DialogTitle className="flex items-center gap-2 text-destructive">
-                    <XCircle className="h-5 w-5" />
-                    Refuser la réouverture
-                  </DialogTitle>
-                  <DialogDescription>
-                    Le ticket restera dans son état actuel. Le motif sera visible dans l'historique.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-2 py-2">
-                  <Label htmlFor="reject-reopen-note" className="text-sm font-medium">
-                    Motif du refus <span className="text-destructive">*</span>
-                  </Label>
-                  <Textarea
-                    id="reject-reopen-note"
-                    value={rejectReopenNote}
-                    onChange={(e) => setRejectReopenNote(e.target.value)}
-                    placeholder="Expliquez pourquoi la réouverture est refusée…"
-                    className="min-h-24 bg-background"
-                  />
-                </div>
-                <DialogFooter className="gap-2">
-                  <Button
-                    variant="ghost"
-                    className="rounded-full"
-                    onClick={() => {
-                      setShowRejectReopenConfirm(false);
-                      setRejectReopenNote("");
-                    }}
-                  >
-                    Annuler
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    className="rounded-full"
-                    disabled={!rejectReopenNote.trim() || rejectReopenMut.isPending}
-                    onClick={() => rejectReopenMut.mutate()}
-                  >
-                    {rejectReopenMut.isPending
-                      ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                      : <XCircle className="mr-1.5 h-4 w-4" />}
-                    Refuser la réouverture
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          )}
-
 
           {canAssignTicket && (
             <Dialog open={showReassign} onOpenChange={setShowReassign}>
@@ -3537,7 +3283,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                     onOpenAttachment={handleTimelineAttachmentOpen}
                   />
                 ) : (
-                  <WorkflowTimeline events={r.timeline} onOpenAttachment={handleTimelineAttachmentOpen} />
+                  <WorkflowTimeline events={journalEvents} onOpenAttachment={handleTimelineAttachmentOpen} />
                 )}
               </div>
             </section>
@@ -3548,26 +3294,26 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
 
             <section className={cn("order-2 border-t border-border/40 p-3 sm:p-4", activeDetailTab !== "sla" && "hidden")}>
               <div className="mb-4">
-                <h3 className="font-semibold">Activité SLA</h3>
+                <h3 className="font-semibold">Durée de traitement</h3>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Lecture basée uniquement sur le SLA et les événements disponibles du ticket.
+                  Lecture basée sur les événements disponibles du ticket.
                 </p>
               </div>
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 <div className="min-w-0 rounded-2xl border border-border/50 bg-background/55 p-3">
                   <div className="flex items-center gap-2 text-sm font-semibold">
                     <Clock className="h-4 w-4 text-primary" />
-                    <span className="truncate">Début SLA</span>
+                    <span className="truncate">Début</span>
                   </div>
                   <p className="mt-2 truncate text-sm text-muted-foreground" title={createdAtLabel}>{createdAtLabel}</p>
                 </div>
                 <div className="min-w-0 rounded-2xl border border-border/50 bg-background/55 p-3">
                   <div className="flex items-center gap-2 text-sm font-semibold">
-                    <AlertTriangle className={cn("h-4 w-4", slaOver ? "text-destructive" : "text-success")} />
-                    <span className="truncate">{slaOver ? "Expiration" : "Temps consommé"}</span>
+                    <Clock className="h-4 w-4 text-muted-foreground" />
+                    <span className="truncate">Temps écoulé</span>
                   </div>
-                  <p className={cn("mt-2 truncate text-sm font-medium", slaOver ? "text-destructive" : "text-success")}>
-                    {r.slaHours > 0 ? `${r.slaElapsed}h / ${r.slaHours}h` : "SLA non configuré"}
+                  <p className="mt-2 truncate text-sm font-medium text-muted-foreground">
+                    {formatElapsedHours(r.slaElapsed)}
                   </p>
                 </div>
                 <div className="min-w-0 rounded-2xl border border-border/50 bg-background/55 p-3">
@@ -3592,13 +3338,13 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                 </div>
               </div>
 
-              {/* BR-SLA-REOPEN-001 — cycles SLA distincts : le 1er traitement et chaque
-                  traitement après réouverture sont mesurés indépendamment, sans jamais
-                  recalculer un cycle déjà clos. */}
+              {/* BR-SLA-REOPEN-001 — cycles de traitement distincts : le 1er traitement et
+                  chaque traitement après réouverture sont mesurés indépendamment, sans
+                  jamais recalculer un cycle déjà clos. */}
               {(r.slaCycles?.length ?? 0) > 1 && (
                 <div className="mt-5 space-y-3">
                   <div>
-                    <h3 className="font-semibold">Cycles SLA ({r.slaCycles!.length})</h3>
+                    <h3 className="font-semibold">Cycles de traitement ({r.slaCycles!.length})</h3>
                     <p className="mt-1 text-xs text-muted-foreground">
                       Ce ticket a été réouvert {r.reopenCount ?? r.slaCycles!.length - 1} fois — chaque
                       traitement est mesuré indépendamment, le premier cycle n'est jamais recalculé.
@@ -3608,12 +3354,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                     {r.slaCycles!.map((cycle) => (
                       <div
                         key={cycle.cycleNumber}
-                        className={cn(
-                          "rounded-2xl border p-3 sm:p-4",
-                          cycle.breached
-                            ? "border-destructive/40 bg-destructive/5"
-                            : "border-border/50 bg-background/55",
-                        )}
+                        className="rounded-2xl border border-border/50 bg-background/55 p-3 sm:p-4"
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <h4 className="text-sm font-semibold">
@@ -3621,22 +3362,16 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                               ? "Premier traitement"
                               : `Traitement après réouverture n°${cycle.cycleNumber - 1}`}
                           </h4>
-                          {cycle.closed ? (
-                            <span
-                              className={cn(
-                                "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
-                                cycle.breached
-                                  ? "bg-destructive/15 text-destructive"
-                                  : "bg-success/15 text-success",
-                              )}
-                            >
-                              {cycle.breached ? "SLA dépassé" : "SLA respecté"}
-                            </span>
-                          ) : (
-                            <span className="rounded-full bg-fuchsia-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-fuchsia-600">
-                              En cours
-                            </span>
-                          )}
+                          <span
+                            className={cn(
+                              "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
+                              cycle.closed
+                                ? "bg-muted text-muted-foreground"
+                                : "bg-fuchsia-500/15 text-fuchsia-600",
+                            )}
+                          >
+                            {cycle.closed ? "Terminé" : "En cours"}
+                          </span>
                         </div>
                         {cycle.reopenReason && (
                           <p className="mt-1.5 text-xs text-muted-foreground">
@@ -3644,7 +3379,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                             {cycle.reopenReason}
                           </p>
                         )}
-                        <dl className="mt-2.5 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
+                        <dl className="mt-2.5 grid gap-2 text-xs sm:grid-cols-3">
                           <div>
                             <dt className="text-muted-foreground">Début</dt>
                             <dd className="mt-0.5 font-medium">{formatTicketDateTime(cycle.startedAt)}</dd>
@@ -3656,24 +3391,9 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                             </dd>
                           </div>
                           <div>
-                            <dt className="text-muted-foreground">Temps de résolution</dt>
+                            <dt className="text-muted-foreground">Durée</dt>
                             <dd className="mt-0.5 font-medium">
-                              {cycle.elapsedHours != null
-                                ? `${cycle.elapsedHours}h${cycle.slaHours ? ` / ${cycle.slaHours}h` : ""}`
-                                : "—"}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-muted-foreground">Respect SLA</dt>
-                            <dd
-                              className={cn(
-                                "mt-0.5 font-medium",
-                                cycle.closed
-                                  ? cycle.breached ? "text-destructive" : "text-success"
-                                  : "text-muted-foreground",
-                              )}
-                            >
-                              {cycle.closed ? (cycle.breached ? "Non" : "Oui") : "—"}
+                              {cycle.elapsedHours != null ? formatElapsedHours(cycle.elapsedHours) : "—"}
                             </dd>
                           </div>
                         </dl>
@@ -3762,28 +3482,11 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                           ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
                           : <RotateCcw className="mr-1.5 h-4 w-4" />
                         }
-                        Demander la réouverture
+                        Réouvrir le ticket
                       </Button>
                     </div>
                   </div>
                 )}
-              </div>
-            </GlassCard>
-          )}
-
-          {iAmRequester && r.status === "resolved" && (r.infos as Record<string, unknown>)?.reopen_requested && (
-            <GlassCard className="border-warning/30 bg-warning/5">
-              <div className="flex items-start gap-3">
-                <RotateCcw className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
-                <div className="min-w-0 flex-1 space-y-3">
-                  <div>
-                    <h3 className="font-semibold text-warning">Réouverture en attente d'approbation</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Votre demande de réouverture a été transmise au chef de service.
-                      Vous serez notifié dès qu'une décision sera prise.
-                    </p>
-                  </div>
-                </div>
               </div>
             </GlassCard>
           )}
@@ -3800,7 +3503,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2">
                     <Lock className="h-5 w-5 text-muted-foreground" />
-                    {r.status === "closed" ? "Ticket clôturé" : "Demander une réouverture"}
+                    {r.status === "closed" ? "Ticket clôturé" : "Réouvrir le ticket"}
                   </DialogTitle>
                   <DialogDescription>
                     {r.status === "closed"
@@ -3847,7 +3550,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                       {requestReopenMut.isPending
                         ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
                         : <RotateCcw className="mr-1.5 h-4 w-4" />}
-                      Demander la réouverture
+                      Réouvrir le ticket
                     </Button>
                   )}
                 </DialogFooter>
@@ -3855,16 +3558,16 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             </Dialog>
           )}
 
-          {canOpenAppreciation && (
+          {isRequesterView && (
             <Dialog open={showAppreciationDialog} onOpenChange={setShowAppreciationDialog}>
               <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2">
-                    <Star className="h-5 w-5 text-muted-foreground" />
-                    Votre avis
+                    <CheckCircle2 className="h-5 w-5 text-success" />
+                    Confirmer la résolution
                   </DialogTitle>
                   <DialogDescription>
-                    Évaluez la prise en charge de votre ticket.
+                    Confirmez que votre ticket est résolu et évaluez la prise en charge — ou signalez que le problème persiste pour demander une réouverture.
                   </DialogDescription>
                 </DialogHeader>
                 <AppreciationForm
@@ -3882,6 +3585,11 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                     setShowClosedRequestDialog(true);
                   }}
                   onSave={async (data) => {
+                    if (data.resolvedConfirmed) {
+                      // Clôture au mieux — l'échec de la clôture ne doit pas bloquer
+                      // l'envoi de l'avis, closeMut gère déjà son propre toast d'erreur.
+                      closeMut.mutate();
+                    }
                     const hasExisting = !!(localAppreciation ?? r.appreciation);
                     if (hasExisting) {
                       await updateRequestAppreciation(r.id, data);
@@ -3965,80 +3673,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                       ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
                       : <Building2 className="mr-1.5 h-4 w-4" />}
                     Transférer
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          )}
-
-          {/* Dialog — Créer circuit de validation */}
-          {!isRequesterView && (
-            <Dialog
-              open={showCircuitDialog}
-              onOpenChange={(open) => { if (!open) { setShowCircuitDialog(false); setCircuitDirectionId(""); setCircuitUnitId(""); } }}
-            >
-              <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
-                <DialogHeader>
-                  <DialogTitle className="flex items-center gap-2">
-                    <GitBranch className="h-5 w-5 text-primary" />
-                    Créer un circuit de validation
-                  </DialogTitle>
-                  <DialogDescription>
-                    Un circuit de validation automatique sera créé pour ce ticket.
-                    Laissez les champs vides pour utiliser la configuration par défaut.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4 py-2">
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium">
-                      Direction cible <span className="text-muted-foreground">(optionnel)</span>
-                    </label>
-                    <select
-                      value={circuitDirectionId}
-                      onChange={(e) => setCircuitDirectionId(e.target.value)}
-                      className="w-full rounded-xl border border-border/50 bg-background/60 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                    >
-                      <option value="">Configuration automatique</option>
-                      {directions.map((d) => (
-                        <option key={d.id} value={d.id}>{d.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium">
-                      Service cible <span className="text-muted-foreground">(optionnel)</span>
-                    </label>
-                    <select
-                      value={circuitUnitId}
-                      onChange={(e) => setCircuitUnitId(e.target.value)}
-                      className="w-full rounded-xl border border-border/50 bg-background/60 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                    >
-                      <option value="">Configuration automatique</option>
-                      {units
-                        .filter((u) => !circuitDirectionId || u.direction_id === circuitDirectionId)
-                        .map((u) => (
-                          <option key={u.id} value={u.id}>{u.name}</option>
-                        ))}
-                    </select>
-                  </div>
-                </div>
-                <DialogFooter className="gap-2">
-                  <Button
-                    variant="ghost"
-                    className="rounded-full"
-                    onClick={() => { setShowCircuitDialog(false); setCircuitDirectionId(""); setCircuitUnitId(""); }}
-                  >
-                    Annuler
-                  </Button>
-                  <Button
-                    className="rounded-full gradient-primary"
-                    disabled={createCircuitMut.isPending}
-                    onClick={() => createCircuitMut.mutate()}
-                  >
-                    {createCircuitMut.isPending
-                      ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                      : <><GitBranch className="mr-1.5 h-4 w-4" /> Créer le circuit</>
-                    }
                   </Button>
                 </DialogFooter>
               </DialogContent>
@@ -4296,15 +3930,14 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                 </dl>
 
                 <div className="mt-4 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-500">
-                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-amber-500/15 text-amber-500">
-                      <AlertTriangle className="h-3.5 w-3.5" />
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground">
+                      <Clock className="h-3.5 w-3.5" />
                     </span>
-                    Délai
+                    Temps écoulé
                   </div>
-                  <div className={cn("flex items-center gap-1.5 text-sm font-semibold", slaOver ? "text-destructive" : "text-success")}>
-                    {slaOver && <AlertTriangle className="h-3.5 w-3.5" />}
-                    {slaOver ? "Délai dépassé" : "Dans les délais"}
+                  <div className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
+                    {formatElapsedHours(r.slaElapsed)}
                   </div>
                 </div>
               </div>

@@ -7,7 +7,7 @@ Chaque handler :
   3. Ne laisse JAMAIS fuiter d'informations système (traceback, SQL, chemins)
 
 Ordre d'évaluation (du plus spécifique au plus général) :
-    EDGException → RequestValidationError → StarletteHTTPException
+    CentralAuthError → EDGException → RequestValidationError → StarletteHTTPException
     → SQLAlchemyError → Exception
 
 Enregistrement dans main.py :
@@ -25,6 +25,15 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from api.core.central_auth import (
+    CentralAuthError,
+    CentralIdentityConflict,
+    CentralInvalidClientCredentials,
+    CentralInvalidCredentials,
+    CentralPermissionDenied,
+    CentralUnavailableError,
+    CentralValidationError,
+)
 from api.core.exceptions import EDGException
 from api.core.logger import get_logger
 
@@ -110,6 +119,35 @@ async def edg_exception_handler(request: Request, exc: EDGException) -> JSONResp
             hint=exc.hint,
             details=exc.details,
         ),
+    )
+
+
+# ── Handler 1bis : Exceptions de la plateforme centrale manager-user ─────────
+
+async def central_auth_exception_handler(request: Request, exc: CentralAuthError) -> JSONResponse:
+    """
+    Convertit les exceptions centrales (central_auth.py) en réponse standardisée.
+    identity_conflict -> 409, validation -> 400, indisponibilité/config -> 503,
+    identifiants centraux invalides -> 401, droits/scope insuffisants -> 403.
+    """
+    if isinstance(exc, CentralIdentityConflict):
+        status_code, error_code = 409, "CENTRAL_IDENTITY_CONFLICT"
+    elif isinstance(exc, CentralValidationError):
+        status_code, error_code = 400, "CENTRAL_VALIDATION_ERROR"
+    elif isinstance(exc, CentralPermissionDenied):
+        status_code, error_code = 403, "CENTRAL_PERMISSION_DENIED"
+    elif isinstance(exc, (CentralUnavailableError, CentralInvalidClientCredentials)):
+        status_code, error_code = 503, "CENTRAL_UNAVAILABLE"
+    elif isinstance(exc, CentralInvalidCredentials):
+        status_code, error_code = 401, "CENTRAL_INVALID_CREDENTIALS"
+    else:
+        status_code, error_code = 503, "CENTRAL_UNAVAILABLE"
+
+    logger.warning(f"❌ {error_code} [{status_code}] — {exc}")
+
+    return JSONResponse(
+        status_code=status_code,
+        content=_error_body(message=str(exc), error_code=error_code),
     )
 
 
@@ -364,11 +402,12 @@ def register_exception_handlers(app: FastAPI) -> None:
     À appeler une seule fois dans main.py.
 
     Ordre d'évaluation (du plus spécifique au plus général) :
-        EDGException → RequestValidationError → StarletteHTTPException
+        CentralAuthError → EDGException → RequestValidationError → StarletteHTTPException
         → SQLAlchemyError → Exception
     """
     from sqlalchemy.exc import SQLAlchemyError
 
+    app.add_exception_handler(CentralAuthError, central_auth_exception_handler)  # type: ignore[arg-type]
     app.add_exception_handler(EDGException, edg_exception_handler)               # type: ignore[arg-type]
     app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore[arg-type]
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)    # type: ignore[arg-type]

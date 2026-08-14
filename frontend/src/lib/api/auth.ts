@@ -1,7 +1,7 @@
 /**
- * Module API — Authentification JWT.
+ * Module API — Authentification via la plateforme centrale manager-user.
  * Endpoints :
- *   POST /auth/register  → TokenResponse
+ *   POST /auth/register  → compte créé (pas de session — connexion explicite ensuite)
  *   POST /auth/login     → TokenResponse
  *   POST /auth/refresh   → AccessTokenResponse
  *   POST /auth/logout    → 204
@@ -22,14 +22,8 @@ export type RegisterPayload = {
   name: string;
   firstname?: string;
   email: string;
-  password: string;
   phone?: string;
-  role?: string;
-  matricule?: string;
-  job?: string;
-  direction_id?: number;
-  unit_id?: number;
-  is_edg_employee?: boolean;
+  password: string;
 };
 
 export type TokenResponse = {
@@ -78,13 +72,12 @@ export async function loginUser(payload: LoginPayload): Promise<AuthResult> {
   return mapTokenResponse(raw);
 }
 
-export async function registerUser(payload: RegisterPayload): Promise<AuthResult> {
-  const raw = await apiFetch<TokenResponse>("/auth/register", {
+export async function registerUser(payload: RegisterPayload): Promise<void> {
+  await apiFetch<unknown>("/auth/register", {
     method: "POST",
     skipAuth: true,
     body: JSON.stringify(payload),
   });
-  return mapTokenResponse(raw);
 }
 
 export async function refreshAccessToken(refreshToken: string): Promise<AccessTokenResponse> {
@@ -104,14 +97,4 @@ export async function logoutUser(refreshToken: string): Promise<void> {
 export async function getMe(): Promise<AccountUser> {
   const raw = await apiFetch<RawAccount>("/auth/me");
   return mapAccount(raw);
-}
-
-export async function changePassword(payload: {
-  current_password: string;
-  new_password: string;
-}): Promise<void> {
-  await apiFetch<void>("/auth/change-password", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
 }

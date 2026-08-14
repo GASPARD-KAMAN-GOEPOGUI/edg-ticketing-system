@@ -18,6 +18,7 @@ Exports (ajout de ?format=csv|excel|pdf) :
   GET /reports/by-unity/export
   GET /reports/decision/export
   GET /reports/sla/export
+  GET /reports/sla-center/export
 
 Accès : chief, director, admin
 """
@@ -499,6 +500,49 @@ async def export_sla(
         filename="rapport_sla",
         title="Rapport Conformité SLA",
         subtitle=data["period"],
+    )
+
+
+@router.get("/sla-center/export")
+async def export_sla_center(
+    start: Optional[date] = Query(None),
+    end: Optional[date] = Query(None),
+    fmt: ExportFormat = Query("excel", alias="format"),
+    actor=Depends(get_current_user),
+    svc: ReportService = Depends(_svc),
+):
+    """Export du Centre SLA : tickets actifs en dépassement SLA sur la période choisie
+    (mêmes règles/périmètre que la page — cf. sla_center_breach_rows)."""
+    role = normalize_role(getattr(actor, "role", None))
+    direction_id: Optional[int] = None
+    unity_id: Optional[int] = None
+    group_by_direction = False
+    if role in ("chief-service", "chief-departement"):
+        actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
+        unity_id = int(actor_unity_id) if actor_unity_id else -1
+    elif role == "director":
+        direction_id = int(actor.direction_id) if actor.direction_id else -1
+    else:
+        group_by_direction = True
+
+    rows = await svc.sla_center_breach_rows(
+        start, end,
+        direction_id=direction_id,
+        unity_id=unity_id,
+        group_by_direction=group_by_direction,
+    )
+    cols = ["ref", "title", "priority", "group_label", "status", "overdue_hours"]
+    hdrs = [
+        "Référence", "Titre", "Priorité",
+        "Direction" if group_by_direction else "Service",
+        "Statut", "Dépassement (h)",
+    ]
+
+    return _do_export(
+        rows, cols, hdrs, fmt,
+        filename="rapport_sla_center",
+        title="Centre SLA — Tickets en dépassement",
+        subtitle="Période : {} → {}".format(start or "J-30", end or "Aujourd'hui"),
     )
 
 

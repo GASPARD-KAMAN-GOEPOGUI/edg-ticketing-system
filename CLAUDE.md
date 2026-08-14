@@ -59,7 +59,7 @@ Le secrétaire a l'autorité complète de routage vers n'importe quel niveau —
 
 **Commandes dev:**
 - Frontend (`frontend/`) : `npm run dev` (Vite), `npm run build`, `npm run lint`, `npm run format`
-- Backend (`backend/`) : `uvicorn api.main:app --reload --port 8000` ; prod : `gunicorn api.main:app -c gunicorn_conf.py`
+- Backend (`backend/`) : `uvicorn api.main:app --reload --reload-dir api --port 8000` (`--reload-dir api` limite la surveillance au code source — sans ça uvicorn surveille aussi `venv/`/`__pycache__/`/`uploads/`, ce qui peut bloquer silencieusement le rechargement et rendre le serveur injoignable sans arrêt volontaire) ; prod : `gunicorn api.main:app -c gunicorn_conf.py` (pas de `--reload`, non concerné)
 
 ---
 

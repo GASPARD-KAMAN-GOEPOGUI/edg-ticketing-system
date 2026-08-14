@@ -65,7 +65,7 @@ async def create_policy(body: SlaPolicyCreate, svc: SlaPolicyService = Depends(_
     return await svc.create(body.dict())
 
 
-@router.patch("/{id}", response_model=SlaPolicyResponse)
+@router.put("/{id}", response_model=SlaPolicyResponse)
 async def update_policy(id: str, body: SlaPolicyUpdate, svc: SlaPolicyService = Depends(_svc)):
     return await svc.update(id, body.dict(exclude_unset=True))
 

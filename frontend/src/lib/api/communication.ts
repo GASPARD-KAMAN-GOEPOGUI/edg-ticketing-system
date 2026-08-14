@@ -191,7 +191,7 @@ export async function updateAnnouncement(
   payload: UpdateAnnouncementPayload,
 ): Promise<Announcement> {
   const raw = await apiFetch<RawAnnouncement>(`/announcements/${id}`, {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify(payload),
   });
   return mapAnnouncement(raw);
@@ -285,7 +285,7 @@ export async function updateCommSettings(
   payload: UpdateSettingsPayload,
 ): Promise<CommunicationSettings> {
   const raw = await apiFetch<RawCommunicationSettings>("/communication-settings", {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify(payload),
   });
   return mapSettings(raw);

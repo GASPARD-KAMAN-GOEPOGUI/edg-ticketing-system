@@ -146,7 +146,7 @@ export type DecisionReport = {
   data_quality: Record<string, unknown>;
 };
 
-export type ExportReportType = "daily" | "monthly" | "by-agent" | "by-unity" | "decision" | "sla" | "csat";
+export type ExportReportType = "daily" | "monthly" | "by-agent" | "by-unity" | "decision" | "sla" | "sla-center" | "csat";
 export type ExportFormat = "csv" | "excel" | "pdf";
 
 // BR-SLA-REOPEN-001

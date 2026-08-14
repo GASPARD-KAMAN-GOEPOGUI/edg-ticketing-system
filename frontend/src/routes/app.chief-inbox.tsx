@@ -10,9 +10,9 @@ import { StatusBadge, PriorityBadge } from "@/components/status-badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { fetchQueue, fetchWorkloadByUnit } from "@/lib/api/requests";
 import { fetchUser, fetchUsers, buildAvatarUrl } from "@/lib/api/accounts";
-import { cn, initialsFor } from "@/lib/utils";
+import { cn, initialsFor, formatElapsedHours } from "@/lib/utils";
 import {
-  ClipboardList, UserPlus, RotateCcw,
+  ClipboardList, UserPlus,
   Clock, Inbox, Wrench, Users, ArrowLeft,
 } from "lucide-react";
 import { format } from "date-fns";
@@ -28,11 +28,14 @@ export const Route = createFileRoute("/app/chief-inbox")({
 
 // ── Types internes ─────────────────────────────────────────────────────────────
 
-type Tab = "assign" | "reopen";
+// BR-REOPEN-QUEUE-001 (révision — réouverture immédiate) : la réouverture ne
+// passe plus par une approbation chef — l'onglet "Réouvertures" (qui listait les
+// demandes en attente de décision) est supprimé, il n'y a plus rien à y afficher.
+// Un ticket réouvert retourne directement dans la File d'attente (/app/queue).
+type Tab = "assign";
 
 const TABS: { key: Tab; label: string; icon: typeof ClipboardList; color: string }[] = [
   { key: "assign",   label: "À affecter",    icon: UserPlus,       color: "text-primary" },
-  { key: "reopen",   label: "Réouvertures",  icon: RotateCcw,      color: "text-amber-500" },
 ];
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -41,11 +44,7 @@ function isToAssign(r: RequestItem): boolean {
   // "assigned" est volontairement exclu (Lot 2.3) : un ticket deja affecte a un agent
   // ne doit plus rester visible dans l'onglet "A affecter" — il disparait des qu'il
   // quitte les statuts non-encore-affectes, meme comportement que /app/queue.
-  return ["new", "qualifying", "qualified"].includes(r.status) &&
-    !r.infos?.reopen_requested;
-}
-function isReopenPending(r: RequestItem): boolean {
-  return r.infos?.reopen_requested === true;
+  return ["new", "qualifying", "qualified"].includes(r.status);
 }
 
 // ── Sous-composant : carte ticket ──────────────────────────────────────────────
@@ -54,10 +53,6 @@ function isReopenPending(r: RequestItem): boolean {
 // l'onglet "Traitement" de la fiche détaillée, où elles vivent déjà.
 
 function TicketRow({ r, detailRoute, requesterAvatar }: { r: RequestItem; detailRoute: TicketDetailRoute; requesterAvatar?: string }) {
-  const slaOver = r.slaElapsed > r.slaHours;
-  const slaLeft = Math.max(0, r.slaHours - r.slaElapsed);
-  const showReopen = r.infos?.reopen_requested === true;
-
   return (
     <motion.div
       layout
@@ -69,7 +64,6 @@ function TicketRow({ r, detailRoute, requesterAvatar }: { r: RequestItem; detail
         <GlassCard className={cn(
           "flex h-full min-h-[196px] flex-col gap-3 p-4 transition-shadow hover:shadow-xl",
           r.priority === "critical" && "border-destructive/40 bg-destructive/3",
-          showReopen               && "border-amber-500/40 bg-amber-500/3",
           r.status === "escalated" && "border-orange-400/40 bg-orange-500/3",
         )}>
           {/* Infos principales */}
@@ -79,11 +73,6 @@ function TicketRow({ r, detailRoute, requesterAvatar }: { r: RequestItem; detail
                 <span className="font-mono text-[11px] text-primary">{r.ref}</span>
                 <PriorityBadge priority={r.priority} />
                 <StatusBadge status={r.status} />
-                {showReopen && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
-                    <RotateCcw className="h-2.5 w-2.5" /> Réouverture demandée
-                  </span>
-                )}
                 {r.priority === "critical" && (
                   <span className="inline-flex items-center rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-bold text-destructive">
                     CRITIQUE
@@ -107,9 +96,9 @@ function TicketRow({ r, detailRoute, requesterAvatar }: { r: RequestItem; detail
 
           {/* Pied de card */}
           <div className="flex items-center justify-between gap-2 border-t border-border/30 pt-3">
-            <div className={cn("flex items-center gap-1 text-xs font-medium", slaOver ? "text-destructive" : "text-muted-foreground")}>
+            <div className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
               <Clock className="h-3.5 w-3.5" />
-              {slaOver ? "Délai dépassé" : `${slaLeft}h restantes`}
+              {formatElapsedHours(r.slaElapsed)}
             </div>
             <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
               <Wrench className="h-3 w-3" /> Traiter
@@ -145,11 +134,9 @@ export function ChiefInbox({ filterUnitId, onBackToOverview }: ChiefInboxProps =
 
   const [activeTab, setActiveTab] = useState<Tab>("assign");
 
-  // Deep-link depuis le menu "Mon travail"/"Pilotage" (Réouvertures) —
-  // ?tab=reopen pré-sélectionne l'onglet déjà existant, sans nouvelle vue.
   useEffect(() => {
     const tab = new URLSearchParams(window.location.search).get("tab");
-    if (tab === "reopen" || tab === "assign") setActiveTab(tab);
+    if (tab === "assign") setActiveTab(tab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -170,10 +157,9 @@ export function ChiefInbox({ filterUnitId, onBackToOverview }: ChiefInboxProps =
   }, [queueData?.items, filterUnitId]);
 
   const toAssign   = useMemo(() => allItems.filter(isToAssign),      [allItems]);
-  const toReopen   = useMemo(() => allItems.filter(isReopenPending), [allItems]);
 
   const tabItems: Record<Tab, RequestItem[]> = {
-    assign: toAssign, reopen: toReopen,
+    assign: toAssign,
   };
   const displayed = tabItems[activeTab];
 
@@ -217,7 +203,6 @@ export function ChiefInbox({ filterUnitId, onBackToOverview }: ChiefInboxProps =
 
   const emptyMessages: Record<Tab, string> = {
     assign:   "Aucun ticket en attente d'affectation.",
-    reopen:   "Aucune demande de réouverture en attente.",
   };
 
   return (
@@ -277,17 +262,15 @@ export function ChiefInbox({ filterUnitId, onBackToOverview }: ChiefInboxProps =
               <GlassCard className={cn(
                 "flex items-center gap-3 p-4 transition-shadow",
                 activeTab === t.key && "ring-2 ring-primary/30",
-                count > 0 && t.key === "reopen"   && "border-amber-500/40",
               )}>
                 <span className={cn(
                   "grid h-9 w-9 shrink-0 place-items-center rounded-xl",
                   t.key === "assign"    && "bg-primary/10",
-                  t.key === "reopen"    && (count > 0 ? "bg-amber-500/15" : "bg-muted"),
                 )}>
                   <Icon className={cn("h-4 w-4", count > 0 ? t.color : "text-muted-foreground")} />
                 </span>
                 <div>
-                  <div className={cn("text-2xl font-bold leading-none", count > 0 && t.key !== "assign" && t.color)}>
+                  <div className="text-2xl font-bold leading-none">
                     {count}
                   </div>
                   <div className="mt-0.5 text-xs text-muted-foreground">{t.label}</div>
@@ -367,7 +350,6 @@ export function ChiefInbox({ filterUnitId, onBackToOverview }: ChiefInboxProps =
                 <span className={cn(
                   "rounded-full px-1.5 py-0.5 text-[10px] font-bold",
                   t.key === "assign"    && "bg-primary/15 text-primary",
-                  t.key === "reopen"    && "bg-amber-500/15 text-amber-600 dark:text-amber-400",
                 )}>
                   {count}
                 </span>

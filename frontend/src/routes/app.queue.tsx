@@ -61,6 +61,14 @@ export const Route = createFileRoute("/app/queue")({
   // ticket de la file d'attente ou devenir l'intervenant courant.
   beforeLoad: () => requireRole("agent-support", "chief-service", "chief-departement", "director", "admin"),
   head: () => ({ meta: [{ title: "File d'attente — EDG Support" }] }),
+  // Précharge les données (pas seulement le chunk JS) au survol du lien —
+  // même queryKey que le useQuery du composant, donc pas de double fetch.
+  loader: ({ context: { queryClient } }) =>
+    queryClient.ensureQueryData({
+      queryKey: ["qualify"],
+      queryFn: () => fetchTriage({ limit: 50 }),
+      staleTime: 20_000,
+    }),
   component: QueuePage,
 });
 
@@ -190,7 +198,14 @@ function QualifyTab() {
     enabled: (!!expandedDirectionId || !!expandedUnitId) && assignableRoles.length > 0,
     staleTime: 5 * 60_000,
   });
-  const unitPeople = unitPeopleData ?? [];
+  // BR-REQUESTER-NO-SELF-TREATMENT-001 — le demandeur du ticket en cours de
+  // qualification ne doit jamais être sélectionnable comme "Personne cible".
+  const expandedRequesterId = expanded
+    ? String(queue.find((q) => q.id === expanded)?.requesterId ?? "")
+    : "";
+  const unitPeople = (unitPeopleData ?? []).filter(
+    (person) => !expandedRequesterId || String(person.id) !== expandedRequesterId,
+  );
 
   // BR-REOPEN-QUEUE-001 : détail de la réouverture (motif, ancien intervenant)
   // — chargé à la demande seulement pour la carte dépliée, le endpoint /triage
@@ -232,6 +247,9 @@ function QualifyTab() {
       queryClient.invalidateQueries({ queryKey: ["queue"] });
       queryClient.invalidateQueries({ queryKey: ["requests"] });
       queryClient.invalidateQueries({ queryKey: ["my-tickets"] });
+      // BR-QUEUE-AUTO-START-001 : "Assigner" démarre aussi le traitement
+      // immédiatement (comme "Prendre le ticket" ci-dessous) — même invalidation.
+      queryClient.invalidateQueries({ queryKey: ["my-tickets-stats"] });
       queryClient.invalidateQueries({ queryKey: ["stats"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
     },
@@ -276,19 +294,13 @@ function QualifyTab() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">File d'attente</h1>
-          {!isLoading && (
-            <p className="mt-1 text-sm text-muted-foreground">
-              {queue.length} ticket{queue.length !== 1 ? "s" : ""} en attente de qualification.
-            </p>
-          )}
-        </div>
-        <div className="flex items-center gap-2 rounded-2xl border border-warning/30 bg-warning/10 px-4 py-2 text-sm font-medium text-warning-foreground dark:text-warning">
-          <Zap className="h-4 w-4 shrink-0" />
-          Aucun ticket ne doit rester non orienté plus de 2h.
-        </div>
+      <header>
+        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">File d'attente</h1>
+        {!isLoading && (
+          <p className="mt-1 text-sm text-muted-foreground">
+            {queue.length} ticket{queue.length !== 1 ? "s" : ""} en attente de qualification.
+          </p>
+        )}
       </header>
 
       <AsyncSwap

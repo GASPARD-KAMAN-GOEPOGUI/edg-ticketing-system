@@ -47,10 +47,12 @@ def test_cdc_interface_actions_ticket_par_role_sont_coherentes():
         "change_service": ["chief", "director", "admin"],
         "transfer_direction": ["director", "admin"],
         "close": ["user", "agent", "chief", "director", "dg", "admin"],
-        "request_reopen": ["user", "agent", "chief", "director", "dg", "admin"],
+        # BR-REOPEN-QUEUE-001 (révision — réouverture immédiate) : "request_reopen"
+        # renommé "reopen", seul comportement métier officiel désormais.
+        "reopen": ["user", "agent", "chief", "director", "dg", "admin"],
     }
 
-    requester_actions = {"close", "request_reopen"}
+    requester_actions = {"close", "reopen"}
     for action, roles in expected_roles.items():
         assert _extract_object_array(capabilities, "TICKET_ACTION_ROLES", action) == roles
         if action not in requester_actions:
@@ -179,14 +181,15 @@ async def test_cdc_scenario_soutenance_ticket_complet(auth_client):
         assert assigned.status_code == 200
         assigned_data = assigned.json().get("data", assigned.json())
         assert str(assigned_data["assignee_id"]) == "2"
-        assert assigned_data["request_status"] == "assigned"
+        # BR-QUEUE-AUTO-START-001 : l'assignation démarre directement le traitement.
+        assert assigned_data["request_status"] == "in_progress"
 
         MOCK_ACCOUNTS["agent"].id = 2
         MOCK_ACCOUNTS["agent"].unity_id = 9101
         async with auth_client("agent") as c:
             commented = await c.post(
                 f"/api/v1/requests/{rid}/comments",
-                json={"body": "Analyse agent CDC.", "is_public": False},
+                json={"body": "Analyse agent CDC.", "is_public": False, "peer_id": "1"},
             )
             escalated = await c.post(
                 f"/api/v1/requests/{rid}/escalate",

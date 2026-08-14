@@ -59,9 +59,16 @@ export const Route = createFileRoute("/app/history")({
   component: RequestHistory,
 });
 
-type TerminalStatus = "closed" | "cancelled" | "rejected";
+type TerminalStatus = "all" | "closed" | "cancelled" | "rejected";
+
+const TERMINAL_STATUSES = "closed,cancelled,rejected";
 
 const TABS: { key: TerminalStatus; label: string; icon: LucideIcon }[] = [
+  {
+    key: "all",
+    label: "Tous les statuts",
+    icon: History,
+  },
   {
     key: "closed",
     label: "Clôturées",
@@ -132,7 +139,7 @@ function RequestHistory() {
   const sessionUser = useUser();
   const navigate = useNavigate();
 
-  const [tab, setTab] = useSessionState<TerminalStatus>("hist:tab", "closed");
+  const [tab, setTab] = useSessionState<TerminalStatus>("hist:tab", "all");
   const [q, setQ] = useSessionState<string>("hist:q", "");
   const [layout, setLayout] = useState<LayoutMode>("grid");
   const [dateFrom, setDateFrom] = useSessionState<string>("hist:dateFrom", "");
@@ -153,7 +160,7 @@ function RequestHistory() {
   }, [tab, debouncedQ, dateFrom, dateTo]);
 
   useEffect(() => {
-    if (!TABS.some((t) => t.key === tab)) setTab("closed");
+    if (!TABS.some((t) => t.key === tab)) setTab("all");
   }, [tab, setTab]);
 
   const applyQuickDate = useCallback(
@@ -199,13 +206,13 @@ function RequestHistory() {
   );
 
   const hasDateFilter = !!dateFrom || !!dateTo;
-  const safeTab: TerminalStatus = TABS.some((t) => t.key === tab) ? tab : "closed";
+  const safeTab: TerminalStatus = TABS.some((t) => t.key === tab) ? tab : "all";
 
   const filters = useMemo(
     () => ({
       page,
       limit: pageSize,
-      request_status: safeTab,
+      request_status: safeTab === "all" ? TERMINAL_STATUSES : safeTab,
       ...(sessionUser?.id && { requester_id: sessionUser.id }),
       ...(debouncedQ && { search: debouncedQ }),
       ...(dateFrom && { date_from: dateFrom }),
@@ -238,6 +245,7 @@ function RequestHistory() {
   const currentTab = TABS.find((t) => t.key === safeTab)!;
 
   const emptyMessage: Record<TerminalStatus, string> = {
+    all: "Aucun ticket clôturé, annulé ou rejeté dans l'historique.",
     closed: "Aucun ticket clôturé dans l'historique.",
     cancelled: "Aucun ticket annulé dans l'historique.",
     rejected: "Aucun ticket rejeté dans l'historique.",
@@ -267,8 +275,8 @@ function RequestHistory() {
             <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Historique</h1>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            {total} ticket{total > 1 ? "s" : ""} {statusLabels[safeTab].toLowerCase()}
-            {total > 1 ? "s" : ""}.
+            {total} ticket{total > 1 ? "s" : ""} {safeTab === "all" ? "dans l'historique" : statusLabels[safeTab].toLowerCase()}
+            {safeTab !== "all" && total > 1 ? "s" : ""}.
           </p>
         </div>
         <div className="flex items-center gap-2">

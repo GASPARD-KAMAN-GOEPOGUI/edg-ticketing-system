@@ -100,12 +100,16 @@ class WorkflowDetailRepository(BaseRepository[WorkflowDetail]):
         return await self.update(id, {"activated": True})
 
     async def create_bulk(self, steps: list[dict]) -> list[WorkflowDetail]:
-        """Insère plusieurs étapes en une seule transaction."""
-        created = []
-        for step in steps:
-            obj = await self.create(step)
-            created.append(obj)
-        return created
+        """Insère plusieurs étapes en une seule transaction (un seul commit).
+
+        Les appelants (ex. `ServiceWorkflow._start_workflow`) ne chaînent pas
+        `parent_id` entre ces étapes — chacune est indépendante — donc un vrai
+        bulk insert via `BaseRepository.bulk_create` est sûr ici (contrairement
+        à `create_event`, qui a besoin du dernier ID inséré pour le chaînage).
+        """
+        if not steps:
+            return []
+        return await self.bulk_create(steps)
 
     async def list_by_agent(
         self, agent_id: str, *, page: int = 1, limit: int = 20
@@ -242,10 +246,10 @@ class WorkflowDetailRepository(BaseRepository[WorkflowDetail]):
             "activated": data.get("activated", False),
         })
 
-    async def list_comments_by_request(
-        self, request_id: str, *, public_only: bool = False
-    ) -> list[WorkflowDetail]:
-        """Retourne les commentaires (event_type='comment_added') d'une demande via son workflow."""
+    async def list_comments_by_request(self, request_id: str) -> list[WorkflowDetail]:
+        """Retourne les commentaires (event_type='comment_added') d'une demande via son workflow.
+        Le filtrage par conversation privée (BR-MESSAGING-PAIR-001) est appliqué
+        en aval par la route, pas ici (dépend du demandeur/de l'acteur)."""
         stmt = (
             select(WorkflowDetail)
             .join(Workflow, WorkflowDetail.workflow_id == Workflow.id)
@@ -255,14 +259,7 @@ class WorkflowDetailRepository(BaseRepository[WorkflowDetail]):
             .order_by(WorkflowDetail.created_at)
         )
         result = await self.session.execute(stmt)
-        items = list(result.scalars().all())
-        if public_only:
-            # infos = {"is_public": True/False}
-            items = [
-                e for e in items
-                if isinstance(e.infos, dict) and e.infos.get("is_public", False)
-            ]
-        return items
+        return list(result.scalars().all())
 
     async def get_comment_by_id_for_request(
         self, comment_id: str, request_id: str

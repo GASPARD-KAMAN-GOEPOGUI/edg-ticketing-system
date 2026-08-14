@@ -24,15 +24,15 @@ import { toast } from "sonner";
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchMe, updateMe, uploadAvatar, deleteAvatar, buildAvatarUrl } from "@/lib/api/accounts";
-import { changePassword } from "@/lib/api/auth";
 import { fetchRequests } from "@/lib/api/requests";
 import { cn } from "@/lib/utils";
+import { isValidGuineaPhone, PHONE_FORMAT_HINT } from "@/lib/phone";
 import type { LucideIcon } from "lucide-react";
 import {
-  User, Shield, Bell, Palette, Eye, EyeOff, Camera, Loader2,
+  User, Shield, Bell, Palette, Camera, Loader2,
   Building2, Briefcase, Phone, Mail, Lock, CheckCircle2,
   Sun, Moon, Monitor, Globe, LogOut, Zap, FileText,
-  ChevronRight, Info, Smartphone, Clock, Trash2,
+  ChevronRight, Info, Smartphone, Trash2,
 } from "lucide-react";
 
 export const Route = createFileRoute("/app/profile")({
@@ -42,63 +42,6 @@ export const Route = createFileRoute("/app/profile")({
 
 
 type Section = "info" | "pro" | "security" | "notifications" | "appearance";
-
-// ── Password input with eye toggle ────────────────────────────────────────
-function PasswordInput({
-  value, onChange, placeholder,
-}: { value: string; onChange: (v: string) => void; placeholder?: string }) {
-  const [show, setShow] = useState(false);
-  return (
-    <div className="relative">
-      <Input
-        type={show ? "text" : "password"}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="pr-10"
-      />
-      <button
-        type="button"
-        onClick={() => setShow((s) => !s)}
-        className="absolute inset-y-0 right-3 flex items-center text-muted-foreground transition hover:text-foreground"
-      >
-        {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-      </button>
-    </div>
-  );
-}
-
-// ── Password strength indicator ───────────────────────────────────────────
-function StrengthBar({ password }: { password: string }) {
-  if (!password) return null;
-  const hasUpper = /[A-Z]/.test(password);
-  const hasNum = /[0-9]/.test(password);
-  const hasSpecial = /[^a-zA-Z0-9]/.test(password);
-  const score =
-    password.length < 6 ? 1
-    : password.length < 10 ? 2
-    : hasUpper && hasNum && hasSpecial ? 4
-    : 3;
-  const labels = ["", "Faible", "Correct", "Fort", "Très fort"];
-  const bar   = ["", "bg-destructive", "bg-warning", "bg-info", "bg-success"];
-  const txt   = ["", "text-destructive", "text-warning-foreground dark:text-warning", "text-info", "text-success"];
-  return (
-    <div className="mt-2 space-y-1">
-      <div className="flex gap-1">
-        {[1, 2, 3, 4].map((i) => (
-          <div
-            key={i}
-            className={cn(
-              "h-1 flex-1 rounded-full transition-all duration-300",
-              i <= score ? bar[score] : "bg-muted",
-            )}
-          />
-        ))}
-      </div>
-      <p className={cn("text-xs font-medium", txt[score])}>{labels[score]}</p>
-    </div>
-  );
-}
 
 // ── Section card header ───────────────────────────────────────────────────
 function SectionHeader({
@@ -182,19 +125,6 @@ function ProfilePage() {
       }
       const msg = (err as any)?.message ?? "Erreur lors de la sauvegarde";
       toast.error(String(msg));
-    },
-  });
-
-  const changePwdMut = useMutation({
-    mutationFn: () => changePassword({ current_password: currentPwd, new_password: newPwd }),
-    onSuccess: () => {
-      toast.success("Mot de passe modifié avec succès");
-      setCurrentPwd(""); setNewPwd(""); setConfirmPwd("");
-      setModalOpen(false);
-    },
-    onError: (err: unknown) => {
-      const msg = err instanceof Error ? err.message : "Erreur lors de la modification";
-      toast.error(msg);
     },
   });
 
@@ -331,10 +261,9 @@ function ProfilePage() {
     setPhone(me.phone ?? "");
   }, [me]);
 
+  const phoneInvalid = phone.trim().length > 0 && !isValidGuineaPhone(phone);
+
   // Sécurité
-  const [currentPwd, setCurrentPwd] = useState("");
-  const [newPwd, setNewPwd] = useState("");
-  const [confirmPwd, setConfirmPwd] = useState("");
   const [twoFactor, setTwoFactor] = useState(false);
 
   // Notifications in-app
@@ -366,13 +295,6 @@ function ProfilePage() {
     { id: "notifications", label: "Notifications",             desc: "Email, in-app, alertes",        icon: Bell },
     { id: "appearance",    label: "Apparence",                 desc: "Thème, langue, densité",        icon: Palette },
   ];
-
-  const savePwd = () => {
-    if (!currentPwd) { toast.error("Saisissez le mot de passe actuel"); return; }
-    if (newPwd.length < 8) { toast.error("Minimum 8 caractères requis"); return; }
-    if (newPwd !== confirmPwd) { toast.error("Les mots de passe ne correspondent pas"); return; }
-    changePwdMut.mutate();
-  };
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -608,12 +530,17 @@ function ProfilePage() {
                     onChange={(e) => setPhone(e.target.value)}
                     placeholder="+224 6XX XX XX XX"
                   />
+                  {phoneInvalid && (
+                    <p className="text-xs text-destructive">
+                      Format invalide. Attendu : {PHONE_FORMAT_HINT}.
+                    </p>
+                  )}
                 </div>
 
                 <div className="flex justify-end border-t border-border/40 pt-4">
                   <Button
                     className="rounded-xl gradient-primary text-background shadow-md shadow-primary/30"
-                    disabled={updateMeMut.isPending}
+                    disabled={updateMeMut.isPending || phoneInvalid}
                     onClick={() =>
                       updateMeMut.mutate(
                           {
@@ -681,65 +608,20 @@ function ProfilePage() {
 
             {/* ── Sécurité ── */}
             {section === "security" && (
-              <>
-                <GlassCard className="space-y-5">
-                  <SectionHeader
-                    icon={Shield}
-                    label="Changer le mot de passe"
-                    desc="Minimum 8 caractères recommandés"
-                    color="bg-amber-500/10"
-                    iconColor="text-amber-500"
-                  />
-
-                  <div className="grid gap-2">
-                    <Label>Mot de passe actuel</Label>
-                    <PasswordInput value={currentPwd} onChange={setCurrentPwd} placeholder="••••••••" />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label>Nouveau mot de passe</Label>
-                    <PasswordInput value={newPwd} onChange={setNewPwd} placeholder="••••••••" />
-                    <StrengthBar password={newPwd} />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label>Confirmer le nouveau mot de passe</Label>
-                    <PasswordInput value={confirmPwd} onChange={setConfirmPwd} placeholder="••••••••" />
-                    {confirmPwd && newPwd !== confirmPwd && (
-                      <p className="text-xs text-destructive">
-                        Les mots de passe ne correspondent pas
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="flex justify-end border-t border-border/40 pt-4">
-                    <Button
-                      className="rounded-xl gradient-primary text-background shadow-md shadow-primary/30"
-                      onClick={savePwd}
-                      disabled={changePwdMut.isPending}
-                    >
-                      {changePwdMut.isPending
-                        ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Modification…</>
-                        : <><Lock className="mr-2 h-4 w-4" />Mettre à jour le mot de passe</>
-                      }
-                    </Button>
-                  </div>
-                </GlassCard>
-
-                <GlassCard className="space-y-4">
-                  <SectionHeader
-                    icon={Clock}
-                    label="Sessions actives"
-                    desc="Gestion des appareils connectés"
-                    color="bg-muted"
-                    iconColor="text-muted-foreground"
-                  />
-                  <div className="flex items-center gap-2 rounded-xl border border-info/20 bg-info/5 p-3 text-sm text-info">
-                    <Info className="h-4 w-4 shrink-0" />
-                    La gestion des sessions est assurée côté serveur. Pour révoquer tous vos accès, utilisez le bouton "Se déconnecter".
-                  </div>
-                </GlassCard>
-              </>
+              <GlassCard className="space-y-3">
+                <SectionHeader
+                  icon={Shield}
+                  label="Mot de passe"
+                  desc="Géré par la plateforme centrale"
+                  color="bg-amber-500/10"
+                  iconColor="text-amber-500"
+                />
+                <p className="text-sm text-muted-foreground">
+                  Le mot de passe de votre compte est désormais géré par la plateforme
+                  centrale d&apos;authentification EDG. Contactez un administrateur pour
+                  le réinitialiser.
+                </p>
+              </GlassCard>
             )}
 
             {/* ── Notifications ── */}

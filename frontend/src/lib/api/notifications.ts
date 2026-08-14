@@ -105,7 +105,7 @@ export async function fetchNotifications(params?: {
 
 export async function markNotificationRead(id: string): Promise<NotifItem> {
   const raw = await apiFetch<RawNotification>(`/notifications/${id}/read`, {
-    method: "PATCH",
+    method: "PUT",
   });
   return mapNotification(raw);
 }

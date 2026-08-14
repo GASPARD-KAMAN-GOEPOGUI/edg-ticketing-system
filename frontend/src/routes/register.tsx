@@ -8,6 +8,7 @@ import { useState } from "react";
 import { ArrowLeft, ArrowRight, CheckCircle2, Eye, EyeOff, Loader2 } from "lucide-react";
 import { registerUser } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
+import { isValidGuineaPhone, PHONE_FORMAT_HINT } from "@/lib/phone";
 
 export const Route = createFileRoute("/register")({
   head: () => ({ meta: [{ title: "Inscription — EDG Support" }] }),
@@ -70,9 +71,11 @@ function Register() {
   const passwordMismatch =
     form.confirmPassword.length > 0 && form.password !== form.confirmPassword;
   const passwordTooShort = form.password.length > 0 && form.password.length < 8;
+  const phoneInvalid = form.phone.trim().length > 0 && !isValidGuineaPhone(form.phone);
   const canContinue =
     !!form.firstName &&
     !!form.email &&
+    !phoneInvalid &&
     form.password.length >= 8 &&
     form.password === form.confirmPassword;
 
@@ -160,6 +163,11 @@ function Register() {
               <div>
                 <Label>Téléphone</Label>
                 <Input className="mt-1.5 h-12" placeholder="+224 6XX XX XX XX" value={form.phone} onChange={set("phone")} />
+                {phoneInvalid && (
+                  <p className="mt-1.5 text-xs text-destructive">
+                    Format invalide. Attendu : {PHONE_FORMAT_HINT}.
+                  </p>
+                )}
               </div>
 
               <div>

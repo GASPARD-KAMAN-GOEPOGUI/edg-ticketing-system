@@ -6,9 +6,11 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_db, get_current_user, require_roles
+from api.models.ModelAccount import Account
 from api.schemas.SchemaRequest import RequestCreate, RequestWorkflowCreate, RequestUpdate, RequestResponse, RequestListItemResponse, RequestSearch
 from api.schemas.SchemaWorkflowDetail import WorkflowDetailResponse
 from api.schemas.SchemaEscalation import EscalationResponse
@@ -21,6 +23,7 @@ from api.services.ServiceClamAV import scan_bytes as clamav_scan
 from api.core.ticket_actions import (
     assert_escalation_allowed,
     assert_exceptional_escalation_reason,
+    assert_requester_is_not_handler,
     assert_ticket_action,
 )
 from api.core.file_validator import validate_file_magic_bytes
@@ -228,26 +231,140 @@ async def _validate_attachment_ids(
     return validated
 
 
-def _hide_internal_comments(schema: RequestResponse) -> RequestResponse:
-    visible_timelines = []
-    for event in schema.timelines or []:
+def _resolve_comment_peer(event, req) -> Optional[str]:
+    """
+    BR-MESSAGING-PAIR-001 — résout le second participant (peer) d'un événement
+    `comment_added`. Une conversation = paire {demandeur, peer}, jamais un fil
+    global par ticket.
+
+    Priorité à `infos.peer_id`, écrit explicitement à la création depuis cette
+    évolution. Fallback pour les événements historiques (créés avant
+    l'introduction de `peer_id`, jamais migrés en base) :
+      - directive (`infos.is_directive`) -> `infos.target_user_id` (déjà résolu,
+        inchangé) ;
+      - auteur = demandeur -> assigné courant du ticket (meilleure estimation :
+        le front n'envoyait jusqu'ici que des messages destinés à l'intervenant
+        en charge) ;
+      - auteur = staff -> lui-même (chaque intervenant historique garde son
+        propre fil avec le demandeur, jamais mélangé avec celui d'un autre).
+    """
+    infos = event.infos if isinstance(event.infos, dict) else {}
+    peer_id = infos.get("peer_id")
+    if peer_id:
+        return str(peer_id)
+    if infos.get("is_directive"):
+        target = infos.get("target_user_id")
+        return str(target) if target else None
+    author_id = infos.get("actor_id") or (str(event.agent_id) if getattr(event, "agent_id", None) else None)
+    requester_id = getattr(req, "requester_id", None)
+    if author_id and requester_id and str(author_id) == str(requester_id):
+        assignee_id = getattr(req, "assignee_id", None)
+        return str(assignee_id) if assignee_id else None
+    return str(author_id) if author_id else None
+
+
+def _visible_comment_responses(
+    events: list[WorkflowDetailResponse], req, actor, *, public_only: bool = False
+) -> list[WorkflowDetailResponse]:
+    """
+    BR-MESSAGING-PAIR-001 — filtre les événements `comment_added` pour ne
+    garder que les conversations dont `actor` fait réellement partie. Le
+    Journal d'audit (tout événement non `comment_added`) n'est jamais touché
+    ici, sa visibilité reste régie par le RBAC ticket standard (`_resolve_access`).
+
+      - admin -> supervision : tout est visible (lecture seule côté frontend) ;
+      - demandeur (ou `public_only`, cf. suivi public par ref+email/téléphone,
+        qui agit pour son propre compte) -> toute conversation normale, puisque
+        chacune l'inclut par construction (BR-MESSAGING-PAIR-001 §1) ; les
+        directives chef->agent restent masquées (jamais destinées au demandeur) ;
+      - staff non-admin -> uniquement sa propre conversation avec le demandeur
+        (peer résolu == lui, ou il en est l'auteur) ; pour une directive,
+        uniquement s'il en est l'auteur (chef) ou la cible (agent).
+    """
+    role = normalize_role(getattr(actor, "role", None)) if actor is not None else None
+    viewer_id = getattr(actor, "id", None)
+    requester_id = getattr(req, "requester_id", None)
+    is_owner = (
+        public_only
+        or role == "user"
+        or (viewer_id is not None and requester_id is not None and str(requester_id) == str(viewer_id))
+    )
+    visible: list[WorkflowDetailResponse] = []
+    for event in events:
         if event.event_type != "comment_added":
-            visible_timelines.append(event)
+            visible.append(event)
             continue
         infos = event.infos if isinstance(event.infos, dict) else {}
-        if infos.get("is_public") is True:
-            visible_timelines.append(event)
-    return schema.copy(update={"timelines": visible_timelines})
+        is_directive = bool(infos.get("is_directive"))
+        peer_id = _resolve_comment_peer(event, req)
+        enriched = event.copy(update={"infos": {**infos, "peer_id": peer_id}}) if peer_id else event
+
+        if role == "admin":
+            visible.append(enriched)
+            continue
+        if is_owner:
+            if not is_directive:
+                visible.append(enriched)
+            continue
+        if viewer_id is None:
+            continue
+        author_id = infos.get("actor_id") or (str(event.agent_id) if event.agent_id else None)
+        if is_directive:
+            target = infos.get("target_user_id")
+            if (author_id and str(author_id) == str(viewer_id)) or (target and str(target) == str(viewer_id)):
+                visible.append(enriched)
+            continue
+        if (peer_id and str(peer_id) == str(viewer_id)) or (author_id and str(author_id) == str(viewer_id)):
+            visible.append(enriched)
+    return visible
 
 
-def _request_response_for_actor(req, svc: RequestService, actor=None, *, public_only: bool = False) -> RequestResponse:
+async def _attach_participant_avatars(schema: RequestResponse, svc: RequestService) -> RequestResponse:
+    """
+    Résout par lot les avatars des intervenants d'un ticket (demandeur, assigné,
+    acteurs/destinataires du journal). Les acteurs du journal (`infos.actor_id`,
+    `infos.target_user_id`) ne sont référencés que par id dans un champ JSON —
+    pas de relation SQLAlchemy directe permettant un join — d'où une résolution
+    en une seule requête groupée ici plutôt qu'un champ calculé sur le modèle.
+    """
+    ids: set[int] = set()
+    if schema.requester_id:
+        ids.add(schema.requester_id)
+    if schema.assignee_id:
+        ids.add(schema.assignee_id)
+    for event in schema.timelines or []:
+        infos = event.infos if isinstance(event.infos, dict) else {}
+        for key in ("actor_id", "target_user_id", "to_user_id"):
+            raw_id = infos.get(key)
+            if raw_id is None:
+                continue
+            try:
+                ids.add(int(raw_id))
+            except (TypeError, ValueError):
+                continue
+    if not ids:
+        return schema
+
+    result = await svc.session.execute(
+        select(Account.id, Account.avatar_url, Account.updated_at).where(Account.id.in_(ids))
+    )
+    avatars: dict[str, str] = {}
+    for account_id, avatar_url, updated_at in result.all():
+        if not avatar_url:
+            continue
+        version = int(updated_at.timestamp()) if updated_at else 0
+        avatars[str(account_id)] = f"{avatar_url}?v={version}"
+    if not avatars:
+        return schema
+    return schema.copy(update={"participant_avatars": avatars})
+
+
+async def _request_response_for_actor(req, svc: RequestService, actor=None, *, public_only: bool = False) -> RequestResponse:
     schema = svc._decrypt_schema(RequestResponse.from_orm(req))
-    actor_id = getattr(actor, "id", None)
-    requester_id = getattr(req, "requester_id", None)
-    is_owner_view = actor_id is not None and requester_id is not None and str(requester_id) == str(actor_id)
-    if public_only or getattr(actor, "role", None) == "user" or is_owner_view:
-        return _hide_internal_comments(schema)
-    return schema
+    schema = schema.copy(update={
+        "timelines": _visible_comment_responses(schema.timelines, req, actor, public_only=public_only),
+    })
+    return await _attach_participant_avatars(schema, svc)
 
 
 # ── Listes ────────────────────────────────────────────────────────────────────
@@ -330,6 +447,10 @@ async def list_requests(
             unit_id=unit_id,
             assignee_id=assignee_id,
             requester_id=requester_id,
+            # BR-REQUESTER-NO-SELF-TREATMENT-001 — defense en profondeur : "Ma boite
+            # de traitement" (assignee_id == soi-meme) n'affiche jamais un ticket dont
+            # l'acteur est aussi le demandeur, meme en cas d'anomalie amont.
+            exclude_requester_id=str(actor.id) if is_own_assignee_view else None,
             sla_breached=sla_breached,
             in_triage=in_triage,
             search=search,
@@ -369,14 +490,20 @@ async def list_transmitted_by_me(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     search: Optional[str] = Query(None, min_length=1),
+    retransmitted_only: bool = Query(False, description="BR-RETRANSMIT-001 — ne garder que les tickets transmis au moins 2 fois par l'acteur"),
     actor=_staff,
     svc: RequestService = Depends(_svc),
 ):
     """BR-TRANSMIT-001 — tickets que l'acteur courant a personnellement transmis
-    à un moment de leur historique (peu importe le porteur actuel ou le statut).
+    à un moment de leur historique ET dont il n'est plus l'intervenant actuel
+    (assignee_id != acteur). Si le ticket lui revient depuis, il quitte cette
+    vue et réapparaît dans "Ma boîte de traitement" — l'historique de
+    transmission reste intact, seule la vue opérationnelle change.
     Lecture seule, scope = ses propres actions passées ; ne touche à aucune
     règle de qualification/assignation/transmission."""
-    return await svc.list_transmitted_by_me(str(actor.id), search=search, page=page, limit=limit)
+    return await svc.list_transmitted_by_me(
+        str(actor.id), search=search, page=page, limit=limit, retransmitted_only=retransmitted_only,
+    )
 
 
 @router.get("/stats/by-status")
@@ -448,7 +575,7 @@ async def track_request(
 ):
     """Suivi public — nécessite ref + (email ou téléphone) du compte ayant créé la demande."""
     req = await svc.track(ref.strip().upper(), email=email, phone=phone)
-    return _request_response_for_actor(req, svc, public_only=True)
+    return await _request_response_for_actor(req, svc, public_only=True)
 
 
 @router.get("/queue", response_model=PaginatedResponse[RequestListItemResponse])
@@ -584,7 +711,7 @@ async def get_by_ref(
     """H-07 — ownership check : un user ne voit que ses propres demandes."""
     req = await svc.get_by_ref(ref)
     await _resolve_access(actor, req, db)
-    return _request_response_for_actor(req, svc, actor)
+    return await _request_response_for_actor(req, svc, actor)
 
 
 @router.get("/{id}", response_model=RequestResponse)
@@ -598,7 +725,7 @@ async def get_request(
     """H-07 — ownership check : un user ne voit que ses propres demandes."""
     req = await svc.get_by_id(id, include_deleted=include_deleted and actor.role == "admin")
     await _resolve_access(actor, req, db)
-    return _request_response_for_actor(req, svc, actor)
+    return await _request_response_for_actor(req, svc, actor)
 
 
 # ── Premier résultat filtré (pattern edgrh GET /items/) ───────────────────────
@@ -652,7 +779,7 @@ async def create_request(
 _STAFF_UPDATE_FIELDS = {"request_status", "status_reason"}
 
 
-@router.patch("/{id}", response_model=RequestResponse)
+@router.put("/{id}", response_model=RequestResponse)
 async def update_request(
     id: str,
     body: RequestUpdate,
@@ -684,6 +811,11 @@ async def update_request(
         # priorite, assignee_id, unity_id, sla_*...) a sa route dediee (qualify/assign/priority/
         # reassign) avec ses propres garde-fous — pas de bypass via PATCH generique.
         data = {k: v for k, v in data.items() if k in _STAFF_UPDATE_FIELDS}
+    if data.get("assignee_id") is not None:
+        # BR-REQUESTER-NO-SELF-TREATMENT-001 — seul chemin restant ou assignee_id
+        # est PATCHable ici (admin, cf. commentaire ci-dessus) ; aucune route dediee
+        # (assign/qualify/transmit/reassign) ne passe par ce PATCH generique.
+        assert_requester_is_not_handler(req, data["assignee_id"])
     return await svc.update(
         id,
         data,
@@ -701,7 +833,7 @@ class RequesterEditBody(BaseModel):
         extra = "forbid"
 
 
-@router.patch("/{id}/requester-edit", response_model=RequestResponse)
+@router.put("/{id}/requester-edit", response_model=RequestResponse)
 async def requester_edit(
     id: str,
     body: RequesterEditBody,
@@ -838,70 +970,34 @@ async def close_request(
     )
 
 
-class ReopenRequestBody(BaseModel):
+class ReopenBody(BaseModel):
     reason: str
     actor_name: Optional[str] = None
-
-
-class RejectReopenBody(BaseModel):
-    reason: str
-
-
-@router.post("/{id}/request-reopen", response_model=RequestResponse, status_code=status.HTTP_200_OK)
-async def user_request_reopen(
-    id: str,
-    body: ReopenRequestBody,
-    actor=Depends(get_current_user),
-    svc: RequestService = Depends(_svc),
-):
-    """
-    Phase 1 — L'utilisateur refuse la résolution et demande la réouverture.
-    Réservé au demandeur propriétaire du ticket. Motif obligatoire.
-    """
-    req = await svc.get_by_id(id)
-    if req.requester_id != actor.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Vous ne pouvez demander la réouverture que de vos propres tickets.",
-        )
-    return await svc.request_reopen(
-        id,
-        actor_id=str(actor.id),
-        actor_name=body.actor_name or _actor_display_name(actor) or actor.name,
-        actor_role=actor.role,
-        actor=actor,
-        reason=body.reason,
-    )
 
 
 @router.post("/{id}/reopen", response_model=RequestResponse)
 async def reopen_request(
     id: str,
-    actor=Depends(require_roles("chief-service", "chief-departement", "director", "admin")),
+    body: ReopenBody,
+    actor=Depends(get_current_user),
     svc: RequestService = Depends(_svc),
 ):
-    """Phase 2 — Le chef approuve la réouverture (change le statut en REOPENED)."""
+    """
+    BR-REOPEN-QUEUE-001 (révision — réouverture immédiate) : réservé au demandeur
+    propriétaire du ticket, motif obligatoire, aucune approbation hiérarchique.
+    Remplace l'ancien mécanisme en deux phases (`/request-reopen` puis approbation
+    chef/directeur/admin via `/reopen`) — un seul comportement métier officiel.
+    """
+    req = await svc.get_by_id(id)
+    if req.requester_id != actor.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Vous ne pouvez réouvrir que vos propres tickets.",
+        )
     return await svc.reopen(
         id,
         actor_id=str(actor.id),
-        actor_name=_actor_display_name(actor),
-        actor_role=actor.role,
-        actor=actor,
-    )
-
-
-@router.post("/{id}/reject-reopen", response_model=RequestResponse)
-async def reject_reopen_request(
-    id: str,
-    body: RejectReopenBody,
-    actor=Depends(require_roles("chief-service", "chief-departement", "director", "admin")),
-    svc: RequestService = Depends(_svc),
-):
-    """Phase 2 — Le chef refuse la réouverture avec motif obligatoire."""
-    return await svc.reject_reopen(
-        id,
-        actor_id=str(actor.id),
-        actor_name=_actor_display_name(actor),
+        actor_name=body.actor_name or _actor_display_name(actor) or actor.name,
         actor_role=actor.role,
         actor=actor,
         reason=body.reason,
@@ -1090,7 +1186,10 @@ async def escalate_request(
     else:
         handler_unity_id = actor.unity_id
 
-    chief_id = await find_hierarchical_chief(db, handler_unity_id, exclude_account_id=handler_id)
+    chief_id = await find_hierarchical_chief(
+        db, handler_unity_id, exclude_account_id=handler_id,
+        exclude_requester_id=req.requester_id,
+    )
     if chief_id is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -1255,27 +1354,30 @@ class _CommentBody(BaseModel):
     attachment_id: Optional[str] = None
     is_directive: bool = False
     reply_to_id: Optional[str] = None
+    peer_id: Optional[str] = None
 
 
 @router.get("/{request_id}/comments", response_model=list[WorkflowDetailResponse])
 async def list_comments(
     request_id: str,
-    public_only: bool = Query(False),
+    peer_id: Optional[str] = Query(None, description="Filtre sur une conversation précise (peer_id)."),
     actor=Depends(get_current_user),
     repo: WorkflowDetailRepository = Depends(_detail_repo),
     req_svc: RequestService = Depends(_svc),
     db: AsyncSession = Depends(get_db),
 ):
-    """C-05 — liste les événements event_type='comment' du workflow de la demande.
-    Un demandeur propriétaire ne voit que les commentaires publics (is_public=True dans infos)."""
+    """C-05 / BR-MESSAGING-PAIR-001 — liste les conversations privées par paire du
+    ticket dont `actor` fait partie (demandeur, ou intervenant courant/passé sur
+    sa propre conversation) ; admin garde une vue de supervision lecture seule
+    sur toutes les conversations. `peer_id` restreint à une conversation précise."""
     req = await req_svc.get_by_id(request_id)
     await _resolve_access(actor, req, db)
-    actor_id = getattr(actor, "id", None)
-    requester_id = getattr(req, "requester_id", None)
-    is_owner_view = actor_id is not None and requester_id is not None and str(requester_id) == str(actor_id)
-    if actor.role == "user" or is_owner_view:
-        public_only = True
-    return await repo.list_comments_by_request(request_id, public_only=public_only)
+    events = await repo.list_comments_by_request(request_id)
+    responses = [WorkflowDetailResponse.from_orm(e) for e in events]
+    visible = _visible_comment_responses(responses, req, actor)
+    if peer_id:
+        visible = [ev for ev in visible if str((ev.infos or {}).get("peer_id")) == str(peer_id)]
+    return visible
 
 
 @router.post("/{request_id}/comments", response_model=WorkflowDetailResponse, status_code=status.HTTP_201_CREATED)
@@ -1295,6 +1397,11 @@ async def create_comment(
     jointe au commentaire — envoyés en un seul geste comme sur WhatsApp."""
     req = await req_svc.get_by_id(request_id)
     await _resolve_access(actor, req, db)
+    if req.deleted_at is not None or req.request_status in {"closed", "rejected", "cancelled"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Impossible d'écrire un message : la demande est clôturée, rejetée, annulée ou archivée.",
+        )
     wf = await wf_repo.find_active_workflow(request_id)
     if wf is None:
         raise HTTPException(
@@ -1315,6 +1422,39 @@ async def create_comment(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Impossible d'envoyer une directive : ce ticket n'a pas encore d'agent assigné.",
             )
+        peer_id = str(req.assignee_id)
+    else:
+        # BR-MESSAGING-PAIR-001 — la messagerie normale est une conversation
+        # strictement privée entre le demandeur et l'INTERVENANT COURANT du
+        # ticket (assignee_id). Un ancien intervenant (réaffectation) garde la
+        # lecture de sa conversation mais ne peut plus y écrire ; personne
+        # d'autre, même avec un accès RBAC large au ticket (`_resolve_access`),
+        # ne peut écrire ici.
+        requester_id = getattr(req, "requester_id", None)
+        assignee_id = getattr(req, "assignee_id", None)
+        if not assignee_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Impossible d'écrire : ce ticket n'a pas encore d'intervenant assigné.",
+            )
+        actor_id_str = str(actor.id)
+        if actor_id_str not in {str(requester_id), str(assignee_id)}:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Seuls le demandeur et l'intervenant actuel de ce ticket peuvent écrire dans cette conversation.",
+            )
+        expected_peer = str(assignee_id) if actor_id_str == str(requester_id) else str(requester_id)
+        if not body.peer_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="peer_id requis : indiquez le destinataire de ce message.",
+            )
+        if str(body.peer_id) != expected_peer:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Destinataire invalide pour cette conversation.",
+            )
+        peer_id = expected_peer
 
     attachment_infos: dict = {}
     if body.attachment_id is not None:
@@ -1372,6 +1512,7 @@ async def create_comment(
             "request_status": req.request_status,
             "source_role": actor.role,
             "actor_role": actor.role,
+            "peer_id": peer_id,
             **({"is_directive": True, "target_user_id": directive_target_id} if body.is_directive else {}),
             **attachment_infos,
             **reply_infos,
@@ -1379,21 +1520,53 @@ async def create_comment(
         },
     })
 
-    # Notifier l'agent assigné quand l'utilisateur répond à une demande en attente
-    if actor.role == "user" and req.request_status == "pending":
+    # BR-NOTIFICATION-WORKFLOW-001 §11 — commentaire du demandeur → informe
+    # principalement l'intervenant actuel (généralisé au-delà du seul statut
+    # `pending` : la règle est "le demandeur écrit", pas "le ticket est en
+    # attente"). Ne jamais notifier l'auteur de sa propre action.
+    if (
+        actor.role == "user"
+        and str(getattr(req, "requester_id", "")) == str(actor.id)
+        and not body.is_directive
+    ):
         assignee_id = getattr(req, "assignee_id", None)
-        if assignee_id:
+        if assignee_id and str(assignee_id) != str(actor.id):
             from api.services.NotificationEmitter import emit as emit_notif
             await emit_notif(
                 db,
                 recipient_id=str(assignee_id),
-                title="Réponse reçue du demandeur",
-                body=f"Le demandeur a répondu à votre demande d'informations sur la demande {req.ref}.",
+                title="Réponse du demandeur",
+                body=f"Le demandeur a répondu sur le ticket {req.ref}.",
                 type="info",
                 request_id=request_id,
-                action_label="Voir la demande",
+                action_label="Voir le ticket",
                 action_url=f"/app/requests/{request_id}",
             )
+
+    # BR-NOTIFICATION-WORKFLOW-001 §11 — commentaire de l'intervenant actuel
+    # destiné au demandeur : réutilise le marqueur existant `is_public` (visible
+    # citoyen) comme signal explicite d'intention, plutôt que de deviner.
+    # App-only (pas d'email systématique, pour éviter le bruit).
+    elif (
+        body.is_public
+        and not body.is_directive
+        and getattr(req, "assignee_id", None)
+        and str(req.assignee_id) == str(actor.id)
+        and getattr(req, "requester_id", None)
+        and str(req.requester_id) != str(actor.id)
+    ):
+        from api.services.NotificationEmitter import emit as emit_notif
+        await emit_notif(
+            db,
+            recipient_id=str(req.requester_id),
+            title="Nouveau message sur votre ticket",
+            body=f"L'intervenant a ajouté un message sur votre ticket {req.ref}.",
+            type="info",
+            request_id=request_id,
+            action_label="Voir le ticket",
+            action_url=f"/app/requests/{request_id}",
+            send_email=False,
+        )
 
     # Directive : notification nominative a l'agent assigne uniquement (BR-NOTIF-001).
     if directive_target_id:
@@ -1405,7 +1578,7 @@ async def create_comment(
             body=f"{_actor_display_name(actor) or actor.name} vous a envoyé une directive sur le ticket {req.ref}.",
             type="warning",
             request_id=request_id,
-            action_label="Voir la demande",
+            action_label="Voir le ticket",
             action_url=f"/app/requests/{request_id}",
         )
 
@@ -1421,24 +1594,24 @@ async def delete_comment(
     detail_repo: WorkflowDetailRepository = Depends(_detail_repo),
     db: AsyncSession = Depends(get_db),
 ):
-    """C-05 — ownership : un user ne peut supprimer que ses propres commentaires."""
+    """C-05 / BR-MESSAGING-PAIR-001 — ownership stricte : seul l'auteur (ou
+    l'admin, en supervision) peut supprimer un message. Un intervenant d'une
+    autre conversation sur ce ticket ne doit plus pouvoir en supprimer les
+    messages, cohérent avec le fait qu'il ne peut même plus les lire."""
     req = await req_svc.get_by_id(request_id)
     await _resolve_access(actor, req, db)
-    if req.deleted_at is not None or req.request_status in {"closed", "rejected"}:
+    if req.deleted_at is not None or req.request_status in {"closed", "rejected", "cancelled"}:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Impossible de supprimer un commentaire : la demande est clôturée, rejetée ou archivée.",
+            detail="Impossible de supprimer un commentaire : la demande est clôturée, rejetée, annulée ou archivée.",
         )
     entry = await detail_repo.get_by_id(comment_id)
     if entry is None or entry.event_type != "comment_added":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Commentaire introuvable.")
-    actor_id = getattr(actor, "id", None)
-    requester_id = getattr(req, "requester_id", None)
-    is_owner_view = actor_id is not None and requester_id is not None and str(requester_id) == str(actor_id)
-    if (actor.role == "user" or is_owner_view) and str(entry.agent_id) != str(actor.id):
+    if normalize_role(actor.role) != "admin" and str(entry.agent_id) != str(actor.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Vous ne pouvez supprimer que vos propres commentaires.",
+            detail="Vous ne pouvez supprimer que vos propres messages.",
         )
     await detail_repo.delete(comment_id)
 

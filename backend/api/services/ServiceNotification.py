@@ -81,10 +81,24 @@ class NotificationService(BaseService):
         obj = await self.repo.mark_as_read(id)
         if obj is None:
             raise self.not_found("Notification introuvable")
+        # Synchronise les autres onglets/appareils du même destinataire (le
+        # compteur de la cloche ne se recalcule sinon que sur cet onglet-ci).
+        await emit_event(AppEvent(
+            type="notification.read",
+            payload={"id": obj.id},
+            target={"user_ids": [obj.recipient_id]},
+        ))
         return obj
 
     async def mark_all_read(self, recipient_id: str) -> int:
-        return await self.repo.mark_all_read(recipient_id)
+        count = await self.repo.mark_all_read(recipient_id)
+        if count:
+            await emit_event(AppEvent(
+                type="notification.read",
+                payload={"bulk": True},
+                target={"user_ids": [int(recipient_id)]},
+            ))
+        return count
 
     async def delete(self, id: str) -> bool:
         """Archive la notification — soft-delete uniquement (deleted_at), jamais de suppression physique."""

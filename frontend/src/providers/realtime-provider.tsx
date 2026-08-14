@@ -20,9 +20,11 @@ import {
   type ReactNode,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "@tanstack/react-router";
+import { toast } from "sonner";
 import { sseClient } from "@/lib/realtime/sse-client";
 import { INVALIDATION_MAP, type QueryKeyPrefix } from "@/lib/realtime/invalidation-map";
-import { getAccessToken } from "@/lib/session";
+import { getAccessToken, clearSession } from "@/lib/session";
 
 // Union dédupliquée de tous les préfixes de query keys de la carte d'invalidation —
 // utilisée comme filet de rattrapage après une reconnexion SSE (voir plus bas).
@@ -56,6 +58,7 @@ export function useRealtimeStatus(): RealtimeStatus {
 
 export function RealtimeProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
+  const router = useRouter();
   const [status, setStatus] = useState<RealtimeStatus>("connecting");
   const cleanupFns = useRef<Array<() => void>>([]);
   const hasDroppedRef = useRef(false);
@@ -101,7 +104,18 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       sseClient.on(eventType, () => invalidateForEvent(eventType)),
     );
 
-    cleanupFns.current = [offConnected, offDisconnected, ...offHandlers];
+    // Compte désactivé/supprimé par un admin — déconnexion forcée immédiate,
+    // sans attendre le prochain appel API rejeté en 401. Un seul événement
+    // ciblé par user_id atteint tous les onglets/appareils ouverts de cette
+    // personne (chacun a son propre abonnement SSE côté event_bus).
+    const offDeactivated = sseClient.on("account.deactivated", () => {
+      toast.error("Votre compte a été désactivé par un administrateur.");
+      sseClient.disconnect();
+      clearSession();
+      router.navigate({ to: "/" });
+    });
+
+    cleanupFns.current = [offConnected, offDisconnected, offDeactivated, ...offHandlers];
 
     return () => {
       cleanupFns.current.forEach((off) => off());

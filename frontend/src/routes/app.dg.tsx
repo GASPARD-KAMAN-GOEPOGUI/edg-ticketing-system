@@ -102,12 +102,6 @@ const levelTone: Record<EscalationItem["level"], string> = {
   L3: "bg-destructive/15 text-destructive",
 };
 
-function slaColorClass(pct: number) {
-  if (pct >= 90) return "border-success/30 bg-success/15 text-success";
-  if (pct >= 75) return "border-warning/40 bg-warning/20 text-warning-foreground dark:text-warning";
-  return "border-destructive/30 bg-destructive/15 text-destructive";
-}
-
 function GlobalView() {
   const qc = useQueryClient();
   const sessionUser = useUser();
@@ -692,10 +686,6 @@ function GlobalView() {
                   </div>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-2">
-                  <div className="text-right">
-                    <div className="text-xs text-muted-foreground">Délai dépassé</div>
-                    <div className="text-sm font-semibold text-destructive">+{e.slaOverHours}h</div>
-                  </div>
                   {e.status !== "resolved" && (
                     <div className="flex flex-wrap gap-1.5">
                       {e.status === "open" && (
@@ -806,33 +796,6 @@ function GlobalView() {
               </li>
             ))}
           </ul>
-        )}
-      </GlassCard>
-
-      {/* Carte thermique SLA par direction */}
-      <GlassCard>
-        <h2 className="mb-4 font-semibold">Carte thermique des délais par direction</h2>
-        {loadReq ? (
-          <div className="flex h-24 items-center justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground/40" />
-          </div>
-        ) : dirStats.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Aucune donnée disponible.</p>
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {dirStats.map((s) => (
-              <div
-                key={s.id}
-                className={cn("rounded-2xl border px-4 py-3", slaColorClass(s.slaRespect))}
-              >
-                <div className="text-xs font-medium">{directionLookup[s.id] ?? s.id}</div>
-                <div className="mt-1 text-2xl font-bold">{s.slaRespect}%</div>
-                <div className="mt-0.5 text-[11px] opacity-80">
-                  {s.total} tickets · {s.overdue} hors délai
-                </div>
-              </div>
-            ))}
-          </div>
         )}
       </GlassCard>
 

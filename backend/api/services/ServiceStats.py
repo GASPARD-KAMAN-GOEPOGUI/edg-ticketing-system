@@ -95,12 +95,18 @@ class StatsService(BaseService):
     # ── Breakdowns ────────────────────────────────────────────────────────────
 
     async def requests_by_direction(self) -> list[dict]:
-        """Requêtes groupées par direction (avec nom)."""
+        """Requêtes groupées par direction (avec nom).
+
+        `request` n'a pas de colonne `direction_id` : la direction est dérivée
+        de `unity_id` (si l'unité a un `parent_direction_id`, celui-ci EST la
+        direction ; sinon l'unité EST elle-même la direction) — même logique
+        que `Request.direction_id` (property Python, `ModelRequest.py`).
+        """
         result = await self.session.execute(text("""
             SELECT
-                r.direction_id,
-                COALESCE(d.name, 'Non assignée') AS direction_name,
-                COUNT(*)                          AS total,
+                du.id                              AS direction_id,
+                COALESCE(du.label, 'Non assignée') AS direction_name,
+                COUNT(*)                           AS total,
                 SUM(CASE WHEN rs.code IN ('resolved','closed')
                                                   THEN 1 ELSE 0 END) AS resolved,
                 SUM(CASE WHEN rs.code IN ('pending','qualifying','qualified',
@@ -112,21 +118,22 @@ class StatsService(BaseService):
                                                   THEN 1 ELSE 0 END) AS sla_breached
             FROM request r
             JOIN request_status rs ON rs.id = r.request_status_id
-            LEFT JOIN direction d ON d.id = r.direction_id AND d.deleted_at IS NULL
+            LEFT JOIN unity u  ON u.id = r.unity_id AND u.deleted_at IS NULL
+            LEFT JOIN unity du ON du.id = COALESCE(u.parent_direction_id, u.id) AND du.deleted_at IS NULL
             WHERE r.deleted_at IS NULL
-            GROUP BY r.direction_id, d.name
+            GROUP BY du.id, du.label
             ORDER BY total DESC
         """))
         return [dict(row) for row in result.mappings().all()]
 
     async def requests_by_unit(self) -> list[dict]:
-        """Requêtes groupées par unité (avec nom de direction)."""
+        """Requêtes groupées par unité (avec nom de direction parente)."""
         result = await self.session.execute(text("""
             SELECT
-                r.unit_id,
-                COALESCE(u.name, 'Non assignée')   AS unit_name,
-                COALESCE(d.name, '')               AS direction_name,
-                COUNT(*)                           AS total,
+                r.unity_id                          AS unit_id,
+                COALESCE(u.label, 'Non assignée')   AS unit_name,
+                COALESCE(du.label, '')              AS direction_name,
+                COUNT(*)                            AS total,
                 SUM(CASE WHEN rs.code IN ('resolved','closed')
                                                    THEN 1 ELSE 0 END) AS resolved,
                 SUM(CASE WHEN rs.code IN ('pending','qualifying','qualified',
@@ -134,10 +141,10 @@ class StatsService(BaseService):
                                                    THEN 1 ELSE 0 END) AS active
             FROM request r
             JOIN request_status rs ON rs.id = r.request_status_id
-            LEFT JOIN unit u      ON u.id = r.unit_id      AND u.deleted_at IS NULL
-            LEFT JOIN direction d ON d.id = u.direction_id AND d.deleted_at IS NULL
+            LEFT JOIN unity u  ON u.id = r.unity_id             AND u.deleted_at IS NULL
+            LEFT JOIN unity du ON du.id = u.parent_direction_id AND du.deleted_at IS NULL
             WHERE r.deleted_at IS NULL
-            GROUP BY r.unit_id, u.name, d.name
+            GROUP BY r.unity_id, u.label, du.label
             ORDER BY total DESC
         """))
         return [dict(row) for row in result.mappings().all()]
@@ -215,14 +222,26 @@ class StatsService(BaseService):
         unit_id: Optional[int] = None,
         limit: int = 50,
     ) -> list[dict]:
-        """Performance par agent : requêtes assignées, résolues, temps moyen."""
-        conditions = ["a.deleted_at IS NULL", "a.role IN ('agent','chief')"]
+        """Performance par agent : requêtes assignées, résolues, temps moyen.
+
+        `account` n'a pas de colonnes `direction_id`/`unit_id`/`role` avec les
+        valeurs 'agent'/'chief' : le rôle réel est `agent-support` /
+        `chief-service` / `chief-departement` (cf. `ModelAccount.py`), et la
+        direction se dérive de `unity_id` comme pour `requests_by_direction`.
+        `unit_id` filtre directement sur `unity_id` (l'unité de l'agent) ;
+        `direction_id` filtre sur la direction résolue (unité elle-même si
+        c'est une direction, ou son parent sinon).
+        """
+        conditions = [
+            "a.deleted_at IS NULL",
+            "a.role IN ('agent-support', 'chief-service', 'chief-departement')",
+        ]
         params: dict = {"limit": limit}
         if direction_id:
-            conditions.append("a.direction_id = :direction_id")
+            conditions.append("(a.unity_id = :direction_id OR au.parent_direction_id = :direction_id)")
             params["direction_id"] = direction_id
         if unit_id:
-            conditions.append("a.unit_id = :unit_id")
+            conditions.append("a.unity_id = :unit_id")
             params["unit_id"] = unit_id
 
         where = " AND ".join(conditions)
@@ -233,8 +252,8 @@ class StatsService(BaseService):
                     a.uuid            AS agent_uuid,
                     a.name            AS agent_name,
                     a.availability,
-                    a.direction_id,
-                    COALESCE(d.name,'') AS direction_name,
+                    du.id                AS direction_id,
+                    COALESCE(du.label,'') AS direction_name,
                     COUNT(r.id)                          AS assigned_total,
                     SUM(CASE WHEN rs.code IN ('resolved','closed')
                              THEN 1 ELSE 0 END)           AS resolved_total,
@@ -247,11 +266,12 @@ class StatsService(BaseService):
                         END
                     ), 1)                                 AS avg_resolution_hours
                 FROM account a
-                LEFT JOIN direction d  ON d.id = a.direction_id AND d.deleted_at IS NULL
+                LEFT JOIN unity au     ON au.id = a.unity_id AND au.deleted_at IS NULL
+                LEFT JOIN unity du     ON du.id = COALESCE(au.parent_direction_id, au.id) AND du.deleted_at IS NULL
                 LEFT JOIN request r    ON r.assignee_id = a.id  AND r.deleted_at IS NULL
                 LEFT JOIN request_status rs ON rs.id = r.request_status_id
                 WHERE {where}
-                GROUP BY a.id, a.uuid, a.name, a.availability, a.direction_id, d.name
+                GROUP BY a.id, a.uuid, a.name, a.availability, du.id, du.label
                 ORDER BY resolved_total DESC
                 LIMIT :limit
             """),
@@ -328,7 +348,7 @@ class StatsService(BaseService):
         conditions = ["r.deleted_at IS NULL", "r.sla_hours > 0"]
         params: dict = {}
         if direction_id:
-            conditions.append("r.direction_id = :direction_id")
+            conditions.append("(r.unity_id = :direction_id OR u.parent_direction_id = :direction_id)")
             params["direction_id"] = direction_id
 
         where = " AND ".join(conditions)
@@ -351,6 +371,7 @@ class StatsService(BaseService):
                     ), 0)                                     AS avg_resolution_minutes
                 FROM request r
                 JOIN request_status rs ON rs.id = r.request_status_id
+                LEFT JOIN unity u ON u.id = r.unity_id AND u.deleted_at IS NULL
                 WHERE {where}
             """),
             params,
@@ -382,10 +403,10 @@ class StatsService(BaseService):
         scope_conditions = "r.deleted_at IS NULL"
         params: dict = {}
         if direction_id:
-            scope_conditions += " AND r.direction_id = :direction_id"
+            scope_conditions += " AND (r.unity_id = :direction_id OR u.parent_direction_id = :direction_id)"
             params["direction_id"] = direction_id
         if unit_id:
-            scope_conditions += " AND r.unit_id = :unit_id"
+            scope_conditions += " AND r.unity_id = :unit_id"
             params["unit_id"] = unit_id
 
         req = await self.session.execute(
@@ -409,6 +430,7 @@ class StatsService(BaseService):
                                                                 THEN 1 ELSE 0 END) AS resolved_today
                 FROM request r
                 JOIN request_status rs ON rs.id = r.request_status_id
+                LEFT JOIN unity u ON u.id = r.unity_id AND u.deleted_at IS NULL
                 WHERE {scope_conditions}
             """),
             params,

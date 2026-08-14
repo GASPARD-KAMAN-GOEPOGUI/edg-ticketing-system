@@ -95,9 +95,12 @@ async def _detail(auth_client, request_id: str) -> dict:
 
 
 async def _add_comment_as(request_id: str, account_id: int, role: str, unity_id: int, body: str):
+    # account_id est systématiquement l'assigné courant du ticket au moment de
+    # l'appel (cf. sites d'appel) ; le demandeur est toujours le compte "user"
+    # (id=1, cf. _create_ticket ci-dessus) -> BR-MESSAGING-PAIR-001.
     resp = await _call_as(
         _dep(account_id, role, unity_id), "POST", f"/api/v1/requests/{request_id}/comments",
-        {"body": body, "is_public": False},
+        {"body": body, "is_public": False, "peer_id": "1"},
     )
     assert resp.status_code in (200, 201), resp.text
     return resp
@@ -171,14 +174,12 @@ async def test_intervention_order_resets_per_cycle_and_history_never_lost(auth_c
     assert detail1["interventions"][0]["intervention_order"] == 1
     assert detail1["interventions"][0]["cycle_number"] == 1
 
-    # ── Reouverture -> cycle 2 ────────────────────────────────────────────────
+    # ── Reouverture (immediate, BR-REOPEN-QUEUE-001) -> cycle 2 ─────────────────
     async with auth_client("user") as user_client:
         req_resp = await user_client.post(
-            f"/api/v1/requests/{request_id}/request-reopen", json={"reason": "Le probleme persiste."},
+            f"/api/v1/requests/{request_id}/reopen", json={"reason": "Le probleme persiste."},
         )
         assert req_resp.status_code == 200, req_resp.text
-    approve1 = await _call_as(_dep(1004, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/reopen")
-    assert approve1.status_code == 200, approve1.text
 
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=1005)
     resolve2 = await _call_as(
@@ -197,14 +198,12 @@ async def test_intervention_order_resets_per_cycle_and_history_never_lost(auth_c
     assert iv_cycle2["cycle_number"] == 2
     assert iv_cycle2["intervention_order"] == 1, "l'ordre doit repartir a 1 pour le nouveau cycle"
 
-    # ── 2e reouverture -> cycle 3, meme intervenant (1003) qu'au cycle 1 ─────
+    # ── 2e reouverture (immediate) -> cycle 3, meme intervenant (1003) qu'au cycle 1 ─
     async with auth_client("user") as user_client:
         req_resp2 = await user_client.post(
-            f"/api/v1/requests/{request_id}/request-reopen", json={"reason": "Nouvelle panne."},
+            f"/api/v1/requests/{request_id}/reopen", json={"reason": "Nouvelle panne."},
         )
         assert req_resp2.status_code == 200, req_resp2.text
-    approve2 = await _call_as(_dep(1004, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/reopen")
-    assert approve2.status_code == 200, approve2.text
 
     # Agent 1003 reprend le ticket — un meme intervenant peut revenir plusieurs
     # fois, chaque passage restant une intervention distincte.
@@ -283,7 +282,8 @@ async def test_non_current_handler_comment_not_attached_to_intervention(auth_cli
 
     async with auth_client("user") as user_client:
         resp = await user_client.post(
-            f"/api/v1/requests/{request_id}/comments", json={"body": "Toujours en panne ?", "is_public": True},
+            f"/api/v1/requests/{request_id}/comments",
+            json={"body": "Toujours en panne ?", "is_public": True, "peer_id": "1008"},
         )
         assert resp.status_code in (200, 201), resp.text
 

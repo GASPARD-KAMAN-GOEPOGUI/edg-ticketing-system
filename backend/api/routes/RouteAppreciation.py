@@ -86,7 +86,7 @@ async def create_appreciation(body: AppreciationCreate, svc: AppreciationService
     return await svc.create(body.dict())
 
 
-@router.patch("/{id}", response_model=AppreciationResponse)
+@router.put("/{id}", response_model=AppreciationResponse)
 async def update_appreciation(
     id: str,
     body: AppreciationUpdate,

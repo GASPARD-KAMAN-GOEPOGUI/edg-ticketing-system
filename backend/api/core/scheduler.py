@@ -28,6 +28,11 @@ async def _job_auto_escalation() -> None:
 
         async with AsyncSessionLocal() as session:
             svc = EscaladeService(session)
+            # BR-NOTIFICATION-WORKFLOW-001 §14 — alerte préventive avant dépassement,
+            # exécutée avant le marquage effectif du dépassement (ordre sans incidence
+            # fonctionnelle : un ticket qui vient de dépasser son SLA à ce passage
+            # précis n'est simplement pas éligible à l'alerte préventive ce tour-ci).
+            await svc.warn_sla_approaching()
             await svc.mark_sla_breached()
             count = await svc.run_auto_escalation()
             await session.commit()
@@ -80,13 +85,12 @@ async def _job_auto_close() -> None:
 
 def start_scheduler(interval_minutes: int = 10) -> None:
     """Démarre le scheduler et enregistre tous les jobs."""
-    _scheduler.add_job(
-        _job_auto_escalation,
-        trigger=IntervalTrigger(minutes=interval_minutes),
-        id="auto_escalation",
-        replace_existing=True,
-        misfire_grace_time=60,
-    )
+    # Job "auto_escalation" désactivé sur demande : plus aucune action automatique
+    # sur le SLA (alerte préventive, marquage de dépassement, escalade + réassignation
+    # automatique) — un ticket ne doit plus changer de statut/responsable sans action
+    # humaine explicite. `_job_auto_escalation()` / `warn_sla_approaching()` /
+    # `mark_sla_breached()` / `run_auto_escalation()` restent en place, simplement
+    # plus invoqués automatiquement.
     _scheduler.add_job(
         _job_auto_close,
         trigger=IntervalTrigger(hours=6),
@@ -96,8 +100,7 @@ def start_scheduler(interval_minutes: int = 10) -> None:
     )
     _scheduler.start()
     logger.info(
-        "[Scheduler] Démarré — auto_escalation toutes les %d min, auto_close toutes les 6h.",
-        interval_minutes,
+        "[Scheduler] Démarré — auto_escalation désactivé, auto_close toutes les 6h.",
     )
 
 

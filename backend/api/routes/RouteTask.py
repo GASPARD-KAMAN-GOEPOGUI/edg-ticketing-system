@@ -81,7 +81,7 @@ async def create_task(
     return await svc.create(body.dict())
 
 
-@router.patch("/{id}", response_model=TaskResponse)
+@router.put("/{id}", response_model=TaskResponse)
 async def update_task(
     id: str,
     body: TaskUpdate,

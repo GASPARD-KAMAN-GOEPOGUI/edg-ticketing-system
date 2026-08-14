@@ -16,7 +16,7 @@ import {
   deleteNotification,
 } from "@/lib/api/notifications";
 import type { NotifItem } from "@/lib/api/notifications";
-import { closeRequest, requestReopen } from "@/lib/api/requests";
+import { closeRequest, reopenRequest } from "@/lib/api/requests";
 import {
   fetchPublishedAnnouncements,
   fetchActiveAlerts,
@@ -173,17 +173,33 @@ export function NotificationPanel({
 
   const invalidateNotifs = () => queryClient.invalidateQueries({ queryKey: ["notifications"] });
 
+  // onError réinvalide aussi : l'échec optimiste local (setReqNotifs) doit être
+  // corrigé par un refetch de l'état réel, sinon le badge de la cloche affiche
+  // "lu" en local sans que ce soit jamais persisté côté serveur (l'utilisateur
+  // le découvre seulement après un rechargement complet de la page).
   const markReadMut = useMutation({
     mutationFn: markNotificationRead,
     onSuccess: invalidateNotifs,
+    onError: () => {
+      invalidateNotifs();
+      toast.error("Impossible de marquer la notification comme lue — réessaie.");
+    },
   });
   const deleteNotifMut = useMutation({
     mutationFn: deleteNotification,
     onSuccess: invalidateNotifs,
+    onError: () => {
+      invalidateNotifs();
+      toast.error("Impossible d'archiver la notification — réessaie.");
+    },
   });
   const markAllReadMut = useMutation({
     mutationFn: () => markAllNotificationsRead(meId),
     onSuccess: invalidateNotifs,
+    onError: () => {
+      invalidateNotifs();
+      toast.error("Impossible de marquer toutes les notifications comme lues — réessaie.");
+    },
   });
 
   const closeMut = useMutation({
@@ -197,11 +213,13 @@ export function NotificationPanel({
   });
 
   const reopenMut = useMutation({
-    mutationFn: (id: string) => requestReopen(id, "Réouverture demandée"),
+    // BR-REOPEN-QUEUE-001 (révision — réouverture immédiate) : plus d'approbation
+    // chef à attendre, le ticket retourne directement en File d'attente.
+    mutationFn: (id: string) => reopenRequest(id, "Réouverture demandée depuis les notifications."),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["requests"] });
       queryClient.invalidateQueries({ queryKey: ["notifications"] });
-      toast.success("Ticket renvoyé pour réouverture.");
+      toast.success("Ticket réouvert et replacé dans la File d'attente.");
     },
     onError: () => toast.error("Impossible de rouvrir le ticket."),
   });

@@ -85,5 +85,6 @@ class WorkflowDetail(Base, BaseColumns):
     __table_args__ = (
         Index("idx_wfd_wf", "workflow_id"),
         Index("idx_wfd_status", "status", "deleted_at"),
+        Index("idx_wfd_event_type", "event_type", "deleted_at"),
         MYSQL_ARGS,
     )

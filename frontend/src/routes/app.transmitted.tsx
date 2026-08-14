@@ -16,7 +16,7 @@ import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { PaginationBar } from "@/components/pagination-bar";
 import { AsyncSwap } from "@/components/async-states";
-import { cn, initialsFor } from "@/lib/utils";
+import { cn, initialsFor, formatElapsedHours } from "@/lib/utils";
 import { ticketDetailRouteForList } from "@/lib/ticket-navigation";
 
 export const Route = createFileRoute("/app/transmitted")({
@@ -173,8 +173,6 @@ function TransmittedTicketsPage() {
             <GlassCard className="overflow-hidden p-0">
               <AnimatePresence mode="popLayout" initial={false}>
                 {paged.map((r, i) => {
-                  const slaOver = r.slaElapsed > r.slaHours;
-                  const slaLeft = Math.max(0, r.slaHours - r.slaElapsed);
                   return (
                     <motion.div
                       key={r.id}
@@ -193,8 +191,6 @@ function TransmittedTicketsPage() {
                           ? "border-destructive/30 bg-destructive/3"
                           : r.status === "reopened"
                           ? "border-amber-500/30 bg-amber-500/3"
-                          : slaOver
-                          ? "border-orange-400/30"
                           : "border-border/30",
                       )}
                     >
@@ -231,9 +227,9 @@ function TransmittedTicketsPage() {
                       </div>
 
                       <div className="flex shrink-0 flex-col items-end gap-2">
-                        <div className={cn("flex items-center gap-1 text-xs font-medium", slaOver ? "text-destructive" : "text-muted-foreground")}>
+                        <div className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
                           <Clock className="h-3.5 w-3.5" />
-                          {slaOver ? "Délai dépassé" : `${slaLeft}h restantes`}
+                          {formatElapsedHours(r.slaElapsed)}
                         </div>
                       </div>
                     </motion.div>
@@ -246,8 +242,6 @@ function TransmittedTicketsPage() {
             <motion.div layout className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <AnimatePresence mode="popLayout" initial={false}>
                 {paged.map((r, i) => {
-                  const slaOver = r.slaElapsed > r.slaHours;
-                  const slaLeft = Math.max(0, r.slaHours - r.slaElapsed);
                   return (
                     <motion.div
                       key={r.id}
@@ -284,9 +278,9 @@ function TransmittedTicketsPage() {
                                 {initialsFor(r.requesterName)}
                               </AvatarFallback>
                             </Avatar>
-                            <div className={cn("flex items-center gap-1 text-xs font-medium shrink-0", slaOver ? "text-destructive" : "text-muted-foreground")}>
+                            <div className="flex items-center gap-1 text-xs font-medium shrink-0 text-muted-foreground">
                               <Clock className="h-3 w-3" />
-                              {slaOver ? "Délai !" : `${slaLeft}h`}
+                              {formatElapsedHours(r.slaElapsed)}
                             </div>
                           </div>
                         </div>

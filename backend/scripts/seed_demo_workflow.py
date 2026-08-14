@@ -31,15 +31,8 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 
 import aiomysql
 
-DEMO_PASSWORD = "Edg@2024!"
 UNITY_DSI_DEX = 14
 UNITY_DSI     = 6
-
-
-def _hash(plain: str) -> str:
-    from argon2 import PasswordHasher
-    ph = PasswordHasher(time_cost=1, memory_cost=65536, parallelism=2)
-    return ph.hash(plain)
 
 
 async def main():
@@ -53,7 +46,6 @@ async def main():
         autocommit=False,
     )
 
-    hashed = _hash(DEMO_PASSWORD)
     now = datetime.now()
 
     async with conn.cursor() as cur:
@@ -76,19 +68,18 @@ async def main():
             acc_uuid = str(uuid.uuid4())
             await cur.execute(
                 """INSERT INTO account
-                   (uuid, password_hash, name, firstname, email, role, unity_id,
+                   (uuid, name, firstname, email, role, unity_id,
                     matricule, is_edg_employee, account_status, email_verified,
                     mfa_enabled, notif_sla_alerts, notif_escalations,
                     notif_comments, notif_resolutions,
                     status, created_at, updated_at)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,1,'active',1,0,1,1,1,1,1,%s,%s)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,1,'active',1,0,1,1,1,1,1,%s,%s)
                    ON DUPLICATE KEY UPDATE
-                     password_hash=VALUES(password_hash),
                      name=VALUES(name), firstname=VALUES(firstname),
                      role=VALUES(role), unity_id=VALUES(unity_id),
                      matricule=VALUES(matricule), is_edg_employee=1,
                      account_status='active', status=1""",
-                (acc_uuid, hashed, name, firstname, email, role, unity_id,
+                (acc_uuid, name, firstname, email, role, unity_id,
                  matricule, now, now)
             )
 
@@ -98,19 +89,18 @@ async def main():
         chief_uuid = str(uuid.uuid4())
         await cur.execute(
             """INSERT INTO account
-               (uuid, password_hash, name, firstname, email, role, unity_id,
+               (uuid, name, firstname, email, role, unity_id,
                 matricule, is_edg_employee, account_status, email_verified,
                 mfa_enabled, notif_sla_alerts, notif_escalations,
                 notif_comments, notif_resolutions,
                 status, created_at, updated_at)
-               VALUES (%s,%s,'Mamadou Diallo','Mamadou','chef.dsi@edg.gn',
+               VALUES (%s,'Mamadou Diallo','Mamadou','chef.dsi@edg.gn',
                        'chief',14,'EDG-CHF-010',1,'active',1,0,1,1,1,1,1,%s,%s)
                ON DUPLICATE KEY UPDATE
-                 password_hash=VALUES(password_hash),
                  name='Mamadou Diallo', role='chief', unity_id=14,
                  matricule='EDG-CHF-010', is_edg_employee=1,
                  account_status='active', status=1""",
-            (chief_uuid, hashed, now, now)
+            (chief_uuid, now, now)
         )
         await cur.execute("SELECT id FROM account WHERE email='chef.dsi@edg.gn'")
         chief_id = (await cur.fetchone())[0]

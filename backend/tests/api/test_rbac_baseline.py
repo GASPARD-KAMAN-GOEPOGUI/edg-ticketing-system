@@ -142,7 +142,7 @@ class TestRequestUpdateSLABaseline:
         if not request_id:
             pytest.skip("request_id non disponible")
         async with auth_client("agent") as c:
-            r = await c.patch(f"/api/v1/requests/{request_id}", json={"sla_hours": 999})
+            r = await c.put(f"/api/v1/requests/{request_id}", json={"sla_hours": 999})
         # Comportement actuel : 200 avec sla_hours modifié (trou de sécurité)
         if r.status_code == 200:
             body = r.json()
@@ -169,7 +169,7 @@ class TestRequestUpdateSLABaseline:
         if not request_id:
             pytest.skip("request_id non disponible")
         async with auth_client("agent") as c:
-            r = await c.patch(f"/api/v1/requests/{request_id}",
+            r = await c.put(f"/api/v1/requests/{request_id}",
                               json={"sla_breached": False})
         assert r.status_code in (200, 400, 403, 422)
 

@@ -1,6 +1,6 @@
 /**
  * Module API — Base de connaissance
- * Endpoints : /knowledge/*, PATCH /knowledge/:id/publish
+ * Endpoints : /knowledge/*, PUT /knowledge/:id/publish
  */
 import { apiFetch } from "./client";
 import type { KnowledgeArticle } from "@/lib/mock-data";
@@ -111,7 +111,7 @@ export async function updateArticle(
   if (data.published !== undefined) payload.is_published = data.published;
   if (data.tags !== undefined) payload.tags = data.tags;
   const raw = await apiFetch<RawKnowledgeArticle>(`/knowledge/${id}`, {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify(payload),
   });
   return mapArticle(raw);
@@ -122,7 +122,7 @@ export async function publishArticle(
   published = true,
 ): Promise<KnowledgeArticle> {
   const raw = await apiFetch<RawKnowledgeArticle>(`/knowledge/${id}/publish`, {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify({ published }),
   });
   return mapArticle(raw);

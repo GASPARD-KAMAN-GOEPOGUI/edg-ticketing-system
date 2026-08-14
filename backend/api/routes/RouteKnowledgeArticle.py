@@ -65,7 +65,7 @@ async def create_article(
     return await svc.create(body.dict())
 
 
-@router.patch("/{id}", response_model=KnowledgeArticleResponse)
+@router.put("/{id}", response_model=KnowledgeArticleResponse)
 async def update_article(
     id: str,
     body: KnowledgeArticleUpdate,

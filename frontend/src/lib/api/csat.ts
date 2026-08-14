@@ -86,7 +86,7 @@ export async function updateRequestAppreciation(
   if (data.comment !== undefined) payload.comment = data.comment ?? null;
   if (data.resolvedConfirmed !== undefined) payload.resolved_confirmed = data.resolvedConfirmed;
   const raw = await apiFetch<RawAppreciation>(`/requests/${requestId}/appreciation`, {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify(payload),
   });
   return mapAppreciation(raw);

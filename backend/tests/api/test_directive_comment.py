@@ -6,6 +6,7 @@ from httpx import ASGITransport, AsyncClient
 
 from api.dependencies import get_current_user
 from api.main import app
+from tests.api.test_requests_baseline import _ensure_test_account
 
 _REQUEST_PAYLOAD_BASE = {
     "description": "Description de test pour la directive (Lot 2.7).",
@@ -114,13 +115,18 @@ async def test_directive_requires_an_assignee(auth_client, unity_id):
 
 
 async def test_regular_comment_unaffected_by_directive_flag(auth_client, unity_id):
-    """Regression : un commentaire normal (is_directive omis) continue de fonctionner."""
+    """Regression : un commentaire normal (is_directive omis) continue de fonctionner
+    pour un intervenant reel du ticket (BR-MESSAGING-PARTICIPANTS-001)."""
+    await _ensure_test_account(813, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "regular-comment")
+    await _assign_ticket(auth_client, request_id, unity_id, assignee_id=813)
 
     def _chief_dep():
         return SimpleNamespace(id=813, role="chief-service", unity_id=unity_id, direction_id=None, name="Chef Test")
 
-    resp = await _post_comment_as(_chief_dep, request_id, {"body": "Commentaire normal.", "is_public": False})
+    resp = await _post_comment_as(
+        _chief_dep, request_id, {"body": "Commentaire normal.", "is_public": False, "peer_id": "1"},
+    )
     assert resp.status_code == 201, resp.text
     assert resp.json()["data"]["infos"].get("is_directive") is not True
 
@@ -136,41 +142,57 @@ def _agent_dep_factory(agent_id: int, unity_id: int):
 
 
 async def test_reply_to_existing_comment_round_trips(auth_client, unity_id):
+    await _ensure_test_account(820, unity_id=unity_id, role="agent-support")
     request_id = await _create_ticket(auth_client, unity_id, "reply-roundtrip")
+    await _assign_ticket(auth_client, request_id, unity_id, assignee_id=820)
     agent_dep = _agent_dep_factory(820, unity_id)
 
-    first = await _post_comment_as(agent_dep, request_id, {"body": "Premier message.", "is_public": False})
+    first = await _post_comment_as(
+        agent_dep, request_id, {"body": "Premier message.", "is_public": False, "peer_id": "1"},
+    )
     assert first.status_code == 201, first.text
     first_id = first.json()["data"]["id"]
 
     reply = await _post_comment_as(
-        agent_dep, request_id, {"body": "Reponse ciblee.", "is_public": False, "reply_to_id": str(first_id)},
+        agent_dep, request_id,
+        {"body": "Reponse ciblee.", "is_public": False, "reply_to_id": str(first_id), "peer_id": "1"},
     )
     assert reply.status_code == 201, reply.text
     assert reply.json()["data"]["infos"]["reply_to_id"] == str(first_id)
 
 
 async def test_reply_to_comment_from_different_request_rejected(auth_client, unity_id):
+    await _ensure_test_account(821, unity_id=unity_id, role="agent-support")
     request_a = await _create_ticket(auth_client, unity_id, "reply-cross-a")
     request_b = await _create_ticket(auth_client, unity_id, "reply-cross-b")
+    # Intervenant reel des DEUX tickets — le test verifie le rejet du croisement
+    # de reply_to_id entre demandes, pas la restriction de participation.
+    await _assign_ticket(auth_client, request_a, unity_id, assignee_id=821)
+    await _assign_ticket(auth_client, request_b, unity_id, assignee_id=821)
     agent_dep = _agent_dep_factory(821, unity_id)
 
-    comment_a = await _post_comment_as(agent_dep, request_a, {"body": "Message sur A.", "is_public": False})
+    comment_a = await _post_comment_as(
+        agent_dep, request_a, {"body": "Message sur A.", "is_public": False, "peer_id": "1"},
+    )
     assert comment_a.status_code == 201, comment_a.text
     comment_a_id = comment_a.json()["data"]["id"]
 
     resp = await _post_comment_as(
-        agent_dep, request_b, {"body": "Reponse invalide.", "is_public": False, "reply_to_id": str(comment_a_id)},
+        agent_dep, request_b,
+        {"body": "Reponse invalide.", "is_public": False, "reply_to_id": str(comment_a_id), "peer_id": "1"},
     )
     assert resp.status_code == 422, resp.text
 
 
 async def test_reply_to_nonexistent_comment_rejected(auth_client, unity_id):
+    await _ensure_test_account(822, unity_id=unity_id, role="agent-support")
     request_id = await _create_ticket(auth_client, unity_id, "reply-missing")
+    await _assign_ticket(auth_client, request_id, unity_id, assignee_id=822)
     agent_dep = _agent_dep_factory(822, unity_id)
 
     resp = await _post_comment_as(
-        agent_dep, request_id, {"body": "Reponse a du vide.", "is_public": False, "reply_to_id": "999999999"},
+        agent_dep, request_id,
+        {"body": "Reponse a du vide.", "is_public": False, "reply_to_id": "999999999", "peer_id": "1"},
     )
     assert resp.status_code == 422, resp.text
 
@@ -178,7 +200,9 @@ async def test_reply_to_nonexistent_comment_rejected(auth_client, unity_id):
 async def test_reply_to_non_comment_event_rejected(auth_client, unity_id):
     """Un id de workflow_detail existant mais dont l'event_type n'est pas 'comment_added'
     (ex. l'evenement de creation du ticket) doit etre refuse comme cible de reponse."""
+    await _ensure_test_account(823, unity_id=unity_id, role="agent-support")
     request_id = await _create_ticket(auth_client, unity_id, "reply-non-comment")
+    await _assign_ticket(auth_client, request_id, unity_id, assignee_id=823)
     agent_dep = _agent_dep_factory(823, unity_id)
 
     async with auth_client("admin") as admin_client:
@@ -190,6 +214,9 @@ async def test_reply_to_non_comment_event_rejected(auth_client, unity_id):
     resp = await _post_comment_as(
         agent_dep,
         request_id,
-        {"body": "Reponse invalide.", "is_public": False, "reply_to_id": str(non_comment_event["id"])},
+        {
+            "body": "Reponse invalide.", "is_public": False,
+            "reply_to_id": str(non_comment_event["id"]), "peer_id": "1",
+        },
     )
     assert resp.status_code == 422, resp.text

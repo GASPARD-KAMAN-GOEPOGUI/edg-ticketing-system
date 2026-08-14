@@ -55,7 +55,7 @@ async def create_rule(body: RoutingRuleCreate, svc: RoutingRuleService = Depends
     return await svc.create(body.dict())
 
 
-@router.patch("/{id}", response_model=RoutingRuleResponse)
+@router.put("/{id}", response_model=RoutingRuleResponse)
 async def update_rule(id: str, body: RoutingRuleUpdate, svc: RoutingRuleService = Depends(_svc)):
     return await svc.update(id, body.dict(exclude_unset=True))
 
@@ -96,7 +96,7 @@ async def create_director_rule(
     return await svc.create(data)
 
 
-@director_router.patch("/{id}", response_model=RoutingRuleResponse)
+@director_router.put("/{id}", response_model=RoutingRuleResponse)
 async def update_director_rule(
     id: str,
     body: RoutingRuleUpdate,

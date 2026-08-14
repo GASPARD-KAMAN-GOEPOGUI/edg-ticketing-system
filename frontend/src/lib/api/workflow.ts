@@ -110,7 +110,7 @@ export async function updateWorkflow(
   data: { workflow_status?: string },
 ): Promise<WorkflowItem> {
   const raw = await apiFetch<RawWorkflow>(`/workflows/${id}`, {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify(data),
   });
   return mapWorkflow(raw);
@@ -148,7 +148,7 @@ export async function updateWorkflowDetail(
 ): Promise<WorkflowDetailItem> {
   const raw = await apiFetch<RawWorkflowDetail>(
     `/workflows/${workflowId}/details/${detailId}`,
-    { method: "PATCH", body: JSON.stringify(data) },
+    { method: "PUT", body: JSON.stringify(data) },
   );
   return mapWorkflowDetail(raw);
 }
@@ -226,19 +226,5 @@ export async function searchWorkflowDetails(params?: {
     pages: number;
   }>(`/workflow-details/search/?${qs}`);
   return { ...raw, items: raw.items.map(mapWorkflowDetail) };
-}
-
-export async function createAutoCircuit(
-  requestId: string,
-  data: { unit_id?: number; direction_id?: number; workflow_status?: string },
-): Promise<{ workflow: WorkflowItem; steps: WorkflowDetailItem[] }> {
-  const raw = await apiFetch<{ workflow: RawWorkflow; steps: RawWorkflowDetail[] }>(
-    `/requests/${requestId}/workflow/auto-circuit`,
-    { method: "POST", body: JSON.stringify(data) },
-  );
-  return {
-    workflow: mapWorkflow(raw.workflow),
-    steps: raw.steps.map(mapWorkflowDetail),
-  };
 }
 

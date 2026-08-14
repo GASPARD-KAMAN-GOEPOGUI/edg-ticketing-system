@@ -41,7 +41,10 @@ mysql -u root -e "CREATE DATABASE IF NOT EXISTS edg_ticketing CHARACTER SET utf8
 
 ```bash
 # Développement (hot-reload)
-uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+# --reload-dir api : limite la surveillance au code source (sans ça, uvicorn
+# surveille aussi venv/, __pycache__/, uploads/... et le rechargement peut se
+# bloquer silencieusement, laissant le serveur injoignable sans avoir été arrêté)
+uvicorn api.main:app --reload --reload-dir api --host 0.0.0.0 --port 8000
 
 # Production (gunicorn + uvicorn workers)
 gunicorn api.main:app -c gunicorn_conf.py

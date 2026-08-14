@@ -2,19 +2,14 @@
 Route SSE — Server-Sent Events pour les mises à jour temps réel EDG Connect.
 
 Authentification :
-  Le token JWT est passé via query param (?token=...) car l'API EventSource
-  du navigateur ne supporte pas les en-têtes HTTP personnalisés.
-
-Session unique (H-08) :
-  - La session est vérifiée en DB au moment de la connexion.
-  - Si l'utilisateur se connecte depuis un autre appareil, un événement
-    `session.revoked` est publié dans le bus et la connexion SSE est fermée
-    dans les secondes qui suivent (sans attendre le prochain ping).
+  Le token bearer central est passé via query param (?token=...) car l'API
+  EventSource du navigateur ne supporte pas les en-têtes HTTP personnalisés.
+  Validé via la même résolution centrale que get_current_user
+  (api.dependencies.resolve_central_account).
 
 Événements émis :
   connected        — confirmation à la connexion
   ping             — keepalive toutes les 25 s
-  session_revoked  — fermeture forcée (nouvelle connexion détectée)
   <event.type>     — tout AppEvent publié dans le bus (ex: request.created)
 """
 from __future__ import annotations
@@ -37,9 +32,8 @@ except ImportError as exc:  # pragma: no cover
 from api.configs.Database import AsyncSessionLocal
 from api.configs.Environment import get_environment
 from api.core.event_bus import event_bus
-from api.core.security import decode_token
 from api.core.exceptions import UnauthorizedException
-from api.core.token_blacklist import token_blacklist
+from api.dependencies import resolve_central_account
 
 _env = get_environment()
 _PING_INTERVAL = 25  # secondes entre keepalives
@@ -51,34 +45,25 @@ router = APIRouter(prefix="/events", tags=["realtime"])
     "",
     summary="Flux SSE — mises à jour temps réel",
     description=(
-        "Connexion Server-Sent Events. Le token JWT doit être passé en "
+        "Connexion Server-Sent Events. Le bearer token central doit être passé en "
         "query param `?token=` car EventSource ne supporte pas les en-têtes."
     ),
 )
 async def stream_events(
     request: Request,
-    token: Optional[str] = Query(None, description="JWT access token"),
+    token: Optional[str] = Query(None, description="Bearer token central"),
 ) -> EventSourceResponse:
     # ── Authentification ──────────────────────────────────────────────────────
     if _env.DISABLE_AUTH:
         user_id: int = 0
         role: str = "admin"
-        session_id: Optional[str] = None
     else:
         if not token:
             raise UnauthorizedException("Token requis pour établir la connexion SSE.")
-        try:
-            payload = decode_token(token)
-        except Exception:
-            raise UnauthorizedException("Token SSE invalide ou expiré.")
-
-        jti = payload.get("jti", "")
-        if await token_blacklist.is_revoked(jti):
-            raise UnauthorizedException("Token SSE révoqué. Reconnectez-vous.")
-
-        user_id = int(payload.get("sub", 0))
-        role = str(payload.get("role", "user"))
-        session_id = payload.get("session_id")
+        async with AsyncSessionLocal() as session:
+            account = await resolve_central_account(token, session)
+        user_id = int(account.id)
+        role = str(account.role)
 
 
     # ── Générateur d'événements ───────────────────────────────────────────────

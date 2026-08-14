@@ -221,7 +221,7 @@ function SupervisionPage() {
     queryKey: ["escalations"],
     queryFn: () => fetchEscalations({ limit: 100 }),
     staleTime: 30_000,
-    refetchInterval: 30_000,
+    // Pas de refetchInterval : escalation.* (SSE) invalide déjà ["escalations"].
   });
   const esc: EscalationItem[] = escData?.items ?? [];
 
@@ -238,7 +238,7 @@ function SupervisionPage() {
     },
     enabled: hasOperationalScope,
     staleTime: 60_000,
-    refetchInterval: 45_000,
+    // Pas de refetchInterval : user.* (SSE) invalide désormais ["agents-supervision"].
   });
   const agents: AccountUser[] = agentsData?.items ?? [];
 
@@ -247,14 +247,16 @@ function SupervisionPage() {
     queryFn: () => fetchUsers({ role: "chief-service", direction_id: directionId, limit: 100 }),
     enabled: role === "director" && !!directionId,
     staleTime: 60_000,
-    refetchInterval: 45_000,
+    // Pas de refetchInterval : user.* (SSE) invalide désormais ["chiefs-supervision"].
   });
   const chiefs: AccountUser[] = chiefsData?.items ?? [];
 
   const { data: unitsData = [], isLoading: loadUnits, isError: unitsError } = useQuery({
-    queryKey: ["units-supervision", directionId],
-    queryFn: () => fetchUnits(directionId),
-    enabled: role === "director" && !!directionId,
+    queryKey: ["units-supervision"],
+    // Pas de filtre direction : les agents affichés (chef-service/département/director)
+    // peuvent appartenir à des unités hors du seul périmètre `directionId` du rôle
+    // director — nécessaire pour résoudre le nom de l'unité de chaque agent ci-dessous.
+    queryFn: () => fetchUnits(),
     staleTime: 5 * 60_000,
   });
 
@@ -271,7 +273,7 @@ function SupervisionPage() {
     },
     enabled: hasOperationalScope,
     staleTime: 30_000,
-    refetchInterval: 30_000,
+    // Pas de refetchInterval : request.* (SSE) invalide désormais ["tickets-supervision"].
   });
   const allTickets = ticketsData?.items ?? [];
 
@@ -295,7 +297,9 @@ function SupervisionPage() {
       const openTickets = myTickets.filter((t) => ACTIVE_STATUSES.has(t.status));
       return {
         id: agent.id,
-        name: agent.name,
+        // Nom complet (prénom + nom) — agent.name seul ne porte que le nom de
+        // famille, insuffisant pour distinguer des agents partageant un patronyme.
+        name: [agent.firstname, agent.name].filter(Boolean).join(" "),
         directionId: agent.direction_id,
         unitId: agent.unit_id,
         availability: agent.availability,
@@ -507,10 +511,9 @@ function SupervisionPage() {
       )}
 
       {/* ── KPI (données réelles) ── */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Kpi label="Escalades ouvertes"  value={kpis.escalationsOpen}  tone="destructive" icon={AlertTriangle} hint={`${esc.length} au total`}               loading={loadEsc} />
         <Kpi label="Tickets en charge"  value={kpis.totalOpen}        tone="primary"     icon={Activity}     hint={`${agentStats.length} agents actifs`}     loading={loadingStats} />
-        <Kpi label="Délais dépassés"        value={kpis.slaBreachedTotal} tone="warning"     icon={Clock}        hint={`Tickets en retard sur le ${scopeLabel}`}  loading={loadingStats} />
         <Kpi label="Agents surchargés"   value={kpis.overloadCount}    tone="warning"     icon={Users2}       hint="≥ 8 tickets ouverts"                       loading={loadingStats} />
       </div>
 
@@ -547,7 +550,6 @@ function SupervisionPage() {
                     }}
                   />
                   <Bar dataKey="ouverts" name="Ouverts"       fill="var(--chart-1)" radius={[6, 6, 0, 0]} />
-                  <Bar dataKey="retards" name="Délais dépassés"  fill="var(--chart-4)" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -852,7 +854,6 @@ function SupervisionPage() {
                   <th className="px-5 py-3 text-right font-semibold">Ouverts</th>
                   <th className="px-5 py-3 text-right font-semibold">En cours</th>
                   <th className="px-5 py-3 text-right font-semibold">En attente</th>
-                  <th className="px-5 py-3 text-right font-semibold">Délais dépassés</th>
                   <th className="px-5 py-3 text-right font-semibold">Critiques</th>
                   <th className="px-5 py-3 text-right font-semibold">Disponibilité</th>
                 </tr>
@@ -861,10 +862,7 @@ function SupervisionPage() {
                 {pagedAgents.map((a) => (
                   <tr
                     key={a.id}
-                    className={cn(
-                      "border-t border-border/40 transition hover:bg-card/40",
-                      a.slaBreached > 0 && "bg-destructive/[0.02]",
-                    )}
+                    className="border-t border-border/40 transition hover:bg-card/40"
                   >
                     <td className="px-5 py-3.5">
                       <div className="flex items-center gap-3">
@@ -874,7 +872,9 @@ function SupervisionPage() {
                         <div>
                           <div className="font-medium">{a.name}</div>
                           <div className="text-xs text-muted-foreground">
-                            {dirsData.find((d) => String(d.id) === String(a.directionId))?.name ?? a.unitId ?? "—"}
+                            {dirsData.find((d) => String(d.id) === String(a.directionId))?.name
+                              ?? unitsData.find((u) => String(u.id) === String(a.unitId))?.name
+                              ?? "—"}
                           </div>
                         </div>
                       </div>
@@ -882,11 +882,6 @@ function SupervisionPage() {
                     <td className="px-5 py-3.5 text-right font-semibold">{a.open}</td>
                     <td className="px-5 py-3.5 text-right text-muted-foreground">{a.inProgress}</td>
                     <td className="px-5 py-3.5 text-right text-muted-foreground">{a.pending}</td>
-                    <td className="px-5 py-3.5 text-right">
-                      {a.slaBreached > 0
-                        ? <span className="font-semibold text-destructive">{a.slaBreached}</span>
-                        : <span className="text-muted-foreground">0</span>}
-                    </td>
                     <td className="px-5 py-3.5 text-right">
                       {a.critical > 0
                         ? <span className="font-semibold text-destructive">{a.critical}</span>
@@ -914,19 +909,17 @@ function SupervisionPage() {
                   <div className="min-w-0 flex-1">
                     <div className="font-semibold truncate">{a.name}</div>
                     <div className="text-xs text-muted-foreground truncate">
-                      {dirsData.find((d) => String(d.id) === String(a.directionId))?.name ?? a.unitId ?? "—"}
+                      {dirsData.find((d) => String(d.id) === String(a.directionId))?.name
+                              ?? unitsData.find((u) => String(u.id) === String(a.unitId))?.name
+                              ?? "—"}
                     </div>
                   </div>
                   <AvailabilityBadge value={a.availability} open={a.open} />
                 </div>
-                <div className="grid grid-cols-3 gap-2 rounded-xl bg-muted/30 px-2 py-2 text-center">
+                <div className="grid grid-cols-2 gap-2 rounded-xl bg-muted/30 px-2 py-2 text-center">
                   <div>
                     <div className="text-sm font-bold">{a.open}</div>
                     <div className="text-[10px] text-muted-foreground">Ouverts</div>
-                  </div>
-                  <div>
-                    <div className={cn("text-sm font-bold", a.slaBreached > 0 && "text-destructive")}>{a.slaBreached}</div>
-                    <div className="text-[10px] text-muted-foreground">Retards</div>
                   </div>
                   <div>
                     <div className={cn("text-sm font-bold", a.critical > 0 && "text-destructive")}>{a.critical}</div>
@@ -1422,7 +1415,7 @@ function DirectorSupervisionCenter({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="font-semibold">Supervision des services</h2>
-            <p className="text-xs text-muted-foreground">Charge, retards, critiques et performance par service de la direction</p>
+            <p className="text-xs text-muted-foreground">Charge, critiques et performance par service de la direction</p>
           </div>
           <Badge variant="outline" className="rounded-full">
             {serviceStats.length} service{serviceStats.length !== 1 ? "s" : ""}
@@ -1440,11 +1433,9 @@ function DirectorSupervisionCenter({
                   <th className="pb-3 text-right font-semibold">Total</th>
                   <th className="pb-3 text-right font-semibold">Ouverts</th>
                   <th className="pb-3 text-right font-semibold">Fermés</th>
-                  <th className="pb-3 text-right font-semibold">Retards</th>
                   <th className="pb-3 text-right font-semibold">Critiques</th>
                   <th className="pb-3 text-right font-semibold">Moy. résol.</th>
                   <th className="pb-3 text-right font-semibold">Taux résol.</th>
-                  <th className="pb-3 text-right font-semibold">Dép. délai</th>
                   <th className="pb-3 text-right font-semibold">Agents</th>
                   <th className="pb-3 text-right font-semibold">Charge</th>
                 </tr>
@@ -1457,14 +1448,10 @@ function DirectorSupervisionCenter({
                     <td className="py-3 text-right font-semibold">{service.total}</td>
                     <td className="py-3 text-right">{service.opened}</td>
                     <td className="py-3 text-right">{service.closed}</td>
-                    <td className={cn("py-3 text-right font-semibold", service.late > 0 ? "text-destructive" : "text-muted-foreground")}>{service.late}</td>
                     <td className={cn("py-3 text-right font-semibold", service.critical > 0 ? "text-destructive" : "text-muted-foreground")}>{service.critical}</td>
                     <td className="py-3 text-right">{service.avg == null ? "—" : `${service.avg}h`}</td>
                     <td className="py-3 text-right">
                       <RateBadge value={service.resolutionRate} />
-                    </td>
-                    <td className="py-3 text-right">
-                      <RateBadge value={service.slaBreachRate} dangerHigh />
                     </td>
                     <td className="py-3 text-right">{service.agents}</td>
                     <td className="py-3 text-right">{service.workload}</td>

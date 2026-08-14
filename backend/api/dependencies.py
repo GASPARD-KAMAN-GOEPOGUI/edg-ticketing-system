@@ -1,5 +1,5 @@
 """
-Dépendances FastAPI — session SQLAlchemy + authentification JWT.
+Dépendances FastAPI — session SQLAlchemy + authentification centrale manager-user.
 
 Hiérarchie des dépendances auth :
   get_current_user           → utilisateur authentifié obligatoire (401 si absent)
@@ -7,10 +7,17 @@ Hiérarchie des dépendances auth :
   require_roles(*roles)      → get_current_user + vérification du rôle (403 si refusé)
   require_permissions(*perm) → get_current_user + vérification des permissions (403)
 
+Chaque requête protégée valide le bearer token auprès de la plateforme centrale
+(scopes + groupes), résout le compte local par central_user_id (aucun
+rattachement automatique — voir api.core.central_auth), puis synchronise le
+rôle local depuis le groupe central mappé, uniquement si le rôle actuel
+appartient à {admin, agent-support, user} (chief/director restent locaux).
+
 Mode développement :
-  Si DISABLE_AUTH=True dans .env, l'authentification est désactivée.
-  Un utilisateur fictif de rôle 'admin' est injecté pour tous les appels.
-  INTERDIT en production — une RuntimeError est levée au démarrage si tenté.
+  Si DISABLE_AUTH=True dans .env, l'authentification est désactivée (aucun
+  appel à la plateforme centrale). Un utilisateur fictif de rôle 'admin' est
+  injecté pour tous les appels. INTERDIT en production — une RuntimeError est
+  levée au démarrage si tenté.
 """
 from __future__ import annotations
 
@@ -23,13 +30,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.configs.Database import AsyncSessionLocal
 from api.configs.Environment import get_environment
-from api.core.exceptions import UnauthorizedException, ForbiddenException
-from api.core.security import decode_token
-from api.core.token_blacklist import token_blacklist
+from api.core import central_auth
 from api.core.rbac import Permission, ROLE_GROUP_ALIASES, ROLE_PERMISSIONS, normalize_role
 
 logger = logging.getLogger(__name__)
 _env = get_environment()
+
+_ROLE_SYNC_SPACE = {"admin", "agent-support", "user"}
 
 # ── C-07 : Garde DISABLE_AUTH en production ───────────────────────────────────
 if _env.DISABLE_AUTH and _env.APP_ENV == "production":
@@ -38,23 +45,23 @@ if _env.DISABLE_AUTH and _env.APP_ENV == "production":
         "Désactivez cette variable dans votre fichier .env de production."
     )
 
-# ── 3.4 : Garde SECRET_KEY placeholder en production ──────────────────────────
-if _env.APP_ENV == "production" and (
-    "changeme" in _env.SECRET_KEY.lower() or len(_env.SECRET_KEY) < 32
+# ── Garde variables centrales absentes en production ──────────────────────────
+if _env.APP_ENV == "production" and not _env.DISABLE_AUTH and (
+    not _env.CENTRAL_AUTH_BASE_URL or not _env.CLIENT_APP_CODE or not _env.CLIENT_APP_SECRET
 ):
     raise RuntimeError(
-        "SECRET_KEY invalide ou de type placeholder en production (APP_ENV=production). "
-        "Générez une clé avec : python -c \"import secrets; print(secrets.token_hex(32))\""
+        "CENTRAL_AUTH_BASE_URL/CLIENT_APP_CODE/CLIENT_APP_SECRET sont requis en production "
+        "(APP_ENV=production) — configurez l'intégration manager-user dans votre .env de production."
     )
 
-# ── 3.3 : Garde REDIS_URL absent en production ────────────────────────────────
-# Sans Redis, la blacklist de tokens et le rate-limiter (RateLimitMiddleware)
-# retombent en mode mémoire — non partagé entre les workers gunicorn.
+# ── Garde REDIS_URL absent en production ───────────────────────────────────────
+# Sans Redis, le rate-limiter (RateLimitMiddleware) retombe en mode mémoire —
+# non partagé entre les workers gunicorn.
 if _env.APP_ENV == "production" and not _env.REDIS_URL:
     raise RuntimeError(
         "REDIS_URL est requis en production (APP_ENV=production). "
-        "Sans Redis, la blacklist de tokens et le rate-limiter ne sont pas partagés "
-        "entre les workers — configurez REDIS_URL dans votre .env de production."
+        "Sans Redis, le rate-limiter n'est pas partagé entre les workers — "
+        "configurez REDIS_URL dans votre .env de production."
     )
 
 # OAuth2 scheme — tokenUrl utilisé par OpenAPI/Swagger uniquement
@@ -78,17 +85,71 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 
-# ── Authentification JWT ──────────────────────────────────────────────────────
+# ── Authentification centrale (manager-user) ──────────────────────────────────
+
+async def resolve_central_account(token: str, db: AsyncSession):
+    """
+    Valide un bearer token auprès de la plateforme centrale (scopes + groupes),
+    résout le compte local par central_user_id (aucun rattachement automatique)
+    et synchronise le rôle si celui-ci appartient à {admin, agent-support, user}.
+    Lève HTTPException (401/503) en cas d'échec. Utilisé par get_current_user
+    et par la validation du token de connexion SSE (RouteSSE.py).
+    """
+    try:
+        scopes = await central_auth.get_scopes(token)
+        groups = await central_auth.get_groups(token)
+    except central_auth.CentralUnavailableError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service d'authentification central indisponible.",
+        )
+    except central_auth.CentralAuthError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session invalide ou expirée.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    central_user_id = scopes.get("user_id")
+    from api.repositories import AccountRepository
+    repo = AccountRepository(db)
+    account = await repo.find_by_central_user_id(central_user_id) if central_user_id else None
+    if account is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Ce compte n'est pas rattaché à un compte local. Contactez un administrateur.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    mapped_role = central_auth.role_from_groups(groups)
+    current_role = normalize_role(account.role)
+    if mapped_role and current_role in _ROLE_SYNC_SPACE and mapped_role != current_role:
+        updated = await repo.update(account.id, {"role": mapped_role})
+        if updated is not None:
+            account = updated
+
+    if (
+        not account.status
+        or account.deleted_at is not None
+        or (account.account_status or "").strip().lower() != "active"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Compte désactivé ou supprimé. Contactez l'administration.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return account
+
 
 async def get_current_user(
     token: Optional[str] = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Extrait et valide le JWT porteur.
-    Vérifie : token valide → type access → JTI non révoqué → session active → compte actif.
-    Retourne l'objet Account SQLAlchemy de l'utilisateur connecté.
-    Lève 401 si l'une de ces vérifications échoue.
+    Valide le bearer token auprès de la plateforme centrale manager-user et
+    retourne le compte local rattaché. Lève 401/503 si l'une des vérifications
+    échoue.
     """
     # ── Bypass développement ──────────────────────────────────────────────────
     if _env.DISABLE_AUTH:
@@ -118,52 +179,7 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # ── Décode le JWT ─────────────────────────────────────────────────────────
-    try:
-        payload = decode_token(token)
-    except UnauthorizedException as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=exc.message,
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    # ── Vérifie le type ───────────────────────────────────────────────────────
-    if payload.get("type") != "access":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Type de token invalide. Utilisez un access token.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    # ── Vérifie la blacklist (JTI) ────────────────────────────────────────────
-    jti = payload.get("jti", "")
-    if await token_blacklist.is_revoked(jti):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token révoqué. Veuillez vous reconnecter.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    # ── Charge l'utilisateur depuis la BDD ────────────────────────────────────
-    account_id = int(payload.get("sub", 0))
-    from api.repositories import AccountRepository
-    repo = AccountRepository(db)
-    user = await repo.get_by_id(account_id)
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Compte introuvable ou désactivé.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    if not user.status or user.deleted_at is not None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Compte désactivé ou supprimé. Contactez l'administration.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    return user
+    return await resolve_central_account(token, db)
 
 
 async def get_current_user_optional(

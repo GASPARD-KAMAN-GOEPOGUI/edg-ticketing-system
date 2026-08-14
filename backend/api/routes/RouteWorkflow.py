@@ -188,7 +188,7 @@ async def create_workflow(
     return await svc.create(body.dict())
 
 
-@router.patch("/{id}", response_model=WorkflowResponse)
+@router.put("/{id}", response_model=WorkflowResponse)
 async def update_workflow(
     id: str,
     body: WorkflowUpdate,
@@ -264,7 +264,7 @@ async def create_workflow_detail(
     return await svc.create_detail(data)
 
 
-@router.patch("/{id}/details/{detail_id}", response_model=WorkflowDetailResponse)
+@router.put("/{id}/details/{detail_id}", response_model=WorkflowDetailResponse)
 async def update_workflow_detail(
     id: str,
     detail_id: str,

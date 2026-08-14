@@ -21,11 +21,9 @@ Exports principaux :
 
     register_exception_handlers — enregistre les handlers sur l'app FastAPI
 
-    Security :
-    hash_password / verify_password — Argon2 password hashing
-    create_access_token / create_refresh_token / decode_token — JWT
+    Auth centrale (manager-user) :
     Permission / ROLE_PERMISSIONS / has_permission — RBAC
-    token_blacklist — blacklist de tokens révoqués
+    central_auth — client plateforme centrale (login/refresh/scopes/groupes/audit)
 """
 from api.core.error_codes import ErrorCode
 from api.core.exceptions import (
@@ -42,16 +40,7 @@ from api.core.exceptions import (
 from api.core.responses import ApiResponse, ErrorResponse, ValidationErrorDetail
 from api.core.logger import get_logger, setup_logging
 from api.core.exception_handlers import register_exception_handlers
-from api.core.security import (
-    hash_password,
-    verify_password,
-    create_access_token,
-    create_refresh_token,
-    decode_token,
-    access_token_expire_seconds,
-)
 from api.core.rbac import Permission, ROLE_PERMISSIONS, has_permission, has_role, role_at_least
-from api.core.token_blacklist import token_blacklist
 from api.core.event_bus import event_bus, AppEvent, emit as emit_event
 
 __all__ = [
@@ -67,14 +56,8 @@ __all__ = [
     "get_logger", "setup_logging",
     # Handlers
     "register_exception_handlers",
-    # Sécurité — JWT
-    "hash_password", "verify_password",
-    "create_access_token", "create_refresh_token", "decode_token",
-    "access_token_expire_seconds",
     # RBAC
     "Permission", "ROLE_PERMISSIONS", "has_permission", "has_role", "role_at_least",
-    # Token blacklist
-    "token_blacklist",
     # Event bus
     "event_bus", "AppEvent", "emit_event",
 ]

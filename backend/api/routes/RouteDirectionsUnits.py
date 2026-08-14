@@ -460,7 +460,7 @@ async def create_direction(
     return await _as_direction(db, await _require_org(db, unity.id, expected="direction", message="Direction introuvable"))
 
 
-@directions_router.patch("/{direction_id}")
+@directions_router.put("/{direction_id}")
 async def update_direction(
     direction_id: str,
     body: dict = Body(...),
@@ -610,7 +610,7 @@ async def create_department(
     return await _as_department(db, await _require_org(db, unity.id, expected="department", message="Departement introuvable"))
 
 
-@departments_router.patch("/{department_id}")
+@departments_router.put("/{department_id}")
 async def update_department(
     department_id: str,
     body: dict = Body(...),
@@ -790,7 +790,7 @@ async def create_unit(
     return await _as_unit(db, await _require_org(db, unity.id, expected="unit", message="Unite introuvable"))
 
 
-@units_router.patch("/{unit_id}")
+@units_router.put("/{unit_id}")
 async def update_unit(
     unit_id: str,
     body: dict = Body(...),

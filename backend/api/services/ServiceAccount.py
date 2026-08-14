@@ -3,15 +3,18 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.core import central_auth
 from api.core.error_codes import ErrorCode
+from api.core.event_bus import AppEvent, emit as emit_event
 from api.core.phone import normalize_phone
 from api.core.rbac import normalize_role
 from api.core.ref_validation import check_ref_code
-from api.core.security import hash_password, verify_password
 from api.models.ModelOrganigram import Organigram
 from api.models.ModelUnity import Unity
 from api.repositories import AccountRepository, AccountStatusRepository
 from api.services.base_service import BaseService
+
+_CENTRAL_NOT_LINKED_MESSAGE = "Ce compte n'est pas rattaché à la plateforme centrale."
 
 
 class AccountService(BaseService):
@@ -137,6 +140,17 @@ class AccountService(BaseService):
 
     # ── Listes ────────────────────────────────────────────────────────────────
 
+    async def list_by_ids(self, ids: list[int]):
+        """Fetch batch par IDs — évite le N+1 (un appel HTTP par auteur/demandeur
+        unique) côté frontend sur les écrans qui affichent plusieurs comptes liés
+        (auteurs de commentaires, demandeurs de tickets…)."""
+        if not ids:
+            return self.paginate([], 0, 1, 1)
+        items, total = await self.repo.list(
+            filters={"id": ids}, order_by="name", limit=len(ids),
+        )
+        return self.paginate(items, total, 1, len(ids))
+
     async def list_all(self, *, page: int = 1, limit: int = 20):
         items, total = await self.repo.list(order_by="name", page=page, limit=limit)
         return self.paginate(items, total, page, limit)
@@ -204,14 +218,14 @@ class AccountService(BaseService):
             )
         return obj
 
-    async def get_by_keycloak_id(self, keycloak_id: str):
-        obj = await self.repo.find_by_keycloak_id(keycloak_id)
+    async def get_by_central_user_id(self, central_user_id: int):
+        obj = await self.repo.find_by_central_user_id(central_user_id)
         if obj is None:
             raise self.not_found(
-                "Compte Keycloak introuvable.",
+                "Compte introuvable pour cette identité centrale.",
                 error_code=ErrorCode.ACCOUNT_NOT_FOUND,
-                field="keycloak_id",
-                value=keycloak_id,
+                field="central_user_id",
+                value=central_user_id,
             )
         return obj
 
@@ -228,7 +242,9 @@ class AccountService(BaseService):
 
     # ── Écriture ──────────────────────────────────────────────────────────────
 
-    async def create(self, data: dict, *, validate_org_assignment: bool = False):
+    async def create(
+        self, data: dict, *, validate_org_assignment: bool = False, actor_bearer_token: str | None = None,
+    ):
         self._logger.info(f"Création d'un compte — email={data.get('email')!r}")
 
         unit_id = data.pop("unit_id", None)
@@ -244,7 +260,7 @@ class AccountService(BaseService):
         if data.get("role"):
             data["role"] = normalize_role(data["role"])
 
-        # Unicité e-mail
+        # Unicité e-mail (locale, avant tout appel réseau)
         existing = await self.repo.find_by_email(data.get("email", ""))
         if existing:
             raise self.conflict(
@@ -277,11 +293,36 @@ class AccountService(BaseService):
                 unity_id=data.get("unity_id"),
             )
 
+        # ── Création centrale (README §12) — TOUJOURS avant l'écriture locale.
+        # Invariant : aucun compte local ne doit exister sans identité centrale.
+        password = data.pop("password")
+        group_codename = central_auth.group_for_role(data.get("role", "user"))
+        machine_token = await central_auth.get_machine_token()
+        central_result = await central_auth.create_central_account(
+            group_codename=group_codename,
+            email=data["email"],
+            phone=data.get("phone") or "",
+            firstname=data.get("firstname") or data["name"],
+            last_name=data["name"],
+            password=password,
+            machine_token=machine_token,
+        )
+        data["central_user_id"] = central_result["user_id"]
+        data["central_user_uuid"] = central_result["user_uuid"]
+
         obj = await self.repo.create(data)
-        self._logger.info(f"✅ Compte créé — id={obj.id}")
+        self._logger.info(f"✅ Compte créé — id={obj.id} central_user_id={obj.central_user_id}")
+
+        if actor_bearer_token:
+            await central_auth.log_central_event(
+                actor_bearer_token, object_id=str(obj.id), action="create", status="success",
+                message=f"Compte créé : {obj.email}", after=data,
+            )
         return obj
 
-    async def update(self, id: int, data: dict, *, validate_org_assignment: bool = False):
+    async def update(
+        self, id: int, data: dict, *, validate_org_assignment: bool = False, actor_bearer_token: str | None = None,
+    ):
         self._logger.info(f"Mise à jour du compte — id={id}")
 
         current = await self.repo.get_by_id(id)
@@ -346,12 +387,66 @@ class AccountService(BaseService):
                 unity_id=data.get("unity_id", current.unity_id),
             )
 
+        # ── Synchronisation centrale (README §12) ────────────────────────────
+        identity_keys = {"email", "phone", "name", "firstname"}
+        touches_identity = bool(identity_keys & data.keys())
+        touches_role = "role" in data and data["role"] != current.role
+
+        if touches_identity or touches_role:
+            if not current.central_user_uuid:
+                raise self.conflict(
+                    _CENTRAL_NOT_LINKED_MESSAGE,
+                    error_code="ACCOUNT_NOT_CENTRAL_LINKED",
+                    hint="Ce compte doit être recréé via la plateforme centrale.",
+                )
+            machine_token = await central_auth.get_machine_token()
+
+            if touches_identity:
+                await central_auth.update_central_account(
+                    current.central_user_uuid,
+                    email=data.get("email", current.email),
+                    phone=data.get("phone", current.phone) or "",
+                    firstname=data.get("firstname", current.firstname) or data.get("name", current.name),
+                    last_name=data.get("name", current.name),
+                    machine_token=machine_token,
+                )
+
+            if touches_role:
+                old_group = central_auth.group_for_role(current.role)
+                new_group = central_auth.group_for_role(data["role"])
+                if new_group != old_group:
+                    await central_auth.add_group_membership(current.central_user_uuid, new_group, machine_token)
+                    await central_auth.remove_group_membership(current.central_user_uuid, old_group, machine_token)
+
         obj = await self.repo.update(id, data)
+
+        if actor_bearer_token:
+            await central_auth.log_central_event(
+                actor_bearer_token, object_id=str(id), action="update", status="success",
+                message=f"Compte mis à jour : {obj.email}", after=data,
+            )
         return obj
 
-    async def delete(self, id: int) -> bool:
-        await self.get_by_id(id)
-        return await self.repo.delete(id)
+    async def delete(self, id: int, actor_bearer_token: str) -> bool:
+        current = await self.get_by_id(id)
+        if not current.central_user_id:
+            raise self.conflict(
+                _CENTRAL_NOT_LINKED_MESSAGE,
+                error_code="ACCOUNT_NOT_CENTRAL_LINKED",
+                hint="Ce compte doit être recréé via la plateforme centrale.",
+            )
+        await central_auth.delete_central_account(current.central_user_id, actor_bearer_token)
+        await central_auth.log_central_event(
+            actor_bearer_token, object_id=str(id), action="delete", status="success",
+            message=f"Compte supprimé : {current.email}",
+        )
+        result = await self.repo.delete(id)
+        await emit_event(AppEvent(
+            type="account.deactivated",
+            payload={"id": id},
+            target={"user_ids": [id]},
+        ))
+        return result
 
     async def set_availability(self, id: int, availability: str):
         obj = await self.repo.set_availability(id, availability)
@@ -375,97 +470,74 @@ class AccountService(BaseService):
             )
         return obj
 
-    async def activate(self, id: int) -> bool:
-        await self.get_by_id(id)
-        return await self.repo.activate(id)
-
-    async def deactivate(self, id: int) -> bool:
-        await self.get_by_id(id)
-        return await self.repo.deactivate(id)
-
-    async def search(self, q: str, *, page: int = 1, limit: int = 20):
-        items, total = await self.repo.search(q, page=page, limit=limit)
-        return self.paginate(items, total, page, limit)
-
-    async def set_role(self, id: int, role: str):
-        return await self.update(id, {"role": normalize_role(role)}, validate_org_assignment=True)
-
-    # ── Auth ──────────────────────────────────────────────────────────────────
-
-    async def register(self, data: dict):
-        """
-        Crée un compte avec un mot de passe haché Argon2.
-        Le rôle est TOUJOURS forcé à 'user' — toute valeur client est ignorée.
-        Lève ConflictException si l'email/matricule/téléphone est déjà utilisé.
-        """
-        plain_password = data.pop("password", None)
-        if not plain_password:
-            raise self.bad_request(
-                "Un mot de passe est requis.",
-                error_code="PASSWORD_REQUIRED",
-                field="password",
+    async def set_active(self, id: int, active: bool, *, actor_bearer_token: str | None = None):
+        current = await self.get_by_id(id)
+        if not current.central_user_uuid:
+            raise self.conflict(
+                _CENTRAL_NOT_LINKED_MESSAGE,
+                error_code="ACCOUNT_NOT_CENTRAL_LINKED",
+                hint="Ce compte doit être recréé via la plateforme centrale.",
             )
-        data["role"] = "user"  # C-01 — auto-élévation impossible
-        obj = await self.create(data)
-        await self.repo.update(obj.id, {"password_hash": hash_password(plain_password)})
-        return await self.repo.get_by_id(obj.id)
+        machine_token = await central_auth.get_machine_token()
+        if active:
+            await central_auth.activate_central_account(current.central_user_uuid, machine_token)
+        else:
+            await central_auth.deactivate_central_account(current.central_user_uuid, machine_token)
 
-    async def authenticate(self, identifier: str, password: str):
-        """
-        Cherche un compte par email, téléphone ou matricule, vérifie le mot de passe.
-        Retourne le compte si l'authentification réussit.
-        Lève UnauthorizedException sinon.
-        """
-        from api.core.exceptions import UnauthorizedException
-        from api.core.phone import is_phone_identifier
-
-        import re as _re
-
-        # 1. Email
-        obj = await self.repo.find_by_email(identifier)
-        # 2. Téléphone (détection automatique du format)
-        if obj is None and is_phone_identifier(identifier):
-            normalized = normalize_phone(identifier)
-            obj = await self.repo.find_by_phone(normalized)
-            if obj is None:
-                # Fallback : essayer les chiffres seuls (comptes non encore normalisés)
-                digits = _re.sub(r"[^\d]", "", identifier)
-                if digits != normalized:
-                    obj = await self.repo.find_by_phone(digits)
-                    if obj is None and digits != normalized.lstrip("+"):
-                        obj = await self.repo.find_by_phone("+" + digits)
-        # 3. Matricule
-        if obj is None and not identifier.startswith("@"):
-            obj = await self.repo.find_by_matricule(identifier)
-
-        if obj is None or not obj.password_hash:
-            raise UnauthorizedException("Identifiant ou mot de passe incorrect.")
-
-        if not verify_password(password, obj.password_hash):
-            raise UnauthorizedException("Identifiant ou mot de passe incorrect.")
-
-        if not obj.status or obj.deleted_at is not None:
-            from api.core.exceptions import UnauthorizedException as UE
-            raise UE(
-                "Compte désactivé. Contactez l'administration EDG.",
-                error_code="ACCOUNT_DISABLED",
+        obj = await self.repo.update(id, {
+            "status": active,
+            "account_status": "active" if active else "inactive",
+        })
+        if actor_bearer_token:
+            await central_auth.log_central_event(
+                actor_bearer_token, object_id=str(id),
+                action="activate" if active else "deactivate", status="success",
+                message=f"Compte {'activé' if active else 'désactivé'} : {obj.email}",
             )
-
+        if not active:
+            # Déconnexion immédiate — sans ça, la personne ne serait rejetée qu'à
+            # son prochain appel API (dependencies.py revérifie account_status à
+            # chaque requête), mais resterait "connectée" en apparence si elle
+            # n'interagit plus (page ouverte, flux SSE déjà établi). Un seul
+            # événement ciblé suffit à couvrir tous ses onglets/appareils ouverts
+            # (event_bus fan-out vers chaque connexion SSE abonnée à cet user_id).
+            await emit_event(AppEvent(
+                type="account.deactivated",
+                payload={"id": id},
+                target={"user_ids": [id]},
+            ))
         return obj
 
-    async def change_password(self, id: int, current_password: str, new_password: str):
-        """Permet à un utilisateur de changer son propre mot de passe."""
-        from api.core.exceptions import UnauthorizedException
-
-        obj = await self.get_by_id(id)
-        if not obj.password_hash or not verify_password(current_password, obj.password_hash):
-            raise UnauthorizedException(
-                "Mot de passe actuel incorrect.",
-                error_code="WRONG_PASSWORD",
+    async def reset_password(self, id: int, *, actor_bearer_token: str | None = None) -> str:
+        current = await self.get_by_id(id)
+        if not current.central_user_uuid:
+            raise self.conflict(
+                _CENTRAL_NOT_LINKED_MESSAGE,
+                error_code="ACCOUNT_NOT_CENTRAL_LINKED",
+                hint="Ce compte doit être recréé via la plateforme centrale.",
             )
-        return await self.repo.update(id, {"password_hash": hash_password(new_password)})
+        machine_token = await central_auth.get_machine_token()
+        default_password = await central_auth.reset_central_password(current.central_user_uuid, machine_token)
+        if actor_bearer_token:
+            await central_auth.log_central_event(
+                actor_bearer_token, object_id=str(id), action="reset_password", status="success",
+                message=f"Mot de passe réinitialisé : {current.email}",
+            )
+        return default_password
 
-    async def set_password(self, id: int, new_password: str):
-        """Réinitialisation admin : définit un nouveau mot de passe sans vérifier l'ancien."""
-        await self.get_by_id(id)
-        return await self.repo.update(id, {"password_hash": hash_password(new_password)})
+    async def search(
+        self, q: str, *,
+        direction_id: int | None = None,
+        unit_id: int | None = None,
+        page: int = 1, limit: int = 20,
+    ):
+        items, total = await self.repo.search(
+            q, direction_id=direction_id, unit_id=unit_id, page=page, limit=limit,
+        )
+        return self.paginate(items, total, page, limit)
+
+    async def set_role(self, id: int, role: str, *, actor_bearer_token: str | None = None):
+        return await self.update(
+            id, {"role": normalize_role(role)},
+            validate_org_assignment=True, actor_bearer_token=actor_bearer_token,
+        )

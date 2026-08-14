@@ -369,7 +369,7 @@ class TestQueueBaseline:
             rid = str(created_body.get("data", created_body)["id"])
 
         async with auth_client("admin") as c:
-            patched = await c.patch(f"/api/v1/requests/{rid}", json={"in_triage": True})
+            patched = await c.put(f"/api/v1/requests/{rid}", json={"in_triage": True})
             assert patched.status_code == 200
 
         async with auth_client("agent") as c:
@@ -427,7 +427,7 @@ class TestAssignationEscaladeRoles:
             rid = await self._create_ticket(c)
 
         async with auth_client("admin") as c:
-            patched = await c.patch(
+            patched = await c.put(
                 f"/api/v1/requests/{rid}",
                 json={"request_status": "resolved"},
             )
@@ -447,7 +447,8 @@ class TestAssignationEscaladeRoles:
         body = assigned.json()
         data = body.get("data", body)
         assert str(data.get("assignee_id")) == "2"
-        assert data.get("request_status") == "assigned"
+        # BR-QUEUE-AUTO-START-001 : l'auto-assignation démarre directement le traitement.
+        assert data.get("request_status") == "in_progress"
 
     async def test_agent_ne_peut_pas_assigner_un_autre_agent(self, auth_client):
         await _ensure_test_account(2, unity_id=1, role="agent")
@@ -597,7 +598,11 @@ class TestAssignationEscaladeRoles:
         for key in _AUDIT_INFO_KEYS:
             assert key in infos
 
-    async def test_chef_peut_refuser_reouverture_avec_motif(self, auth_client):
+    async def test_demandeur_peut_reouvrir_immediatement_avec_motif(self, auth_client):
+        """BR-REOPEN-QUEUE-001 (révision — réouverture immédiate) : le demandeur
+        réouvre seul, sans approbation d'un chef — remplace les anciens tests
+        d'approbation/refus (`/request-reopen` + `/reject-reopen`/`/reopen`
+        deux-phases), routes supprimées."""
         await _ensure_test_account(2, unity_id=1, role="agent")
 
         async with auth_client("admin") as c:
@@ -609,35 +614,28 @@ class TestAssignationEscaladeRoles:
             resolved = await c.post(f"/api/v1/requests/{rid}/resolve")
             assert resolved.status_code == 200
 
-        async with auth_client("admin") as c:
-            requested = await c.post(
-                f"/api/v1/requests/{rid}/request-reopen",
+        async with auth_client("user") as c:
+            reopened = await c.post(
+                f"/api/v1/requests/{rid}/reopen",
                 json={"reason": "Le problème persiste côté demandeur."},
-            )
-            assert requested.status_code == 200
-
-        async with auth_client("chief") as c:
-            refused = await c.post(
-                f"/api/v1/requests/{rid}/reject-reopen",
-                json={"reason": "Les éléments fournis ne justifient pas la réouverture."},
             )
             detail = await c.get(f"/api/v1/requests/{rid}")
 
-        assert refused.status_code == 200
-        refused_body = refused.json()
-        refused_data = refused_body.get("data", refused_body)
-        assert refused_data.get("infos", {}).get("reopen_requested") is not True
+        assert reopened.status_code == 200, reopened.text
+        body = reopened.json()
+        data = body.get("data", body)
+        assert data.get("request_status") == "reopened"
+        assert data.get("assignee_id") is None
 
         assert detail.status_code == 200
         detail_body = detail.json()
         detail_data = detail_body.get("data", detail_body)
         assert any(
-            event.get("event_type") == "reopen_rejected"
-            and event.get("comment") == "Les éléments fournis ne justifient pas la réouverture."
+            event.get("event_type") == "reopened"
             for event in detail_data.get("timelines", [])
         )
 
-    async def test_chef_peut_approuver_reouverture(self, auth_client):
+    async def test_reopen_sans_motif_est_refuse(self, auth_client):
         await _ensure_test_account(2, unity_id=1, role="agent")
 
         async with auth_client("admin") as c:
@@ -649,23 +647,12 @@ class TestAssignationEscaladeRoles:
             resolved = await c.post(f"/api/v1/requests/{rid}/resolve")
             assert resolved.status_code == 200
 
-        async with auth_client("admin") as c:
-            requested = await c.post(
-                f"/api/v1/requests/{rid}/request-reopen",
-                json={"reason": "Résolution contestée."},
-            )
-            assert requested.status_code == 200
+        async with auth_client("user") as c:
+            reopened = await c.post(f"/api/v1/requests/{rid}/reopen", json={"reason": "   "})
 
-        async with auth_client("chief") as c:
-            reopened = await c.post(f"/api/v1/requests/{rid}/reopen")
+        assert reopened.status_code == 400
 
-        assert reopened.status_code == 200
-        body = reopened.json()
-        data = body.get("data", body)
-        assert data.get("request_status") == "reopened"
-        assert data.get("infos", {}).get("reopen_requested") is not True
-
-    async def test_agent_ne_peut_pas_approuver_reouverture(self, auth_client):
+    async def test_non_demandeur_ne_peut_pas_reouvrir(self, auth_client):
         await _ensure_test_account(2, unity_id=1, role="agent")
 
         async with auth_client("admin") as c:
@@ -677,15 +664,11 @@ class TestAssignationEscaladeRoles:
             resolved = await c.post(f"/api/v1/requests/{rid}/resolve")
             assert resolved.status_code == 200
 
-        async with auth_client("admin") as c:
-            requested = await c.post(
-                f"/api/v1/requests/{rid}/request-reopen",
+        async with auth_client("agent") as c:
+            reopened = await c.post(
+                f"/api/v1/requests/{rid}/reopen",
                 json={"reason": "Résolution contestée."},
             )
-            assert requested.status_code == 200
-
-        async with auth_client("agent") as c:
-            reopened = await c.post(f"/api/v1/requests/{rid}/reopen")
 
         assert reopened.status_code == 403
 
@@ -971,15 +954,54 @@ class TestCommentairesBaseline:
             data = body.get("data", body)
             assert str(data.get("author_id", "")) != "9999"
 
-    async def test_commentaire_accompagne_demande_dans_timeline_detail(self, auth_client, request_id):
-        """Un commentaire doit rester attaché à la demande dans l'historique détaillé."""
-        if not request_id:
-            pytest.skip("request_id non disponible")
+    async def test_commentaire_accompagne_demande_dans_timeline_detail(self, auth_client, unity_id):
+        """Un commentaire doit rester attaché à la demande dans l'historique détaillé.
+        Ticket dédié (pas le `request_id` de session partagé) : admin (id=6) est
+        le demandeur (compte créateur), l'agent 7601 est l'assigné courant —
+        admin écrit donc dans sa propre conversation (BR-MESSAGING-PAIR-001),
+        indépendamment de l'ordre d'exécution des tests. La qualification est
+        effectuée par un second compte admin (id=7602) : le compte admin
+        créateur est aussi le demandeur ici et ne peut pas qualifier/traiter
+        son propre ticket, même avec le rôle admin (conflit d'intérêt,
+        BR-REQUESTER-NO-SELF-TREATMENT-001)."""
+        from types import SimpleNamespace
+        from httpx import ASGITransport, AsyncClient
+        from api.dependencies import get_current_user
+        from api.main import app
+
+        await _ensure_test_account(7601, unity_id=unity_id, role="agent-support")
 
         async with auth_client("admin") as c:
+            created_req = await c.post("/api/v1/requests/", json={
+                "title": "Commentaire timeline detail",
+                "description": "Ticket dedie pour verifier le rattachement timeline du commentaire.",
+                "category": "panne",
+                "priority": "medium",
+                "is_external": False,
+                "unity_id": unity_id,
+                "requester_name": "Citoyen Test",
+                "requester_email": "citoyen.timeline@test.edg.gn",
+            })
+            assert created_req.status_code == 201, created_req.text
+            request_id = str(created_req.json()["data"]["id"])
+
+            def _admin_bis_dep():
+                return SimpleNamespace(id=7602, role="admin", unity_id=unity_id, direction_id=None, name="Admin Bis")
+            app.dependency_overrides[get_current_user] = _admin_bis_dep
+            try:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client2:
+                    qualified = await client2.post(
+                        f"/api/v1/requests/{request_id}/qualify",
+                        json={"category": "panne", "priority": "medium", "unit_id": unity_id, "assignee_id": 7601},
+                    )
+            finally:
+                app.dependency_overrides.pop(get_current_user, None)
+            assert qualified.status_code == 200, qualified.text
+
             created = await c.post(f"/api/v1/requests/{request_id}/comments", json={
                 "body": "Commentaire audit timeline.",
                 "is_public": True,
+                "peer_id": "7601",
                 "author_id": 9999,
                 "author_name": "Faux Auteur",
             })

@@ -13,7 +13,7 @@ Route frontend: `/app/requests`, `/app/requests/$id`.
 Page principale: `frontend/src/routes/app.requests.index.tsx`, `frontend/src/routes/app.requests.$id.tsx`.
 Composants: `new-request-form.tsx`, `workflow-timeline.tsx`, `appreciation-form.tsx`.
 Service frontend: `frontend/src/lib/api/requests.ts`.
-Endpoint backend: `GET /api/v1/requests`, `GET /api/v1/requests/{id}`, `POST /api/v1/requests`, `PATCH /api/v1/requests/{id}/requester-edit`.
+Endpoint backend: `GET /api/v1/requests`, `GET /api/v1/requests/{id}`, `POST /api/v1/requests`, `PUT /api/v1/requests/{id}/requester-edit`.
 Route backend: `backend/api/routes/RouteRequest.py`.
 Service backend: `backend/api/services/ServiceRequest.py`.
 Schemas: `SchemaRequest.py`.
@@ -178,18 +178,18 @@ Chemins probables: `ticket_actions.py`, `ServiceRequest.py`, `RouteRequest.py`, 
 ## FEATURE-REOPEN-QUEUE
 
 Identifiant: FEATURE-REOPEN-QUEUE
-Nom: Retour automatique d'un ticket reouvert dans la File d'attente
-Module: MOD-AGENT / MOD-CHIEF / MOD-WORKFLOW
-Description: quand une demande de reouverture est approuvee, le ticket libere systematiquement son ancien intervenant (`assignee_id=null`, jamais de reaffectation automatique) et retourne dans la File d'attente (`in_triage=true`) comme n'importe quelle demande en attente. Un nouvel agent (ou le meme, s'il le choisit) doit la reprendre depuis la File d'attente pour demarrer un nouveau cycle collaboratif dynamique (FEATURE-COLLABORATIVE-TREATMENT) — transmission/terminaison redeviennent alors disponibles pour ce nouvel intervenant. Corrige le blocage identifie par la verification du workflow dynamique (2026-08-04) : sans ce correctif, un ticket reouvert restait affecte a l'ancien intervenant mais hors des statuts autorises pour transmettre/resoudre (`reopened` volontairement exclu de `TICKET_ACTION_STATUSES.transmit_treatment`/`resolve`), bloquant definitivement le workflow.
-Roles concernes: chief-service/chief-departement/director/admin (approbation) ; agent-support/chief-service/chief-departement (reprise depuis la File d'attente).
-Route frontend: `app.queue.tsx` (badge `Réouverte` + encart motif/ancien intervenant/date sur la carte depliee), `app.requests.$id.tsx` (message "Ce ticket réouvert attend une nouvelle prise en charge.").
-Endpoint backend: `POST /api/v1/requests/{id}/reopen` (comportement etendu, pas de nouvel endpoint).
+Nom: Reouverture immediate par le demandeur et retour automatique dans la File d'attente
+Module: MOD-PERSONAL / MOD-AGENT / MOD-CHIEF / MOD-WORKFLOW
+Description: le demandeur reouvre seul son ticket resolu/rejete/cloture, sans approbation d'un chef/directeur/admin (revision 2026-08-07 — remplace l'ancien mecanisme en deux phases "demande de reouverture" + approbation/refus, routes `request-reopen`/`reject-reopen` supprimees). Motif obligatoire. Effet atomique et immediat : le ticket libere systematiquement son ancien intervenant (`assignee_id=null`, jamais de reaffectation automatique) et retourne dans la File d'attente (`in_triage=true`) comme n'importe quelle demande en attente. Un nouvel agent (ou le meme, s'il le choisit) doit la reprendre depuis la File d'attente pour demarrer un nouveau cycle collaboratif dynamique (FEATURE-COLLABORATIVE-TREATMENT) — transmission/terminaison redeviennent alors disponibles pour ce nouvel intervenant. Corrige le blocage identifie par la verification du workflow dynamique (2026-08-04) : sans le correctif d'origine, un ticket reouvert restait affecte a l'ancien intervenant mais hors des statuts autorises pour transmettre/resoudre (`reopened` volontairement exclu de `TICKET_ACTION_STATUSES.transmit_treatment`/`resolve`), bloquant definitivement le workflow ; la revision 2026-08-07 supprime en plus l'etape d'approbation elle-meme.
+Roles concernes: demandeur uniquement (`request.requester_id`, quel que soit son role professionnel) pour la reouverture ; agent-support/chief-service/chief-departement/director (reprise depuis la File d'attente).
+Route frontend: `app.requests.$id.tsx` (bouton "Réouvrir le ticket", motif obligatoire, mutation unique), `app.notifications.tsx`/`notification-panel.tsx` (action rapide "Rouvrir"), `rejected-ticket-modal.tsx` (motif obligatoire). `app.chief-inbox.tsx` : onglet "Reouvertures" retire (plus d'approbation en attente).
+Endpoint backend: `POST /api/v1/requests/{id}/reopen` (body `{reason: string}` obligatoire — comportement etendu, pas de nouvel endpoint). `POST /request-reopen` et `POST /reject-reopen` supprimes.
 Route backend: `backend/api/routes/RouteRequest.py`.
-Service backend: `backend/api/services/ServiceRequest.py` (`reopen`).
+Service backend: `backend/api/services/ServiceRequest.py` (`reopen` — `request_reopen`/`reject_reopen` supprimees).
 Modeles: `ModelRequest.py` (`assignee_id`, `in_triage`, `request_status`), `ModelWorkflowDetail.py` (`reopened`), `ModelNotification.py`.
 Tables: `request`, `workflow_detail`, `notification` (aucune nouvelle table).
-Regles metier: BR-REOPEN-QUEUE-001 (etend BR-REOPEN-001).
-Tests: `backend/tests/api/test_reopen_queue.py`.
+Regles metier: BR-REOPEN-QUEUE-001 (revision 2026-08-07, etend BR-REOPEN-001).
+Tests: `backend/tests/api/test_reopen_queue.py` (reecrit, 11 scenarios).
 Fonctionnalites dependantes: File d'attente (`GET /requests/triage`), notifications (BR-NOTIF-001), timeline (FEATURE-WORKFLOW-TIMELINE), workflow collaboratif dynamique (FEATURE-COLLABORATIVE-TREATMENT), temps reel (`request.reopened`, deja dans `INVALIDATION_MAP`).
 Chemins probables: `ServiceRequest.py`, `RepositoryRequest.py` (`_QUALIFIABLE_STATUSES`), `RouteRequest.py`, `app.queue.tsx`, `app.requests.$id.tsx`, `capabilities.ts`.
 
@@ -249,7 +249,7 @@ Roles concernes: user, agent, chief, director, admin.
 Route frontend: `/app/notifications`.
 Composants: `frontend/src/components/notification-panel.tsx`.
 Service frontend: `frontend/src/lib/api/notifications.ts`, `frontend/src/lib/realtime/invalidation-map.ts`.
-Endpoint backend: `GET/PATCH/POST /api/v1/notifications/*`, actions ticket qui appellent `NotificationEmitter.py`.
+Endpoint backend: `GET/PUT/POST /api/v1/notifications/*`, actions ticket qui appellent `NotificationEmitter.py`.
 Route backend: `backend/api/routes/RouteNotification.py`, `backend/api/routes/RouteSSE.py`.
 Service backend: `backend/api/services/ServiceNotification.py`, `backend/api/services/NotificationEmitter.py`.
 Email backend: `backend/api/core/mailer.py`, templates HTML dans `backend/templates/`.
@@ -291,7 +291,7 @@ Roles concernes: admin.
 Routes frontend: `/app/admin/org`, `/app/admin/directions`, `/app/admin/directions/$id`, `/app/admin/departments`, `/app/admin/units`.
 Composant frontend: `frontend/src/components/admin/direction-org-chart.tsx`.
 Service frontend: `frontend/src/lib/api/directions-units.ts`, `frontend/src/lib/api/accounts.ts` pour le personnel affiche dans le detail direction.
-Endpoint backend: `GET/POST/PATCH /directions/*`, `GET/POST/PATCH /departments/*`, `GET/POST/PATCH /units/*`, actions `/activate` et `/deactivate`.
+Endpoint backend: `GET/POST/PUT /directions/*`, `GET/POST/PUT /departments/*`, `GET/POST/PUT /units/*`, actions `/activate` et `/deactivate`.
 Route backend: `backend/api/routes/RouteDirectionsUnits.py`.
 Modeles: `ModelUnity.py`, `ModelOrganigram.py`, `ModelAccount.py`.
 Tables: `unity`, `organigram`, `account`.

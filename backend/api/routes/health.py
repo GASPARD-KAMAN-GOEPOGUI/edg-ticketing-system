@@ -24,3 +24,5 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         return {"status": "ok", "database": "connected"}
     except Exception as e:
         return {"status": "error", "database": str(e)}
+
+

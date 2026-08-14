@@ -23,6 +23,7 @@ from api.core.ticket_actions import (
     assert_action_allowed,
     assert_is_current_handler,
     assert_qualify_target_allowed,
+    assert_requester_is_not_handler,
     assert_role_specific_action_constraints,
     assert_service_reassignment_allowed,
     assert_ticket_scope,
@@ -645,6 +646,7 @@ class RequestService(BaseService):
         unit_id: Optional[str] = None,
         assignee_id: Optional[str] = None,
         requester_id: Optional[str] = None,
+        exclude_requester_id: Optional[str] = None,
         search: Optional[str] = None,
         sla_breached: Optional[bool] = None,
         in_triage: Optional[bool] = None,
@@ -672,6 +674,7 @@ class RequestService(BaseService):
                         "unity_id": effective_unity_id,
                         "assignee_id": assignee_id,
                         "requester_id": requester_id,
+                        "exclude_requester_id": exclude_requester_id,
                     }.items() if v is not None
                 },
                 page=page,
@@ -691,6 +694,8 @@ class RequestService(BaseService):
                 filters["assignee_id"] = assignee_id
             if requester_id is not None:
                 filters["requester_id"] = requester_id
+            if exclude_requester_id is not None:
+                filters["exclude_requester_id"] = exclude_requester_id
             if sla_breached is not None:
                 filters["sla_breached"] = sla_breached
             if in_triage is not None:
@@ -750,12 +755,14 @@ class RequestService(BaseService):
         search: Optional[str] = None,
         page: int = 1,
         limit: int = 20,
+        retransmitted_only: bool = False,
     ):
         items, total = await self.repo.list_transmitted_by_actor(
             actor_id,
             search=search,
             page=page,
             limit=limit,
+            retransmitted_only=retransmitted_only,
         )
         return self.paginate(self._serialize(items), total, page, limit)
 
@@ -809,7 +816,12 @@ class RequestService(BaseService):
         assert_qualify_target_allowed(actor_role, actor_id, assignee_id)
         if assignee_id:
             patch["assignee_id"] = int(assignee_id)
-            patch["request_status"] = "assigned"
+            # BR-QUEUE-AUTO-START-001 — une prise ("Prendre le ticket") ou une
+            # assignation ("Assigner") effective depuis la File d'attente
+            # constitue le démarrage effectif du traitement : le ticket passe
+            # directement à `in_progress`, sans étape "assigned" intermédiaire
+            # nécessitant un second clic "Démarrer traitement".
+            patch["request_status"] = "in_progress"
         else:
             patch["request_status"] = "qualifying"
 
@@ -820,6 +832,8 @@ class RequestService(BaseService):
             actor=actor,
             actor_role=actor_role,
         )
+        if assignee_id:
+            assert_requester_is_not_handler(current, assignee_id)
         if assignee_id and actor is not None:
             row = await self.session.execute(
                 select(Account.unity_id, Account.role)
@@ -918,8 +932,15 @@ class RequestService(BaseService):
 
     # ── Auto-affectation ──────────────────────────────────────────────────────
 
-    async def _select_auto_assignee(self, unity_id: int) -> Optional[int]:
-        """Retourne l'agent disponible le moins chargé dans l'unité cible."""
+    async def _select_auto_assignee(
+        self, unity_id: int, *, exclude_id: Optional[int | str] = None,
+    ) -> Optional[int]:
+        """Retourne l'agent disponible le moins chargé dans l'unité cible.
+
+        BR-REQUESTER-NO-SELF-TREATMENT-001 — `exclude_id` (typiquement le
+        demandeur du ticket) est exclu des candidats, sans autre restriction
+        sur le nombre d'agents disponibles restants.
+        """
         # Statuts terminaux — exclus du comptage de charge active
         terminal_result = await self.session.execute(
             select(RequestStatus.id)
@@ -952,9 +973,10 @@ class RequestService(BaseService):
             .where(Account.account_status == "active")
             .where(or_(Account.availability.is_(None), Account.availability == "available"))
             .where(Account.deleted_at.is_(None))
-            .order_by(func.coalesce(load_sq.c.cnt, 0).asc())
-            .limit(1)
         )
+        if exclude_id is not None:
+            stmt = stmt.where(Account.id != int(exclude_id))
+        stmt = stmt.order_by(func.coalesce(load_sq.c.cnt, 0).asc()).limit(1)
 
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
@@ -1025,7 +1047,9 @@ class RequestService(BaseService):
             target_unity_id = matched.target_unity_id
             chief = await acc_repo.find_chief_for_unity(target_unity_id)
 
-            # Conflit d'intérêt : le demandeur est lui-même le chef de l'unité cible.
+            # Conflit d'intérêt / BR-REQUESTER-NO-SELF-TREATMENT-001 : le demandeur
+            # (actor_id, ce point d'appel de _apply_routing ne reçoit jamais que le
+            # requester_id — voir create()) est lui-même le chef de l'unité cible.
             # On bascule en triage pour éviter l'auto-traitement (biais, traçabilité).
             if chief and str(chief.id) == str(actor_id):
                 self._logger.warning(
@@ -1036,20 +1060,20 @@ class RequestService(BaseService):
                     await emit_notif(
                         self.session,
                         recipient_id=str(actor_id),
-                        title="Demande transmise au support général",
+                        title="Ticket transmis au support général",
                         body=(
-                            f"Votre demande {obj.ref} a été transmise au support général "
+                            f"Votre ticket {obj.ref} a été transmis au support général "
                             f"car vous êtes responsable du service cible (neutralité garantie)."
                         ),
                         type="info",
                         request_id=str(obj.id),
-                        action_label="Suivre ma demande",
+                        action_label="Suivre mon ticket",
                         action_url=f"/app/requests/{obj.id}",
                     )
                 # Fall-through au bloc triage ci-dessous
             else:
                 auto_assignee_id = (
-                    await self._select_auto_assignee(target_unity_id)
+                    await self._select_auto_assignee(target_unity_id, exclude_id=actor_id)
                     if matched.auto_assign
                     else None
                 )
@@ -1099,15 +1123,15 @@ class RequestService(BaseService):
                     await emit_notif(
                         self.session,
                         recipient_id=str(assignee_id),
-                        title="Nouvelle demande assignée" if auto_assignee_id else "Nouvelle demande à traiter",
+                        title="Nouveau ticket assigné" if auto_assignee_id else "Nouveau ticket à traiter",
                         body=(
-                            f"La demande {obj.ref} vous a été assignée automatiquement."
+                            f"Le ticket {obj.ref} vous a été assigné automatiquement. Vous pouvez commencer votre intervention."
                             if auto_assignee_id
-                            else f"La demande {obj.ref} a été routée vers votre service."
+                            else f"Le ticket {obj.ref} a été routé vers votre service."
                         ),
                         type="info",
                         request_id=str(obj.id),
-                        action_label="Voir la demande",
+                        action_label="Voir le ticket",
                         action_url=f"/app/requests/{obj.id}",
                     )
 
@@ -1155,8 +1179,8 @@ class RequestService(BaseService):
             await emit_notif(
                 self.session,
                 recipient_id=str(support.id),
-                title="Demande à qualifier",
-                body=f"La demande {obj.ref} arrive au support général (aucune règle de routage).",
+                title="Ticket à qualifier",
+                body=f"Le ticket {obj.ref} arrive au support général (aucune règle de routage).",
                 type="warning",
                 request_id=str(obj.id),
                 action_label="Qualifier",
@@ -1273,6 +1297,21 @@ class RequestService(BaseService):
             target={"roles": ["agent", "chief", "director", "admin"]},
         ))
 
+        # BR-NOTIFICATION-WORKFLOW-001 §5 — le demandeur doit être informé que son
+        # ticket est bien créé et placé en File d'attente, avant même tout routage.
+        requester_id = data.get("requester_id")
+        if requester_id:
+            await emit_notif(
+                self.session,
+                recipient_id=str(requester_id),
+                title="Ticket créé",
+                body=f"Votre ticket {ref} a été créé avec succès et placé dans la File d'attente.",
+                type="success",
+                request_id=str(obj.id),
+                action_label="Voir le ticket",
+                action_url=f"/app/requests/{obj.id}",
+            )
+
         # Étape 2 — routage automatique uniquement si explicitement demandé.
         if self._should_auto_route(data):
             try:
@@ -1356,6 +1395,16 @@ class RequestService(BaseService):
             event_type = _STATUS_EVENT_MAP.get(status_code, "status_changed")
             if status_code == "pending" and status_reason == "info_request":
                 event_label = "Informations complémentaires demandées"
+            elif status_code == "in_progress" and opening_meta and new_assignee_id:
+                # BR-QUEUE-AUTO-START-001 §7 — une seule ligne de journal cohérente
+                # ("pris/assigné" + "traitement démarré"), jamais deux événements
+                # distincts pour la même action utilisateur.
+                intervenant_name = opening_meta.get("intervention_actor_name")
+                event_label = (
+                    f"Pris en charge par {intervenant_name} — traitement démarré"
+                    if intervenant_name
+                    else "Pris en charge — traitement démarré"
+                )
             else:
                 event_label = _STATUS_LABEL_MAP.get(status_code, f"Statut → {status_code}")
             wf_id = await self._get_or_create_workflow(int(id))
@@ -1383,17 +1432,20 @@ class RequestService(BaseService):
                 payload={"id": id, "status": status_code},
                 target={"roles": "all"},
             ))
-            # Notification individuelle au demandeur (CDC §6.3)
+            # Notification individuelle au demandeur (CDC §6.3). BR-NOTIFICATION-
+            # WORKFLOW-001 §22 — seuls les événements importants/actionnables
+            # (information requise, escalade) déclenchent un email ; les étapes de
+            # progression routinière restent App-only pour éviter le bruit.
             _notif_map = {
-                "qualifying":   ("Demande en cours de qualification", "Votre demande {ref} est en cours de qualification.", "info"),
-                "qualified":    ("Demande qualifiée", "Votre demande {ref} a été qualifiée et sera traitée prochainement.", "info"),
-                "assigned":     ("Demande assignée", "Votre demande {ref} a été assignée à un agent qui va la traiter.", "info"),
-                "in_progress":  ("Demande prise en charge", "Votre demande {ref} est maintenant en cours de traitement.", "info"),
-                "pending":      ("Information complémentaire requise", "Un agent attend votre retour sur la demande {ref}.", "warning"),
-                "escalated":    ("Demande escaladée", "Votre demande {ref} a été escaladée à un niveau supérieur.", "warning"),
+                "qualifying":   ("Ticket en cours de qualification", "Votre ticket {ref} est en cours de qualification.", "info", False),
+                "qualified":    ("Ticket qualifié", "Votre ticket {ref} a été qualifié et sera traité prochainement.", "info", False),
+                "assigned":     ("Ticket pris en charge", "Votre ticket {ref} a été pris en charge par un intervenant.", "info", False),
+                "in_progress":  ("Ticket en cours de traitement", "Votre ticket {ref} est maintenant en cours de traitement.", "info", False),
+                "pending":      ("Information complémentaire requise", "Un agent attend votre retour sur le ticket {ref}.", "warning", True),
+                "escalated":    ("Ticket escaladé", "Votre ticket {ref} a nécessité une prise en charge complémentaire.", "warning", True),
             }
             if status_code in _notif_map and obj is not None and obj.requester_id:
-                title_tpl, body_tpl, notif_type = _notif_map[status_code]
+                title_tpl, body_tpl, notif_type, send_email_flag = _notif_map[status_code]
                 ref_val = getattr(obj, "ref", id)
                 await emit_notif(
                     self.session,
@@ -1402,7 +1454,30 @@ class RequestService(BaseService):
                     body=body_tpl.format(ref=ref_val),
                     type=notif_type,
                     request_id=id,
-                    action_label="Voir la demande",
+                    action_label="Voir le ticket",
+                    action_url=f"/app/requests/{id}",
+                    send_email=send_email_flag,
+                )
+
+            # BR-NOTIFICATION-WORKFLOW-001 §4/§6/§7 + BR-QUEUE-AUTO-START-001 —
+            # cohérence assign()/qualify_triage() : toute transition qui installe
+            # réellement un nouvel intervenant (assignee_id changé, intervention
+            # ouverte via BR-TRACE-001 ci-dessus) doit notifier CE nouvel
+            # intervenant (App+Email), quel que soit le chemin technique emprunté.
+            # `status_code` vaut désormais "in_progress" pour une prise/assignation
+            # depuis la File d'attente (qualify_triage()) — "assigned" reste
+            # couvert pour les autres chemins génériques qui en dépendraient encore
+            # (ex. PATCH admin direct). Ne se déclenche jamais pour `escalated`
+            # (déjà notifié nominativement par les routes d'escalade dédiées).
+            if status_code in ("assigned", "in_progress") and opening_meta and new_assignee_id:
+                await emit_notif(
+                    self.session,
+                    recipient_id=str(new_assignee_id),
+                    title="Ticket assigné",
+                    body=f"Le ticket {getattr(obj, 'ref', id)} vous a été attribué. Vous pouvez commencer votre intervention.",
+                    type="info",
+                    request_id=id,
+                    action_label="Voir le ticket",
                     action_url=f"/app/requests/{id}",
                 )
         else:
@@ -1512,10 +1587,13 @@ class RequestService(BaseService):
         actor_role: Optional[str] = None,
         actor=None,
     ):
+        # BR-QUEUE-AUTO-START-001 — une assignation effective depuis la File
+        # d'attente démarre directement le traitement (`in_progress`), sans
+        # étape "assigned" intermédiaire ni second clic "Démarrer traitement".
         current = await self._guard_ticket_action(
             id,
             "assign",
-            target_status="assigned",
+            target_status="in_progress",
             actor=actor,
             actor_role=actor_role,
         )
@@ -1556,6 +1634,7 @@ class RequestService(BaseService):
                 target_role=assignee_role,
                 allowed_scope_unity_ids=allowed_scope_unity_ids,
             )
+        assert_requester_is_not_handler(current, assignee_id)
 
         if actor_role not in _BYPASS_ROLES:
             assignee_direction_id = assignee_parent_dir_id or assignee_unity_id
@@ -1569,7 +1648,8 @@ class RequestService(BaseService):
         # BR-TRACE-001 — ouvre l'intervention du nouvel assigné.
         new_infos, opening_meta = await self._open_intervention(current.infos, assignee_id, id)
 
-        translated = await self._translate_codes({"request_status": "assigned"})
+        # BR-QUEUE-AUTO-START-001 — démarrage immédiat du traitement.
+        translated = await self._translate_codes({"request_status": "in_progress"})
         obj = await self.repo.update(id, {
             "assignee_id": assignee_id,
             "in_triage": False,
@@ -1581,14 +1661,18 @@ class RequestService(BaseService):
         wf_id_assign = await self._get_or_create_workflow(int(id))
         await self.detail_repo.create_event({
             "workflow_id": wf_id_assign,
+            # event_type reste "assigned" : décrit l'action réalisée (une
+            # assignation) — event_status/new_status ci-dessous portent le
+            # statut métier résultant réel (in_progress), sans dupliquer
+            # l'événement (section 7, BR-QUEUE-AUTO-START-001).
             "event_type": "assigned",
-            "label": f"Demande assignée à {assignee_name or assignee_id}",
+            "label": f"Ticket assigné à {assignee_name or assignee_id} — traitement démarré",
             "actor_id": actor_id,
             "actor_name": actor_name,
             "dest_id": assignee_id,
             "activated": True,
             "infos": self._clean_infos({
-                "event_status": "assigned",
+                "event_status": "in_progress",
                 "source_role": actor_role,
                 "actor_role": actor_role,
                 "dest_role": assignee_role,
@@ -1598,7 +1682,7 @@ class RequestService(BaseService):
                 # BR-TRACE-001 — intervention ouverte par cette assignation.
                 **opening_meta,
                 "old_status": current.request_status,
-                "new_status": "assigned",
+                "new_status": "in_progress",
                 "old_assignee_id": current.assignee_id,
                 "new_assignee_id": assignee_id,
                 "target_unity_id": assignee_unity_id,
@@ -1607,13 +1691,27 @@ class RequestService(BaseService):
         await emit_notif(
             self.session,
             recipient_id=assignee_id,
-            title="Demande assignée",
-            body=f"La demande {obj.ref} vous a été assignée.",
+            title="Ticket assigné",
+            body=f"Le ticket {obj.ref} vous a été attribué. Vous pouvez commencer votre intervention.",
             type="info",
             request_id=id,
-            action_label="Voir la demande",
+            action_label="Voir le ticket",
             action_url=f"/app/requests/{id}",
         )
+        # BR-NOTIFICATION-WORKFLOW-001 §7 — le demandeur est informé (App only, la
+        # personne qui assigne n'a pas besoin d'être notifiée de sa propre action).
+        if obj.requester_id and not self._same_account(obj.requester_id, assignee_id):
+            await emit_notif(
+                self.session,
+                recipient_id=str(obj.requester_id),
+                title="Ticket pris en charge",
+                body=f"Votre ticket {obj.ref} a été pris en charge par un intervenant.",
+                type="info",
+                request_id=id,
+                action_label="Voir le ticket",
+                action_url=f"/app/requests/{id}",
+                send_email=False,
+            )
         await emit_event(AppEvent(
             type="request.assigned",
             payload={"id": id, "assignee_id": assignee_id},
@@ -1664,12 +1762,28 @@ class RequestService(BaseService):
             await emit_notif(
                 self.session,
                 recipient_id=str(obj.requester_id),
-                title="Demande clôturée",
-                body=f"Votre demande {obj.ref} est clôturée.",
+                title="Ticket clôturé",
+                body=f"Votre ticket {obj.ref} est maintenant clôturé.",
                 type="success",
                 request_id=id,
-                action_label="Voir la demande",
+                action_label="Voir le ticket",
                 action_url=f"/app/requests/{id}",
+            )
+        # Lot finition §3 — le dernier intervenant est informé de la confirmation du
+        # demandeur (App-only) : purement informatif, ne réaffecte rien, ne rouvre
+        # aucune intervention, `assignee_id` déjà inchangé par close().
+        last_handler_id = current.assignee_id
+        if last_handler_id and str(last_handler_id) != str(obj.requester_id or ""):
+            await emit_notif(
+                self.session,
+                recipient_id=str(last_handler_id),
+                title="Ticket clôturé",
+                body=f"Le demandeur a confirmé la résolution du ticket {obj.ref}.",
+                type="info",
+                request_id=id,
+                action_label="Voir le ticket",
+                action_url=f"/app/requests/{id}",
+                send_email=False,
             )
         await emit_event(AppEvent(type="request.closed", payload={"id": id}, target={"roles": "all"}))
         return obj
@@ -1783,8 +1897,11 @@ class RequestService(BaseService):
         await emit_notif(
             self.session,
             recipient_id=getattr(obj, "requester_id", None),
-            title="Demande résolue",
-            body=f"Votre demande {obj.ref} a été résolue. Résumé : {clean_summary}",
+            title="Ticket résolu",
+            body=(
+                f"Le traitement du ticket {obj.ref} est terminé. Résumé : {clean_summary} "
+                f"Consultez la solution et confirmez la résolution ou réouvrez le ticket si nécessaire."
+            ),
             type="success",
             request_id=id,
             action_label="Confirmer la résolution",
@@ -1852,6 +1969,7 @@ class RequestService(BaseService):
                 "Ce destinataire n'a pas un rôle de traitement autorisé.",
                 error_code=ErrorCode.INVALID_FIELD_VALUE,
             )
+        assert_requester_is_not_handler(current, target_id_int)
         target_name = self._account_display_name(target)
 
         previous_assignee_id = current.assignee_id
@@ -1917,13 +2035,31 @@ class RequestService(BaseService):
         await emit_notif(
             self.session,
             recipient_id=str(target_id_int),
-            title="Traitement transmis",
-            body=f"{actor_name or 'Un intervenant'} vous a transmis le traitement de la demande {obj.ref}. Motif : {clean_reason}",
+            title="Ticket transmis",
+            body=(
+                f"{actor_name or 'Un intervenant'} vous a transmis le ticket {obj.ref}. "
+                f"Consultez le travail déjà effectué et poursuivez le traitement. Motif : {clean_reason}"
+            ),
             type="info",
             request_id=id,
-            action_label="Voir la demande",
+            action_label="Voir le ticket",
             action_url=f"/app/requests/{id}",
         )
+        # BR-NOTIFICATION-WORKFLOW-001 §8 — confirmation légère App-only à l'émetteur
+        # (previous_assignee_id = l'acteur lui-même) : pas d'email, pas de détails
+        # internes, juste l'accusé que la transmission a bien eu lieu.
+        if previous_assignee_id and not self._same_account(previous_assignee_id, target_id_int):
+            await emit_notif(
+                self.session,
+                recipient_id=str(previous_assignee_id),
+                title="Ticket transmis",
+                body=f"Ticket {obj.ref} transmis à {target_name or target_id_int}.",
+                type="info",
+                request_id=id,
+                action_label="Voir le ticket",
+                action_url=f"/app/requests/{id}",
+                send_email=False,
+            )
         await emit_event(AppEvent(
             type="request.transmitted",
             payload={"id": id, "assignee_id": target_id_int},
@@ -1931,7 +2067,7 @@ class RequestService(BaseService):
         ))
         return obj
 
-    async def request_reopen(
+    async def reopen(
         self,
         id: str,
         *,
@@ -1942,24 +2078,24 @@ class RequestService(BaseService):
         reason: str,
     ):
         """
-        Phase 1 — L'utilisateur refuse la résolution et demande la réouverture.
+        BR-REOPEN-QUEUE-001 (révision — réouverture immédiate) : le demandeur réouvre
+        son ticket lui-même, sans approbation hiérarchique. Motif obligatoire. Le
+        ticket retourne directement dans la File d'attente (`assignee_id=None`,
+        `in_triage=True`) pour un nouveau cycle de traitement entièrement dynamique —
+        aucun intervenant n'est connu à l'avance (BR-REQUESTER-NO-SELF-TREATMENT-001 :
+        le demandeur ne redevient jamais lui-même intervenant).
 
-        Préconditions :
-          - Le ticket doit être à l'état RESOLVED.
-          - Le motif est obligatoire.
-
-        Actions :
-          - Crée un événement REOPEN_REQUESTED (dest = chef de service).
-          - Pose request.infos["reopen_requested"] = True (flag visible par le chef).
-          - Notifie le chef de service actuel.
-          - Status inchangé : reste RESOLVED en attente de décision chef.
+        L'ancien mécanisme en deux phases (`request_reopen` → approbation chef/
+        directeur/admin → `reopen`) est supprimé : il n'existe plus qu'un seul
+        comportement métier officiel de réouverture.
         """
         obj = await self.get_by_id(id)
         effective_actor_role = actor_role or getattr(actor, "role", None) or "user"
         if actor is not None:
             await self._guard_ticket_action(
                 id,
-                "request_reopen",
+                "reopen",
+                target_status="reopened",
                 actor=actor,
                 actor_role=effective_actor_role,
             )
@@ -1981,138 +2117,29 @@ class RequestService(BaseService):
                     error_code=ErrorCode.INVALID_STATUS_TRANSITION,
                 )
 
-        if not reason or not reason.strip():
+        clean_reason = reason.strip() if isinstance(reason, str) else ""
+        if not clean_reason:
             raise self.bad_request(
-                "Un motif est obligatoire pour demander la réouverture.",
+                "Un motif est obligatoire pour réouvrir un ticket.",
                 field="reason",
             )
 
-        if isinstance(obj.infos, dict) and obj.infos.get("reopen_requested"):
-            raise self.conflict(
-                "Une demande de réouverture est déjà en attente d'approbation.",
-                error_code=ErrorCode.DUPLICATE_REQUEST,
-            )
-
-        wf_id = await self._get_or_create_workflow(int(id))
-
-        # Trouve le chef du service actuel pour la destination
-        from api.repositories.RepositoryAccount import AccountRepository
-        acc_repo = AccountRepository(self.session)
-        chief = await acc_repo.find_chief_for_unity(obj.unity_id) if obj.unity_id else None
-
-        await self.detail_repo.create_event({
-            "workflow_id": wf_id,
-            "event_type": "reopen_requested",
-            "label": f"Réouverture demandée — {reason.strip()}",
-            "actor_id": actor_id,
-            "actor_name": actor_name,
-            "dest_id": chief.id if chief else None,
-            "comment": reason.strip(),
-            "activated": True,
-            "infos": self._clean_infos({
-                "event_status": "pending_validation",
-                "source_role": effective_actor_role,
-                "actor_role": effective_actor_role,
-                "dest_role": "chief",
-                "target_role": "chief",
-                "target_user_id": str(chief.id) if chief else None,
-                "target_user_name": self._account_display_name(chief) if chief else None,
-                "old_status": translated_status,
-                "new_status": translated_status,
-                "reason": reason.strip(),
-            }),
-        })
-
-        # Marque le flag sur la demande (pas de changement de statut)
-        current_infos = dict(obj.infos) if isinstance(obj.infos, dict) else {}
-        current_infos["reopen_requested"] = True
-        await self.repo.update(id, {"infos": current_infos})
-
-        if chief:
-            await emit_notif(
-                self.session,
-                recipient_id=str(chief.id),
-                title="Réouverture demandée",
-                body=f"L'utilisateur conteste la résolution de {obj.ref} : « {reason.strip()[:80]} »",
-                type="warning",
-                request_id=id,
-                action_label="Voir la demande",
-                action_url=f"/app/requests/{id}",
-            )
-
-        await emit_event(AppEvent(
-            type="request.reopen_requested",
-            payload={"id": id},
-            target={"roles": "all"},
-        ))
-
-        fresh = await self.repo.get_by_id(int(id))
-        return fresh if fresh else obj
-
-    async def reopen(
-        self,
-        id: str,
-        *,
-        actor_id: Optional[str] = None,
-        actor_name: Optional[str] = None,
-        actor_role: Optional[str] = None,
-        actor=None,
-    ):
-        """
-        BR-REOPEN-QUEUE-001 — Phase 2 : le chef approuve la réouverture.
-
-        La réouverture ne doit jamais réaffecter automatiquement l'ancien intervenant :
-        le ticket redevient non affecté (`assignee_id=None`) et retourne dans la File
-        d'attente (`in_triage=True`) — `list_pending_triage()` accepte déjà `reopened`
-        parmi ses statuts qualifiables (`RepositoryRequest._QUALIFIABLE_STATUSES`), seul
-        `in_triage` manquait pour que le ticket y réapparaisse. Le workflow collaboratif
-        dynamique (transmit/resolve) ne redevient disponible qu'après qu'un nouvel
-        intervenant a pris ou reçu le ticket (nouveau cycle, jamais préempté ici).
-        """
-        await self._guard_ticket_action(
-            id,
-            "reopen",
-            target_status="reopened",
-            actor=actor,
-            actor_role=actor_role,
-        )
-        obj = await self.get_by_id(id)
-
-        has_pending_reopen = isinstance(obj.infos, dict) and obj.infos.get("reopen_requested")
-        effective_role = str(getattr(actor, "role", actor_role or "") or "").strip().lower()
-        if not has_pending_reopen and effective_role not in _BYPASS_ROLES:
-            raise self.bad_request(
-                "Aucune demande de réouverture n'est en attente.",
-                error_code=ErrorCode.INVALID_STATUS_TRANSITION,
-            )
-
-        # Motif et demandeur de la réouverture — retrouvés depuis le dernier événement
-        # `reopen_requested` (append-only, jamais modifié), pour les reporter dans le
-        # nouvel événement sans les ressaisir ni les perdre.
+        # Historique des cycles déjà écoulés — uniquement pour numéroter le nouveau
+        # cycle dans l'événement `reopened` (jamais pour recalculer/modifier les
+        # cycles passés, qui restent figés dans workflow_detail, append-only).
         past_events = await self.detail_repo.list_by_request(str(id))
-        reopen_requested_event = next(
-            (e for e in reversed(past_events) if e.event_type == "reopen_requested"), None
-        )
-        reopen_reason = (
-            reopen_requested_event.comment
-            or (reopen_requested_event.infos or {}).get("reason")
-        ) if reopen_requested_event else None
-        reopen_requested_by = (
-            (reopen_requested_event.infos or {}).get("actor_id")
-            or getattr(reopen_requested_event, "agent_id", None)
-        ) if reopen_requested_event else None
         previous_cycle_number = sum(
             1 for e in past_events if e.event_type in ("treatment_transmitted", "treatment_completed")
         )
 
         previous_assignee_id = obj.assignee_id
         previous_status = obj.request_status
-
-        # Efface le flag de demande de réouverture ET libère l'intervenant/remet en file
-        # d'attente en une seule écriture (réduit le risque de modification partielle :
-        # une seule commande SQL porte l'ensemble des changements de cette approbation).
         current_infos = dict(obj.infos) if isinstance(obj.infos, dict) else {}
-        current_infos.pop("reopen_requested", None)
+        # BR-NOTIFICATION-WORKFLOW-001 §14/§15 — nouveau cycle SLA indépendant
+        # (BR-SLA-REOPEN-001) : le flag anti-répétition de l'alerte préventive doit
+        # repartir à zéro pour ce nouveau cycle, sinon `warn_sla_approaching()` ne
+        # préviendrait plus jamais le nouvel intervenant.
+        current_infos.pop("sla_warning_sent_at", None)
         # BR-TRACE-001 — nouveau cycle d'intervention explicitement enregistré (jamais
         # recalculé) : incrémente le compteur de cycle et remet l'ordre des interventions
         # à zéro, pour que la première intervention du nouveau cycle reparte à 1.
@@ -2143,13 +2170,13 @@ class RequestService(BaseService):
         await self.detail_repo.create_event({
             "workflow_id": wf_id,
             "event_type": "reopened",
-            "label": "Demande réouverte et renvoyée dans la File d'attente",
+            "label": f"Ticket réouvert — {clean_reason}",
             "actor_id": actor_id,
             "actor_name": actor_name,
-            "comment": reopen_reason,
+            "comment": clean_reason,
             "activated": True,
             "infos": self._clean_infos({
-                "source": "reopen_approval",
+                "source": "reopen_immediate",
                 "source_role": actor_role,
                 "actor_role": actor_role,
                 "requester_id": str(obj.requester_id) if obj.requester_id else None,
@@ -2159,8 +2186,11 @@ class RequestService(BaseService):
                 "new_status_full": "reopened",
                 "previous_assignee_id": previous_assignee_id,
                 "new_assignee_id": None,
-                "reopen_reason": reopen_reason,
-                "reopen_requested_by": str(reopen_requested_by) if reopen_requested_by else None,
+                "reopen_reason": clean_reason,
+                # BR-REOPEN-QUEUE-001 (révision) — plus d'approbation distincte :
+                # celui qui demande et celui qui déclenche la réouverture sont
+                # toujours la même personne (le demandeur).
+                "reopen_requested_by": str(actor_id) if actor_id else None,
                 "reopen_approved_by": str(actor_id) if actor_id else None,
                 "reopened_at": reopened_at.isoformat(),
                 "previous_cycle_number": previous_cycle_number,
@@ -2172,32 +2202,36 @@ class RequestService(BaseService):
             }),
         })
 
-        # Notifie le requérant — confirmation, ticket remis en file d'attente.
+        # Notifie le requérant — confirmation, ticket remis en file d'attente pour un
+        # nouveau cycle. App + Email (défaut) : événement important/actionnable.
         if obj.requester_id:
             await emit_notif(
                 self.session,
                 recipient_id=str(obj.requester_id),
-                title="Votre demande de réouverture a été approuvée",
-                body=f"Le ticket {obj.ref} a été replacé dans la File d'attente en vue d'une nouvelle prise en charge.",
+                title="Ticket réouvert",
+                body=f"Votre ticket {obj.ref} a été réouvert et replacé dans la File d'attente pour un nouveau cycle de traitement.",
                 type="info",
                 request_id=id,
-                action_label="Voir la demande",
+                action_label="Voir le ticket",
                 action_url=f"/app/requests/{id}",
             )
 
         # BR-NOTIF-001 : jamais d'affectation automatique — l'ancien intervenant n'est
-        # informé qu'à titre indicatif, il ne redevient jamais assignee_id ici.
+        # informé qu'à titre indicatif (App-only, il ne redevient jamais assignee_id
+        # ici) — BR-REQUESTER-NO-SELF-TREATMENT-001 : le demandeur ne devient jamais
+        # intervenant de son propre ticket, donc previous_assignee_id != requester_id.
         notified_ids = {str(obj.requester_id)} if obj.requester_id else set()
         if previous_assignee_id and str(previous_assignee_id) not in notified_ids:
             await emit_notif(
                 self.session,
                 recipient_id=str(previous_assignee_id),
                 title="Ticket réouvert",
-                body=f"Le ticket {obj.ref} sur lequel vous êtes intervenu a été réouvert et replacé dans la File d'attente.",
+                body=f"Le ticket {obj.ref} sur lequel vous êtes intervenu a été réouvert.",
                 type="warning",
                 request_id=id,
-                action_label="Voir la demande",
+                action_label="Voir le ticket",
                 action_url=f"/app/requests/{id}",
+                send_email=False,
             )
             notified_ids.add(str(previous_assignee_id))
         if obj.unity_id:
@@ -2215,91 +2249,12 @@ class RequestService(BaseService):
                     request_id=id,
                     action_label="Voir la file d'attente",
                     action_url="/app/queue",
+                    send_email=False,
                 )
 
         await emit_event(AppEvent(type="request.reopened", payload={"id": id}, target={"roles": "all"}))
         fresh = await self.repo.get_by_id(int(id))
         return fresh if fresh else updated
-
-    async def reject_reopen(
-        self,
-        id: str,
-        *,
-        actor_id: Optional[str] = None,
-        actor_name: Optional[str] = None,
-        actor_role: Optional[str] = None,
-        actor=None,
-        reason: Optional[str] = None,
-    ):
-        """
-        Refus d'une demande de réouverture.
-
-        Le statut du ticket ne change pas, mais le flag reopen_requested est retiré
-        et la décision est conservée dans la timeline.
-        """
-        clean_reason = reason.strip() if isinstance(reason, str) else ""
-        if not clean_reason:
-            raise self.bad_request(
-                "Un motif est obligatoire pour refuser une réouverture.",
-                field="reason",
-            )
-
-        obj = await self._guard_ticket_action(
-            id,
-            "reject_reopen",
-            actor=actor,
-            actor_role=actor_role,
-        )
-        if not (isinstance(obj.infos, dict) and obj.infos.get("reopen_requested")):
-            raise self.bad_request(
-                "Aucune demande de réouverture n'est en attente.",
-                error_code=ErrorCode.INVALID_STATUS_TRANSITION,
-            )
-
-        current_infos = dict(obj.infos)
-        current_infos.pop("reopen_requested", None)
-        current_infos["reopen_rejected_reason"] = clean_reason
-        current_infos["reopen_rejected_at"] = datetime.now(timezone.utc).isoformat()
-        await self.repo.update(id, {"infos": current_infos})
-
-        wf_id = await self._get_or_create_workflow(int(id))
-        await self.detail_repo.create_event({
-            "workflow_id": wf_id,
-            "event_type": "reopen_rejected",
-            "label": f"Réouverture refusée — {clean_reason}",
-            "actor_id": actor_id,
-            "actor_name": actor_name,
-            "comment": clean_reason,
-            "activated": True,
-            "infos": self._clean_infos({
-                "event_status": obj.request_status,
-                "source_role": actor_role,
-                "actor_role": actor_role,
-                "dest_role": "user",
-                "target_role": "user",
-                "target_user_id": str(obj.requester_id) if obj.requester_id else None,
-                "target_user_name": obj.requester_name,
-                "old_status": obj.request_status,
-                "new_status": obj.request_status,
-                "reason": clean_reason,
-            }),
-        })
-
-        if obj.requester_id:
-            await emit_notif(
-                self.session,
-                recipient_id=str(obj.requester_id),
-                title="Votre demande de réouverture a été refusée",
-                body=f"Le ticket {obj.ref} reste à l'état {obj.request_status} : {clean_reason[:100]}",
-                type="warning",
-                request_id=id,
-                action_label="Voir la demande",
-                action_url=f"/app/requests/{id}",
-            )
-
-        await emit_event(AppEvent(type="request.reopen_rejected", payload={"id": id}, target={"roles": "all"}))
-        fresh = await self.repo.get_by_id(int(id))
-        return fresh if fresh else obj
 
     async def cancel(
         self,
@@ -2351,27 +2306,32 @@ class RequestService(BaseService):
                 "reason": clean_reason,
             }),
         })
+        # BR-NOTIFICATION-WORKFLOW-001 §20/§22 — annulation absente de la liste des
+        # événements "email important" : confirmation App-only pour le demandeur
+        # comme pour le porteur actuel (qui doit surtout savoir qu'il doit arrêter).
         if obj.requester_id:
             await emit_notif(
                 self.session,
                 recipient_id=str(obj.requester_id),
-                title="Demande annulée",
-                body=f"Votre demande {obj.ref} a été annulée : {clean_reason}",
+                title="Ticket annulé",
+                body=f"Votre ticket {obj.ref} a été annulé : {clean_reason}",
                 type="warning",
                 request_id=id,
-                action_label="Voir la demande",
+                action_label="Voir le ticket",
                 action_url=f"/app/requests/{id}",
+                send_email=False,
             )
         if obj.assignee_id and not self._same_account(obj.assignee_id, obj.requester_id):
             await emit_notif(
                 self.session,
                 recipient_id=str(obj.assignee_id),
-                title="Demande annulée",
-                body=f"La demande {obj.ref} qui vous était assignée a été annulée : {clean_reason}",
+                title="Ticket annulé",
+                body=f"Le ticket {obj.ref} qui vous était assigné a été annulé : {clean_reason}. Vous ne devez plus poursuivre le traitement.",
                 type="warning",
                 request_id=id,
-                action_label="Voir la demande",
+                action_label="Voir le ticket",
                 action_url=f"/app/requests/{id}",
+                send_email=False,
             )
         await emit_event(AppEvent(type="request.cancelled", payload={"id": id}, target={"roles": "all"}))
         return obj
@@ -2441,9 +2401,15 @@ class RequestService(BaseService):
                 "Ce ticket est déjà affecté à ce service.",
                 error_code=ErrorCode.INVALID_STATUS_TRANSITION,
             )
+        previous_assignee_id = obj.assignee_id
         wf_id = await self._get_or_create_workflow(int(id))
         acc_repo = AccountRepository(self.session)
         chief = await acc_repo.find_chief_for_unity(target_unity_id)
+        # BR-REQUESTER-NO-SELF-TREATMENT-001 — le chef du service cible ne peut pas
+        # devenir intervenant s'il est le demandeur de ce ticket ; traité comme
+        # "aucun chef trouvé" (même repli que le cas chief=None déjà géré ci-dessous).
+        if chief is not None and str(chief.id) == str(obj.requester_id):
+            chief = None
 
         await self.detail_repo.create_event({
             "workflow_id": wf_id,
@@ -2482,16 +2448,49 @@ class RequestService(BaseService):
             **status_translated,
         })
 
+        # Lot finition §4 — règle globale : la responsabilité actuelle détermine les
+        # notifications opérationnelles. Nouveau responsable (chef cible) : App+Email
+        # (déjà en place). Demandeur : App-only (réorientation informative, pas une
+        # action de sa part). Ancien responsable : App-only, uniquement s'il perd
+        # réellement la responsabilité (assignee_id changé). Anciens intervenants
+        # historiques (workflow_detail) : jamais notifiés — historique ≠ abonnement.
+        notified_ids: set[str] = set()
         if chief:
             await emit_notif(
                 self.session,
                 recipient_id=str(chief.id),
-                title="Demande réaffectée vers votre service",
-                body=f"La demande {obj.ref} vous a été transférée.",
+                title="Ticket réaffecté vers votre service",
+                body=f"Le ticket {obj.ref} a été réaffecté à votre service et nécessite une prise en charge.",
                 type="info",
                 request_id=id,
-                action_label="Voir la demande",
+                action_label="Voir le ticket",
                 action_url=f"/app/requests/{id}",
+            )
+            notified_ids.add(str(chief.id))
+        if obj.requester_id:
+            await emit_notif(
+                self.session,
+                recipient_id=str(obj.requester_id),
+                title="Ticket réaffecté",
+                body=f"Votre ticket {obj.ref} a été réorienté vers un autre service pour poursuivre son traitement.",
+                type="info",
+                request_id=id,
+                action_label="Voir le ticket",
+                action_url=f"/app/requests/{id}",
+                send_email=False,
+            )
+            notified_ids.add(str(obj.requester_id))
+        if previous_assignee_id and str(previous_assignee_id) not in notified_ids:
+            await emit_notif(
+                self.session,
+                recipient_id=str(previous_assignee_id),
+                title="Ticket réaffecté",
+                body=f"Le ticket {obj.ref} a été réaffecté vers un autre service.",
+                type="info",
+                request_id=id,
+                action_label="Voir le ticket",
+                action_url=f"/app/requests/{id}",
+                send_email=False,
             )
 
         await emit_event(AppEvent(
@@ -2571,6 +2570,7 @@ class RequestService(BaseService):
                 error_code=ErrorCode.INVALID_STATUS_TRANSITION,
             )
 
+        previous_assignee_id = obj.assignee_id
         wf_id = await self._get_or_create_workflow(int(id))
         acc_repo = AccountRepository(self.session)
         target_directors = await acc_repo.find_directors_by_direction(int(target_direction_db_id))
@@ -2622,16 +2622,47 @@ class RequestService(BaseService):
             **status_translated,
         })
 
+        # Lot finition §4 — même principe que reassign_service : responsabilité
+        # actuelle → notifications. Nouveau directeur cible : App+Email (déjà en
+        # place). Demandeur : App-only. Ancien responsable : App-only, uniquement
+        # s'il perd réellement la responsabilité (assignee_id vidé par ce transfert).
+        notified_ids: set[str] = set()
         if first_director:
             await emit_notif(
                 self.session,
                 recipient_id=str(first_director.id),
-                title="Demande transférée vers votre direction",
-                body=f"La demande {obj.ref} a été transférée vers {target_label} : {clean_reason[:120]}",
+                title="Ticket transféré vers votre direction",
+                body=f"Le ticket {obj.ref} a été transféré vers votre direction et nécessite une prise en charge.",
                 type="info",
                 request_id=id,
-                action_label="Voir la demande",
+                action_label="Voir le ticket",
                 action_url=f"/app/requests/{id}",
+            )
+            notified_ids.add(str(first_director.id))
+        if obj.requester_id:
+            await emit_notif(
+                self.session,
+                recipient_id=str(obj.requester_id),
+                title="Ticket transféré",
+                body=f"Votre ticket {obj.ref} a été transféré vers une autre direction afin de poursuivre son traitement.",
+                type="info",
+                request_id=id,
+                action_label="Voir le ticket",
+                action_url=f"/app/requests/{id}",
+                send_email=False,
+            )
+            notified_ids.add(str(obj.requester_id))
+        if previous_assignee_id and str(previous_assignee_id) not in notified_ids:
+            await emit_notif(
+                self.session,
+                recipient_id=str(previous_assignee_id),
+                title="Ticket transféré",
+                body=f"Le ticket {obj.ref} a été transféré vers une autre direction.",
+                type="info",
+                request_id=id,
+                action_label="Voir le ticket",
+                action_url=f"/app/requests/{id}",
+                send_email=False,
             )
 
         await emit_event(AppEvent(
@@ -2788,11 +2819,11 @@ class RequestService(BaseService):
             await emit_notif(
                 self.session,
                 recipient_id=str(obj.requester_id),
-                title="Demande rejetée",
-                body=f"Votre demande {obj.ref} a été rejetée : {clean_reason}",
+                title="Ticket rejeté",
+                body=f"Le ticket {obj.ref} a été rejeté. Motif : {clean_reason}",
                 type="warning",
                 request_id=id,
-                action_label="Voir la demande",
+                action_label="Voir le ticket",
                 action_url=f"/app/requests/{id}",
             )
 

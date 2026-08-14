@@ -26,16 +26,21 @@ async def _create_ticket(client, unity_id: int, title_suffix: str) -> str:
 
 
 async def _create_assigned_ticket(auth_client, unity_id: int, title_suffix: str, assignee_id: int) -> str:
-    """Cree un ticket (role user) puis le fait passer en statut 'assigned' (seule source
-    valide pour la transition 'in_progress' selon ALLOWED_TRANSITIONS) via qualify (role admin).
+    """Cree un ticket (role user) puis le fait passer en statut 'assigned' (une des sources
+    valides pour la transition 'in_progress' selon ALLOWED_TRANSITIONS) via un PATCH admin
+    direct — PAS via /qualify, qui depuis BR-QUEUE-AUTO-START-001 demarre desormais
+    directement le traitement (in_progress) pour une prise/assignation reelle depuis la
+    File d'attente. Ce helper a besoin d'un etat "assigned mais non demarre" intermediaire
+    (scenario legitime residuel, ex. reassign_service) pour tester que la route PATCH
+    generique peut encore transitionner explicitement vers in_progress.
     Deux blocs `async with` SEQUENTIELS (pas combines) : l'override de get_current_user est un
     etat global de l'app — les ouvrir simultanement fait gagner le dernier partout."""
     async with auth_client("user") as user_client:
         request_id = await _create_ticket(user_client, unity_id, title_suffix)
     async with auth_client("admin") as admin_client:
-        resp = await admin_client.post(
-            f"/api/v1/requests/{request_id}/qualify",
-            json={"category": "panne", "priority": "medium", "unit_id": unity_id, "assignee_id": assignee_id},
+        resp = await admin_client.put(
+            f"/api/v1/requests/{request_id}",
+            json={"assignee_id": assignee_id, "request_status": "assigned"},
         )
         assert resp.status_code == 200, resp.text
     return request_id
@@ -54,7 +59,7 @@ async def test_patch_blocks_staff_outside_perimeter(auth_client, unity_id):
     app.dependency_overrides[get_current_user] = _outsider_dep
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            resp = await client.patch(f"/api/v1/requests/{request_id}", json={"request_status": "in_progress"})
+            resp = await client.put(f"/api/v1/requests/{request_id}", json={"request_status": "in_progress"})
     finally:
         app.dependency_overrides.pop(get_current_user, None)
 
@@ -74,7 +79,7 @@ async def test_patch_allows_in_scope_staff_to_transition_status(auth_client, uni
     app.dependency_overrides[get_current_user] = _agent_dep
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            resp = await client.patch(f"/api/v1/requests/{request_id}", json={"request_status": "in_progress"})
+            resp = await client.put(f"/api/v1/requests/{request_id}", json={"request_status": "in_progress"})
     finally:
         app.dependency_overrides.pop(get_current_user, None)
 
@@ -95,7 +100,7 @@ async def test_patch_silently_drops_non_status_fields_for_non_admin_staff(auth_c
     app.dependency_overrides[get_current_user] = _agent_dep
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            resp = await client.patch(
+            resp = await client.put(
                 f"/api/v1/requests/{request_id}",
                 json={"category": "reclamation", "priority": "critical"},
             )
@@ -121,7 +126,7 @@ async def test_patch_director_status_transition_unaffected(auth_client, unity_id
     app.dependency_overrides[get_current_user] = _director_dep
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            resp = await client.patch(f"/api/v1/requests/{request_id}", json={"request_status": "in_progress"})
+            resp = await client.put(f"/api/v1/requests/{request_id}", json={"request_status": "in_progress"})
     finally:
         app.dependency_overrides.pop(get_current_user, None)
 
@@ -136,7 +141,7 @@ async def test_patch_admin_keeps_full_field_access(auth_client, unity_id):
         request_id = await _create_ticket(user_client, unity_id, "admin-full-access")
 
     async with auth_client("admin") as admin_client:
-        resp = await admin_client.patch(
+        resp = await admin_client.put(
             f"/api/v1/requests/{request_id}",
             json={"priority": "critical"},
         )

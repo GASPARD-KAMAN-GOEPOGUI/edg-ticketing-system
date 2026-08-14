@@ -26,7 +26,7 @@ import {
   deleteNotification,
   restoreNotification,
 } from "@/lib/api/notifications";
-import { closeRequest, requestReopen } from "@/lib/api/requests";
+import { closeRequest, reopenRequest } from "@/lib/api/requests";
 import { cn } from "@/lib/utils";
 import { PaginationBar, usePagination } from "@/components/pagination-bar";
 import { LayoutToggle, type LayoutMode } from "@/components/layout-toggle";
@@ -436,13 +436,12 @@ function Notifications() {
   const [filter, setFilter] = useState<"all" | "unread" | "archived">("all");
   const isArchivedView = filter === "archived";
 
-  /* ── Notifications API — rafraîchissement auto toutes les 30 s ── */
+  /* ── Notifications API — invalidées en temps réel via SSE (notification.*) ── */
   const { data: apiData } = useQuery({
     queryKey: ["notifications", meId, isArchivedView],
     queryFn: () => fetchNotifications({ meId, limit: 100, archived: isArchivedView }),
     enabled: !!meId,
     staleTime: 10_000,
-    refetchInterval: 30_000,
     refetchOnWindowFocus: true,
   });
 
@@ -484,7 +483,7 @@ function Notifications() {
     queryKey: ["announcements-active", role],
     queryFn: () => fetchPublishedAnnouncements({ audience: roleToAnnounceAudience(role), limit: 50 }),
     staleTime: 60_000,
-    refetchInterval: 60_000,
+    // Pas de refetchInterval : announcement.* (SSE) invalide déjà ["announcements-active"].
   });
 
   const annNotifs: Notif[] = (annData?.items ?? [])
@@ -594,8 +593,11 @@ function Notifications() {
   });
 
   const reopenMut = useMutation({
-    mutationFn: (id: string) => requestReopen(id, "Réouverture demandée"),
-    onSuccess: () => { invalidateRequests(); toast.success("Ticket renvoyé pour réouverture."); },
+    // BR-REOPEN-QUEUE-001 (révision — réouverture immédiate) : raccourci "Rouvrir"
+    // depuis une notification, motif générique — le ticket retourne directement
+    // en File d'attente (plus d'approbation chef à attendre).
+    mutationFn: (id: string) => reopenRequest(id, "Réouverture demandée depuis les notifications."),
+    onSuccess: () => { invalidateRequests(); toast.success("Ticket réouvert et replacé dans la File d'attente."); },
     onError: () => toast.error("Impossible de rouvrir le ticket."),
   });
 

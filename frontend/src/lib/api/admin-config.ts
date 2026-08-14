@@ -143,7 +143,7 @@ export async function updateSlaPolicy(
   if (data.escalateAfterH !== undefined) patch.escalate_after_h = data.escalateAfterH;
   if (data.active !== undefined) patch.status = data.active;
   const raw = await apiFetch<RawSlaPolicy>(`/admin/sla/${id}`, {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify(patch),
   });
   return mapSlaPolicy(raw);
@@ -151,7 +151,7 @@ export async function updateSlaPolicy(
 
 export async function toggleSlaPolicy(id: string): Promise<SLAPolicy> {
   const raw = await apiFetch<RawSlaPolicy>(`/admin/sla/${id}/toggle`, {
-    method: "PATCH",
+    method: "PUT",
     body: "{}",
   });
   return mapSlaPolicy(raw);
@@ -196,7 +196,7 @@ export async function updatePriorityDef(
   if (data.order !== undefined) patch.sort_order = data.order;
   if (data.active !== undefined) patch.status = data.active;
   const raw = await apiFetch<RawPriorityDef>(`/admin/priorities/${id}`, {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify(patch),
   });
   return mapPriorityDef(raw);
@@ -204,7 +204,7 @@ export async function updatePriorityDef(
 
 export async function reorderPriorityDefs(orderedIds: string[]): Promise<void> {
   await apiFetch<unknown>("/admin/priorities/reorder", {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify({ ordered_ids: orderedIds.map(Number) }),
   });
 }
@@ -249,7 +249,7 @@ export async function updateRoutingRule(
   if (data.order !== undefined) patch.sort_order = data.order;
   if (data.active !== undefined) patch.status = data.active;
   const raw = await apiFetch<RawRoutingRule>(`/admin/routing/${id}`, {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify(patch),
   });
   return mapRoutingRule(raw);
@@ -257,7 +257,7 @@ export async function updateRoutingRule(
 
 export async function toggleRoutingRule(id: string): Promise<RoutingRule> {
   const raw = await apiFetch<RawRoutingRule>(`/admin/routing/${id}/toggle`, {
-    method: "PATCH",
+    method: "PUT",
     body: "{}",
   });
   return mapRoutingRule(raw);
@@ -265,7 +265,7 @@ export async function toggleRoutingRule(id: string): Promise<RoutingRule> {
 
 export async function reorderRoutingRules(orderedIds: string[]): Promise<void> {
   await apiFetch<unknown>("/admin/routing/reorder", {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify({ ordered_ids: orderedIds.map(Number) }),
   });
 }
@@ -345,7 +345,7 @@ export async function updateRefItem(
   data: { label?: string; sort_order?: number; status?: boolean },
 ): Promise<RawRefItem> {
   return apiFetch<RawRefItem>(`/admin/ref/${table}/${id}`, {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify(data),
   });
 }
@@ -362,7 +362,7 @@ export async function restoreRefItem(
   id: string,
 ): Promise<RawRefItem> {
   return apiFetch<RawRefItem>(`/admin/ref/${table}/${id}/restore`, {
-    method: "PATCH",
+    method: "PUT",
     body: "{}",
   });
 }

@@ -59,7 +59,7 @@ async def create_unity(
     return await svc.create(body.dict())
 
 
-@router.patch("/{id}", response_model=UnityResponse)
+@router.put("/{id}", response_model=UnityResponse)
 async def update_unity(
     id: str,
     body: UnityUpdate,

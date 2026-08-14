@@ -242,6 +242,8 @@ function CycleSection({
   const [open, setOpen] = useState(defaultOpen);
   const panelId = `cycle-panel-${cycleNumber}`;
 
+  const displayOrder = useMemo(() => [...interventions].reverse(), [interventions]);
+
   const last = interventions[interventions.length - 1];
   const status = interventionStatus(last);
   const first = interventions[0];
@@ -290,7 +292,10 @@ function CycleSection({
 
         {open && (
           <div id={panelId} className="space-y-2.5 border-t border-border/40 p-2.5 sm:p-3">
-            {interventions.map((iv, i) => (
+            {/* Affichage décroissant : intervenant actuel (le plus récent) en premier,
+                jusqu'au plus ancien en dernier. Les calculs de cycle (cycleStart/cycleEnd)
+                restent basés sur l'ordre chronologique réel via `interventions`. */}
+            {displayOrder.map((iv, i) => (
               <div key={iv.interventionId}>
                 <InterventionCard
                   intervention={iv}
@@ -299,7 +304,7 @@ function CycleSection({
                   onOpenAttachment={onOpenAttachment}
                   onConsult={() => onConsult(iv)}
                 />
-                {i < interventions.length - 1 && <TransferLink intervention={iv} />}
+                {i < displayOrder.length - 1 && <TransferLink intervention={displayOrder[i + 1]} direction="from" />}
               </div>
             ))}
           </div>
@@ -345,16 +350,23 @@ function ReopenSeparator({ event }: { event?: TimelineEvent }) {
   );
 }
 
-function TransferLink({ intervention }: { intervention: Intervention }) {
+function TransferLink({ intervention, direction = "to" }: { intervention: Intervention; direction?: "to" | "from" }) {
   if (intervention.decision !== "transmission") return null;
   return (
     <div className="flex items-center gap-2 py-1.5 pl-4 text-xs text-muted-foreground">
       <div className="h-4 w-px bg-border" />
       <Send className="h-3 w-3 shrink-0" />
-      <span>
-        Transmis à <span className="font-medium text-foreground">{intervention.destinationName ?? "—"}</span>
-        {intervention.transmissionReason && <span> · {intervention.transmissionReason}</span>}
-      </span>
+      {direction === "from" ? (
+        <span>
+          Reçu de <span className="font-medium text-foreground">{intervention.actorName ?? "—"}</span>
+          {intervention.transmissionReason && <span> · {intervention.transmissionReason}</span>}
+        </span>
+      ) : (
+        <span>
+          Transmis à <span className="font-medium text-foreground">{intervention.destinationName ?? "—"}</span>
+          {intervention.transmissionReason && <span> · {intervention.transmissionReason}</span>}
+        </span>
+      )}
     </div>
   );
 }

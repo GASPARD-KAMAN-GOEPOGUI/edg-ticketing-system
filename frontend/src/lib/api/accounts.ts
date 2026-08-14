@@ -9,7 +9,6 @@ import { normalizeRole } from "../session";
 
 export type RawAccount = {
   id: string;
-  keycloak_id?: string | null;
   unity_id?: string | number | null;
   name: string;
   firstname?: string | null;
@@ -147,6 +146,16 @@ export async function fetchUser(id: string): Promise<AccountUser> {
   return mapAccount(raw);
 }
 
+/** Fetch batch — un seul appel HTTP pour plusieurs comptes (au lieu d'un
+ * appel par ID unique). Utilisé pour résoudre les auteurs de commentaires,
+ * demandeurs de tickets, etc. sur les écrans qui affichent une liste. */
+export async function fetchUsersByIds(ids: string[]): Promise<AccountUser[]> {
+  const unique = Array.from(new Set(ids.filter(Boolean)));
+  if (unique.length === 0) return [];
+  const raw = await apiFetch<{ items: RawAccount[] }>(`/users/?ids=${unique.join(",")}`);
+  return raw.items.map(mapAccount);
+}
+
 export async function fetchMe(): Promise<AccountUser> {
   const raw = await apiFetch<RawAccount>(`/users/me`);
   return mapAccount(raw);
@@ -168,7 +177,7 @@ export async function updateMe(
   }>,
 ): Promise<AccountUser> {
   const raw = await apiFetch<RawAccount>(`/users/me`, {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify(data),
   });
   return mapAccount(raw);
@@ -193,7 +202,7 @@ export async function deleteAvatar(): Promise<AccountUser> {
 export async function setMyAvailability(availability: string): Promise<AccountUser> {
   const qs = new URLSearchParams({ availability });
   const raw = await apiFetch<RawAccount>(`/users/me/availability?${qs}`, {
-    method: "PATCH",
+    method: "PUT",
   });
   return mapAccount(raw);
 }
@@ -215,7 +224,7 @@ export async function updateUser(
   }>,
 ): Promise<AccountUser> {
   const raw = await apiFetch<RawAccount>(`/users/${id}`, {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify(data),
   });
   return mapAccount(raw);
@@ -226,7 +235,7 @@ export async function setUserRole(
   role: string,
 ): Promise<AccountUser> {
   const raw = await apiFetch<RawAccount>(`/users/${id}/role`, {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify({ role }),
   });
   return mapAccount(raw);
@@ -236,6 +245,7 @@ export async function createUser(data: {
   name: string;
   firstname?: string;
   email: string;
+  password: string;
   role?: string;
   matricule?: string;
   job?: string;
@@ -259,10 +269,10 @@ export async function deactivateUser(id: string): Promise<void> {
   await apiFetch<{ ok: boolean }>(`/users/${id}/deactivate`, { method: "POST", body: "{}" });
 }
 
-export async function resetUserPassword(id: string, newPassword: string): Promise<void> {
-  await apiFetch<{ ok: boolean }>(`/users/${id}/reset-password`, {
+export async function resetUserPassword(id: string): Promise<{ default_password: string }> {
+  return apiFetch<{ ok: boolean; default_password: string }>(`/users/${id}/reset-password`, {
     method: "POST",
-    body: JSON.stringify({ new_password: newPassword }),
+    body: "{}",
   });
 }
 

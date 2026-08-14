@@ -42,8 +42,8 @@ import { Route as AppRequestsHistoryRouteImport } from './routes/app.requests.hi
 import { Route as AppRequestsIdRouteImport } from './routes/app.requests.$id'
 import { Route as AppAdminUsersRouteImport } from './routes/app.admin.users'
 import { Route as AppAdminUnitsRouteImport } from './routes/app.admin.units'
+import { Route as AppAdminTicketTraceRouteImport } from './routes/app.admin.ticket-trace'
 import { Route as AppAdminSlaRouteImport } from './routes/app.admin.sla'
-import { Route as AppAdminSecurityRouteImport } from './routes/app.admin.security'
 import { Route as AppAdminRoutingRouteImport } from './routes/app.admin.routing'
 import { Route as AppAdminReferencesRouteImport } from './routes/app.admin.references'
 import { Route as AppAdminPrioritiesRouteImport } from './routes/app.admin.priorities'
@@ -233,14 +233,14 @@ const AppAdminUnitsRoute = AppAdminUnitsRouteImport.update({
   path: '/units',
   getParentRoute: () => AppAdminRoute,
 } as any)
+const AppAdminTicketTraceRoute = AppAdminTicketTraceRouteImport.update({
+  id: '/ticket-trace',
+  path: '/ticket-trace',
+  getParentRoute: () => AppAdminRoute,
+} as any)
 const AppAdminSlaRoute = AppAdminSlaRouteImport.update({
   id: '/sla',
   path: '/sla',
-  getParentRoute: () => AppAdminRoute,
-} as any)
-const AppAdminSecurityRoute = AppAdminSecurityRouteImport.update({
-  id: '/security',
-  path: '/security',
   getParentRoute: () => AppAdminRoute,
 } as any)
 const AppAdminRoutingRoute = AppAdminRoutingRouteImport.update({
@@ -400,8 +400,8 @@ export interface FileRoutesByFullPath {
   '/app/admin/priorities': typeof AppAdminPrioritiesRoute
   '/app/admin/references': typeof AppAdminReferencesRoute
   '/app/admin/routing': typeof AppAdminRoutingRoute
-  '/app/admin/security': typeof AppAdminSecurityRoute
   '/app/admin/sla': typeof AppAdminSlaRoute
+  '/app/admin/ticket-trace': typeof AppAdminTicketTraceRoute
   '/app/admin/units': typeof AppAdminUnitsRoute
   '/app/admin/users': typeof AppAdminUsersRoute
   '/app/requests/$id': typeof AppRequestsIdRoute
@@ -459,8 +459,8 @@ export interface FileRoutesByTo {
   '/app/admin/priorities': typeof AppAdminPrioritiesRoute
   '/app/admin/references': typeof AppAdminReferencesRoute
   '/app/admin/routing': typeof AppAdminRoutingRoute
-  '/app/admin/security': typeof AppAdminSecurityRoute
   '/app/admin/sla': typeof AppAdminSlaRoute
+  '/app/admin/ticket-trace': typeof AppAdminTicketTraceRoute
   '/app/admin/units': typeof AppAdminUnitsRoute
   '/app/admin/users': typeof AppAdminUsersRoute
   '/app/requests/$id': typeof AppRequestsIdRoute
@@ -520,8 +520,8 @@ export interface FileRoutesById {
   '/app/admin/priorities': typeof AppAdminPrioritiesRoute
   '/app/admin/references': typeof AppAdminReferencesRoute
   '/app/admin/routing': typeof AppAdminRoutingRoute
-  '/app/admin/security': typeof AppAdminSecurityRoute
   '/app/admin/sla': typeof AppAdminSlaRoute
+  '/app/admin/ticket-trace': typeof AppAdminTicketTraceRoute
   '/app/admin/units': typeof AppAdminUnitsRoute
   '/app/admin/users': typeof AppAdminUsersRoute
   '/app/requests/$id': typeof AppRequestsIdRoute
@@ -582,8 +582,8 @@ export interface FileRouteTypes {
     | '/app/admin/priorities'
     | '/app/admin/references'
     | '/app/admin/routing'
-    | '/app/admin/security'
     | '/app/admin/sla'
+    | '/app/admin/ticket-trace'
     | '/app/admin/units'
     | '/app/admin/users'
     | '/app/requests/$id'
@@ -641,8 +641,8 @@ export interface FileRouteTypes {
     | '/app/admin/priorities'
     | '/app/admin/references'
     | '/app/admin/routing'
-    | '/app/admin/security'
     | '/app/admin/sla'
+    | '/app/admin/ticket-trace'
     | '/app/admin/units'
     | '/app/admin/users'
     | '/app/requests/$id'
@@ -701,8 +701,8 @@ export interface FileRouteTypes {
     | '/app/admin/priorities'
     | '/app/admin/references'
     | '/app/admin/routing'
-    | '/app/admin/security'
     | '/app/admin/sla'
+    | '/app/admin/ticket-trace'
     | '/app/admin/units'
     | '/app/admin/users'
     | '/app/requests/$id'
@@ -968,18 +968,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminUnitsRouteImport
       parentRoute: typeof AppAdminRoute
     }
+    '/app/admin/ticket-trace': {
+      id: '/app/admin/ticket-trace'
+      path: '/ticket-trace'
+      fullPath: '/app/admin/ticket-trace'
+      preLoaderRoute: typeof AppAdminTicketTraceRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
     '/app/admin/sla': {
       id: '/app/admin/sla'
       path: '/sla'
       fullPath: '/app/admin/sla'
       preLoaderRoute: typeof AppAdminSlaRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/security': {
-      id: '/app/admin/security'
-      path: '/security'
-      fullPath: '/app/admin/security'
-      preLoaderRoute: typeof AppAdminSecurityRouteImport
       parentRoute: typeof AppAdminRoute
     }
     '/app/admin/routing': {
@@ -1169,8 +1169,8 @@ interface AppAdminRouteChildren {
   AppAdminPrioritiesRoute: typeof AppAdminPrioritiesRoute
   AppAdminReferencesRoute: typeof AppAdminReferencesRoute
   AppAdminRoutingRoute: typeof AppAdminRoutingRoute
-  AppAdminSecurityRoute: typeof AppAdminSecurityRoute
   AppAdminSlaRoute: typeof AppAdminSlaRoute
+  AppAdminTicketTraceRoute: typeof AppAdminTicketTraceRoute
   AppAdminUnitsRoute: typeof AppAdminUnitsRoute
   AppAdminUsersRoute: typeof AppAdminUsersRoute
   AppAdminTicketsIdRoute: typeof AppAdminTicketsIdRoute
@@ -1188,8 +1188,8 @@ const AppAdminRouteChildren: AppAdminRouteChildren = {
   AppAdminPrioritiesRoute: AppAdminPrioritiesRoute,
   AppAdminReferencesRoute: AppAdminReferencesRoute,
   AppAdminRoutingRoute: AppAdminRoutingRoute,
-  AppAdminSecurityRoute: AppAdminSecurityRoute,
   AppAdminSlaRoute: AppAdminSlaRoute,
+  AppAdminTicketTraceRoute: AppAdminTicketTraceRoute,
   AppAdminUnitsRoute: AppAdminUnitsRoute,
   AppAdminUsersRoute: AppAdminUsersRoute,
   AppAdminTicketsIdRoute: AppAdminTicketsIdRoute,

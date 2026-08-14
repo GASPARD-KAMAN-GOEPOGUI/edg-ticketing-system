@@ -113,7 +113,7 @@ async def create_attachment(
     return await svc.create(body.dict())
 
 
-@router.patch("/{id}/scan-result", response_model=AttachmentResponse)
+@router.put("/{id}/scan-result", response_model=AttachmentResponse)
 async def update_scan_result(
     id: str,
     clamav_clean: bool = Query(..., description="True = fichier sain, False = menace détectée"),

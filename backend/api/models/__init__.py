@@ -43,9 +43,6 @@ from .ModelNotification import Notification
 from .ModelKnowledgeArticle import KnowledgeArticle
 from .ModelActivityLog import ActivityLog
 
-# ── Sécurité incidents (1) ────────────────────────────────────────────────────
-from .ModelSecurityIncident import SecurityIncident
-
 # ── Communication & CSAT (4) ─────────────────────────────────────────────────
 from .ModelAnnouncement import Announcement
 from .ModelAnnouncementTargetRole import AnnouncementTargetRole
@@ -70,8 +67,6 @@ __all__ = [
     "SlaPolicy", "RoutingRule",
     # Transverses (3)
     "Notification", "KnowledgeArticle", "ActivityLog",
-    # Sécurité incidents (1)
-    "SecurityIncident",
     # Communication & CSAT (4)
     "Announcement", "AnnouncementTargetRole",
     "CommunicationSetting", "Appreciation",

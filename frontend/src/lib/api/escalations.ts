@@ -87,7 +87,7 @@ export async function fetchEscalation(id: string): Promise<EscalationItem> {
 
 export async function reviewEscalation(id: string): Promise<EscalationItem> {
   const raw = await apiFetch<RawEscalation>(`/escalations/${id}/review`, {
-    method: "PATCH",
+    method: "PUT",
     body: "{}",
   });
   return mapEscalation(raw);
@@ -98,7 +98,7 @@ export async function resolveEscalation(
   options?: { comment?: string; action?: "resolve" | "reject" },
 ): Promise<EscalationItem> {
   const raw = await apiFetch<RawEscalation>(`/escalations/${id}/resolve`, {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify({
       decision_comment: options?.comment ?? null,
       action: options?.action ?? "resolve",

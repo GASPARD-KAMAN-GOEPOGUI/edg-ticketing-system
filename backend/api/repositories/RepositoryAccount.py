@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.core.phone import is_phone_identifier, normalize_phone
 from api.core.rbac import normalize_role
 from api.models.ModelAccount import Account
 from api.models.ModelUnity import Unity
@@ -21,8 +22,8 @@ class AccountRepository(BaseRepository[Account]):
     async def find_by_email(self, email: str) -> Account | None:
         return await self.get_one({"email": email})
 
-    async def find_by_keycloak_id(self, keycloak_id: str) -> Account | None:
-        return await self.get_one({"keycloak_id": keycloak_id})
+    async def find_by_central_user_id(self, central_user_id: int) -> Account | None:
+        return await self.get_one({"central_user_id": central_user_id})
 
     async def find_by_matricule(self, matricule: str) -> Account | None:
         return await self.get_one({"matricule": matricule})
@@ -118,11 +119,25 @@ class AccountRepository(BaseRepository[Account]):
         )
         org_id = org_row.scalar_one_or_none()
         if org_id:
-            child_rows = await self.session.execute(
-                select(_Org.unity_id)
-                .where(_Org.parent_id == org_id, _Org.deleted_at.is_(None))
-            )
-            ids.extend(int(uid) for (uid,) in child_rows.all() if uid is not None)
+            # Descend tout l'arbre Organigram (département -> service -> ...),
+            # pas seulement les enfants directs, sinon les unités à 2+ niveaux
+            # sous la direction (ex : Service sous Département) sont ignorées.
+            frontier = [org_id]
+            seen_org_ids = {org_id}
+            while frontier:
+                child_rows = await self.session.execute(
+                    select(_Org.id, _Org.unity_id)
+                    .where(_Org.parent_id.in_(frontier), _Org.deleted_at.is_(None))
+                )
+                next_frontier: list[int] = []
+                for child_org_id, unity_id in child_rows.all():
+                    if child_org_id in seen_org_ids:
+                        continue
+                    seen_org_ids.add(child_org_id)
+                    next_frontier.append(child_org_id)
+                    if unity_id is not None:
+                        ids.append(int(unity_id))
+                frontier = next_frontier
 
         unity_rows = await self.session.execute(
             select(Unity.id)
@@ -131,10 +146,62 @@ class AccountRepository(BaseRepository[Account]):
         ids.extend(int(uid) for (uid,) in unity_rows.all() if uid is not None)
         return sorted(set(ids))
 
+    def _apply_search(self, stmt, search: tuple[list[str], str]):
+        """
+        Sélecteur @mention (annuaire) — surcharge le comportement générique
+        (`base_repository._apply_search`, un seul ILIKE par colonne) pour supporter :
+          - un terme téléphone tolérant au formatage (espaces/tirets/indicatif),
+            via `core/phone.py` déjà utilisé par l'inscription/le login ;
+          - une recherche multi-mots ("Prénom Nom" / "Nom Prénom") : chaque mot doit
+            matcher au moins une colonne (ET logique entre mots, OU entre colonnes),
+            puisque prénom/nom vivent dans deux colonnes séparées et qu'aucune des
+            deux ne contient la chaîne complète.
+        Ne modifie pas `base_repository.py` (partagé par les autres repositories,
+        ex. RequestRepository) — surcharge locale à Account uniquement, même
+        principe que `RequestRepository._apply_filters`.
+        """
+        cols, term = search
+        clean = (term or "").strip()
+        if not clean:
+            return stmt
+
+        def _clauses(value: str):
+            return [
+                getattr(Account, c).ilike(f"%{value}%")
+                for c in cols if getattr(Account, c, None) is not None
+            ]
+
+        if is_phone_identifier(clean):
+            normalized = normalize_phone(clean) or clean
+            values = {clean, normalized}
+            clauses = [c for v in values for c in _clauses(v)]
+            return stmt.where(or_(*clauses)) if clauses else stmt
+
+        tokens = clean.split()
+        if len(tokens) <= 1:
+            clauses = _clauses(clean)
+            return stmt.where(or_(*clauses)) if clauses else stmt
+
+        token_clauses = [or_(*_clauses(token)) for token in tokens if _clauses(token)]
+        return stmt.where(and_(*token_clauses)) if token_clauses else stmt
+
     async def search(
-        self, term: str, *, page: int = 1, limit: int = 20
+        self, term: str, *,
+        direction_id: int | None = None,
+        unit_id: int | None = None,
+        page: int = 1, limit: int = 20,
     ) -> tuple[list[Account], int]:
+        """`unit_id`/`direction_id` permettent de combiner la recherche libre avec
+        les filtres organigramme déjà posés (Direction/Département/Service) au lieu
+        de les ignorer — `unit_id` prioritaire s'il est fourni, sinon résolution de
+        tous les services de `direction_id` via `_direction_unity_ids`."""
+        filters: dict = {}
+        if unit_id is not None:
+            filters["unity_id"] = int(unit_id)
+        elif direction_id is not None:
+            filters["unity_id"] = await self._direction_unity_ids(int(direction_id))
         return await self.list(
+            filters=filters or None,
             search=(["name", "firstname", "email", "matricule", "phone"], term),
             only_active=True,
             page=page,

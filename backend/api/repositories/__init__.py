@@ -43,9 +43,6 @@ from api.repositories.RepositoryActivityLog import ActivityLogRepository
 from api.repositories.RepositoryKnowledgeArticle import KnowledgeArticleRepository
 from api.repositories.RepositoryCommunicationSetting import CommunicationSettingRepository
 
-# ── Sécurité incidents ────────────────────────────────────────────────────────
-from api.repositories.RepositorySecurityIncident import SecurityIncidentRepository
-
 # ── Communication & CSAT ──────────────────────────────────────────────────────
 from api.repositories.RepositoryAnnouncement import AnnouncementRepository
 from api.repositories.RepositoryAnnouncementTargetRole import AnnouncementTargetRoleRepository
@@ -64,7 +61,6 @@ __all__ = [
     "WorkflowRepository", "WorkflowDetailRepository", "TaskRepository",
     "NotificationRepository", "ActivityLogRepository",
     "KnowledgeArticleRepository", "CommunicationSettingRepository",
-    "SecurityIncidentRepository",
     "AnnouncementRepository", "AnnouncementTargetRoleRepository",
     "AppreciationRepository",
 ]

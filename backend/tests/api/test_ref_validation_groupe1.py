@@ -95,7 +95,7 @@ class TestVerifA_AutonomieAdmin:
             f"obtenu {r.status_code}: {r.text}"
         )
 
-    async def test_a4_account_status_custom_accepte(self, auth_client, unity_id):
+    async def test_a4_account_status_custom_accepte(self, auth_client, mock_central_auth):
         """Admin ajoute account_status custom → update compte accepté immédiatement."""
         async with auth_client("admin") as c:
             # Création du code custom
@@ -107,19 +107,20 @@ class TestVerifA_AutonomieAdmin:
             })
             assert cr.status_code == 201, f"Création account_status custom : {cr.status_code} {cr.text}"
 
-            # Création d'un compte pour le test
-            acct_r = await c.post(f"{BASE}/accounts/", json={
+            # Création d'un compte pour le test (role=public : pas de contrainte
+            # d'affectation organisationnelle, hors sujet pour ce test d'account_status)
+            acct_r = await c.post(f"{BASE}/users/", json={
                 "name": "TestRef",
                 "email": "testref_a4@edg.gn",
-                "role": "user",
+                "password": "Password123!",
+                "role": "public",
                 "account_status": "active",
-                "unity_id": unity_id,
             })
             assert acct_r.status_code in (200, 201), f"Création compte : {acct_r.status_code}"
             acct_id = _unwrap(acct_r)["id"]
 
             # Mise à jour avec le code custom
-            upd_r = await c.patch(f"{BASE}/accounts/{acct_id}", json={
+            upd_r = await c.put(f"{BASE}/users/{acct_id}", json={
                 "account_status": "test_account_status",
             })
         assert upd_r.status_code == 200, (
@@ -166,12 +167,13 @@ class TestVerifB_RejetValeurInvalide:
             f"obtenu {r.status_code}: {r.text}"
         )
 
-    async def test_b3_account_status_inconnu_rejete_422(self, auth_client, unity_id):
-        """POST /accounts/ avec account_status inexistant → 422."""
+    async def test_b3_account_status_inconnu_rejete_422(self, auth_client, unity_id, mock_central_auth):
+        """POST /users/ avec account_status inexistant → 422."""
         async with auth_client("admin") as c:
-            r = await c.post(f"{BASE}/accounts/", json={
+            r = await c.post(f"{BASE}/users/", json={
                 "name": "TestInvalid",
                 "email": "testinvalid_b3@edg.gn",
+                "password": "Password123!",
                 "role": "user",
                 "account_status": "statut_bidon_xyz",
                 "unity_id": unity_id,

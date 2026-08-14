@@ -55,27 +55,12 @@ const userListeners = new Set<UserListener>();
 
 // ── Rôle ─────────────────────────────────────────────────────────────────────
 
-/** 4.1 — décode le claim "role" du JWT d'accès (source de vérité serveur). */
-function decodeJwtRole(token: string): Role | null {
-  try {
-    const payload = token.split(".")[1];
-    const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
-    return normalizeRole(JSON.parse(json).role);
-  } catch {
-    return null;
-  }
-}
-
 export function getRole(): Role {
   if (AUTH_DISABLED) return _DEV_USER.role;
   if (typeof window === "undefined") return "user";
-  // Priorité : rôle décodé du JWT courant (plus frais après un refresh de token)
-  const token = getAccessToken();
-  if (token) {
-    const jwtRole = decodeJwtRole(token);
-    if (jwtRole) return jwtRole;
-  }
-  // Fallback : rôle du profil utilisateur stocké au login
+  // Le token bearer central n'est pas nécessairement un JWT décodable côté
+  // client — le rôle vient exclusivement de `user.role` déjà résolu par le
+  // backend (voir /auth/login, /auth/me) et stocké au login via setUser().
   try {
     const raw = localStorage.getItem(USER_KEY);
     if (raw) return normalizeRole((JSON.parse(raw) as SessionUser).role);

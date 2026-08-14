@@ -193,6 +193,11 @@ class RequestResponse(_RequestCommonFields):
     sla_cycles: list[SlaCycleResponse] = []
     reopen_count: int = 0
     interventions: list[InterventionResponse] = []
+    # Avatars des intervenants (demandeur, assigné, acteurs/destinataires du journal),
+    # cle = account id (str) -> avatar_url. Résolu par lot en dehors de l'ORM (voir
+    # RouteRequest._attach_participant_avatars) car les acteurs du journal ne sont
+    # référencés que par id dans `infos` (JSON), sans relation SQLAlchemy directe.
+    participant_avatars: dict[str, str] = {}
 
 
 class RequestSearch(BaseModel):

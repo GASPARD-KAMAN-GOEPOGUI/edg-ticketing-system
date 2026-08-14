@@ -54,6 +54,20 @@ _test_engine = create_async_engine(
 )
 _TestSession = async_sessionmaker(_test_engine, expire_on_commit=False, class_=AsyncSession)
 
+# ── Patch de compatibilité SQLite : JSON_UNQUOTE (MySQL) sans équivalent ─────
+# Le backend utilise du SQL brut MySQL (JSON_UNQUOTE(JSON_EXTRACT(...))) dans
+# quelques requêtes (ex. RepositoryRequest.list_transmitted_by_actor). SQLite
+# résout déjà JSON_EXTRACT via son extension JSON1 intégrée (et renvoie une
+# valeur scalaire déjà "unquoted"), il ne connaît juste pas le nom
+# JSON_UNQUOTE — on l'enregistre comme fonction identité, sans modifier le SQL
+# métier ni les modèles.
+from sqlalchemy import event
+
+
+@event.listens_for(_test_engine.sync_engine, "connect")
+def _register_sqlite_json_unquote(dbapi_connection, _):
+    dbapi_connection.create_function("JSON_UNQUOTE", 1, lambda value: value)
+
 
 async def _override_get_db() -> AsyncGenerator[AsyncSession, None]:
     async with _TestSession() as session:
@@ -117,9 +131,9 @@ class MockAccount:
         self.notif_sms = False
         self.mfa_enabled = False
         self.avatar = None
-        self.keycloak_id = None
+        self.central_user_id = None
+        self.central_user_uuid = None
         self.infos = None
-        self.biometric_descriptor = None
 
 
 # Un compte par rôle (IDs distincts pour éviter les collisions)
@@ -180,6 +194,153 @@ async def anon_client() -> AsyncGenerator[AsyncClient, None]:
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         yield client
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MOCK DE LA PLATEFORME CENTRALE manager-user (pas d'appel réseau en test)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Compteur PARTAGÉ au niveau module (pas par instance de registre) — la DB de
+# test est persistée pour toute la session pytest (setup_db, scope="session"),
+# alors qu'une nouvelle _CentralAuthRegistry est créée à chaque test qui demande
+# mock_central_auth. Un compteur par-instance recommencerait à 90000 à chaque
+# test et entrerait en collision (contrainte UNIQUE sur central_user_id/uuid)
+# avec les comptes déjà créés par des tests précédents dans la même session.
+import itertools as _itertools
+_central_id_counter = _itertools.count(90000)
+
+
+class _CentralAuthRegistry:
+    """Registre en mémoire d'identités centrales simulées pour les tests."""
+
+    def __init__(self) -> None:
+        self.users: dict[str, dict] = {}   # email(lower) -> {password, user_id, uuid, groups}
+        self.tokens: dict[str, str] = {}   # bearer -> email(lower)
+
+    def register(
+        self, *, email: str, password: str, user_id: int,
+        groups: list[str] | None = None, uuid: str | None = None,
+    ) -> None:
+        self.users[email.lower()] = {
+            "password": password,
+            "user_id": user_id,
+            "uuid": uuid or f"uuid-{user_id}",
+            "groups": groups or [],
+        }
+
+    def _generate_id(self) -> int:
+        return next(_central_id_counter)
+
+
+@pytest_asyncio.fixture
+async def mock_central_auth(monkeypatch):
+    """
+    Monkeypatch api.core.central_auth pour simuler la plateforme centrale
+    (source-token/login/refresh/scopes/groupes) sans appel réseau réel.
+
+    Usage :
+        async def test_xxx(mock_central_auth):
+            mock_central_auth.register(email="a@edg.gn", password="Pwd123!", user_id=1001, groups=["admin-support"])
+            ...  # POST /api/v1/auth/login avec identifier="a@edg.gn", password="Pwd123!"
+    """
+    import api.core.central_auth as central_auth_module
+
+    registry = _CentralAuthRegistry()
+
+    async def fake_central_login(email: str, password: str):
+        user = registry.users.get(email.lower())
+        if user is None or user["password"] != password:
+            raise central_auth_module.CentralInvalidCredentials("Identifiant ou mot de passe incorrect.")
+        token = f"central-bearer-{user['user_id']}"
+        registry.tokens[token] = email.lower()
+        return {
+            "bearer_token": token,
+            "refresh_token": f"central-refresh-{user['user_id']}",
+            "token_type": "bearer",
+            "expires_in": 180,
+        }
+
+    async def fake_central_refresh(refresh_token: str):
+        if not refresh_token.startswith("central-refresh-"):
+            raise central_auth_module.CentralInvalidCredentials("Refresh token invalide.")
+        user_id = refresh_token[len("central-refresh-"):]
+        token = f"central-bearer-{user_id}"
+        if token not in registry.tokens:
+            raise central_auth_module.CentralInvalidCredentials("Refresh token invalide.")
+        return {"bearer_token": token, "token_type": "bearer", "expires_in": 180}
+
+    async def fake_get_scopes(bearer_token: str):
+        email = registry.tokens.get(bearer_token)
+        if email is None:
+            raise central_auth_module.CentralInvalidCredentials("Session invalide.")
+        user = registry.users[email]
+        return {
+            "actor_type": "user", "user_id": user["user_id"], "user_uuid": user["uuid"],
+            "email": email, "scopes": [],
+        }
+
+    async def fake_get_groups(bearer_token: str):
+        email = registry.tokens.get(bearer_token)
+        if email is None:
+            raise central_auth_module.CentralInvalidCredentials("Session invalide.")
+        return [{"codename": g, "is_activated": True} for g in registry.users[email]["groups"]]
+
+    async def fake_log_central_event(*args, **kwargs):
+        return None
+
+    # ── Mutation de comptes (gestion de comptes, phase 2) ────────────────────
+
+    async def fake_get_machine_token():
+        return "central-machine-token"
+
+    async def fake_create_central_account(*, group_codename, email, phone, firstname, last_name, password, machine_token):
+        user_id = registry._generate_id()
+        uuid = f"uuid-{user_id}"
+        registry.users[email.lower()] = {
+            "password": password, "user_id": user_id, "uuid": uuid, "groups": [group_codename],
+        }
+        return {
+            "status": "created_and_added", "message": None, "user_id": user_id,
+            "user_uuid": uuid, "user_is_activated": True, "group_codename": group_codename,
+        }
+
+    async def fake_update_central_account(user_uuid, *, email, phone, firstname, last_name, machine_token):
+        return {"user_uuid": user_uuid, "email": email, "phone": phone, "name": firstname, "last_name": last_name}
+
+    async def fake_add_group_membership(user_uuid, group_codename, machine_token):
+        return None
+
+    async def fake_remove_group_membership(user_uuid, group_codename, machine_token):
+        return None
+
+    async def fake_activate_central_account(user_uuid, machine_token):
+        return None
+
+    async def fake_deactivate_central_account(user_uuid, machine_token):
+        return None
+
+    async def fake_reset_central_password(user_uuid, machine_token):
+        return central_auth_module._DEFAULT_RESET_PASSWORD
+
+    async def fake_delete_central_account(user_id, user_bearer):
+        return None
+
+    monkeypatch.setattr(central_auth_module, "central_login", fake_central_login)
+    monkeypatch.setattr(central_auth_module, "central_refresh", fake_central_refresh)
+    monkeypatch.setattr(central_auth_module, "get_scopes", fake_get_scopes)
+    monkeypatch.setattr(central_auth_module, "get_groups", fake_get_groups)
+    monkeypatch.setattr(central_auth_module, "log_central_event", fake_log_central_event)
+    monkeypatch.setattr(central_auth_module, "get_machine_token", fake_get_machine_token)
+    monkeypatch.setattr(central_auth_module, "create_central_account", fake_create_central_account)
+    monkeypatch.setattr(central_auth_module, "update_central_account", fake_update_central_account)
+    monkeypatch.setattr(central_auth_module, "add_group_membership", fake_add_group_membership)
+    monkeypatch.setattr(central_auth_module, "remove_group_membership", fake_remove_group_membership)
+    monkeypatch.setattr(central_auth_module, "activate_central_account", fake_activate_central_account)
+    monkeypatch.setattr(central_auth_module, "deactivate_central_account", fake_deactivate_central_account)
+    monkeypatch.setattr(central_auth_module, "reset_central_password", fake_reset_central_password)
+    monkeypatch.setattr(central_auth_module, "delete_central_account", fake_delete_central_account)
+
+    return registry
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

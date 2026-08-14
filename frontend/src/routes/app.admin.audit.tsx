@@ -223,16 +223,10 @@ function AuditPage() {
         )}
 
         {globalKpis && !kpisLoading && (
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <GlassCard className="py-3">
               <div className="text-xs text-muted-foreground">Taux de résolution</div>
               <div className="mt-1 text-xl font-bold text-emerald-500">{globalKpis.resolution_rate}%</div>
-            </GlassCard>
-            <GlassCard className="py-3">
-              <div className="text-xs text-muted-foreground">Délais dépassés</div>
-              <div className={cn("mt-1 text-xl font-bold", globalKpis.sla_breached > 0 ? "text-destructive" : "text-emerald-500")}>
-                {globalKpis.sla_breached}
-              </div>
             </GlassCard>
             <GlassCard className="py-3">
               <div className="text-xs text-muted-foreground">Satisfaction moyenne</div>

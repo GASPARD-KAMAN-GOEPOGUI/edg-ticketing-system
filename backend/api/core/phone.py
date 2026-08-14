@@ -37,6 +37,33 @@ def normalize_phone(raw: str | None, country_code: str = _GUINEA_CODE) -> str | 
     return f"+{country_code}{local}"
 
 
+_GUINEA_MOBILE_RE = re.compile(r"^6\d{8}$")
+
+PHONE_FORMAT_HINT = "+224 6XX XX XX XX, 224 6XX XX XX XX ou 6XX XX XX XX"
+
+
+def validate_guinea_phone(raw: str | None) -> str | None:
+    """
+    Valide puis normalise un numéro de téléphone mobile guinéen.
+
+    Formats acceptés (espaces/tirets ignorés) : +224 6XX XX XX XX,
+    224 6XX XX XX XX, 6XX XX XX XX — un numéro local à 9 chiffres commençant
+    par 6, avec ou sans l'indicatif 224.
+
+    Retourne None si raw est None/vide (champ optionnel). Lève ValueError
+    si raw est renseigné mais ne correspond à aucun de ces formats.
+    """
+    if raw is None or not raw.strip():
+        return None
+    normalized = normalize_phone(raw) or raw
+    local = normalized[len(_GUINEA_CODE) + 1:] if normalized.startswith(f"+{_GUINEA_CODE}") else normalized
+    if not _GUINEA_MOBILE_RE.match(local):
+        raise ValueError(
+            f"Numéro de téléphone invalide. Formats acceptés : {PHONE_FORMAT_HINT}."
+        )
+    return normalized
+
+
 def is_phone_identifier(identifier: str) -> bool:
     """
     Retourne True si l'identifiant ressemble à un numéro de téléphone

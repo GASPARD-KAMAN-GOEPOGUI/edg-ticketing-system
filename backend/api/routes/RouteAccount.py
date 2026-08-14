@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.core.phone import normalize_phone
 from api.dependencies import get_db, get_current_user, require_roles
-from api.schemas.SchemaAccount import AccountCreate, AccountUpdate, AccountResponse
+from api.schemas.SchemaAccount import AccountResponse
 from api.schemas.base import PaginatedResponse
 from api.services import AccountService
 
@@ -23,16 +23,6 @@ _assign = Depends(require_roles("agent", "chief", "director", "admin"))
 
 def _svc(db: AsyncSession = Depends(get_db)) -> AccountService:
     return AccountService(db)
-
-
-@router.get("/", response_model=PaginatedResponse)
-async def list_accounts(
-    _actor=_admin,
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
-    svc: AccountService = Depends(_svc),
-):
-    return await svc.list_all(page=page, limit=limit)
 
 
 @router.get("/agents", response_model=PaginatedResponse)
@@ -125,36 +115,12 @@ async def check_duplicate(
     return result
 
 
-@router.get("/{id}", response_model=AccountResponse)
-async def get_account(id: int, _actor=_admin, svc: AccountService = Depends(_svc)):
-    return await svc.get_by_id(id)
-
-
-@router.post("/", response_model=AccountResponse, status_code=status.HTTP_201_CREATED)
-async def create_account(
-    body: AccountCreate,
-    _actor=_admin,
-    svc: AccountService = Depends(_svc),
-):
-    return await svc.create(body.dict())
-
-
-@router.patch("/{id}", response_model=AccountResponse)
-async def update_account(
-    id: int,
-    body: AccountUpdate,
-    _actor=_admin,
-    svc: AccountService = Depends(_svc),
-):
-    return await svc.update(id, body.dict(exclude_unset=True))
-
-
 @router.post("/{id}/verify-email", response_model=AccountResponse)
 async def verify_email(id: int, _actor=_admin, svc: AccountService = Depends(_svc)):
     return await svc.verify_email(id)
 
 
-@router.patch("/{id}/availability", response_model=AccountResponse)
+@router.put("/{id}/availability", response_model=AccountResponse)
 async def set_availability(
     id: int,
     _actor=_assign,
@@ -162,20 +128,3 @@ async def set_availability(
     svc: AccountService = Depends(_svc),
 ):
     return await svc.set_availability(id, availability)
-
-
-@router.post("/{id}/activate", status_code=status.HTTP_200_OK)
-async def activate_account(id: int, _actor=_admin, svc: AccountService = Depends(_svc)):
-    await svc.activate(id)
-    return {"ok": True}
-
-
-@router.post("/{id}/deactivate", status_code=status.HTTP_200_OK)
-async def deactivate_account(id: int, _actor=_admin, svc: AccountService = Depends(_svc)):
-    await svc.deactivate(id)
-    return {"ok": True}
-
-
-@router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_account(id: int, _actor=_admin, svc: AccountService = Depends(_svc)):
-    await svc.delete(id)

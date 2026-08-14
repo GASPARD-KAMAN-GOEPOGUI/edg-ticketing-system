@@ -72,7 +72,7 @@ async def create_request_status(data: dict, db: AsyncSession = Depends(get_db)):
     return await RequestStatusService(db).create(data)
 
 
-@router.patch("/request-statuses/{id}", dependencies=[_admin])
+@router.put("/request-statuses/{id}", dependencies=[_admin])
 async def update_request_status(id: int, data: dict, db: AsyncSession = Depends(get_db)):
     return await RequestStatusService(db).update(id, data)
 
@@ -82,7 +82,7 @@ async def delete_request_status(id: int, db: AsyncSession = Depends(get_db)):
     await RequestStatusService(db).delete(id)
 
 
-@router.patch("/request-statuses/{id}/restore", dependencies=[_admin])
+@router.put("/request-statuses/{id}/restore", dependencies=[_admin])
 async def restore_request_status(id: int, db: AsyncSession = Depends(get_db)):
     return await RequestStatusService(db).restore(id)
 
@@ -111,7 +111,7 @@ async def create_request_category(data: dict, db: AsyncSession = Depends(get_db)
     return await RequestCategoryService(db).create(data)
 
 
-@router.patch("/request-categories/{id}", dependencies=[_admin])
+@router.put("/request-categories/{id}", dependencies=[_admin])
 async def update_request_category(id: int, data: dict, db: AsyncSession = Depends(get_db)):
     return await RequestCategoryService(db).update(id, data)
 
@@ -121,7 +121,7 @@ async def delete_request_category(id: int, db: AsyncSession = Depends(get_db)):
     await RequestCategoryService(db).delete(id)
 
 
-@router.patch("/request-categories/{id}/restore", dependencies=[_admin])
+@router.put("/request-categories/{id}/restore", dependencies=[_admin])
 async def restore_request_category(id: int, db: AsyncSession = Depends(get_db)):
     return await RequestCategoryService(db).restore(id)
 
@@ -164,7 +164,7 @@ async def create_account_status(data: dict, db: AsyncSession = Depends(get_db)):
     return await AccountStatusService(db).create(data)
 
 
-@router.patch("/account-statuses/{id}", dependencies=[_admin])
+@router.put("/account-statuses/{id}", dependencies=[_admin])
 async def update_account_status(id: int, data: dict, db: AsyncSession = Depends(get_db)):
     return await AccountStatusService(db).update(id, data)
 
@@ -174,7 +174,7 @@ async def delete_account_status(id: int, db: AsyncSession = Depends(get_db)):
     await AccountStatusService(db).delete(id)
 
 
-@router.patch("/account-statuses/{id}/restore", dependencies=[_admin])
+@router.put("/account-statuses/{id}/restore", dependencies=[_admin])
 async def restore_account_status(id: int, db: AsyncSession = Depends(get_db)):
     return await AccountStatusService(db).restore(id)
 
@@ -196,7 +196,7 @@ async def create_knowledge_category(data: dict, db: AsyncSession = Depends(get_d
     return await KnowledgeCategoryService(db).create(data)
 
 
-@router.patch("/knowledge-categories/{id}", dependencies=[_admin])
+@router.put("/knowledge-categories/{id}", dependencies=[_admin])
 async def update_knowledge_category(id: int, data: dict, db: AsyncSession = Depends(get_db)):
     return await KnowledgeCategoryService(db).update(id, data)
 
@@ -206,7 +206,7 @@ async def delete_knowledge_category(id: int, db: AsyncSession = Depends(get_db))
     await KnowledgeCategoryService(db).delete(id)
 
 
-@router.patch("/knowledge-categories/{id}/restore", dependencies=[_admin])
+@router.put("/knowledge-categories/{id}/restore", dependencies=[_admin])
 async def restore_knowledge_category(id: int, db: AsyncSession = Depends(get_db)):
     return await KnowledgeCategoryService(db).restore(id)
 
@@ -228,7 +228,7 @@ async def create_announcement_category(data: dict, db: AsyncSession = Depends(ge
     return await AnnouncementCategoryService(db).create(data)
 
 
-@router.patch("/announcement-categories/{id}", dependencies=[_admin])
+@router.put("/announcement-categories/{id}", dependencies=[_admin])
 async def update_announcement_category(id: int, data: dict, db: AsyncSession = Depends(get_db)):
     return await AnnouncementCategoryService(db).update(id, data)
 
@@ -238,7 +238,7 @@ async def delete_announcement_category(id: int, db: AsyncSession = Depends(get_d
     await AnnouncementCategoryService(db).delete(id)
 
 
-@router.patch("/announcement-categories/{id}/restore", dependencies=[_admin])
+@router.put("/announcement-categories/{id}/restore", dependencies=[_admin])
 async def restore_announcement_category(id: int, db: AsyncSession = Depends(get_db)):
     return await AnnouncementCategoryService(db).restore(id)
 
@@ -260,7 +260,7 @@ async def create_announcement_priority(data: dict, db: AsyncSession = Depends(ge
     return await AnnouncementPriorityService(db).create(data)
 
 
-@router.patch("/announcement-priorities/{id}", dependencies=[_admin])
+@router.put("/announcement-priorities/{id}", dependencies=[_admin])
 async def update_announcement_priority(id: int, data: dict, db: AsyncSession = Depends(get_db)):
     return await AnnouncementPriorityService(db).update(id, data)
 
@@ -270,7 +270,7 @@ async def delete_announcement_priority(id: int, db: AsyncSession = Depends(get_d
     await AnnouncementPriorityService(db).delete(id)
 
 
-@router.patch("/announcement-priorities/{id}/restore", dependencies=[_admin])
+@router.put("/announcement-priorities/{id}/restore", dependencies=[_admin])
 async def restore_announcement_priority(id: int, db: AsyncSession = Depends(get_db)):
     return await AnnouncementPriorityService(db).restore(id)
 
@@ -292,7 +292,7 @@ async def create_announcement_status(data: dict, db: AsyncSession = Depends(get_
     return await AnnouncementStatusService(db).create(data)
 
 
-@router.patch("/announcement-statuses/{id}", dependencies=[_admin])
+@router.put("/announcement-statuses/{id}", dependencies=[_admin])
 async def update_announcement_status(id: int, data: dict, db: AsyncSession = Depends(get_db)):
     return await AnnouncementStatusService(db).update(id, data)
 
@@ -302,7 +302,7 @@ async def delete_announcement_status(id: int, db: AsyncSession = Depends(get_db)
     await AnnouncementStatusService(db).delete(id)
 
 
-@router.patch("/announcement-statuses/{id}/restore", dependencies=[_admin])
+@router.put("/announcement-statuses/{id}/restore", dependencies=[_admin])
 async def restore_announcement_status(id: int, db: AsyncSession = Depends(get_db)):
     return await AnnouncementStatusService(db).restore(id)
 
@@ -324,7 +324,7 @@ async def create_priority_definition(data: dict, db: AsyncSession = Depends(get_
     return await PriorityDefinitionService(db).create(data)
 
 
-@router.patch("/priority-definitions/{id}", dependencies=[_admin])
+@router.put("/priority-definitions/{id}", dependencies=[_admin])
 async def update_priority_definition(id: int, data: dict, db: AsyncSession = Depends(get_db)):
     return await PriorityDefinitionService(db).update(id, data)
 
@@ -334,7 +334,7 @@ async def delete_priority_definition(id: int, db: AsyncSession = Depends(get_db)
     await PriorityDefinitionService(db).delete(id)
 
 
-@router.patch("/priority-definitions/{id}/restore", dependencies=[_admin])
+@router.put("/priority-definitions/{id}/restore", dependencies=[_admin])
 async def restore_priority_definition(id: int, db: AsyncSession = Depends(get_db)):
     return await PriorityDefinitionService(db).restore(id)
 

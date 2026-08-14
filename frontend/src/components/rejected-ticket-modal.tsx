@@ -45,7 +45,7 @@ export function RejectedTicketModal({ id, open, onClose }: Props) {
   });
 
   const reopenMut = useMutation({
-    mutationFn: (reason: string) => reopenRequest(id!, reason || undefined),
+    mutationFn: (reason: string) => reopenRequest(id!, reason),
     onSuccess: () => {
       toast.success("Ticket réouvert — un agent va le reprendre en charge.");
       qc.invalidateQueries({ queryKey: ["requests"] });
@@ -214,9 +214,11 @@ export function RejectedTicketModal({ id, open, onClose }: Props) {
               {/* Formulaire de réouverture */}
               {showReopenForm && (
                 <div className="space-y-3 rounded-2xl border border-border/40 bg-background/40 p-4">
-                  <p className="text-sm font-semibold">Motif de la réouverture</p>
+                  <p className="text-sm font-semibold">
+                    Motif de la réouverture <span className="text-destructive">*</span>
+                  </p>
                   <p className="text-xs text-muted-foreground">
-                    Expliquez ce qui a changé ou pourquoi vous contestez ce rejet (optionnel).
+                    Expliquez ce qui a changé ou pourquoi vous contestez ce rejet.
                   </p>
                   <textarea
                     value={reopenReason}
@@ -237,7 +239,7 @@ export function RejectedTicketModal({ id, open, onClose }: Props) {
                     <Button
                       size="sm"
                       className="rounded-full"
-                      disabled={reopenMut.isPending}
+                      disabled={reopenMut.isPending || !reopenReason.trim()}
                       onClick={() => reopenMut.mutate(reopenReason.trim())}
                     >
                       {reopenMut.isPending ? (

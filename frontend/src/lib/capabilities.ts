@@ -71,16 +71,13 @@ export function isRequester(
 export type TicketAction =
   | "requester_edit"
   | "self_assign"
-  | "take_ownership"
   | "request_info"
   | "resume"
   | "assign"
   | "resolve"
   | "transmit_treatment"
   | "close"
-  | "request_reopen"
-  | "approve_reopen"
-  | "reject_reopen"
+  | "reopen"
   | "cancel"
   | "reject"
   | "escalate"
@@ -88,14 +85,12 @@ export type TicketAction =
   | "change_priority"
   | "change_service"
   | "transfer_direction"
-  | "create_circuit"
   | "accept_workflow_step";
 
 type TicketActionOptions = {
   isRequester?: boolean;
   isAssignedToMe?: boolean;
   hasAssignee?: boolean;
-  hasReopenRequest?: boolean;
   canReopenClosed?: boolean;
 };
 
@@ -104,7 +99,6 @@ const AUTHENTICATED_ROLES: Role[] = ["user", "agent-support", "chief-service", "
 const TICKET_ACTION_ROLES: Record<TicketAction, Role[]> = {
   requester_edit: AUTHENTICATED_ROLES,
   self_assign: ["agent-support"],
-  take_ownership: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
   request_info: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
   resume: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
   assign: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
@@ -117,9 +111,10 @@ const TICKET_ACTION_ROLES: Record<TicketAction, Role[]> = {
   // même garde isAssignedToMe.
   transmit_treatment: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
   close: AUTHENTICATED_ROLES,
-  request_reopen: AUTHENTICATED_ROLES,
-  approve_reopen: ["chief-service", "chief-departement", "director", "admin"],
-  reject_reopen: ["chief-service", "chief-departement", "director", "admin"],
+  // BR-REOPEN-QUEUE-001 (révision — réouverture immédiate) : réservé au demandeur
+  // (garde réelle : options.isRequester dans canTicketAction ci-dessous) — le rôle
+  // ne sert que de filtre de sécurité général, comme ailleurs dans ce module.
+  reopen: AUTHENTICATED_ROLES,
   cancel: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"],
   reject: ["chief-service", "chief-departement", "admin"],
   escalate: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
@@ -130,23 +125,19 @@ const TICKET_ACTION_ROLES: Record<TicketAction, Role[]> = {
   // director, admin) — cf. ticket_actions.ACTION_ALLOWED_ROLES["reassign"] côté backend.
   change_service: ["chief-departement", "director", "admin"],
   transfer_direction: ["director", "admin"],
-  create_circuit: ["agent-support", "chief-service", "chief-departement", "admin"],
   accept_workflow_step: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
 };
 
 const TICKET_ACTION_STATUSES: Record<TicketAction, RequestStatus[]> = {
   requester_edit: ["new", "qualifying"],
   self_assign: ["new", "qualifying", "qualified", "reopened"],
-  take_ownership: ["assigned", "qualifying", "qualified", "pending"],
   request_info: ["in_progress", "assigned"],
   resume: ["pending"],
   assign: ["new", "qualifying", "qualified", "reopened"],
   resolve: ["assigned", "in_progress", "pending", "escalated"],
   transmit_treatment: ["assigned", "in_progress", "pending", "escalated"],
   close: ["resolved"],
-  request_reopen: ["resolved", "closed", "rejected"],
-  approve_reopen: ["resolved", "closed", "rejected"],
-  reject_reopen: ["resolved", "closed", "rejected"],
+  reopen: ["resolved", "closed", "rejected"],
   cancel: ["new", "qualifying", "qualified", "assigned", "in_progress", "pending"],
   reject: ["new", "qualifying", "qualified", "assigned", "in_progress", "pending"],
   escalate: ["qualifying", "assigned", "in_progress", "pending"],
@@ -154,14 +145,13 @@ const TICKET_ACTION_STATUSES: Record<TicketAction, RequestStatus[]> = {
   change_priority: ["new", "qualifying", "qualified", "assigned", "in_progress", "pending", "escalated", "reopened"],
   change_service: ["new", "qualifying", "qualified", "reopened"],
   transfer_direction: ["new", "qualifying", "qualified", "assigned", "in_progress", "pending", "escalated", "reopened"],
-  create_circuit: ["new", "qualifying", "qualified", "assigned", "in_progress", "pending", "escalated", "reopened"],
   accept_workflow_step: ["new", "qualifying", "qualified", "assigned", "in_progress", "pending", "escalated", "reopened"],
 };
 
 const OWN_REQUEST_ALLOWED_ACTIONS = new Set<TicketAction>([
   "requester_edit",
   "close",
-  "request_reopen",
+  "reopen",
   "cancel",
 ]);
 
@@ -184,15 +174,15 @@ export function canTicketAction(
   }
   if (action === "requester_edit") return options.isRequester === true;
   if (action === "self_assign") return options.hasAssignee !== true;
-  if (action === "take_ownership" && role === "agent-support") {
-    return options.isAssignedToMe === true;
-  }
-  if (action === "request_reopen") {
+  // BR-QUEUE-AUTO-START-001 — "take_ownership"/"Démarrer traitement" supprimé :
+  // une prise/assignation depuis la File d'attente (self_assign/assign côté
+  // backend) démarre désormais toujours directement `in_progress`, il n'existe
+  // plus de second temps "assigned → Démarrer traitement" à exposer en capacité.
+  // BR-REOPEN-QUEUE-001 (révision — réouverture immédiate) : réservé au demandeur,
+  // aucune approbation hiérarchique distincte (approve_reopen/reject_reopen supprimés).
+  if (action === "reopen") {
     if (options.isRequester !== true) return false;
     if (status === "closed" && options.canReopenClosed === false) return false;
-  }
-  if (action === "approve_reopen" || action === "reject_reopen") {
-    return options.hasReopenRequest === true;
   }
 
   return true;

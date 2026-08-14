@@ -70,7 +70,7 @@ async def create_organigram(
     return await svc.create(body.dict())
 
 
-@router.patch("/{id}", response_model=OrganigramResponse)
+@router.put("/{id}", response_model=OrganigramResponse)
 async def update_organigram(
     id: str,
     body: OrganigramUpdate,

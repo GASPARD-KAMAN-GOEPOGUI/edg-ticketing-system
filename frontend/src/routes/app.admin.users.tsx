@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useHasRole } from "@/lib/permissions";
+import { useUser } from "@/lib/session";
 import { GlassCard } from "@/components/glass-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -56,6 +57,7 @@ import {
   UserX,
   Trash2,
   Plus,
+  Copy,
 } from "lucide-react";
 import { PaginationBar, usePagination } from "@/components/pagination-bar";
 import { cn } from "@/lib/utils";
@@ -65,7 +67,10 @@ export const Route = createFileRoute("/app/admin/users")({
   component: AdminUsers,
 });
 
-const ROLES: Role[] = ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"];
+// Limité aux 3 rôles ayant une correspondance de groupe côté plateforme centrale
+// (admin-support / qualify-support / collaborateur-support) — chief-service,
+// chief-departement et director n'ont pas de groupe central pour le moment.
+const ROLES: Role[] = ["user", "agent-support", "admin"];
 
 const statusBadge: Record<string, string> = {
   active: "bg-success/15 text-success",
@@ -111,9 +116,6 @@ type OrgTarget = "direction" | "department" | "unit";
 const USER_FORM_ROLE_OPTIONS: Array<{ value: Role; label: string }> = [
   { value: "user", label: roleLabels.user },
   { value: "agent-support", label: roleLabels["agent-support"] },
-  { value: "chief-service", label: roleLabels["chief-service"] },
-  { value: "chief-departement", label: roleLabels["chief-departement"] },
-  { value: "director", label: roleLabels.director },
   { value: "admin", label: roleLabels.admin },
 ];
 
@@ -137,6 +139,7 @@ function fullName(u?: { name: string; firstname?: string } | null): string {
 function AdminUsers() {
   const qc = useQueryClient();
   const isAdmin = useHasRole("admin");
+  const currentUser = useUser();
 
   // ── State ──────────────────────────────────────────────────────────────────
   const [q, setQ] = useState("");
@@ -148,8 +151,10 @@ function AdminUsers() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editUser, setEditUser] = useState<AccountUser | null>(null);
   const [resetUser, setResetUser] = useState<AccountUser | null>(null);
+  const [resetResultPassword, setResetResultPassword] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AccountUser | null>(null);
-  const [newPassword, setNewPassword] = useState("");
+  const [activateTarget, setActivateTarget] = useState<AccountUser | null>(null);
+  const [deactivateTarget, setDeactivateTarget] = useState<AccountUser | null>(null);
 
   // form
   const [form, setForm] = useState<FormData>(emptyForm());
@@ -238,11 +243,7 @@ function AdminUsers() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ["admin", "users"], exact: false });
 
   const createMut = useMutation({
-    mutationFn: async ({ data, password }: { data: Parameters<typeof createUser>[0]; password: string }) => {
-      const newUser = await createUser(data);
-      await resetUserPassword(newUser.id, password);
-      return newUser;
-    },
+    mutationFn: (data: Parameters<typeof createUser>[0]) => createUser(data),
     onSuccess: () => { invalidate(); setCreateOpen(false); toast.success("Compte créé avec succès."); },
     onError: () => toast.error("Erreur lors de la création du compte."),
   });
@@ -256,27 +257,29 @@ function AdminUsers() {
 
   const activateMut = useMutation({
     mutationFn: (id: string) => activateUser(id),
-    onSuccess: () => { invalidate(); toast.success("Compte activé."); },
+    onSuccess: () => { invalidate(); setActivateTarget(null); toast.success("Compte activé."); },
     onError: () => toast.error("Erreur lors de l'activation."),
   });
 
   const deactivateMut = useMutation({
     mutationFn: (id: string) => deactivateUser(id),
-    onSuccess: () => { invalidate(); toast.success("Compte désactivé."); },
+    onSuccess: () => { invalidate(); setDeactivateTarget(null); toast.success("Compte désactivé."); },
     onError: () => toast.error("Erreur lors de la désactivation."),
   });
 
   const resetMut = useMutation({
-    mutationFn: ({ id, pwd }: { id: string; pwd: string }) =>
-      resetUserPassword(id, pwd),
-    onSuccess: () => { setResetUser(null); setNewPassword(""); toast.success("Mot de passe réinitialisé."); },
+    mutationFn: (id: string) => resetUserPassword(id),
+    onSuccess: ({ default_password }) => {
+      setResetResultPassword(default_password);
+      toast.success("Mot de passe réinitialisé.");
+    },
     onError: () => toast.error("Erreur lors de la réinitialisation."),
   });
 
   const deleteMut = useMutation({
     mutationFn: (id: string) => deleteUser(id),
     onSuccess: () => { invalidate(); setDeleteTarget(null); toast.success("Compte supprimé."); },
-    onError: () => toast.error("Erreur lors de la suppression."),
+    onError: (err: Error) => toast.error(err.message || "Erreur lors de la suppression."),
   });
 
   // ── Filtering ──────────────────────────────────────────────────────────────
@@ -408,17 +411,15 @@ function AdminUsers() {
     }
     if (createMut.isPending) return;
     createMut.mutate({
-      data: {
-        name: form.name.trim(),
-        firstname: form.firstname.trim() || undefined,
-        email: form.email.trim(),
-        role: form.role,
-        matricule: form.matricule || undefined,
-        job: form.job || undefined,
-        ...buildOrgPayload(form),
-        is_edg_employee: form.is_edg_employee,
-      },
+      name: form.name.trim(),
+      firstname: form.firstname.trim() || undefined,
+      email: form.email.trim(),
       password: form.password,
+      role: form.role,
+      matricule: form.matricule || undefined,
+      job: form.job || undefined,
+      ...buildOrgPayload(form),
+      is_edg_employee: form.is_edg_employee,
     });
   }
 
@@ -593,40 +594,43 @@ function AdminUsers() {
                             variant="ghost"
                             title="Réinitialiser MDP"
                             className="h-8 w-8"
-                            onClick={() => { setResetUser(u); setNewPassword(""); }}
+                            onClick={() => { setResetUser(u); setResetResultPassword(null); }}
                           >
                             <KeyRound className="h-3.5 w-3.5" />
                           </Button>
-                          {u.account_status === "active" ? (
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              title="Désactiver"
-                              className="h-8 w-8 text-amber-500 hover:text-amber-400"
-                              onClick={() => deactivateMut.mutate(u.id)}
-                              disabled={deactivateMut.isPending}
-                            >
-                              <UserX className="h-3.5 w-3.5" />
-                            </Button>
-                          ) : (
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              title="Activer"
-                              className="h-8 w-8 text-success hover:text-success"
-                              onClick={() => activateMut.mutate(u.id)}
-                              disabled={activateMut.isPending}
-                            >
-                              <UserCheck className="h-3.5 w-3.5" />
-                            </Button>
-                          )}
+                          {(() => {
+                            const isSelf = u.id === currentUser?.id;
+                            return u.account_status === "active" ? (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                title={isSelf ? "Vous ne pouvez pas désactiver votre propre compte." : "Désactiver"}
+                                className="h-8 w-8 text-amber-500 hover:text-amber-400"
+                                onClick={() => setDeactivateTarget(u)}
+                                disabled={isSelf}
+                              >
+                                <UserX className="h-3.5 w-3.5" />
+                              </Button>
+                            ) : (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                title="Activer"
+                                className="h-8 w-8 text-success hover:text-success"
+                                onClick={() => setActivateTarget(u)}
+                              >
+                                <UserCheck className="h-3.5 w-3.5" />
+                              </Button>
+                            );
+                          })()}
                           {isAdmin && (
                             <Button
                               size="icon"
                               variant="ghost"
-                              title="Supprimer"
+                              title={u.id === currentUser?.id ? "Vous ne pouvez pas supprimer votre propre compte." : "Supprimer"}
                               className="h-8 w-8 text-destructive hover:text-destructive"
                               onClick={() => setDeleteTarget(u)}
+                              disabled={u.id === currentUser?.id}
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
@@ -715,36 +719,106 @@ function AdminUsers() {
       </Dialog>
 
       {/* ── Dialog Reset MDP ─────────────────────────────────────────────────── */}
-      <Dialog open={!!resetUser} onOpenChange={(o) => !o && setResetUser(null)}>
+      <Dialog
+        open={!!resetUser}
+        onOpenChange={(o) => { if (!o) { setResetUser(null); setResetResultPassword(null); } }}
+      >
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>Réinitialiser le mot de passe</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Définir un nouveau mot de passe pour <strong>{fullName(resetUser)}</strong>.
-          </p>
-          <div className="space-y-2">
-            <Label>Nouveau mot de passe</Label>
-            <Input
-              type="password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              placeholder="Minimum 8 caractères"
-              autoComplete="new-password"
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setResetUser(null)}>Annuler</Button>
-            <Button
-              className="gradient-primary"
-              disabled={newPassword.length < 8 || resetMut.isPending}
-              onClick={() => resetUser && resetMut.mutate({ id: resetUser.id, pwd: newPassword })}
-            >
-              {resetMut.isPending ? "Réinitialisation…" : "Confirmer"}
-            </Button>
-          </DialogFooter>
+          {resetResultPassword ? (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Le mot de passe de <strong>{fullName(resetUser)}</strong> a été réinitialisé. Communiquez-lui
+                la valeur ci-dessous — il pourra la changer après connexion.
+              </p>
+              <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-background/50 px-3 py-2">
+                <code className="flex-1 font-mono text-sm">{resetResultPassword}</code>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-7 w-7"
+                  title="Copier"
+                  onClick={() => navigator.clipboard.writeText(resetResultPassword)}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+              <DialogFooter>
+                <Button
+                  className="gradient-primary"
+                  onClick={() => { setResetUser(null); setResetResultPassword(null); }}
+                >
+                  Fermer
+                </Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Le mot de passe de <strong>{fullName(resetUser)}</strong> sera réinitialisé à la valeur par
+                défaut définie par le système.
+              </p>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setResetUser(null)}>Annuler</Button>
+                <Button
+                  className="gradient-primary"
+                  disabled={resetMut.isPending}
+                  onClick={() => resetUser && resetMut.mutate(resetUser.id)}
+                >
+                  {resetMut.isPending ? "Réinitialisation…" : "Confirmer"}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
+
+      {/* ── Confirm Activation ────────────────────────────────────────────────── */}
+      <AlertDialog open={!!activateTarget} onOpenChange={(o) => !o && setActivateTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Activer ce compte ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Le compte de <strong>{fullName(activateTarget)}</strong> sera réactivé et pourra de nouveau
+              se connecter.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => activateTarget && activateMut.mutate(activateTarget.id)}
+              disabled={activateMut.isPending}
+            >
+              {activateMut.isPending ? "Activation…" : "Activer"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ── Confirm Désactivation ─────────────────────────────────────────────── */}
+      <AlertDialog open={!!deactivateTarget} onOpenChange={(o) => !o && setDeactivateTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Désactiver ce compte ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Le compte de <strong>{fullName(deactivateTarget)}</strong> sera désactivé et ne pourra plus
+              se connecter.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-amber-500 text-white hover:bg-amber-500/90"
+              onClick={() => deactivateTarget && deactivateMut.mutate(deactivateTarget.id)}
+              disabled={deactivateMut.isPending}
+            >
+              {deactivateMut.isPending ? "Désactivation…" : "Désactiver"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* ── Confirm Suppression ───────────────────────────────────────────────── */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>

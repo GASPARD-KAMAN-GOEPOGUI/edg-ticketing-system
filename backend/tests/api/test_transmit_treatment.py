@@ -106,7 +106,8 @@ async def test_agent_transmits_to_another_agent(auth_client, unity_id):
     data = resp.json()["data"]
     assert str(data["assignee_id"]) == "802"
     # Le statut actif n'est jamais forcé/rétrogradé par la transmission.
-    assert data["request_status"] == "assigned"
+    # BR-QUEUE-AUTO-START-001 : l'assignation initiale démarre déjà le traitement.
+    assert data["request_status"] == "in_progress"
 
     events = await _timeline(auth_client, request_id)
     transmitted = [e for e in events if e["event_type"] == "treatment_transmitted"]
@@ -281,7 +282,8 @@ async def test_director_can_terminate_without_prior_escalation(auth_client, unit
 
     async with auth_client("admin") as admin_client:
         detail = await admin_client.get(f"/api/v1/requests/{request_id}")
-    assert detail.json()["data"]["request_status"] == "assigned"
+    # BR-QUEUE-AUTO-START-001 : l'assignation initiale démarre déjà le traitement.
+    assert detail.json()["data"]["request_status"] == "in_progress"
 
     resp = await _call_as(
         _dep(819, "director", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
@@ -308,7 +310,14 @@ async def test_transmit_then_terminate_notifies_and_tracks_cycles(auth_client, u
     # Le nouvel intervenant reçoit une notification de transmission.
     new_handler_notifs = await _notifications_for(821, request_id)
     assert len(new_handler_notifs) == 1
-    assert new_handler_notifs[0].title == "Traitement transmis"
+    assert new_handler_notifs[0].title == "Ticket transmis"
+
+    # BR-NOTIFICATION-WORKFLOW-001 §8 — l'émetteur reçoit une confirmation légère,
+    # en plus du "Ticket assigné" déjà reçu lors de la qualification initiale
+    # (cohérence assign()/qualify_triage(), ce même lot).
+    emitter_notifs = [n for n in await _notifications_for(820, request_id) if n.title == "Ticket transmis"]
+    assert len(emitter_notifs) == 1
+    assert "transmis à Test Compte Test 821." in emitter_notifs[0].body
 
     resolve_resp = await _call_as(
         _dep(821, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
@@ -320,7 +329,7 @@ async def test_transmit_then_terminate_notifies_and_tracks_cycles(auth_client, u
     from tests.conftest import MOCK_ACCOUNTS
 
     requester_notifs = await _notifications_for(MOCK_ACCOUNTS["user"].id, request_id)
-    assert any(n.title == "Demande résolue" for n in requester_notifs)
+    assert any(n.title == "Ticket résolu" for n in requester_notifs)
 
     events = await _timeline(auth_client, request_id)
     completed = [e for e in events if e["event_type"] == "treatment_completed"]
@@ -329,6 +338,110 @@ async def test_transmit_then_terminate_notifies_and_tracks_cycles(auth_client, u
     assert completed_infos["summary"] == _FULL_RESOLVE_BODY["summary"]
     assert completed_infos["solution"] == _FULL_RESOLVE_BODY["solution"]
     assert completed_infos["cycle_number"] == 2  # 1 transmission + 1 terminaison
+
+
+# ── 19. "Ma boîte de traitement" vs "Tickets transmis" suit la responsabilité
+#        actuelle (assignee_id), pas seulement l'historique de transmission ──
+
+async def _my_tickets_ids(role_dep, assignee_id: int) -> set[str]:
+    resp = await _call_as(role_dep, "GET", f"/api/v1/requests/?assignee_id={assignee_id}&limit=1000")
+    assert resp.status_code == 200, resp.text
+    return {str(item["id"]) for item in resp.json()["data"]["items"]}
+
+
+async def _transmitted_ids(role_dep) -> set[str]:
+    resp = await _call_as(role_dep, "GET", "/api/v1/requests/transmitted?limit=100")
+    assert resp.status_code == 200, resp.text
+    return {str(item["id"]) for item in resp.json()["data"]["items"]}
+
+
+async def _retransmitted_ids(role_dep) -> set[str]:
+    """BR-RETRANSMIT-001 — sous-ensemble de `_transmitted_ids` où l'acteur a
+    transmis le ticket au moins deux fois (revenu puis retransmis)."""
+    resp = await _call_as(role_dep, "GET", "/api/v1/requests/transmitted?limit=100&retransmitted_only=true")
+    assert resp.status_code == 200, resp.text
+    return {str(item["id"]) for item in resp.json()["data"]["items"]}
+
+
+async def test_transmitted_view_flips_back_to_my_tickets_when_ticket_returns(auth_client, unity_id):
+    """Scénario A -> B -> A -> C : chaque bascule doit refléter la responsabilité
+    actuelle (assignee_id), pas seulement le fait d'avoir déjà transmis."""
+    await _ensure_test_account(824, unity_id=unity_id, role="agent-support")  # A
+    await _ensure_test_account(825, unity_id=unity_id, role="agent-support")  # B
+    await _ensure_test_account(826, unity_id=unity_id, role="agent-support")  # C
+    a = _dep(824, "agent-support", unity_id)
+    b = _dep(825, "agent-support", unity_id)
+    c = _dep(826, "agent-support", unity_id)
+
+    request_id = await _create_ticket(auth_client, unity_id, "flip-back-a-b-a-c")
+    await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=824)
+
+    # État initial : A est l'intervenant actuel.
+    assert request_id in await _my_tickets_ids(a, 824)
+    assert request_id not in await _transmitted_ids(a)
+
+    # A -> B
+    resp = await _call_as(
+        a, "POST", f"/api/v1/requests/{request_id}/transmit",
+        {"to_user_id": "825", "work_done": "Diagnostic A.", "reason": "Passage à B."},
+    )
+    assert resp.status_code == 200, resp.text
+
+    assert request_id not in await _my_tickets_ids(a, 824)
+    assert request_id in await _transmitted_ids(a)
+    assert request_id in await _my_tickets_ids(b, 825)
+    assert request_id not in await _transmitted_ids(b)
+    # A n'a transmis qu'une seule fois pour l'instant : pas encore "retransmis".
+    assert request_id not in await _retransmitted_ids(a)
+
+    # B -> A (le ticket revient à A)
+    resp = await _call_as(
+        b, "POST", f"/api/v1/requests/{request_id}/transmit",
+        {"to_user_id": "824", "work_done": "Analyse B.", "reason": "Retour à A pour finalisation."},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # A redevient l'intervenant actuel : le ticket doit quitter "Tickets transmis"
+    # de A et réapparaître dans "Ma boîte de traitement", sans rien perdre de
+    # l'historique de transmission déjà écrit (vérifié séparément par le test
+    # test_previous_handler_stays_in_history_and_can_return_later).
+    assert request_id in await _my_tickets_ids(a, 824)
+    assert request_id not in await _transmitted_ids(a)
+    # B a transmis et n'est plus l'intervenant actuel : bascule inverse pour B.
+    assert request_id not in await _my_tickets_ids(b, 825)
+    assert request_id in await _transmitted_ids(b)
+    # B n'a transmis qu'une seule fois (B -> A) : pas "retransmis" non plus.
+    assert request_id not in await _retransmitted_ids(b)
+
+    events = await _timeline(auth_client, request_id)
+    transmitted = [e for e in events if e["event_type"] == "treatment_transmitted"]
+    assert len(transmitted) == 2, "l'historique des deux transmissions doit rester intact"
+
+    # A -> C
+    resp = await _call_as(
+        a, "POST", f"/api/v1/requests/{request_id}/transmit",
+        {"to_user_id": "826", "work_done": "Nouvelle intervention A.", "reason": "Passage à C."},
+    )
+    assert resp.status_code == 200, resp.text
+
+    assert request_id not in await _my_tickets_ids(a, 824)
+    assert request_id in await _transmitted_ids(a)
+    assert request_id in await _my_tickets_ids(c, 826)
+    assert request_id not in await _transmitted_ids(c)
+    # B reste hors de sa boîte de traitement, toujours dans ses tickets transmis.
+    assert request_id not in await _my_tickets_ids(b, 825)
+    assert request_id in await _transmitted_ids(b)
+
+    events = await _timeline(auth_client, request_id)
+    transmitted = [e for e in events if e["event_type"] == "treatment_transmitted"]
+    assert len(transmitted) == 3, "la 3e transmission s'ajoute sans écraser les précédentes"
+
+    # BR-RETRANSMIT-001 — A a maintenant transmis 2 fois (A->B puis A->C, revenu
+    # entre les deux) : bascule dans "retransmis". B (1 seule transmission, B->A)
+    # et C (0 transmission, intervenant actuel) n'y figurent pas.
+    assert request_id in await _retransmitted_ids(a)
+    assert request_id not in await _retransmitted_ids(b)
+    assert request_id not in await _retransmitted_ids(c)
 
 
 # ── 18. Conflit de transmission simultanée refusé ─────────────────────────────

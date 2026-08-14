@@ -41,7 +41,7 @@ async def _create_org_chain(client):
 
 
 @pytest.mark.asyncio
-async def test_admin_user_role_org_assignment_validation(auth_client):
+async def test_admin_user_role_org_assignment_validation(auth_client, mock_central_auth):
     async with auth_client("admin") as client:
         direction_id, department_id, unit_id, suffix = await _create_org_chain(client)
 
@@ -50,6 +50,7 @@ async def test_admin_user_role_org_assignment_validation(auth_client):
             json={
                 "name": "Directeur Validation",
                 "email": f"director-{suffix}@edg.gn",
+                "password": "Password123!",
                 "role": "director",
                 "direction_id": direction_id,
                 "is_edg_employee": True,
@@ -63,6 +64,7 @@ async def test_admin_user_role_org_assignment_validation(auth_client):
             json={
                 "name": "Chef Departement Validation",
                 "email": f"chief-dept-{suffix}@edg.gn",
+                "password": "Password123!",
                 "role": "chief",
                 "department_id": department_id,
                 "is_edg_employee": True,
@@ -76,6 +78,7 @@ async def test_admin_user_role_org_assignment_validation(auth_client):
             json={
                 "name": "Chef Service Validation",
                 "email": f"chief-service-{suffix}@edg.gn",
+                "password": "Password123!",
                 "role": "chief",
                 "unit_id": unit_id,
                 "is_edg_employee": True,
@@ -89,6 +92,7 @@ async def test_admin_user_role_org_assignment_validation(auth_client):
             json={
                 "name": "Agent Validation",
                 "email": f"agent-{suffix}@edg.gn",
+                "password": "Password123!",
                 "role": "agent",
                 "unit_id": unit_id,
                 "is_edg_employee": True,
@@ -102,6 +106,7 @@ async def test_admin_user_role_org_assignment_validation(auth_client):
             json={
                 "name": "Directeur Invalide",
                 "email": f"bad-director-{suffix}@edg.gn",
+                "password": "Password123!",
                 "role": "director",
                 "unit_id": unit_id,
                 "is_edg_employee": True,
@@ -114,6 +119,7 @@ async def test_admin_user_role_org_assignment_validation(auth_client):
             json={
                 "name": "Admin Invalide",
                 "email": f"bad-admin-{suffix}@edg.gn",
+                "password": "Password123!",
                 "role": "admin",
                 "department_id": department_id,
                 "is_edg_employee": True,
@@ -121,13 +127,13 @@ async def test_admin_user_role_org_assignment_validation(auth_client):
         )
         assert bad_admin.status_code == 400
 
-        invalid_update = await client.patch(
+        invalid_update = await client.put(
             f"/api/v1/users/{agent_id}",
             json={"role": "director", "unit_id": unit_id},
         )
         assert invalid_update.status_code == 400
 
-        valid_update = await client.patch(
+        valid_update = await client.put(
             f"/api/v1/users/{agent_id}",
             json={"role": "director", "direction_id": direction_id},
         )

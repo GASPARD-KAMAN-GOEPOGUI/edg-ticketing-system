@@ -90,7 +90,7 @@ class TestAdminSlidesCRUD:
         slide_id = _data(create_r)["id"]
 
         async with auth_client("admin") as c:
-            patch_r = await c.patch(f"/api/v1/admin/homepage/slides/{slide_id}", json={
+            patch_r = await c.put(f"/api/v1/admin/homepage/slides/{slide_id}", json={
                 "title": "Slide modifié",
                 "sort_order": 5,
             })
@@ -107,7 +107,7 @@ class TestAdminSlidesCRUD:
         slide_id = _data(create_r)["id"]
 
         async with auth_client("user") as c:
-            r = await c.patch(f"/api/v1/admin/homepage/slides/{slide_id}", json={"title": "Hack"})
+            r = await c.put(f"/api/v1/admin/homepage/slides/{slide_id}", json={"title": "Hack"})
         assert r.status_code == 403
 
     async def test_admin_can_delete_slide(self, auth_client):

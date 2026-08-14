@@ -1,13 +1,18 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { usePagination, PaginationBar } from "@/components/pagination-bar";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
   CheckCircle2,
   ChevronRight,
+  Download,
+  FileSpreadsheet,
+  FileText,
   Flame,
   LayoutList,
+  Loader2,
+  MoreHorizontal,
   RotateCcw,
   Users,
   Send,
@@ -15,13 +20,22 @@ import {
 } from "lucide-react";
 import { GlassCard } from "@/components/glass-card";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { fetchRequests } from "@/lib/api/requests";
-import { fetchSlaReopenStats, fetchInterventionStats } from "@/lib/api/reports";
+import { fetchSlaReopenStats, fetchInterventionStats, downloadReport, type ExportFormat } from "@/lib/api/reports";
 import type { RequestItem, RequestStatus } from "@/lib/mock-data";
 import { requireRole } from "@/lib/auth-guard";
 import { useRole, useUser } from "@/lib/session";
 import { fetchDirections, fetchUnit, fetchUnits } from "@/lib/api/directions-units";
 import type { Unit } from "@/lib/api/directions-units";
+import { toast } from "sonner";
+import { formatElapsedHours } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/sla-center")({
   beforeLoad: () => requireRole("chief-service", "chief-departement", "director", "admin"),
@@ -39,27 +53,6 @@ const ACTIVE_STATUSES: RequestStatus[] = [
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const isActive = (r: RequestItem) => ACTIVE_STATUSES.includes(r.status);
-const isBreached = (r: RequestItem) => r.slaElapsed > r.slaHours;
-
-function complianceColor(rate: number): string {
-  if (rate >= 90) return "text-emerald-600";
-  if (rate >= 70) return "text-amber-600";
-  return "text-destructive";
-}
-
-function complianceBarColor(rate: number): string {
-  if (rate >= 90) return "bg-emerald-500";
-  if (rate >= 70) return "bg-amber-500";
-  return "bg-destructive";
-}
-
-function formatOverdue(hours: number): string {
-  if (hours < 1) return "< 1h";
-  if (hours < 24) return `+${Math.round(hours)}h`;
-  const days = Math.floor(hours / 24);
-  const rem = Math.round(hours % 24);
-  return rem > 0 ? `+${days}j ${rem}h` : `+${days}j`;
-}
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -101,12 +94,15 @@ type GroupRow = {
   id: string;
   label: string;
   total: number;
-  compliant: number;
-  breached: number;
-  rate: number;
+  avgHours: number;
+  totalHours: number;
 };
 
 // ── Page ──────────────────────────────────────────────────────────────────────
+
+function toISODate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
 
 function SlaCenterPage() {
   const [role] = useRole();
@@ -115,16 +111,40 @@ function SlaCenterPage() {
   const isChiefService = role === "chief-service";
   const isChief = role === "chief-service" || role === "chief-departement";
 
+  // Période d'affichage — par défaut les 30 derniers jours, ajustable librement.
+  const [startDate, setStartDate] = useState(() => toISODate(new Date(Date.now() - 30 * 86_400_000)));
+  const [endDate, setEndDate] = useState(() => toISODate(new Date()));
+  const [exportPending, setExportPending] = useState(false);
+
+  const resetPeriod = () => {
+    setStartDate(toISODate(new Date(Date.now() - 30 * 86_400_000)));
+    setEndDate(toISODate(new Date()));
+  };
+
+  const handleExport = async (fmt: ExportFormat) => {
+    setExportPending(true);
+    try {
+      await downloadReport("sla-center", fmt, { start: startDate, end: endDate });
+      toast.success("Export téléchargé.");
+    } catch {
+      toast.error("Erreur lors de l'export — vérifiez que le backend est démarré.");
+    } finally {
+      setExportPending(false);
+    }
+  };
+
   const filters = useMemo(
     () => ({
       limit: 500,
+      date_from: startDate,
+      date_to: endDate,
       ...(isDirector && sessionUser?.direction_id
         ? { direction_id: sessionUser.direction_id }
         : isChief && sessionUser?.unit_id
         ? { unit_id: sessionUser.unit_id }
         : {}),
     }),
-    [isDirector, isChief, sessionUser?.direction_id, sessionUser?.unit_id],
+    [isDirector, isChief, sessionUser?.direction_id, sessionUser?.unit_id, startDate, endDate],
   );
 
   const { data, isLoading, isError } = useQuery({
@@ -135,15 +155,15 @@ function SlaCenterPage() {
 
   // BR-SLA-REOPEN-001 — statistiques croisées cycles SLA / réouvertures.
   const { data: reopenStats } = useQuery({
-    queryKey: ["sla-reopen-stats"],
-    queryFn: () => fetchSlaReopenStats(),
+    queryKey: ["sla-reopen-stats", startDate, endDate],
+    queryFn: () => fetchSlaReopenStats(startDate, endDate),
     staleTime: 60_000,
   });
 
   // BR-TRACE-001 — statistiques agrégées sur les interventions.
   const { data: interventionStats } = useQuery({
-    queryKey: ["intervention-stats"],
-    queryFn: () => fetchInterventionStats(),
+    queryKey: ["intervention-stats", startDate, endDate],
+    queryFn: () => fetchInterventionStats(startDate, endDate),
     staleTime: 60_000,
   });
 
@@ -214,11 +234,8 @@ function SlaCenterPage() {
   const directionLabel = (directionId?: string) =>
     directionId && directionLookup[directionId] ? directionLookup[directionId] : "—";
 
-  const breachedList = useMemo(
-    () =>
-      active
-        .filter(isBreached)
-        .sort((a, b) => (b.slaElapsed - b.slaHours) - (a.slaElapsed - a.slaHours)),
+  const sortedByDuration = useMemo(
+    () => [...active].sort((a, b) => b.slaElapsed - a.slaElapsed),
     [active],
   );
 
@@ -227,12 +244,12 @@ function SlaCenterPage() {
     [active],
   );
 
-  const { page: bPage, setPage: setBPage, totalPages: bTotalPages, paged: pagedBreached, total: bTotal, pageSize: bPageSize, setPageSize: setBPageSize } = usePagination(breachedList, 15);
+  const { page: bPage, setPage: setBPage, totalPages: bTotalPages, paged: pagedActive, total: bTotal, pageSize: bPageSize, setPageSize: setBPageSize } = usePagination(sortedByDuration, 15);
 
-  const conformityRate =
-    active.length > 0
-      ? ((active.length - breachedList.length) / active.length) * 100
-      : 100;
+  const avgActiveHours = active.length > 0
+    ? active.reduce((sum, r) => sum + (r.slaElapsed ?? 0), 0) / active.length
+    : 0;
+  const longestActiveHours = sortedByDuration[0]?.slaElapsed ?? 0;
 
   // Group by direction (DG/admin), by service (director), or by service (chief — one service)
   const groupRows = useMemo<GroupRow[]>(() => {
@@ -245,19 +262,18 @@ function SlaCenterPage() {
     }
     return [...map.entries()]
       .map(([id, items]) => {
-        const compliant = items.filter((r) => !isBreached(r)).length;
+        const totalHours = items.reduce((sum, r) => sum + (r.slaElapsed ?? 0), 0);
         return {
           id,
           label: (isDirector || isChief)
             ? serviceLabel(id)
             : directionLabel(id),
           total: items.length,
-          compliant,
-          breached: items.length - compliant,
-          rate: items.length > 0 ? (compliant / items.length) * 100 : 100,
+          avgHours: items.length > 0 ? totalHours / items.length : 0,
+          totalHours,
         };
       })
-      .sort((a, b) => a.rate - b.rate);
+      .sort((a, b) => b.avgHours - a.avgHours);
   }, [active, isDirector, isChief, directionLookup, serviceLookup]);
 
   if (isLoading) {
@@ -281,38 +297,75 @@ function SlaCenterPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold">Centre SLA</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {isDirector
-            ? "Suivi des engagements SLA de votre direction"
-            : "Vue d'ensemble SLA — toutes les directions"}
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Centre SLA</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {isDirector
+              ? "Suivi des engagements SLA de votre direction"
+              : "Vue d'ensemble SLA — toutes les directions"}
+          </p>
+        </div>
+
+        {/* Filtre de période + export */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5 rounded-2xl border border-border/50 bg-background/60 p-1.5 shadow-sm backdrop-blur">
+            <input
+              type="date"
+              value={startDate}
+              max={endDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="h-9 min-w-0 rounded-xl border border-border/40 bg-background/60 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+            />
+            <span className="text-xs text-muted-foreground">→</span>
+            <input
+              type="date"
+              value={endDate}
+              min={startDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="h-9 min-w-0 rounded-xl border border-border/40 bg-background/60 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/40"
+            />
+          </div>
+          <Button variant="outline" size="sm" className="rounded-full" onClick={resetPeriod}>
+            30 derniers jours
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                className="rounded-full gradient-primary text-background shadow-lg shadow-primary/30"
+                disabled={exportPending}
+              >
+                {exportPending
+                  ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                  : <Download className="mr-1.5 h-4 w-4" />}
+                Exporter
+                <MoreHorizontal className="ml-1 h-3.5 w-3.5 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuItem onSelect={() => handleExport("excel")}>
+                <FileSpreadsheet className="h-4 w-4" /> Excel
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => handleExport("csv")}>
+                <FileSpreadsheet className="h-4 w-4" /> CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => handleExport("pdf")}>
+                <FileText className="h-4 w-4" /> PDF
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
 
       {/* KPI row */}
       <div className="grid grid-cols-2 gap-4 md:gap-6 lg:grid-cols-4">
         <KpiCard
-          label="Taux de conformité"
-          value={`${conformityRate.toFixed(1)}%`}
-          sub={`${active.length - breachedList.length} conformes / ${active.length}`}
-          icon={CheckCircle2}
-          iconBg={
-            conformityRate >= 90
-              ? "bg-emerald-500/15"
-              : conformityRate >= 70
-                ? "bg-amber-500/15"
-                : "bg-destructive/15"
-          }
-          iconColor={
-            conformityRate >= 90
-              ? "text-emerald-600"
-              : conformityRate >= 70
-                ? "text-amber-600"
-                : "text-destructive"
-          }
-          progress={conformityRate}
-          progressColor={complianceBarColor(conformityRate)}
+          label="Durée moyenne de traitement"
+          value={formatElapsedHours(avgActiveHours)}
+          sub="sur les tickets actifs"
+          icon={Timer}
+          iconBg="bg-primary/10"
+          iconColor="text-primary"
         />
         <KpiCard
           label="Tickets actifs"
@@ -323,12 +376,12 @@ function SlaCenterPage() {
           iconColor="text-primary"
         />
         <KpiCard
-          label="En dépassement SLA"
-          value={breachedList.length}
-          sub={breachedList.length > 0 ? "action requise" : "aucun dépassement"}
+          label="Durée la plus longue"
+          value={formatElapsedHours(longestActiveHours)}
+          sub="ticket actif le plus ancien en traitement"
           icon={AlertTriangle}
-          iconBg={breachedList.length > 0 ? "bg-destructive/15" : "bg-emerald-500/15"}
-          iconColor={breachedList.length > 0 ? "text-destructive" : "text-emerald-600"}
+          iconBg="bg-muted"
+          iconColor="text-muted-foreground"
         />
         <KpiCard
           label="Critiques actifs"
@@ -364,11 +417,6 @@ function SlaCenterPage() {
             <KpiCard
               label="Durée moy. 1er traitement"
               value={reopenStats.avg_first_cycle_hours != null ? `${reopenStats.avg_first_cycle_hours.toFixed(1)}h` : "—"}
-              sub={
-                reopenStats.first_cycle_sla_compliance_rate != null
-                  ? `conformité SLA ${reopenStats.first_cycle_sla_compliance_rate.toFixed(1)}%`
-                  : undefined
-              }
               icon={CheckCircle2}
               iconBg="bg-primary/10"
               iconColor="text-primary"
@@ -376,11 +424,6 @@ function SlaCenterPage() {
             <KpiCard
               label="Durée moy. après réouverture"
               value={reopenStats.avg_post_reopen_cycle_hours != null ? `${reopenStats.avg_post_reopen_cycle_hours.toFixed(1)}h` : "—"}
-              sub={
-                reopenStats.post_reopen_sla_compliance_rate != null
-                  ? `conformité SLA ${reopenStats.post_reopen_sla_compliance_rate.toFixed(1)}%`
-                  : undefined
-              }
               icon={CheckCircle2}
               iconBg="bg-primary/10"
               iconColor="text-primary"
@@ -470,7 +513,7 @@ function SlaCenterPage() {
 
       {!isChiefService && (
         <GlassCard>
-          <h2 className="mb-4 font-semibold capitalize">SLA par {groupLabel}</h2>
+          <h2 className="mb-4 font-semibold capitalize">Durée de traitement par {groupLabel}</h2>
           {groupRows.length === 0 ? (
             <p className="text-sm text-muted-foreground">Aucun ticket actif.</p>
           ) : (
@@ -480,10 +523,8 @@ function SlaCenterPage() {
                   <tr className="border-b border-border text-xs text-muted-foreground">
                     <th className="py-2 pr-4 text-left capitalize">{groupLabel}</th>
                     <th className="py-2 px-3 text-right">Actifs</th>
-                    <th className="py-2 px-3 text-right">Conformes</th>
-                    <th className="py-2 px-3 text-right">Breach</th>
-                    <th className="py-2 pl-3 text-right">Taux</th>
-                    <th className="w-32 py-2 pl-4"></th>
+                    <th className="py-2 px-3 text-right">Durée moyenne</th>
+                    <th className="py-2 pl-3 text-right">Durée cumulée</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/50">
@@ -491,24 +532,11 @@ function SlaCenterPage() {
                     <tr key={row.id} className="transition-colors hover:bg-muted/30">
                       <td className="py-2.5 pr-4 font-medium">{row.label}</td>
                       <td className="py-2.5 px-3 text-right tabular-nums">{row.total}</td>
-                      <td className="py-2.5 px-3 text-right tabular-nums text-emerald-600">
-                        {row.compliant}
+                      <td className="py-2.5 px-3 text-right tabular-nums text-muted-foreground">
+                        {formatElapsedHours(row.avgHours)}
                       </td>
-                      <td className="py-2.5 px-3 text-right tabular-nums text-destructive">
-                        {row.breached}
-                      </td>
-                      <td
-                        className={`py-2.5 pl-3 text-right tabular-nums font-semibold ${complianceColor(row.rate)}`}
-                      >
-                        {row.rate.toFixed(1)}%
-                      </td>
-                      <td className="py-2.5 pl-4">
-                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                          <div
-                            className={`h-full rounded-full transition-all ${complianceBarColor(row.rate)}`}
-                            style={{ width: `${row.rate}%` }}
-                          />
-                        </div>
+                      <td className="py-2.5 pl-3 text-right tabular-nums text-muted-foreground">
+                        {formatElapsedHours(row.totalHours)}
                       </td>
                     </tr>
                   ))}
@@ -519,22 +547,22 @@ function SlaCenterPage() {
         </GlassCard>
       )}
 
-      {/* Breached tickets list */}
+      {/* Tickets actifs — durée de traitement, du plus long au plus récent */}
       <GlassCard>
         <h2 className="mb-4 flex items-center gap-2 font-semibold">
-          <AlertTriangle className="h-4 w-4 text-destructive" />
-          Tickets en dépassement SLA
-          {breachedList.length > 0 && (
-            <span className="ml-1 rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-semibold text-destructive">
-              {breachedList.length}
+          <Timer className="h-4 w-4 text-muted-foreground" />
+          Tickets actifs — durée de traitement
+          {sortedByDuration.length > 0 && (
+            <span className="ml-1 rounded-full bg-muted px-2 py-0.5 text-xs font-semibold text-muted-foreground">
+              {sortedByDuration.length}
             </span>
           )}
         </h2>
 
-        {breachedList.length === 0 ? (
-          <div className="flex items-center gap-2 text-sm text-emerald-600">
+        {sortedByDuration.length === 0 ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <CheckCircle2 className="h-4 w-4" />
-            Toutes les SLA sont respectées.
+            Aucun ticket actif.
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -545,13 +573,13 @@ function SlaCenterPage() {
                   <th className="py-2 pr-3 text-left">Titre</th>
                   <th className="py-2 pr-3 text-left">Priorité</th>
                   <th className="py-2 pr-3 text-left capitalize">{groupLabel}</th>
-                  <th className="py-2 pr-3 text-right">Dépassé de</th>
+                  <th className="py-2 pr-3 text-right">Durée</th>
                   <th className="py-2 text-left">Statut</th>
                   <th className="py-2"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/50">
-                {pagedBreached.map((r) => (
+                {pagedActive.map((r) => (
                   <tr key={r.id} className="transition-colors hover:bg-muted/30">
                     <td className="py-2.5 pr-3 font-mono text-xs text-muted-foreground">
                       {r.ref}
@@ -565,8 +593,8 @@ function SlaCenterPage() {
                         ? serviceLabel(r.serviceId)
                         : directionLabel(r.directionId)}
                     </td>
-                    <td className="py-2.5 pr-3 text-right font-semibold tabular-nums text-destructive">
-                      {formatOverdue(r.slaElapsed - r.slaHours)}
+                    <td className="py-2.5 pr-3 text-right font-semibold tabular-nums text-muted-foreground">
+                      {formatElapsedHours(r.slaElapsed)}
                     </td>
                     <td className="py-2.5">
                       <StatusBadge status={r.status} />

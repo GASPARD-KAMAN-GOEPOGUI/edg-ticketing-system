@@ -16,7 +16,7 @@
 
 ### Routers ajoutés à `main.py`
 - `agent_stats_router` → `GET /api/v1/stats/my`
-- `director_routing_router` → `GET|POST|PATCH|DELETE /api/v1/routing-rules/by-direction/...`
+- `director_routing_router` → `GET|POST|PUT|DELETE /api/v1/routing-rules/by-direction/...`
 
 ---
 

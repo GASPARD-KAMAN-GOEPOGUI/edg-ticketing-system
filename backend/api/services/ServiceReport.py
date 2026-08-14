@@ -1584,6 +1584,65 @@ class ReportService(BaseService):
         )
         return [dict(r) for r in result.mappings().all()]
 
+    # ── Centre SLA — tickets actifs en dépassement sur une période ────────────
+
+    async def sla_center_breach_rows(
+        self,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        direction_id: Optional[int] = None,
+        unity_id: Optional[int] = None,
+        group_by_direction: bool = False,
+    ) -> list[dict]:
+        """Tickets actifs en dépassement SLA créés sur la période, pour l'export
+        du Centre SLA (mêmes règles que la page : statuts non terminaux + sla_breached)."""
+        from datetime import date as dt_date
+        today = dt_date.today()
+        s = (start_date or (today - timedelta(days=30))).isoformat()
+        e = (end_date or today).isoformat()
+        params: dict = {"start": s, "end": e, "active_statuses": tuple(ACTIVE_STATUS_CODES)}
+        stmt_params = [bindparam("active_statuses", expanding=True)]
+
+        scope_sql = ""
+        if unity_id is not None:
+            scope_sql = "AND r.unity_id = :unity_id"
+            params["unity_id"] = int(unity_id)
+        elif direction_id is not None:
+            unity_ids = await self._scoped_unity_ids(int(direction_id))
+            if not unity_ids:
+                return []
+            scope_sql = "AND r.unity_id IN :unity_ids"
+            params["unity_ids"] = unity_ids
+            stmt_params.append(bindparam("unity_ids", expanding=True))
+
+        group_label_expr = "d.label" if group_by_direction else "u.label"
+
+        stmt = text(f"""
+            SELECT
+                r.ref          AS ref,
+                r.title        AS title,
+                pd.label       AS priority,
+                {group_label_expr} AS group_label,
+                rs.label       AS status,
+                ROUND(GREATEST(TIMESTAMPDIFF(
+                    MINUTE, DATE_ADD(r.created_at, INTERVAL r.sla_hours HOUR), NOW()
+                ), 0) / 60.0, 1) AS overdue_hours
+            FROM request r
+            JOIN request_status rs ON rs.id = r.request_status_id
+            JOIN priority_definition pd ON pd.id = r.priority_definition_id
+            LEFT JOIN unity u ON u.id = r.unity_id
+            LEFT JOIN unity d ON d.id = COALESCE(u.parent_direction_id, u.id)
+            WHERE r.deleted_at IS NULL
+              AND r.sla_breached = 1
+              AND rs.code IN :active_statuses
+              AND DATE(r.created_at) BETWEEN :start AND :end
+              {scope_sql}
+            ORDER BY overdue_hours DESC
+        """).bindparams(*stmt_params)
+
+        result = await self.session.execute(stmt, params)
+        return [dict(r) for r in result.mappings().all()]
+
     # ── Rapport CSAT ─────────────────────────────────────────────────────────
 
     async def csat_report(

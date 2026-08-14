@@ -166,7 +166,7 @@ async def get_escalation(
     return EscalationResponse.from_detail(wd, req_id, ref)
 
 
-@router.patch("/{id}/review", response_model=EscalationResponse)
+@router.put("/{id}/review", response_model=EscalationResponse)
 async def review_escalation(
     id: int,
     db: AsyncSession = Depends(get_db),
@@ -183,7 +183,7 @@ async def review_escalation(
     return EscalationResponse.from_detail(wd, req_id, ref)
 
 
-@router.patch("/{id}/resolve", response_model=EscalationResponse)
+@router.put("/{id}/resolve", response_model=EscalationResponse)
 async def resolve_escalation(
     id: int,
     body: _ResolveBody = Body(default_factory=_ResolveBody),

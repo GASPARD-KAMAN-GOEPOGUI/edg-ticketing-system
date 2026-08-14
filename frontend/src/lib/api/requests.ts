@@ -121,6 +121,9 @@ export type RawRequest = {
   reopen_count?: number;
   // BR-TRACE-001 — détail ticket uniquement (absent des listes allégées).
   interventions?: RawIntervention[];
+  // Avatars des intervenants (demandeur, assigné, acteurs/destinataires du journal),
+  // cle = account id (string) -> avatar_url. Détail ticket uniquement.
+  participant_avatars?: Record<string, string>;
 };
 
 export type RawSlaCycle = {
@@ -290,6 +293,7 @@ export function mapRequest(raw: RawRequest): RequestItem {
     slaCycles: (raw.sla_cycles ?? []).map(mapSlaCycle),
     reopenCount: raw.reopen_count ?? 0,
     interventions: (raw.interventions ?? []).map(mapIntervention),
+    participantAvatars: raw.participant_avatars ?? undefined,
   };
 }
 
@@ -429,7 +433,7 @@ export async function fetchTriage(
 }
 
 export async function fetchTransmittedByMe(
-  filters?: { page?: number; limit?: number; search?: string },
+  filters?: { page?: number; limit?: number; search?: string; retransmitted_only?: boolean },
 ): Promise<{ items: RequestItem[]; total: number; page: number; pages: number; pageSize: number }> {
   const params = new URLSearchParams();
   if (filters) {
@@ -458,6 +462,13 @@ export async function fetchRequest(
 ): Promise<RequestItem> {
   const params = options?.includeDeleted ? "?include_deleted=true" : "";
   const raw = await apiFetch<RawRequest>(`/requests/${id}${params}`);
+  return mapRequest(raw);
+}
+
+// BR-TRACE-001 — lookup admin par référence (accès global, contrairement à
+// trackRequest qui exige un identifiant citoyen email/téléphone).
+export async function getRequestByRef(ref: string): Promise<RequestItem> {
+  const raw = await apiFetch<RawRequest>(`/requests/ref/${encodeURIComponent(ref.trim().toUpperCase())}`);
   return mapRequest(raw);
 }
 
@@ -541,7 +552,7 @@ export async function updateRequest(
   data: Partial<RawRequest> & { status_reason?: string },
 ): Promise<RequestItem> {
   const raw = await apiFetch<RawRequest>(`/requests/${id}`, {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify(data),
   });
   return mapRequest(raw);
@@ -682,40 +693,16 @@ export async function cancelRequest(
   return mapRequest(raw);
 }
 
-/** Phase 1 — L'utilisateur refuse la résolution (motif obligatoire). */
-export async function requestReopen(
-  id: string,
-  reason: string,
-): Promise<RequestItem> {
-  const raw = await apiFetch<RawRequest>(`/requests/${id}/request-reopen`, {
-    method: "POST",
-    body: JSON.stringify({ reason }),
-  });
-  return mapRequest(raw);
-}
-
-/** Phase 2 — Le chef approuve la réouverture (réservé chief/director/admin). */
+/**
+ * BR-REOPEN-QUEUE-001 (révision — réouverture immédiate) : réservé au demandeur,
+ * motif obligatoire, aucune approbation hiérarchique. Le ticket retourne
+ * directement dans la File d'attente pour un nouveau cycle.
+ */
 export async function reopenRequest(
   id: string,
-  reason?: string,
-  actorId?: string,
-): Promise<RequestItem> {
-  const params = new URLSearchParams();
-  if (actorId) params.set("actor_id", actorId);
-  const qs = params.toString() ? `?${params.toString()}` : "";
-  const raw = await apiFetch<RawRequest>(`/requests/${id}/reopen${qs}`, {
-    method: "POST",
-    body: JSON.stringify(reason ? { reason } : {}),
-  });
-  return mapRequest(raw);
-}
-
-/** Phase 2 — Le chef refuse la réouverture avec motif obligatoire. */
-export async function rejectReopenRequest(
-  id: string,
   reason: string,
 ): Promise<RequestItem> {
-  const raw = await apiFetch<RawRequest>(`/requests/${id}/reject-reopen`, {
+  const raw = await apiFetch<RawRequest>(`/requests/${id}/reopen`, {
     method: "POST",
     body: JSON.stringify({ reason }),
   });
@@ -897,7 +884,7 @@ export async function requesterEditRequest(
   },
 ): Promise<RequestItem> {
   const raw = await apiFetch<RawRequest>(`/requests/${id}/requester-edit`, {
-    method: "PATCH",
+    method: "PUT",
     body: JSON.stringify(data),
   });
   return mapRequest(raw);

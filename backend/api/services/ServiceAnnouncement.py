@@ -13,7 +13,7 @@ from api.repositories import (
 )
 from api.core.event_bus import AppEvent, emit as emit_event
 from api.services.base_service import BaseService
-from api.services.NotificationEmitter import emit as emit_notif
+from api.services.NotificationEmitter import emit_bulk as emit_notif_bulk
 
 _ADMIN_ROLES: frozenset[str] = frozenset({"admin"})
 
@@ -166,10 +166,10 @@ class AnnouncementService(BaseService):
             result = await self.session.execute(stmt)
             recipient_ids = [str(row[0]) for row in result.all()]
 
-            for rid in recipient_ids:
-                await emit_notif(
+            if recipient_ids:
+                await emit_notif_bulk(
                     self.session,
-                    recipient_id=rid,
+                    recipient_ids=recipient_ids,
                     title=f"Annonce : {obj.title}",
                     body=obj.description[:120] + ("…" if len(obj.description) > 120 else ""),
                     type="info",
