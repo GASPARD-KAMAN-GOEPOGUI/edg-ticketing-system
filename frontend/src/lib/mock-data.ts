@@ -290,6 +290,7 @@ export type RequestItem = {
     isPublic: boolean;
     isDirective?: boolean;
     replyToId?: string;
+    peerId?: string;
     createdAt: string;
     attachmentId?: string;
     attachmentName?: string;

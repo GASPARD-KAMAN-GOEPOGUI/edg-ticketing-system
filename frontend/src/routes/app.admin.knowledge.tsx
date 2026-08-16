@@ -125,6 +125,7 @@ function AdminKnowledge() {
         category: f.category,
         readTime: f.readTime,
         author: f.author,
+        published: f.published,
         tags: f.tags.split(",").map((t) => t.trim()).filter(Boolean),
       }),
     onSuccess: () => { invalidate(); setSheetOpen(false); toast.success("Article mis à jour."); },
@@ -175,12 +176,13 @@ function AdminKnowledge() {
     return true;
   }
 
-  function submit() {
+  function submit(published: boolean) {
     if (!validate()) return;
+    const f = { ...form, published };
     if (editTarget) {
-      updateMut.mutate({ id: editTarget.id, f: form });
+      updateMut.mutate({ id: editTarget.id, f });
     } else {
-      createMut.mutate(form);
+      createMut.mutate(f);
     }
   }
 
@@ -361,14 +363,14 @@ function AdminKnowledge() {
             <Button variant="outline" onClick={() => setSheetOpen(false)}>Annuler</Button>
             <Button
               variant="outline"
-              onClick={() => { setForm({ ...form, published: false }); setTimeout(submit, 0); }}
+              onClick={() => submit(false)}
               disabled={createMut.isPending || updateMut.isPending}
             >
               Enregistrer comme brouillon
             </Button>
             <Button
               className="gradient-primary"
-              onClick={() => { setForm((prev) => ({ ...prev, published: true })); setTimeout(submit, 0); }}
+              onClick={() => submit(true)}
               disabled={createMut.isPending || updateMut.isPending}
             >
               {createMut.isPending || updateMut.isPending ? "Enregistrement…" : "Publier"}

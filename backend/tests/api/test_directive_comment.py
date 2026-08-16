@@ -125,7 +125,7 @@ async def test_regular_comment_unaffected_by_directive_flag(auth_client, unity_i
         return SimpleNamespace(id=813, role="chief-service", unity_id=unity_id, direction_id=None, name="Chef Test")
 
     resp = await _post_comment_as(
-        _chief_dep, request_id, {"body": "Commentaire normal.", "is_public": False, "peer_id": "1"},
+        _chief_dep, request_id, {"body": "Commentaire normal.", "is_public": False, "peer_id": "813"},
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["data"]["infos"].get("is_directive") is not True
@@ -148,14 +148,14 @@ async def test_reply_to_existing_comment_round_trips(auth_client, unity_id):
     agent_dep = _agent_dep_factory(820, unity_id)
 
     first = await _post_comment_as(
-        agent_dep, request_id, {"body": "Premier message.", "is_public": False, "peer_id": "1"},
+        agent_dep, request_id, {"body": "Premier message.", "is_public": False, "peer_id": "820"},
     )
     assert first.status_code == 201, first.text
     first_id = first.json()["data"]["id"]
 
     reply = await _post_comment_as(
         agent_dep, request_id,
-        {"body": "Reponse ciblee.", "is_public": False, "reply_to_id": str(first_id), "peer_id": "1"},
+        {"body": "Reponse ciblee.", "is_public": False, "reply_to_id": str(first_id), "peer_id": "820"},
     )
     assert reply.status_code == 201, reply.text
     assert reply.json()["data"]["infos"]["reply_to_id"] == str(first_id)
@@ -172,14 +172,14 @@ async def test_reply_to_comment_from_different_request_rejected(auth_client, uni
     agent_dep = _agent_dep_factory(821, unity_id)
 
     comment_a = await _post_comment_as(
-        agent_dep, request_a, {"body": "Message sur A.", "is_public": False, "peer_id": "1"},
+        agent_dep, request_a, {"body": "Message sur A.", "is_public": False, "peer_id": "821"},
     )
     assert comment_a.status_code == 201, comment_a.text
     comment_a_id = comment_a.json()["data"]["id"]
 
     resp = await _post_comment_as(
         agent_dep, request_b,
-        {"body": "Reponse invalide.", "is_public": False, "reply_to_id": str(comment_a_id), "peer_id": "1"},
+        {"body": "Reponse invalide.", "is_public": False, "reply_to_id": str(comment_a_id), "peer_id": "821"},
     )
     assert resp.status_code == 422, resp.text
 
@@ -192,7 +192,7 @@ async def test_reply_to_nonexistent_comment_rejected(auth_client, unity_id):
 
     resp = await _post_comment_as(
         agent_dep, request_id,
-        {"body": "Reponse a du vide.", "is_public": False, "reply_to_id": "999999999", "peer_id": "1"},
+        {"body": "Reponse a du vide.", "is_public": False, "reply_to_id": "999999999", "peer_id": "822"},
     )
     assert resp.status_code == 422, resp.text
 
@@ -216,7 +216,7 @@ async def test_reply_to_non_comment_event_rejected(auth_client, unity_id):
         request_id,
         {
             "body": "Reponse invalide.", "is_public": False,
-            "reply_to_id": str(non_comment_event["id"]), "peer_id": "1",
+            "reply_to_id": str(non_comment_event["id"]), "peer_id": "823",
         },
     )
     assert resp.status_code == 422, resp.text

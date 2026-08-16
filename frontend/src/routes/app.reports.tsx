@@ -21,7 +21,6 @@ import {
   BarChart3,
   FileSpreadsheet,
   FileText,
-  Star,
   Download,
   Loader2,
   MoreHorizontal,
@@ -362,46 +361,6 @@ function ReportsPage() {
           </DropdownMenu>
         </div>
       </header>
-
-      {/* KPIs réels */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <GlassCard>
-          <div className="text-sm text-muted-foreground">Volume total</div>
-          {isLoading ? (
-            <Loader2 className="mt-2 h-6 w-6 animate-spin text-muted-foreground" />
-          ) : (
-            <>
-              <div className="mt-2 text-3xl font-bold tracking-tight">
-                {total.toLocaleString("fr-FR")}
-              </div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                {openCount} en cours
-              </div>
-            </>
-          )}
-        </GlassCard>
-        <GlassCard>
-          <div className="text-sm text-muted-foreground">Satisfaction (CSAT)</div>
-          {loadCsat ? (
-            <Loader2 className="mt-2 h-6 w-6 animate-spin text-muted-foreground" />
-          ) : (
-            <>
-              <div className="mt-2 flex items-baseline gap-1">
-                <span className="text-3xl font-bold tracking-tight">
-                  {csatScore ?? "—"}
-                </span>
-                {csatScore && (
-                  <span className="text-base text-muted-foreground">/ 5</span>
-                )}
-              </div>
-              <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                <Star className="h-3 w-3 text-amber-400" />
-                {csatCount > 0 ? `${csatCount} avis` : "Aucun avis"}
-              </div>
-            </>
-          )}
-        </GlassCard>
-      </div>
 
       {/* Graphiques principaux */}
       <div className="grid gap-4 lg:grid-cols-3">

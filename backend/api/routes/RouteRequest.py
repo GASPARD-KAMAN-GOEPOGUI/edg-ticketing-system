@@ -17,7 +17,8 @@ from api.schemas.SchemaEscalation import EscalationResponse
 from api.schemas.SchemaAttachment import AttachmentResponse
 from pydantic import BaseModel
 from api.schemas.base import PaginatedResponse
-from api.services import RequestService, AttachmentService
+from api.services import RequestService, AttachmentService, RequestExportService
+from api.services.ServiceExport import build_response
 from api.repositories import WorkflowDetailRepository, WorkflowRepository
 from api.services.ServiceClamAV import scan_bytes as clamav_scan
 from api.core.ticket_actions import (
@@ -201,6 +202,10 @@ def _att_svc(db: AsyncSession = Depends(get_db)) -> AttachmentService:
     return AttachmentService(db)
 
 
+def _export_svc(db: AsyncSession = Depends(get_db)) -> RequestExportService:
+    return RequestExportService(db)
+
+
 def _actor_display_name(actor) -> str | None:
     parts = [getattr(actor, "firstname", None), getattr(actor, "name", None)]
     return " ".join(part for part in parts if part) or None
@@ -233,18 +238,20 @@ async def _validate_attachment_ids(
 
 def _resolve_comment_peer(event, req) -> Optional[str]:
     """
-    BR-MESSAGING-PAIR-001 — résout le second participant (peer) d'un événement
-    `comment_added`. Une conversation = paire {demandeur, peer}, jamais un fil
-    global par ticket.
+    BR-MESSAGING-PAIR-001 — résout la clé de conversation (`peer_id`) d'un
+    événement `comment_added` : toujours le côté "intervenant" de la paire
+    {demandeur, peer}, jamais le demandeur lui-même et jamais inversé selon
+    qui a écrit — un message du demandeur et la réponse de l'intervenant
+    portent le même `peer_id`, pour rester dans le même fil.
 
     Priorité à `infos.peer_id`, écrit explicitement à la création depuis cette
     évolution. Fallback pour les événements historiques (créés avant
     l'introduction de `peer_id`, jamais migrés en base) :
       - directive (`infos.is_directive`) -> `infos.target_user_id` (déjà résolu,
         inchangé) ;
-      - auteur = demandeur -> assigné courant du ticket (meilleure estimation :
-        le front n'envoyait jusqu'ici que des messages destinés à l'intervenant
-        en charge) ;
+      - auteur = demandeur -> assigné courant du ticket au moment de la lecture
+        (meilleure estimation : le front n'envoyait jusqu'ici que des messages
+        destinés à l'intervenant en charge) ;
       - auteur = staff -> lui-même (chaque intervenant historique garde son
         propre fil avec le demandeur, jamais mélangé avec celui d'un autre).
     """
@@ -728,6 +735,20 @@ async def get_request(
     return await _request_response_for_actor(req, svc, actor)
 
 
+@router.get("/{id}/export")
+async def export_request_dossier(
+    id: str,
+    format: str = Query("excel", pattern="^(excel|pdf)$"),
+    _actor=Depends(require_roles("admin")),
+    export_svc: RequestExportService = Depends(_export_svc),
+):
+    """Dossier fonctionnel complet d'une demande — Administration uniquement.
+    Lecture seule : aucun changement de statut, aucune notification, aucun
+    événement métier. Aucune donnée SLA/délai n'est incluse."""
+    content, filename = await export_svc.build_dossier(id, fmt=format)
+    return build_response(content, format, filename)
+
+
 # ── Premier résultat filtré (pattern edgrh GET /items/) ───────────────────────
 
 @router.get(
@@ -1155,6 +1176,14 @@ async def escalate_request(
     chef hiérarchique de la personne qui traite le ticket (assignee, ou l'acteur
     lui-même si le ticket n'est pas encore assigné) et lui réassigne le ticket.
     """
+    # Escalade mise de côté (harmonisation statuts/notifications, 2026-08) —
+    # fonctionnalité désactivée en attente de réintroduction ultérieure (cf.
+    # CLAUDE.md §12). Ne pas réactiver sans consigne explicite.
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="La fonctionnalité d'escalade est actuellement désactivée.",
+    )
+
     from sqlalchemy import select as sa_select
     from api.models.ModelAccount import Account
     from api.services.ServiceEscalade import find_hierarchical_chief
@@ -1270,6 +1299,14 @@ async def escalate_to_director_request(
     cette action court-circuite volontairement la hierarchie normale et cible directement
     le directeur de la direction du chef de departement. Motif obligatoire.
     """
+    # Escalade mise de côté (harmonisation statuts/notifications, 2026-08) —
+    # fonctionnalité désactivée en attente de réintroduction ultérieure (cf.
+    # CLAUDE.md §12). Ne pas réactiver sans consigne explicite.
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="La fonctionnalité d'escalade est actuellement désactivée.",
+    )
+
     from sqlalchemy import select as sa_select
     from api.models.ModelAccount import Account
     from api.services.ServiceEscalade import find_director_for_department
@@ -1443,18 +1480,23 @@ async def create_comment(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Seuls le demandeur et l'intervenant actuel de ce ticket peuvent écrire dans cette conversation.",
             )
-        expected_peer = str(assignee_id) if actor_id_str == str(requester_id) else str(requester_id)
+        # `peer_id` est la clé stable de la conversation — toujours le côté
+        # "intervenant" de la paire {demandeur, assigné}, quel que soit lequel
+        # des deux écrit. Ne PAS l'inverser selon l'auteur : un message du
+        # demandeur et la réponse de l'assigné doivent porter le même peer_id
+        # pour rester dans le même fil (sinon ils se retrouvent dans deux
+        # conversations distinctes côté lecture/regroupement).
         if not body.peer_id:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="peer_id requis : indiquez le destinataire de ce message.",
+                detail="peer_id requis : indiquez la conversation cible.",
             )
-        if str(body.peer_id) != expected_peer:
+        if str(body.peer_id) != str(assignee_id):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Destinataire invalide pour cette conversation.",
+                detail="Conversation invalide : peer_id doit être l'intervenant actuel du ticket.",
             )
-        peer_id = expected_peer
+        peer_id = str(assignee_id)
 
     attachment_infos: dict = {}
     if body.attachment_id is not None:

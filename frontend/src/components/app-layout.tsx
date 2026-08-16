@@ -140,9 +140,13 @@ const navItems: NavItem[] = [
   { to: "/app/strategic-dashboard", label: "Tableau de bord DSI", icon: Compass, roles: ["director"],   group: "Pilotage" },
 
   // ── Analyse — rapports/statistiques, séparé du pilotage opérationnel ──────
-  { to: "/app/reports", label: "Rapports Département", icon: BarChart3, roles: ["chief-departement"],  group: "Analyse" },
-  { to: "/app/reports", label: "Rapports Direction",   icon: BarChart3, roles: ["director"],           group: "Analyse" },
-  { to: "/app/reports", label: "Rapports",             icon: BarChart3, roles: ["admin"],               group: "Analyse" },
+  // Onglet "Rapports" masqué sur demande (2026-08-16) pour les 3 rôles
+  // (chief-departement, director, admin) — la route /app/reports et son
+  // composant restent intacts, uniquement retirés de la navigation. Changement
+  // réversible : réajouter les 3 entrées ci-dessous pour réactiver.
+  // { to: "/app/reports", label: "Rapports Département", icon: BarChart3, roles: ["chief-departement"],  group: "Analyse" },
+  // { to: "/app/reports", label: "Rapports Direction",   icon: BarChart3, roles: ["director"],           group: "Analyse" },
+  // { to: "/app/reports", label: "Rapports",             icon: BarChart3, roles: ["admin"],               group: "Analyse" },
 
   // ── Admin — Utilisateurs ──────────────────────────────────────────────────
   { to: "/app/admin/users", label: "Utilisateurs & Rôles", icon: Users2, roles: ["admin"], group: "Utilisateurs" },

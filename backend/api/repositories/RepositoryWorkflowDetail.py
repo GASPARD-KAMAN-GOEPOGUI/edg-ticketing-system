@@ -179,7 +179,7 @@ class WorkflowDetailRepository(BaseRepository[WorkflowDetail]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def create_event(self, data: dict) -> WorkflowDetail:
+    async def create_event(self, data: dict, *, commit: bool = True) -> WorkflowDetail:
         """
         Insère un événement de timeline dans le journal du workflow.
 
@@ -244,7 +244,7 @@ class WorkflowDetailRepository(BaseRepository[WorkflowDetail]):
             "infos": infos,
             "parent_id": parent_id,
             "activated": data.get("activated", False),
-        })
+        }, commit=commit)
 
     async def list_comments_by_request(self, request_id: str) -> list[WorkflowDetail]:
         """Retourne les commentaires (event_type='comment_added') d'une demande via son workflow.

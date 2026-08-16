@@ -54,19 +54,10 @@ def _request_label(obj, attr: str, fallback: str = "") -> str:
 
 def _request_email_details(req) -> dict[str, str]:
     assignee = getattr(req, "assignee", None)
-    requester = getattr(req, "requester", None)
-    requester_name = (
-        _display_name(getattr(requester, "firstname", None), getattr(requester, "name", None))
-        or getattr(req, "requester_name", "")
-    )
     details = {
         "Numero de ticket": getattr(req, "ref", "") or str(getattr(req, "id", "")),
-        "Objet": getattr(req, "title", ""),
         "Service concerne": _request_label(req, "unity"),
-        "Priorite": _request_label(req, "priority_definition_ref", getattr(req, "priority", "")),
-        "Statut actuel": _request_label(req, "request_status_ref", getattr(req, "request_status", "")),
         "Date de creation": _display_date(getattr(req, "created_at", None)),
-        "Demandeur": requester_name,
         "Agent assigne": _display_name(
             getattr(assignee, "firstname", None),
             getattr(assignee, "name", None),
@@ -97,6 +88,10 @@ async def emit(
     # notification App-only (ex. confirmation légère à l'émetteur d'une
     # transmission) sans passer par un canal SMS et sans email systématique.
     send_email: bool = True,
+    # Perf — flush au lieu de commit quand l'appelant orchestre lui-même un
+    # commit unique en fin de transaction (cf. ServiceRequest.create()). Défaut
+    # True : comportement strictement inchangé pour tous les autres appelants.
+    commit: bool = True,
 ) -> None:
     """
     Émet une notification.
@@ -131,7 +126,7 @@ async def emit(
                     "action_label": action_label,
                     "action_url": action_url,
                     "visibility": visibility,
-                })
+                }, commit=commit)
                 await emit_event(AppEvent(
                     type="notification.created",
                     payload={

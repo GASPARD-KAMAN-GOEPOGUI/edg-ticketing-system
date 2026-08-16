@@ -8,11 +8,101 @@ import csv
 import io
 import logging
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
 ExportFormat = Literal["csv", "excel", "pdf"]
+
+# Caractères "typographiques" hors Latin-1 (polices de base fpdf2/PDF) —
+# transposés vers leur équivalent ASCII le plus proche. Tout le reste
+# d'irreprésentable (emoji, autres scripts) est neutralisé en aval par
+# l'encode/decode latin-1 de pdf_safe_text() plutôt que de faire planter
+# l'export sur un contenu utilisateur imprévisible (titre, commentaire...).
+_PDF_CHAR_MAP = {
+    "—": "-", "–": "-",       # tiret cadratin/demi-cadratin — –
+    "‘": "'", "’": "'",       # apostrophes courbes ' '
+    "“": '"', "”": '"',       # guillemets courbes " "
+    "…": "...",                    # points de suspension …
+    " ": " ",                      # espace insécable
+}
+
+
+def pdf_safe_text(value: Any) -> str:
+    """Neutralise tout caractère non supporté par les polices de base fpdf2
+    (Latin-1 uniquement) — nécessaire car le contenu exporté (titres,
+    commentaires, motifs...) est du texte libre saisi par les utilisateurs,
+    jamais garanti Latin-1 (tiret cadratin, guillemets courbes, emoji...)."""
+    text = "" if value is None else str(value)
+    for src, dst in _PDF_CHAR_MAP.items():
+        text = text.replace(src, dst)
+    return text.encode("latin-1", errors="replace").decode("latin-1")
+
+
+def get_logo_path() -> Path | None:
+    """Chemin du logo EDG — réutilise l'asset frontend existant (même pattern
+    que core/mailer.py pour l'en-tête des emails), aucune copie dupliquée."""
+    path = Path(__file__).resolve().parents[3] / "frontend" / "src" / "assets" / "edg_logo.png"
+    return path if path.exists() else None
+
+
+def make_branded_pdf(doc_title: str):
+    """Crée un document FPDF avec logo EDG en en-tête + filigrane sur chaque
+    page (paysage A4). Utilisé par les exports qui veulent ce branding (ex.
+    dossier de ticket) ; n'affecte pas export_pdf() ci-dessus, qui reste
+    volontairement inchangé pour les rapports existants.
+
+    fpdf2 n'expose header()/footer() que via une sous-classe de FPDF — définie
+    ici (dans la fonction, pas au niveau module) pour garder l'import de fpdf2
+    paresseux, comme export_pdf() ci-dessus."""
+    try:
+        from fpdf import FPDF
+    except ImportError:
+        raise RuntimeError("fpdf2 requis pour les exports PDF. pip install fpdf2")
+
+    logo_path = get_logo_path()
+    safe_title = pdf_safe_text(doc_title)
+
+    class _BrandedPDF(FPDF):
+        def header(self) -> None:
+            logo_bottom_y = 8.0
+            if logo_path:
+                wm_w = 130.0
+                with self.local_context(fill_opacity=0.07):
+                    self.image(str(logo_path), x=(self.w - wm_w) / 2, y=(self.h - wm_w) / 2, w=wm_w)
+                logo_y = 8.0
+                info = self.image(str(logo_path), x=10, y=logo_y, w=16)
+                # Hauteur réelle rendue (dépend du ratio du fichier logo) — évite de
+                # figer une hauteur supposée : la ligne de séparation ci-dessous doit
+                # passer sous le logo entier, jamais le traverser.
+                logo_bottom_y = logo_y + info.rendered_height
+            self.set_xy(0, 10)
+            self.set_font("Helvetica", "B", 14)
+            self.set_text_color(26, 82, 118)
+            self.cell(self.w, 7, safe_title, align="C")
+            self.set_xy(0, 17)
+            self.set_font("Helvetica", "", 8)
+            self.set_text_color(120, 120, 120)
+            self.cell(self.w, 5, pdf_safe_text("EDG Connect — Électricité de Guinée"), align="C")
+            self.set_y(max(24.0, logo_bottom_y + 2.0))
+            self.set_draw_color(26, 82, 118)
+            self.set_line_width(0.4)
+            self.line(10, self.get_y(), self.w - 10, self.get_y())
+            self.ln(4)
+
+        def footer(self) -> None:
+            self.set_y(-14)
+            self.set_font("Helvetica", "I", 7)
+            self.set_text_color(150, 150, 150)
+            stamp = datetime.now().strftime("%d/%m/%Y à %H:%M")
+            self.cell(0, 5, pdf_safe_text(f"Page {self.page_no()}/{{nb}} — Généré le {stamp}"), align="C")
+
+    pdf = _BrandedPDF(orientation="L", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.set_margins(10, 10, 10)
+    pdf.alias_nb_pages()
+    return pdf
 
 
 # ── CSV ───────────────────────────────────────────────────────────────────────

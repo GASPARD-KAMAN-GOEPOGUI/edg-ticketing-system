@@ -289,16 +289,31 @@ class BaseRepository(Generic[ModelType]):
 
     # ── Écritures ─────────────────────────────────────────────────────────────
 
-    async def create(self, data: dict) -> ModelType:
+    async def create(self, data: dict, *, commit: bool = True) -> ModelType:
+        """
+        `commit=False` — flush au lieu de commit (id auto-incrémenté disponible
+        immédiatement, cf. cursor.lastrowid ; `created_at`/`updated_at` restent
+        server_default et ne sont donc peuplés qu'après un commit/refresh ou une
+        lecture fraîche). Réservé aux flux qui orchestrent explicitement un commit
+        unique en fin de transaction (ex. ServiceRequest.create()) — laisse la
+        session dans un état "flush" en cas d'IntegrityError plutôt que de
+        rollback, pour ne pas annuler des écritures antérieures déjà flush dans
+        la même transaction (le rollback reste de la responsabilité de l'appelant
+        ou de la savepoint englobante — cf. begin_nested()).
+        """
         valid = self._valid_columns()
         row = {k: v for k, v in data.items() if k in valid}
         obj = self.model(**row)
         self.session.add(obj)
         try:
-            await self.session.commit()
-            await self.session.refresh(obj)
+            if commit:
+                await self.session.commit()
+                await self.session.refresh(obj)
+            else:
+                await self.session.flush()
         except IntegrityError as exc:
-            await self.session.rollback()
+            if commit:
+                await self.session.rollback()
             _parse_integrity_error(exc)
         return obj
 
@@ -318,8 +333,9 @@ class BaseRepository(Generic[ModelType]):
             _parse_integrity_error(exc)
         return objs
 
-    async def update(self, id: int, data: dict) -> ModelType | None:
-        """Ignore les clés inconnues et les champs protégés (id, created_at)."""
+    async def update(self, id: int, data: dict, *, commit: bool = True) -> ModelType | None:
+        """Ignore les clés inconnues et les champs protégés (id, created_at).
+        `commit=False` — voir docstring de `create()`."""
         obj = await self.get_by_id(id)
         if obj is None:
             return None
@@ -328,10 +344,26 @@ class BaseRepository(Generic[ModelType]):
             if k in allowed:
                 setattr(obj, k, v)
         try:
-            await self.session.commit()
-            await self.session.refresh(obj)
+            if commit:
+                await self.session.commit()
+                await self.session.refresh(obj)
+            else:
+                await self.session.flush()
+                # Important : les attributs dérivés d'une relation (ex. FK
+                # `request_status_id` → propriété `request_status`) restent en
+                # cache avec leur ancienne valeur après un simple flush — un
+                # `session.expire(obj)` sans requête associée casse ensuite tout
+                # accès synchrone à cet attribut sous SQLAlchemy async
+                # (MissingGreenlet : le lazy-load implicite n'a nulle part où
+                # s'exécuter). `refresh()` reste nécessaire ici — un SELECT dans
+                # la MÊME transaction (donc voit ses propres écritures non
+                # commitées), largement moins coûteux qu'un commit (pas de
+                # fsync/round-trip de validation), et bien moins fréquent que
+                # les anciens commits systématiques qu'il remplace.
+                await self.session.refresh(obj)
         except IntegrityError as exc:
-            await self.session.rollback()
+            if commit:
+                await self.session.rollback()
             _parse_integrity_error(exc)
         return obj
 

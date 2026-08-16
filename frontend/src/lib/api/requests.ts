@@ -257,6 +257,10 @@ export function mapRequest(raw: RawRequest): RequestItem {
         isPublic: t.infos?.is_public === true,
         isDirective: t.infos?.is_directive === true,
         replyToId: asString(t.infos?.reply_to_id),
+        // BR-MESSAGING-PAIR-001 — second participant de la conversation privée
+        // (toujours résolu côté backend, y compris pour les événements créés
+        // avant l'introduction de ce champ — cf. _resolve_comment_peer).
+        peerId: asString(t.infos?.peer_id),
         isEdited: false,
         createdAt: t.created_at,
       })),
@@ -355,6 +359,7 @@ export function mapComment(t: RawTimeline) {
     isPublic: t.infos?.is_public === true,
     isDirective: t.infos?.is_directive === true,
     replyToId: asString(t.infos?.reply_to_id),
+    peerId: asString(t.infos?.peer_id),
     isEdited: false,
     createdAt: t.created_at,
     attachmentId: asString(t.infos?.attachment_id),
@@ -731,10 +736,14 @@ export type CreateCommentData = {
   attachment_id?: string;
   is_directive?: boolean;
   reply_to_id?: string;
+  // BR-MESSAGING-PAIR-001 — obligatoire pour un message normal (destinataire de
+  // la conversation privée : le demandeur ou l'assigné courant, selon qui
+  // écrit) ; ignoré pour une directive (peer résolu côté backend = assigné).
+  peer_id?: string;
 };
 
-export async function fetchComments(requestId: string, publicOnly = false) {
-  const params = publicOnly ? "?public_only=true" : "";
+export async function fetchComments(requestId: string, peerId?: string) {
+  const params = peerId ? `?peer_id=${encodeURIComponent(peerId)}` : "";
   const raw = await apiFetch<RawTimeline[]>(`/requests/${requestId}/comments${params}`);
   return (raw ?? []).map(mapComment);
 }
@@ -751,6 +760,7 @@ export async function createComment(
       ...(data.attachment_id ? { attachment_id: data.attachment_id } : {}),
       ...(data.is_directive ? { is_directive: true } : {}),
       ...(data.reply_to_id ? { reply_to_id: data.reply_to_id } : {}),
+      ...(data.peer_id ? { peer_id: data.peer_id } : {}),
     }),
   });
   return mapComment(raw);
@@ -814,6 +824,17 @@ export async function fetchAttachmentFile(
     filename: file.filename ?? attachment.filename,
     contentType: file.contentType ?? attachment.mime_type,
   };
+}
+
+/** Dossier fonctionnel complet d'une demande (Excel ou PDF, logo EDG en
+ * en-tête + filigrane pour le PDF) — réservé à l'espace Administration. */
+export async function exportRequestDossier(
+  id: string,
+  format: "excel" | "pdf" = "excel",
+): Promise<{ blob: Blob; filename: string }> {
+  const file = await apiFetchBlob(`/requests/${id}/export?format=${format}`);
+  const ext = format === "pdf" ? "pdf" : "xlsx";
+  return { blob: file.blob, filename: file.filename ?? `dossier-${id}.${ext}` };
 }
 
 /** Rejet d'un ticket par le chef de service — motif obligatoire. */

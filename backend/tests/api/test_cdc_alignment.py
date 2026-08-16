@@ -189,7 +189,7 @@ async def test_cdc_scenario_soutenance_ticket_complet(auth_client):
         async with auth_client("agent") as c:
             commented = await c.post(
                 f"/api/v1/requests/{rid}/comments",
-                json={"body": "Analyse agent CDC.", "is_public": False, "peer_id": "1"},
+                json={"body": "Analyse agent CDC.", "is_public": False, "peer_id": "2"},
             )
             escalated = await c.post(
                 f"/api/v1/requests/{rid}/escalate",

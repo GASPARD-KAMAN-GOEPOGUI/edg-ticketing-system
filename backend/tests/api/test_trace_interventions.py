@@ -96,11 +96,12 @@ async def _detail(auth_client, request_id: str) -> dict:
 
 async def _add_comment_as(request_id: str, account_id: int, role: str, unity_id: int, body: str):
     # account_id est systématiquement l'assigné courant du ticket au moment de
-    # l'appel (cf. sites d'appel) ; le demandeur est toujours le compte "user"
-    # (id=1, cf. _create_ticket ci-dessus) -> BR-MESSAGING-PAIR-001.
+    # l'appel (cf. sites d'appel) -> BR-MESSAGING-PAIR-001 : peer_id est
+    # toujours le côté intervenant de la conversation, donc account_id lui-même
+    # ici (pas le demandeur), que le message vienne de lui ou du demandeur.
     resp = await _call_as(
         _dep(account_id, role, unity_id), "POST", f"/api/v1/requests/{request_id}/comments",
-        {"body": body, "is_public": False, "peer_id": "1"},
+        {"body": body, "is_public": False, "peer_id": str(account_id)},
     )
     assert resp.status_code in (200, 201), resp.text
     return resp

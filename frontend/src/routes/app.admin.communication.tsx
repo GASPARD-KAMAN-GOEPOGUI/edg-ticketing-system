@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Megaphone, Plus, Settings2, BarChart3, Send, Trash2, Edit3,
   Eye, AlertTriangle, Bell, Mail, Smartphone, Monitor, Globe,
-  X, CheckCircle2, Clock, FileText, Users, ChevronDown,
+  X, Clock, FileText, Users, ChevronDown,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -312,24 +312,6 @@ function AdminCommunication() {
             <Plus className="h-4 w-4" /> Nouvelle publication
           </Button>
         )}
-      </div>
-
-      {/* KPI row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: "Total publications", value: kpis.total, icon: FileText, color: "text-primary" },
-          { label: "Publiées actives", value: kpis.published, icon: CheckCircle2, color: "text-success" },
-          { label: "Alertes actives", value: kpis.active_alerts, icon: AlertTriangle, color: "text-destructive" },
-          { label: "Taux consultation moyen", value: `${kpis.avg_consultation}%`, icon: Eye, color: "text-primary/70" },
-        ].map((k) => (
-          <div key={k.label} className="glass-card rounded-xl p-4 flex items-center gap-3">
-            <k.icon className={`h-5 w-5 shrink-0 ${k.color}`} />
-            <div>
-              <p className="text-2xl font-bold">{k.value}</p>
-              <p className="text-xs text-muted-foreground">{k.label}</p>
-            </div>
-          </div>
-        ))}
       </div>
 
       {/* Tabs */}

@@ -624,8 +624,11 @@ function GlobalView() {
         )}
       </GlassCard>
 
-      {/* Section escalades direction */}
-      <GlassCard className="space-y-4 p-5">
+      {/* Section escalades direction — masquée à la demande du métier (2026-08-14,
+          harmonisation statuts/notifications) : escalade mise de côté, cohérent avec
+          le masquage déjà en place sur /app/supervision. KPI "Escaladés" ci-dessus
+          reste visible (compteur informatif, non actionnable). */}
+      <GlassCard className="hidden space-y-4 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="font-semibold">Escalades direction</h2>

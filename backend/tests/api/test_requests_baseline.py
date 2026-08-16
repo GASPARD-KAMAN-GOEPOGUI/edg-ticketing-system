@@ -987,6 +987,11 @@ class TestCommentairesBaseline:
 
             def _admin_bis_dep():
                 return SimpleNamespace(id=7602, role="admin", unity_id=unity_id, direction_id=None, name="Admin Bis")
+            # Ne pas simplement pop() dans le finally : auth_client("admin") a deja
+            # pose son propre override pour la duree du bloc `async with` englobant
+            # (variable `c`) — il faut le restaurer, pas le supprimer, sous peine de
+            # casser l'auth des appels suivants via `c` (401).
+            previous_override = app.dependency_overrides.get(get_current_user)
             app.dependency_overrides[get_current_user] = _admin_bis_dep
             try:
                 async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client2:
@@ -995,7 +1000,10 @@ class TestCommentairesBaseline:
                         json={"category": "panne", "priority": "medium", "unit_id": unity_id, "assignee_id": 7601},
                     )
             finally:
-                app.dependency_overrides.pop(get_current_user, None)
+                if previous_override is not None:
+                    app.dependency_overrides[get_current_user] = previous_override
+                else:
+                    app.dependency_overrides.pop(get_current_user, None)
             assert qualified.status_code == 200, qualified.text
 
             created = await c.post(f"/api/v1/requests/{request_id}/comments", json={

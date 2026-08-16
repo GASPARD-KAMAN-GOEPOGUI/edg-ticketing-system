@@ -92,10 +92,10 @@ async def test_escalated_ticket_lands_in_chief_inbox_with_full_treatment_actions
 
     # 4. B peut ecrire dans la messagerie (intervenant courant du ticket
     #    desormais, cf. BR-MESSAGING-PAIR-001 : conversation privee
-    #    demandeur <-> assigne courant).
+    #    demandeur <-> assigne courant — peer_id = cote intervenant = B lui-meme).
     resp = await _call_as(
         _chief_dep, "POST", f"/api/v1/requests/{request_id}/comments",
-        {"body": "Pris en compte, je regarde ca.", "is_public": False, "peer_id": "1"},
+        {"body": "Pris en compte, je regarde ca.", "is_public": False, "peer_id": str(chief_id)},
     )
     assert resp.status_code == 201, resp.text
 

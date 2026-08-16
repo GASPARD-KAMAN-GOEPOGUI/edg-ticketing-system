@@ -315,7 +315,8 @@ export function NotificationPanel({
                 </p>
               </div>
             </div>
-            {unread > 0 && (
+            {/* Masqué à la demande du métier (2026-08-14). */}
+            {false && unread > 0 && (
               <Button
                 variant="outline"
                 size="sm"
@@ -329,8 +330,8 @@ export function NotificationPanel({
           </div>
         </SheetHeader>
 
-        {/* ── Compteurs rapides ── */}
-        <div className="flex shrink-0 gap-2 border-b border-border/30 px-5 py-3">
+        {/* ── Compteurs rapides — masqués à la demande du métier (2026-08-14) ── */}
+        <div className="hidden shrink-0 gap-2 border-b border-border/30 px-5 py-3">
           {[
             { label: "Non lues", value: unread, tone: "bg-primary/10 text-primary" },
             { label: "Alertes délais", value: reqNotifs.filter((n) => n.type === "warning").length, tone: "bg-warning/15 text-warning-foreground dark:text-warning" },

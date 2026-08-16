@@ -284,6 +284,14 @@ Le système doit journaliser :
 - les connexions ;
 - les modifications.
 
+**Export du dossier complet d'une demande (Administration)** — réservé au rôle
+`admin` : depuis la fiche détail d'un ticket dans l'espace Administration,
+génération d'un dossier Excel complet (identification, demandeur, structure
+organisationnelle, acteurs, historique, escalades, conversations, pièces
+jointes, notifications) reconstruit à partir des données réellement
+enregistrées. Aucune donnée de délai/SLA n'y figure. Lecture seule : aucun
+changement de statut, notification ou événement métier déclenché par l'export.
+
 ### 10.6 Gestion Documentaire
 
 Possibilité de :
@@ -430,3 +438,11 @@ La mise en place de cette application de Ticketing/Support permettra à la DSI d
 - d'améliorer la qualité de service ;
 - de réduire les délais de traitement ;
 - d'avoir une meilleure visibilité sur les activités informatiques.
+
+---
+
+## 19. Journal Des Évolutions
+
+| Date | Évolution |
+| --- | --- |
+| 2026-08-15 | Ajout de l'export du dossier complet d'une demande, réservé à l'espace Administration (§10.5) — détails techniques dans `docs/mise-a-jour-backend.md`. |

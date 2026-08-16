@@ -70,8 +70,21 @@ def _register_sqlite_json_unquote(dbapi_connection, _):
 
 
 async def _override_get_db() -> AsyncGenerator[AsyncSession, None]:
+    """Reproduit fidèlement `api.dependencies.get_db()` (commit après un yield
+    réussi, rollback sur exception). Nécessaire depuis l'harmonisation
+    transactionnelle (2026-08) de ServiceRequest.create()/_apply_routing() :
+    ces flux flush (commit=False) plusieurs écritures et comptent sur ce
+    commit de fin de requête pour les persister — sans lui, elles étaient
+    silencieusement perdues à la fermeture de la session de test (rollback
+    implicite de SQLAlchemy sur une transaction non commitée), ce qui ne
+    reproduisait pas le comportement réel de production."""
     async with _TestSession() as session:
-        yield session
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 
 # Override global : toute la suite de tests utilise SQLite

@@ -17,7 +17,10 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     # effective depuis la File d'attente (qualify_triage()/assign()) démarre
     # désormais directement le traitement, sans étape "assigned" intermédiaire.
     "in_progress": {"assigned", "qualifying", "qualified", "new", "reopened", "pending", "escalated"},
-    "pending": {"in_progress", "assigned"},
+    # "pending" retiré du workflow actuel (harmonisation statuts/notifications,
+    # 2026-08) : plus aucune transition ne peut désormais cibler ce statut — un
+    # ticket déjà "pending" en base (donnée historique) reste transitionnable
+    # normalement (cf. sources ci-dessus), mais il ne peut plus y retourner.
     "escalated": {"in_progress", "assigned", "pending", "qualifying"},
     "resolved": {"in_progress", "assigned", "escalated", "pending"},
     "closed": {"resolved"},

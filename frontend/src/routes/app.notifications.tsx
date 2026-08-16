@@ -628,7 +628,8 @@ function Notifications() {
               : "Toutes les notifications sont lues."}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        {/* Masqué à la demande du métier (2026-08-14). */}
+        <div className="hidden items-center gap-2">
           {unread > 0 && (
             <Button variant="outline" className="rounded-full" onClick={markAllRead}>
               <MailOpen className="mr-1.5 h-4 w-4" /> Tout marquer lu
@@ -638,8 +639,8 @@ function Notifications() {
         </div>
       </header>
 
-      {/* ── Résumé rapide ── */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
+      {/* ── Résumé rapide — masqué à la demande du métier (2026-08-14) ── */}
+      <div className="hidden grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
         {[
           { label: "Non lues", value: unread, icon: Bell, tone: "text-primary bg-primary/10" },
           { label: "Alertes délais", value: slaCount, icon: AlertTriangle, tone: "text-warning-foreground dark:text-warning bg-warning/15" },

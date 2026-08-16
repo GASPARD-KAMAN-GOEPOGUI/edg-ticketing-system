@@ -145,9 +145,16 @@ async def test_transmit_confirms_emitter_app_only(auth_client, unity_id, monkeyp
     assert not emitter_email_calls, "l'émetteur ne doit recevoir qu'une confirmation App-only"
 
 
-async def test_cancel_is_app_only_for_requester_and_assignee(auth_client, unity_id, monkeypatch):
+async def test_cancel_emails_requester_but_stays_app_only_for_assignee(auth_client, unity_id, monkeypatch):
+    # L'email de confirmation au demandeur suppose une ligne Account en base
+    # (NotificationEmitter y va chercher l'adresse par recipient_id) — le
+    # MockAccount d'injection de rôle n'y suffit pas.
+    await _ensure_test_account(
+        MOCK_ACCOUNTS["user"].id, unity_id=None, role="user",
+        email=MOCK_ACCOUNTS["user"].email,
+    )
     await _ensure_test_account(850, unity_id=unity_id, role="agent-support")
-    request_id = await _create_ticket(auth_client, unity_id, "cancel-app-only")
+    request_id = await _create_ticket(auth_client, unity_id, "cancel-requester-email")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=850)
 
     email_calls: list[dict] = []
@@ -170,9 +177,10 @@ async def test_cancel_is_app_only_for_requester_and_assignee(auth_client, unity_
     assignee_notifs = await _notifications_for(850, request_id)
     assert any(n.title == "Ticket annulé" for n in assignee_notifs)
 
-    # BR-NOTIFICATION-WORKFLOW-001 §20/§22 — annulation absente de la liste des
-    # événements "email important" : aucun email ne doit avoir été tenté.
-    assert not email_calls
+    # Le demandeur qui annule reçoit désormais une confirmation par email ;
+    # l'intervenant assigné, lui, reste en App-only (BR-NOTIFICATION-WORKFLOW-001 §20/§22).
+    assert len(email_calls) == 1
+    assert email_calls[0]["to_email"] == MOCK_ACCOUNTS["user"].email
 
 
 async def test_requester_comment_notifies_current_handler_even_outside_pending(auth_client, unity_id):

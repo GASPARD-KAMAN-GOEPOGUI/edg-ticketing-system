@@ -11,12 +11,12 @@ Si SMTP_HOST est vide, l'envoi est ignoré silencieusement (mode dev sans email)
 """
 from __future__ import annotations
 
+import base64
 import logging
 import re
 from datetime import datetime
 from html import escape
 from email.mime.multipart import MIMEMultipart
-from email.mime.image import MIMEImage
 from email.mime.text import MIMEText
 from pathlib import Path
 from unicodedata import combining, normalize
@@ -153,8 +153,29 @@ def _is_configured() -> bool:
     return bool(_env.SMTP_HOST and _env.SMTP_USER and _env.SMTP_PASSWORD)
 
 
+_logo_data_uri_cache: str | None = None
+
+
+def _logo_data_uri() -> str:
+    """Logo encodé en base64, embarqué directement dans le HTML (data: URI) plutôt
+    qu'en pièce jointe MIME séparée — certains clients mail (Gmail notamment)
+    affichaient l'image "inline" comme pièce jointe téléchargeable en plus de
+    l'en-tête, même avec Content-Disposition: inline. Un data URI n'a aucune
+    partie MIME séparée : structurellement impossible à afficher en pièce jointe.
+    Mis en cache (le fichier ne change pas en cours d'exécution)."""
+    global _logo_data_uri_cache
+    if _logo_data_uri_cache is None:
+        try:
+            encoded = base64.b64encode(_logo_path.read_bytes()).decode("ascii")
+            _logo_data_uri_cache = f"data:image/png;base64,{encoded}"
+        except Exception as exc:
+            logger.debug("Logo email non chargé : %s", exc)
+            _logo_data_uri_cache = ""
+    return _logo_data_uri_cache
+
+
 def _render_template(template_name: str, **context: object) -> str:
-    data = {"year": datetime.now().year, **context}
+    data = {"year": datetime.now().year, "logo_data_uri": _logo_data_uri(), **context}
     template = (_templates_dir / template_name).read_text(encoding="utf-8")
     template = re.sub(
         r'{%\s*include\s+"([^"]+)"\s*%}',
@@ -295,19 +316,6 @@ def _notification_context(
     return str(variant["template"]), context
 
 
-def _attach_logo(msg: MIMEMultipart) -> None:
-    if not _logo_path.exists():
-        return
-    try:
-        with _logo_path.open("rb") as logo_file:
-            logo = MIMEImage(logo_file.read())
-        logo.add_header("Content-ID", "<edg-logo>")
-        logo.add_header("Content-Disposition", "inline", filename="edg_logo.png")
-        msg.attach(logo)
-    except Exception as exc:
-        logger.debug("Logo email non attache : %s", exc)
-
-
 async def send_reset_code_email(to_email: str, code: str, name: str = "") -> bool:
     """
     Envoie le code de réinitialisation par email.
@@ -336,17 +344,14 @@ async def send_reset_code_email(to_email: str, code: str, name: str = "") -> boo
         support_phone="(+224) 153 456 789",
     )
 
-    # multipart/related (+ alternative imbriqué) et _attach_logo() — même structure
-    # que send_notification_email(), nécessaire pour que le <img src="cid:edg-logo">
-    # du template partagé (_ticket_notification_base.html) s'affiche réellement.
-    msg = MIMEMultipart("related")
-    msg_alt = MIMEMultipart("alternative")
+    # Le logo est embarqué en data URI directement dans le HTML (voir
+    # _logo_data_uri()) — plus besoin de multipart/related ni de pièce jointe
+    # MIME séparée pour l'image.
+    msg = MIMEMultipart("alternative")
     msg["From"] = f"EDG Connect <{_env.SMTP_USER}>"
     msg["To"] = to_email
     msg["Subject"] = subject
-    msg_alt.attach(MIMEText(html, "html", "utf-8"))
-    msg.attach(msg_alt)
-    _attach_logo(msg)
+    msg.attach(MIMEText(html, "html", "utf-8"))
 
     await _smtp_send(msg)
     logger.info("Email reset envoyé à %r", to_email)
@@ -419,14 +424,14 @@ async def send_notification_email(
         request_details=request_details,
     )
 
-    msg = MIMEMultipart("related")
-    msg_alt = MIMEMultipart("alternative")
+    # Le logo est embarqué en data URI directement dans le HTML (voir
+    # _logo_data_uri()) — plus besoin de multipart/related ni de pièce jointe
+    # MIME séparée pour l'image.
+    msg = MIMEMultipart("alternative")
     msg["From"] = f"EDG Connect <{_env.SMTP_USER}>"
     msg["To"] = to_email
     msg["Subject"] = title
-    msg_alt.attach(MIMEText(html, "html", "utf-8"))
-    msg.attach(msg_alt)
-    _attach_logo(msg)
+    msg.attach(MIMEText(html, "html", "utf-8"))
     try:
         await _smtp_send(msg)
         logger.info("Email notification envoyé à %r : %s", to_email, title)

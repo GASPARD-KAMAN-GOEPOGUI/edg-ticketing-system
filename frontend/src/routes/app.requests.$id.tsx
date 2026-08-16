@@ -53,6 +53,7 @@ import {
   reassignService,
   transferDirection,
   requesterEditRequest,
+  exportRequestDossier,
   type RawAttachment,
 } from "@/lib/api/requests";
 import { fetchRefTable } from "@/lib/api/admin-config";
@@ -114,6 +115,8 @@ import {
   ZoomOut,
   UserCog,
   Send,
+  FileSpreadsheet,
+  MoreHorizontal,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -407,6 +410,38 @@ function buildParticipants(
   });
 }
 
+type ConversationSummary = { peerId: string; lastAt?: string; lastBody?: string };
+
+/**
+ * BR-MESSAGING-PAIR-001 — regroupe les commentaires (non-directive) par
+ * conversation privée. `peerId` est toujours le côté intervenant de la paire
+ * {demandeur, intervenant} (résolu côté backend, stable quel que soit qui a
+ * écrit), donc un simple groupBy suffit — pas besoin de recalculer côté client
+ * qui est "l'autre" participant.
+ */
+function buildConversations(
+  comments: RequestItem["comments"],
+  currentAssigneeId: string | undefined,
+  includeCurrentEvenEmpty: boolean,
+): ConversationSummary[] {
+  const map = new Map<string, ConversationSummary>();
+  for (const c of comments) {
+    if (!c.peerId || c.isDirective) continue;
+    const existing = map.get(c.peerId);
+    if (!existing || (c.createdAt && (!existing.lastAt || c.createdAt > existing.lastAt))) {
+      map.set(c.peerId, { peerId: c.peerId, lastAt: c.createdAt, lastBody: c.body });
+    }
+  }
+  if (includeCurrentEvenEmpty && currentAssigneeId && !map.has(currentAssigneeId)) {
+    map.set(currentAssigneeId, { peerId: currentAssigneeId });
+  }
+  return Array.from(map.values()).sort((a, b) => {
+    const aTime = a.lastAt ? new Date(a.lastAt).getTime() : 0;
+    const bTime = b.lastAt ? new Date(b.lastAt).getTime() : 0;
+    return bTime - aTime;
+  });
+}
+
 type TimelineItem = RequestItem["timeline"][number];
 
 const DETAIL_STATUS_LABELS: Record<string, string> = {
@@ -683,6 +718,10 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const [stagedFile, setStagedFile] = useState<File | null>(null);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [isDirective, setIsDirective] = useState(false);
+  // BR-MESSAGING-PAIR-001 — conversation sélectionnée dans le sélecteur multi-fils
+  // (demandeur avec plusieurs intervenants successifs, ou supervision admin).
+  // undefined = pas de choix explicite, la valeur par défaut est recalculée au rendu.
+  const [selectedPeerId, setSelectedPeerId] = useState<string | undefined>(undefined);
   const [role] = useRole();
   // Dans "Mes demandes", le propriétaire garde la vue demandeur. Dans les espaces
   // métier, le contexte fonctionnel prime sur la propriété personnelle du ticket.
@@ -783,6 +822,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     mimeType: string;
   } | null>(null);
   const [previewZoom, setPreviewZoom] = useState(1);
+  const [exportPending, setExportPending] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -858,6 +898,27 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       toast.error(message ? `Impossible d'accéder à la pièce jointe : ${message}` : "Impossible d'accéder à la pièce jointe.");
     } finally {
       setAttachmentAction(null);
+    }
+  };
+
+  const handleExportDossier = async (format: "excel" | "pdf") => {
+    setExportPending(true);
+    try {
+      const { blob, filename } = await exportRequestDossier(id, format);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1_000);
+      toast.success("Dossier de la demande exporté.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : undefined;
+      toast.error(message ? `Impossible de générer l'export : ${message}` : "Impossible de générer l'export.");
+    } finally {
+      setExportPending(false);
     }
   };
 
@@ -1271,13 +1332,18 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
         );
         attachmentId = uploaded.id;
       }
+      // BR-MESSAGING-PAIR-001 — peer_id = toujours l'intervenant actuel du
+      // ticket (clé stable de la conversation), non pertinent pour une
+      // directive (le backend résout son propre destinataire).
+      const isDirectiveSend = canSendDirective && isDirective;
       return createComment(id, {
         author_id: authorId,
         author_name: authorName,
         body: comment.trim(),
         is_public: true,
         attachment_id: attachmentId,
-        is_directive: canSendDirective ? isDirective : false,
+        is_directive: isDirectiveSend,
+        peer_id: isDirectiveSend ? undefined : r?.assigneeId,
       });
     },
     onMutate: async () => {
@@ -1292,6 +1358,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
         isEdited: false,
         createdAt: new Date().toISOString(),
         attachmentName: stagedFile?.name,
+        peerId: canSendDirective && isDirective ? undefined : r?.assigneeId,
       };
       qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
         old ? { ...old, comments: [...(old.comments ?? []), optimisticComment] } : old,
@@ -1528,15 +1595,51 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const agentPool = agentsData?.items ?? [];
   const availableServices = [...new Set(agentPool.map((a) => a.unit_id).filter((u): u is string => !!u))];
 
-  const visibleComments = isRequesterView ? r.comments.filter((c) => c.isPublic) : r.comments;
-  const participants = buildParticipants(r, visibleComments, assigneeUser?.name);
+  const isAssignedToMe = isRequester(r.assigneeId, sessionUser?.id);
+  const hasAssignee = Boolean(r.assigneeId);
+  // BR-MESSAGING-PAIR-001 — la messagerie n'est plus un fil unique par ticket :
+  // chaque conversation est une paire privée {demandeur, intervenant}. Le
+  // backend ne renvoie déjà que les événements que ce viewer est autorisé à
+  // voir (_visible_comment_responses côté API) ; ici on se contente de les
+  // répartir en fils distincts et de choisir lequel afficher.
+  const isAdminSupervision = role === "admin" && !isRequesterView;
+  const conversations = buildConversations(
+    r.comments,
+    r.assigneeId,
+    isRequesterView || isAssignedToMe,
+  );
+  const effectiveSelectedPeerId = selectedPeerId
+    ?? (isRequesterView || isAdminSupervision
+      ? (conversations.find((c) => c.peerId === r.assigneeId)?.peerId ?? conversations[0]?.peerId)
+      : (isAssignedToMe ? r.assigneeId : undefined));
+  const showConversationSwitcher = (isRequesterView || isAdminSupervision) && conversations.length > 1;
+  // Écrire n'est possible que dans la conversation COURANTE (demandeur <->
+  // assigné actuel) — si le demandeur consulte un fil archivé (ancien
+  // intervenant), la composition reste désactivée pour ce fil précis même si
+  // le ticket a par ailleurs un intervenant actuel.
+  const isViewingCurrentConversation = !effectiveSelectedPeerId || effectiveSelectedPeerId === r.assigneeId;
+  const visibleComments = r.comments.filter((c) => {
+    if (!effectiveSelectedPeerId) return true;
+    if (c.isDirective) {
+      // Une directive chef->agent reste rattachée au fil de l'agent visé (déjà
+      // scopée côté backend à ce chef/cet agent — jamais visible au demandeur
+      // ni à un tiers), jamais à un fil archivé d'un ancien intervenant.
+      return effectiveSelectedPeerId === r.assigneeId;
+    }
+    return c.peerId === effectiveSelectedPeerId;
+  });
+  const participants = buildParticipants(r, r.comments, assigneeUser?.name);
   // La messagerie (Discussions) doit rester distincte du Journal — un message
-  // n'y apparaît plus comme entrée générique de la chronologie complète (BR-MESSAGING-PARTICIPANTS-001).
+  // n'y apparaît plus comme entrée générique de la chronologie complète.
   const journalEvents = r.timeline.filter((e) => e.type !== "comment_added");
-  // BR-MESSAGING-PARTICIPANTS-001 — messagerie réservée au demandeur + intervenants
-  // réels du ticket (= la liste "Intervenants" déjà calculée juste au-dessus).
-  const isTicketParticipant = isRequesterView
-    || participants.some((p) => isRequester(p.key, sessionUser?.id));
+  // BR-MESSAGING-PAIR-001 — seuls le demandeur et l'intervenant COURANT du
+  // ticket peuvent écrire, et seulement dans la conversation courante ; un
+  // ancien intervenant garde la lecture de sa conversation (archivée) mais
+  // plus l'écriture ; l'admin est en lecture seule (supervision).
+  const canWriteConversation = hasAssignee
+    && !isAdminSupervision
+    && (isRequesterView || isAssignedToMe)
+    && isViewingCurrentConversation;
   const commentAuthorProfiles = new Map<string, AccountUser>();
   for (const account of commentAuthorsData ?? []) {
     commentAuthorProfiles.set(String(account.id), account);
@@ -1569,16 +1672,16 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       "Intervenant"
     );
   };
+  // BR-MESSAGING-PAIR-001 — suppression réservée à l'auteur du message (+ admin
+  // en supervision) ; un intervenant d'une autre conversation sur ce ticket ne
+  // doit plus pouvoir supprimer un message qu'il ne peut même plus lire.
   const canDeleteComment = (item: RequestItem["comments"][number]) => {
     if (isArchived || r.status === "closed" || r.status === "rejected" || r.status === "cancelled") return false;
     if (!sessionUser?.id || !item.authorId) return false;
     if (String(item.authorId) === String(sessionUser.id)) return true;
-    const isOwnerView = Boolean(r.requesterId && String(sessionUser.id) === String(r.requesterId));
-    return sessionUser.role !== "user" && !isOwnerView;
+    return role === "admin";
   };
   const isDiscussionLocked = isArchived || r.status === "closed" || r.status === "rejected" || r.status === "cancelled";
-  const isAssignedToMe = isRequester(r.assigneeId, sessionUser?.id);
-  const hasAssignee = Boolean(r.assigneeId);
 
   // Fenêtre réouverture ticket fermé (7 jours après fermeture)
   const canReopenClosed = r.closedAt
@@ -1771,7 +1874,8 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
           </button>
         )}
         {/* Lot 3.3 — Escalade exceptionnelle : court-circuite la hiérarchie, cible le directeur */}
-        {canEscalateToDirector && (
+        {/* Masqué temporairement à la demande du métier (2026-08-14) — repasser à `canEscalateToDirector` pour réactiver. */}
+        {false && canEscalateToDirector && (
           <button
             type="button"
             className="flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-left transition hover:bg-destructive/15"
@@ -1842,7 +1946,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             </span>
           </button>
         )}
-        {canTransferDirection && (
+        {false && canTransferDirection && (
           <button
             type="button"
             className="flex items-start gap-3 rounded-xl border border-violet-600/40 bg-violet-600/10 p-3 text-left transition hover:bg-violet-600/15 disabled:opacity-60"
@@ -1969,9 +2073,53 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     ) : null
   );
 
+  const nameForPeer = (peerId: string) =>
+    (peerId === r.assigneeId ? assigneeUser?.name ?? r.assigneeName : undefined)
+    ?? participants.find((p) => p.key === peerId)?.name
+    ?? "Intervenant";
+
   const commentsPanel = (
     <section ref={commentsPanelRef} className="min-w-0">
       <div>
+        {showConversationSwitcher && (
+          <div className="mb-4 flex gap-2 overflow-x-auto pb-1">
+            {conversations.map((conv) => {
+              const isSelected = conv.peerId === effectiveSelectedPeerId;
+              const isCurrent = conv.peerId === r.assigneeId;
+              return (
+                <button
+                  key={conv.peerId}
+                  type="button"
+                  onClick={() => setSelectedPeerId(conv.peerId)}
+                  className={cn(
+                    "flex shrink-0 flex-col items-start gap-0.5 rounded-xl border px-3 py-2 text-left transition",
+                    isSelected
+                      ? "border-primary/50 bg-primary/10"
+                      : "border-border/40 bg-background/45 hover:bg-background/70",
+                  )}
+                >
+                  <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                    {nameForPeer(conv.peerId)}
+                    {isCurrent ? (
+                      <span className="rounded-full bg-success/15 px-1.5 py-0.5 text-[9px] font-bold text-success">
+                        Actuel
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">
+                        Archivé
+                      </span>
+                    )}
+                  </span>
+                  {conv.lastBody && (
+                    <span className="max-w-[160px] truncate text-[11px] text-muted-foreground">
+                      {conv.lastBody}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
         {visibleComments.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-border/50 bg-background/35 px-4 py-5 text-sm text-muted-foreground">
             Aucun message pour l'instant.
@@ -1999,7 +2147,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                   </Avatar>
                   <div className={cn("flex min-w-0 flex-1 flex-col", isMine ? "items-end" : "items-start")}>
                     <div className={cn(
-                      "relative inline-block max-w-full rounded-2xl px-3.5 py-2.5 pr-10 shadow-sm",
+                      "relative inline-block max-w-full rounded-2xl px-3.5 py-2.5 shadow-sm",
                       c.isDirective
                         ? "border border-warning/40 bg-warning/10"
                         : "bg-muted/45",
@@ -2013,15 +2161,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                           <span className="flex shrink-0 items-center gap-1 rounded-full bg-warning/20 px-2 py-0.5 text-[10px] font-bold text-warning-foreground dark:text-warning">
                             <AlertTriangle className="h-2.5 w-2.5" /> Directive
                           </span>
-                        )}
-                        {!isRequesterView && (
-                          c.isPublic ? (
-                            <span className="shrink-0 rounded-full bg-info/15 px-2 py-0.5 text-[10px] text-info">
-                              Visible public
-                            </span>
-                          ) : (
-                            <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px]">Interne</span>
-                          )
                         )}
                       </div>
                       <p className="mt-1 whitespace-pre-wrap text-sm leading-5 text-foreground">{c.body}</p>
@@ -2044,28 +2183,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                           <Download className="h-4 w-4 shrink-0 text-muted-foreground" />
                         </button>
                       )}
-                      {canDeleteComment(c) && (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <button
-                              type="button"
-                              className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full text-muted-foreground opacity-80 transition hover:bg-background/80 hover:text-foreground"
-                              title="Options du message"
-                            >
-                              <MoreVertical className="h-4 w-4" />
-                            </button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              className="text-destructive focus:text-destructive"
-                              onClick={() => deleteCommentMut.mutate(c.id)}
-                            >
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              Supprimer
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      )}
                     </div>
                     <div className={cn(
                       "mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground",
@@ -2085,10 +2202,25 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             <Lock className="h-3.5 w-3.5 shrink-0" />
             La messagerie est desactivee - ticket {isArchived ? "archive" : r.status === "closed" ? "cloture" : r.status === "cancelled" ? "annule" : "rejete"}.
           </div>
-        ) : !isTicketParticipant ? (
+        ) : !hasAssignee ? (
           <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/30 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
             <Lock className="h-3.5 w-3.5 shrink-0" />
-            Messagerie réservée au demandeur et aux intervenants de ce ticket — lecture seule pour vous.
+            La messagerie sera disponible une fois qu'un intervenant prendra en charge le ticket.
+          </div>
+        ) : isAdminSupervision ? (
+          <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/30 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+            <Lock className="h-3.5 w-3.5 shrink-0" />
+            Vue de supervision admin — lecture seule, ces conversations sont privées entre leurs participants.
+          </div>
+        ) : !isRequesterView && !isAssignedToMe ? (
+          <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/30 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+            <Lock className="h-3.5 w-3.5 shrink-0" />
+            Messagerie réservée au demandeur et à l'intervenant actuel de ce ticket — lecture seule pour vous.
+          </div>
+        ) : !isViewingCurrentConversation ? (
+          <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/30 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+            <Lock className="h-3.5 w-3.5 shrink-0" />
+            Conversation archivée avec un ancien intervenant — lecture seule. Sélectionnez la conversation "Actuel" pour écrire.
           </div>
         ) : (
           <div className="mt-5 rounded-2xl border border-border/40 bg-background/45 p-2 shadow-sm">
@@ -2245,17 +2377,48 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
           </div>
         </div>
 
-        {isArchived && (
-          <div className="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
-            <div className="flex-1">
-              <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">
-                Ticket archivé
-              </p>
-              <p className="mt-0.5 text-sm text-amber-600/80 dark:text-amber-400/70">
-                Consultation admin en lecture seule. Les actions métier sont désactivées.
-              </p>
-            </div>
+        {(context === "admin" || isArchived) && (
+          <div className="flex flex-col items-stretch gap-3 lg:items-end">
+            {context === "admin" && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-full"
+                    disabled={exportPending}
+                  >
+                    {exportPending
+                      ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                      : <Download className="mr-1.5 h-4 w-4" />}
+                    Exporter la demande
+                    <MoreHorizontal className="ml-1 h-3.5 w-3.5 opacity-60" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-44">
+                  <DropdownMenuItem onSelect={() => void handleExportDossier("excel")}>
+                    <FileSpreadsheet className="h-4 w-4" /> Excel
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => void handleExportDossier("pdf")}>
+                    <FileText className="h-4 w-4" /> PDF
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+
+            {isArchived && (
+              <div className="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">
+                    Ticket archivé
+                  </p>
+                  <p className="mt-0.5 text-sm text-amber-600/80 dark:text-amber-400/70">
+                    Consultation admin en lecture seule. Les actions métier sont désactivées.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

@@ -23,6 +23,7 @@ from api.services.ServiceAccount import AccountService
 # ── Requêtes et chaîne ────────────────────────────────────────────────────────
 from api.services.ServiceRequest import RequestService
 from api.services.ServiceAttachment import AttachmentService
+from api.services.ServiceRequestExport import RequestExportService
 
 # ── Configuration métier ──────────────────────────────────────────────────────
 from api.services.ServiceSlaPolicy import SlaPolicyService
@@ -52,7 +53,7 @@ __all__ = [
     "KnowledgeCategoryService", "AnnouncementCategoryService",
     "AnnouncementPriorityService", "AnnouncementStatusService", "PriorityDefinitionService",
     "UnityService", "OrganigramService", "AccountService",
-    "RequestService", "AttachmentService",
+    "RequestService", "AttachmentService", "RequestExportService",
     "SlaPolicyService", "RoutingRuleService",
     "WorkflowService", "TaskService",
     "NotificationService", "ActivityLogService", "KnowledgeArticleService",

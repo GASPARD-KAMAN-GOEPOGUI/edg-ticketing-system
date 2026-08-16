@@ -44,13 +44,15 @@ from api.services.NotificationEmitter import emit as emit_notif
 from api.services.ServiceCrypto import decrypt_field
 
 # Mapping statut → event_type spécifique (CDC §7 + §8)
+# "pending" retiré (harmonisation statuts/notifications, 2026-08) : ce statut
+# n'est plus atteignable (cf. ticket_actions.ALLOWED_TRANSITIONS), donc plus
+# cartographié ici.
 _STATUS_EVENT_MAP: dict[str, str] = {
     "qualifying":   "qualifying",
     "qualified":    "qualified",
     "assigned":     "assigned",
     "in_progress":  "in_progress",
     "rejected":     "rejected",
-    "pending":      "pending",
     "escalated":    "escalated",
 }
 _STATUS_LABEL_MAP: dict[str, str] = {
@@ -59,7 +61,6 @@ _STATUS_LABEL_MAP: dict[str, str] = {
     "assigned":     "Ticket assigné à un agent",
     "in_progress":  "Prise en charge — traitement en cours",
     "rejected":     "Ticket rejeté",
-    "pending":      "Ticket en attente",
     "escalated":    "Ticket escaladé",
 }
 
@@ -197,6 +198,7 @@ class RequestService(BaseService):
         *,
         values: dict[str, Any],
         require_current_assignee: bool,
+        commit: bool = True,
     ) -> RequestModel:
         """
         BR-TRANSMIT-001 — écriture atomique conditionnelle (compare-and-set côté SQL)
@@ -208,6 +210,12 @@ class RequestService(BaseService):
         porte la condition de concurrence. Rafraîchit ensuite `current` (déjà chargé dans
         l'identity map de la session) plutôt que de refaire un SELECT : un SELECT après un
         UPDATE Core renverrait sinon l'objet ORM encore en cache, avec des valeurs perimées.
+
+        `commit=False` — perf (harmonisation transactionnelle) : flush au lieu de
+        commit, l'appelant orchestre un commit unique en fin de requête (get_db()).
+        C'est toujours le tout premier écrit de resolve()/transmit_treatment(), donc
+        le rollback sur conflit de concurrence (rowcount == 0) reste sans risque —
+        rien d'autre n'est encore flush à ce stade.
         """
         stmt = sa_update(RequestModel).where(RequestModel.id == current.id)
         if require_current_assignee:
@@ -220,7 +228,10 @@ class RequestService(BaseService):
                 "Ce ticket a été modifié par un autre utilisateur. Veuillez actualiser la page.",
                 error_code=ErrorCode.TICKET_STATE_CONFLICT,
             )
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
+        else:
+            await self.session.flush()
         await self.session.refresh(current)
         return current
 
@@ -1069,6 +1080,7 @@ class RequestService(BaseService):
                         request_id=str(obj.id),
                         action_label="Suivre mon ticket",
                         action_url=f"/app/requests/{obj.id}",
+                        commit=False,
                     )
                 # Fall-through au bloc triage ci-dessous
             else:
@@ -1108,7 +1120,7 @@ class RequestService(BaseService):
                         "new_status": "assigned",
                         "target_unity_id": target_unity_id,
                     }),
-                })
+                }, commit=False)
 
                 assert_transition_allowed(obj.request_status, "assigned", actor_role=actor_role)
                 status_translated = await self._translate_codes({"request_status": "assigned"})
@@ -1117,7 +1129,7 @@ class RequestService(BaseService):
                     "unity_id": target_unity_id,
                     "in_triage": False,
                     **status_translated,
-                })
+                }, commit=False)
 
                 if assignee_id:
                     await emit_notif(
@@ -1133,6 +1145,7 @@ class RequestService(BaseService):
                         request_id=str(obj.id),
                         action_label="Voir le ticket",
                         action_url=f"/app/requests/{obj.id}",
+                        commit=False,
                     )
 
                 await emit_event(AppEvent(
@@ -1165,7 +1178,7 @@ class RequestService(BaseService):
                 "old_status": getattr(obj, "request_status", None),
                 "new_status": "qualifying",
             }),
-        })
+        }, commit=False)
 
         assert_transition_allowed(obj.request_status, "qualifying", actor_role=actor_role)
         status_qualifying = await self._translate_codes({"request_status": "qualifying"})
@@ -1173,7 +1186,7 @@ class RequestService(BaseService):
             "assignee_id": support.id if support else None,
             "in_triage": True,
             **status_qualifying,
-        })
+        }, commit=False)
 
         if support:
             await emit_notif(
@@ -1185,6 +1198,7 @@ class RequestService(BaseService):
                 request_id=str(obj.id),
                 action_label="Qualifier",
                 action_url="/app/queue?tab=qualify",
+                commit=False,
             )
 
         self._logger.info(f"Demande {obj.ref} → triage (aucune règle matchée)")
@@ -1267,6 +1281,14 @@ class RequestService(BaseService):
         wf_id = await self._get_or_create_workflow(obj.id)
 
         # Étape 1 — événement CREATED
+        # Perf (harmonisation transactionnelle 2026-08) : à partir d'ici, toutes
+        # les écritures de ce flux passent en flush (commit=False) — un seul
+        # commit réel a lieu en fin de requête HTTP (dependency get_db(), qui
+        # commit après un retour réussi et rollback sur exception). `obj` (le
+        # ticket) reste lui committé plus haut par self.repo.create() pour
+        # préserver intacte la logique de retry sur collision de référence
+        # (IntegrityError → rollback → nouvelle tentative), qui a besoin d'un
+        # commit/rollback réel à cette étape précise.
         await self.detail_repo.create_event({
             "workflow_id": wf_id,
             "event_type": "created",
@@ -1280,7 +1302,7 @@ class RequestService(BaseService):
                 "actor_role": data.get("requester_role", "user"),
                 "new_status": "new",
             },
-        })
+        }, commit=False)
 
         # Circuit de validation optionnel (pattern edgrh)
         for i, step in enumerate(workflow_steps):
@@ -1288,7 +1310,7 @@ class RequestService(BaseService):
             step_data["workflow_id"] = wf_id
             step_data.setdefault("activated", i == 0)
             step_data.setdefault("accepted", None)
-            await self.detail_repo.create(step_data)
+            await self.detail_repo.create(step_data, commit=False)
 
         self._logger.info(f"Demande créée — ref={ref}")
         await emit_event(AppEvent(
@@ -1310,22 +1332,34 @@ class RequestService(BaseService):
                 request_id=str(obj.id),
                 action_label="Voir le ticket",
                 action_url=f"/app/requests/{obj.id}",
+                commit=False,
             )
 
         # Étape 2 — routage automatique uniquement si explicitement demandé.
+        # begin_nested() = SAVEPOINT : si le routage échoue en cours de route
+        # (ex. contrainte FK improbable), seules SES propres écritures sont
+        # annulées — le ticket/événement/notification déjà flush ci-dessus
+        # restent intacts et seront bien commités en fin de requête. Le routage
+        # reste strictement "best effort" (échec = log + poursuite), exactement
+        # comme avant, mais sans risque de corrompre la création elle-même.
         if self._should_auto_route(data):
             try:
-                await self._apply_routing(
-                    obj, wf_id,
-                    actor_id=data.get("requester_id"),
-                    actor_name=data.get("requester_name"),
-                    raw_description=raw_description,
-                    actor_role=data.get("requester_role", "user"),
-                )
+                async with self.session.begin_nested():
+                    await self._apply_routing(
+                        obj, wf_id,
+                        actor_id=data.get("requester_id"),
+                        actor_name=data.get("requester_name"),
+                        raw_description=raw_description,
+                        actor_role=data.get("requester_role", "user"),
+                    )
             except Exception as exc:
                 self._logger.warning(f"Routage échoué pour demande {ref}: {exc}")
 
-        # Re-fetch pour retourner l'état complet après routage
+        # Re-fetch pour retourner l'état complet après routage — nécessaire
+        # désormais aussi pour peupler les colonnes server_default
+        # (created_at/updated_at) qu'un simple flush ne rapatrie pas côté
+        # objet Python (elles restent lisibles en base, dans la même
+        # transaction, dès le flush — seule l'instance ORM locale ne les a pas).
         fresh = await self.repo.get_by_id(obj.id)
         if fresh is not None:
             obj = fresh
@@ -1355,7 +1389,7 @@ class RequestService(BaseService):
         status_code = normalize_status(raw_status) if raw_status else None
         if raw_status and status_code != raw_status:
             data = {**data, "request_status": status_code}
-        status_reason = data.pop("status_reason", None)
+        data.pop("status_reason", None)
         current = await self.repo.get_by_id(id)
 
         # Validation stricte de la matrice : les routes dediees portent les exceptions metier.
@@ -1383,7 +1417,7 @@ class RequestService(BaseService):
             data = {**data, "infos": new_infos}
 
         translated = await self._translate_codes(data)
-        obj = await self.repo.update(id, translated)
+        obj = await self.repo.update(id, translated, commit=False)
         if obj is None:
             raise self.not_found(
                 "Cette demande n'existe pas.",
@@ -1393,9 +1427,7 @@ class RequestService(BaseService):
             )
         if status_code:
             event_type = _STATUS_EVENT_MAP.get(status_code, "status_changed")
-            if status_code == "pending" and status_reason == "info_request":
-                event_label = "Informations complémentaires demandées"
-            elif status_code == "in_progress" and opening_meta and new_assignee_id:
+            if status_code == "in_progress" and opening_meta and new_assignee_id:
                 # BR-QUEUE-AUTO-START-001 §7 — une seule ligne de journal cohérente
                 # ("pris/assigné" + "traitement démarré"), jamais deux événements
                 # distincts pour la même action utilisateur.
@@ -1426,7 +1458,7 @@ class RequestService(BaseService):
                     # directe, auto-assignation, prise en charge).
                     **opening_meta,
                 }),
-            })
+            }, commit=False)
             await emit_event(AppEvent(
                 type="request.status_changed",
                 payload={"id": id, "status": status_code},
@@ -1436,12 +1468,15 @@ class RequestService(BaseService):
             # WORKFLOW-001 §22 — seuls les événements importants/actionnables
             # (information requise, escalade) déclenchent un email ; les étapes de
             # progression routinière restent App-only pour éviter le bruit.
+            # "qualifying" volontairement absent (harmonisation statuts/notifications,
+            # 2026-08) : c'est un état technique de file d'attente (pas encore de
+            # prise en charge active), donc pas d'événement métier distinct pour le
+            # demandeur — cf. "new" = file d'attente. "pending" retiré : statut
+            # inatteignable désormais (cf. ticket_actions.ALLOWED_TRANSITIONS).
             _notif_map = {
-                "qualifying":   ("Ticket en cours de qualification", "Votre ticket {ref} est en cours de qualification.", "info", False),
                 "qualified":    ("Ticket qualifié", "Votre ticket {ref} a été qualifié et sera traité prochainement.", "info", False),
                 "assigned":     ("Ticket pris en charge", "Votre ticket {ref} a été pris en charge par un intervenant.", "info", False),
                 "in_progress":  ("Ticket en cours de traitement", "Votre ticket {ref} est maintenant en cours de traitement.", "info", False),
-                "pending":      ("Information complémentaire requise", "Un agent attend votre retour sur le ticket {ref}.", "warning", True),
                 "escalated":    ("Ticket escaladé", "Votre ticket {ref} a nécessité une prise en charge complémentaire.", "warning", True),
             }
             if status_code in _notif_map and obj is not None and obj.requester_id:
@@ -1457,6 +1492,7 @@ class RequestService(BaseService):
                     action_label="Voir le ticket",
                     action_url=f"/app/requests/{id}",
                     send_email=send_email_flag,
+                    commit=False,
                 )
 
             # BR-NOTIFICATION-WORKFLOW-001 §4/§6/§7 + BR-QUEUE-AUTO-START-001 —
@@ -1479,6 +1515,7 @@ class RequestService(BaseService):
                     request_id=id,
                     action_label="Voir le ticket",
                     action_url=f"/app/requests/{id}",
+                    commit=False,
                 )
         else:
             if data:
@@ -1496,7 +1533,7 @@ class RequestService(BaseService):
                         "actor_role": actor_role,
                         "changed_fields": sorted(data.keys()),
                     }),
-                })
+                }, commit=False)
             await emit_event(AppEvent(
                 type="request.updated",
                 payload={"id": id},
@@ -1655,7 +1692,7 @@ class RequestService(BaseService):
             "in_triage": False,
             "infos": new_infos,
             **translated,
-        })
+        }, commit=False)
         if obj is None:
             raise self.not_found("Cette demande n'existe pas.", error_code=ErrorCode.REQUEST_NOT_FOUND)
         wf_id_assign = await self._get_or_create_workflow(int(id))
@@ -1687,7 +1724,7 @@ class RequestService(BaseService):
                 "new_assignee_id": assignee_id,
                 "target_unity_id": assignee_unity_id,
             }),
-        })
+        }, commit=False)
         await emit_notif(
             self.session,
             recipient_id=assignee_id,
@@ -1697,6 +1734,7 @@ class RequestService(BaseService):
             request_id=id,
             action_label="Voir le ticket",
             action_url=f"/app/requests/{id}",
+            commit=False,
         )
         # BR-NOTIFICATION-WORKFLOW-001 §7 — le demandeur est informé (App only, la
         # personne qui assigne n'a pas besoin d'être notifiée de sa propre action).
@@ -1711,6 +1749,7 @@ class RequestService(BaseService):
                 action_label="Voir le ticket",
                 action_url=f"/app/requests/{id}",
                 send_email=False,
+                commit=False,
             )
         await emit_event(AppEvent(
             type="request.assigned",
@@ -1739,7 +1778,7 @@ class RequestService(BaseService):
         obj = await self.repo.update(id, {
             **translated,
             "closed_at": datetime.now(timezone.utc).replace(tzinfo=None),
-        })
+        }, commit=False)
         if obj is None:
             raise self.not_found("Cette demande n'existe pas.", error_code=ErrorCode.REQUEST_NOT_FOUND)
         wf_id_close = await self._get_or_create_workflow(int(id))
@@ -1757,7 +1796,7 @@ class RequestService(BaseService):
                 "old_status": current.request_status,
                 "new_status": "closed",
             }),
-        })
+        }, commit=False)
         if obj.requester_id:
             await emit_notif(
                 self.session,
@@ -1768,6 +1807,7 @@ class RequestService(BaseService):
                 request_id=id,
                 action_label="Voir le ticket",
                 action_url=f"/app/requests/{id}",
+                commit=False,
             )
         # Lot finition §3 — le dernier intervenant est informé de la confirmation du
         # demandeur (App-only) : purement informatif, ne réaffecte rien, ne rouvre
@@ -1784,6 +1824,7 @@ class RequestService(BaseService):
                 action_label="Voir le ticket",
                 action_url=f"/app/requests/{id}",
                 send_email=False,
+                commit=False,
             )
         await emit_event(AppEvent(type="request.closed", payload={"id": id}, target={"roles": "all"}))
         return obj
@@ -1851,6 +1892,7 @@ class RequestService(BaseService):
             current,
             values={**translated, "resolved_at": ended_at, "in_triage": False, "infos": new_infos},
             require_current_assignee=require_guard,
+            commit=False,
         )
 
         sla_snapshot = await self._sla_cycle_snapshot(
@@ -1893,7 +1935,7 @@ class RequestService(BaseService):
                 **intervention_meta,
                 **actor_identity,
             }),
-        })
+        }, commit=False)
         await emit_notif(
             self.session,
             recipient_id=getattr(obj, "requester_id", None),
@@ -1906,6 +1948,7 @@ class RequestService(BaseService):
             request_id=id,
             action_label="Confirmer la résolution",
             action_url=f"/app/requests/{id}",
+            commit=False,
         )
         await emit_event(AppEvent(type="request.resolved", payload={"id": id}, target={"roles": "all"}))
         return obj
@@ -1987,6 +2030,7 @@ class RequestService(BaseService):
             current,
             values={"assignee_id": target_id_int, "in_triage": False, "infos": new_infos},
             require_current_assignee=require_guard,
+            commit=False,
         )
 
         wf_id = await self._get_or_create_workflow(int(id))
@@ -2030,7 +2074,7 @@ class RequestService(BaseService):
                 **closing_identity,
                 "next_intervention": {**opening_meta, "started_at": ended_at.isoformat()},
             }),
-        })
+        }, commit=False)
 
         await emit_notif(
             self.session,
@@ -2044,6 +2088,7 @@ class RequestService(BaseService):
             request_id=id,
             action_label="Voir le ticket",
             action_url=f"/app/requests/{id}",
+            commit=False,
         )
         # BR-NOTIFICATION-WORKFLOW-001 §8 — confirmation légère App-only à l'émetteur
         # (previous_assignee_id = l'acteur lui-même) : pas d'email, pas de détails
@@ -2059,6 +2104,7 @@ class RequestService(BaseService):
                 action_label="Voir le ticket",
                 action_url=f"/app/requests/{id}",
                 send_email=False,
+                commit=False,
             )
         await emit_event(AppEvent(
             type="request.transmitted",
@@ -2161,7 +2207,7 @@ class RequestService(BaseService):
             # déclencherait une escalade automatique immédiate et injustifiée du nouveau cycle.
             "sla_breached": False,
             "sla_elapsed": 0,
-        })
+        }, commit=False)
         if updated is None:
             raise self.not_found("Cette demande n'existe pas.", error_code=ErrorCode.REQUEST_NOT_FOUND)
 
@@ -2200,7 +2246,7 @@ class RequestService(BaseService):
                 # transmissions/résolutions globales — voir note terminologique BR-TRACE-001).
                 "intervention_cycle_number": next_sla_cycle_number,
             }),
-        })
+        }, commit=False)
 
         # Notifie le requérant — confirmation, ticket remis en file d'attente pour un
         # nouveau cycle. App + Email (défaut) : événement important/actionnable.
@@ -2214,6 +2260,7 @@ class RequestService(BaseService):
                 request_id=id,
                 action_label="Voir le ticket",
                 action_url=f"/app/requests/{id}",
+                commit=False,
             )
 
         # BR-NOTIF-001 : jamais d'affectation automatique — l'ancien intervenant n'est
@@ -2232,6 +2279,7 @@ class RequestService(BaseService):
                 action_label="Voir le ticket",
                 action_url=f"/app/requests/{id}",
                 send_email=False,
+                commit=False,
             )
             notified_ids.add(str(previous_assignee_id))
         if obj.unity_id:
@@ -2250,6 +2298,7 @@ class RequestService(BaseService):
                     action_label="Voir la file d'attente",
                     action_url="/app/queue",
                     send_email=False,
+                    commit=False,
                 )
 
         await emit_event(AppEvent(type="request.reopened", payload={"id": id}, target={"roles": "all"}))
@@ -2285,7 +2334,7 @@ class RequestService(BaseService):
         existing = await self.repo.get_by_id(int(id))
         existing_infos = (existing.infos or {}) if existing else {}
         patch["infos"] = {**existing_infos, "cancel_reason": clean_reason}
-        obj = await self.repo.update(id, patch)
+        obj = await self.repo.update(id, patch, commit=False)
         if obj is None:
             raise self.not_found("Cette demande n'existe pas.", error_code=ErrorCode.REQUEST_NOT_FOUND)
         wf_id_cancel = await self._get_or_create_workflow(int(id))
@@ -2305,10 +2354,11 @@ class RequestService(BaseService):
                 "new_status": "cancelled",
                 "reason": clean_reason,
             }),
-        })
+        }, commit=False)
         # BR-NOTIFICATION-WORKFLOW-001 §20/§22 — annulation absente de la liste des
-        # événements "email important" : confirmation App-only pour le demandeur
-        # comme pour le porteur actuel (qui doit surtout savoir qu'il doit arrêter).
+        # événements "email important" pour le porteur actuel (qui doit surtout
+        # savoir qu'il doit arrêter, in-app suffit). Le demandeur, lui, reçoit un
+        # email de confirmation de son annulation.
         if obj.requester_id:
             await emit_notif(
                 self.session,
@@ -2319,7 +2369,8 @@ class RequestService(BaseService):
                 request_id=id,
                 action_label="Voir le ticket",
                 action_url=f"/app/requests/{id}",
-                send_email=False,
+                send_email=True,
+                commit=False,
             )
         if obj.assignee_id and not self._same_account(obj.assignee_id, obj.requester_id):
             await emit_notif(
@@ -2332,6 +2383,7 @@ class RequestService(BaseService):
                 action_label="Voir le ticket",
                 action_url=f"/app/requests/{id}",
                 send_email=False,
+                commit=False,
             )
         await emit_event(AppEvent(type="request.cancelled", payload={"id": id}, target={"roles": "all"}))
         return obj
@@ -2438,7 +2490,7 @@ class RequestService(BaseService):
                 "new_assignee_id": chief.id if chief else None,
                 "reason": clean_reason or None,
             }),
-        })
+        }, commit=False)
 
         status_translated = await self._translate_codes({"request_status": "assigned"})
         await self.repo.update(id, {
@@ -2446,7 +2498,7 @@ class RequestService(BaseService):
             "assignee_id": chief.id if chief else None,
             "in_triage": False,
             **status_translated,
-        })
+        }, commit=False)
 
         # Lot finition §4 — règle globale : la responsabilité actuelle détermine les
         # notifications opérationnelles. Nouveau responsable (chef cible) : App+Email
@@ -2465,6 +2517,7 @@ class RequestService(BaseService):
                 request_id=id,
                 action_label="Voir le ticket",
                 action_url=f"/app/requests/{id}",
+                commit=False,
             )
             notified_ids.add(str(chief.id))
         if obj.requester_id:
@@ -2478,6 +2531,7 @@ class RequestService(BaseService):
                 action_label="Voir le ticket",
                 action_url=f"/app/requests/{id}",
                 send_email=False,
+                commit=False,
             )
             notified_ids.add(str(obj.requester_id))
         if previous_assignee_id and str(previous_assignee_id) not in notified_ids:
@@ -2491,6 +2545,7 @@ class RequestService(BaseService):
                 action_label="Voir le ticket",
                 action_url=f"/app/requests/{id}",
                 send_email=False,
+                commit=False,
             )
 
         await emit_event(AppEvent(
@@ -2605,7 +2660,7 @@ class RequestService(BaseService):
                 "new_assignee_id": None,
                 "reason": clean_reason,
             }),
-        })
+        }, commit=False)
 
         status_translated = await self._translate_codes({"request_status": "qualifying"})
         existing_infos = dict(obj.infos) if isinstance(obj.infos, dict) else {}
@@ -2620,7 +2675,7 @@ class RequestService(BaseService):
             "in_triage": False,
             "infos": existing_infos,
             **status_translated,
-        })
+        }, commit=False)
 
         # Lot finition §4 — même principe que reassign_service : responsabilité
         # actuelle → notifications. Nouveau directeur cible : App+Email (déjà en
@@ -2637,6 +2692,7 @@ class RequestService(BaseService):
                 request_id=id,
                 action_label="Voir le ticket",
                 action_url=f"/app/requests/{id}",
+                commit=False,
             )
             notified_ids.add(str(first_director.id))
         if obj.requester_id:
@@ -2650,6 +2706,7 @@ class RequestService(BaseService):
                 action_label="Voir le ticket",
                 action_url=f"/app/requests/{id}",
                 send_email=False,
+                commit=False,
             )
             notified_ids.add(str(obj.requester_id))
         if previous_assignee_id and str(previous_assignee_id) not in notified_ids:
@@ -2663,6 +2720,7 @@ class RequestService(BaseService):
                 action_label="Voir le ticket",
                 action_url=f"/app/requests/{id}",
                 send_email=False,
+                commit=False,
             )
 
         await emit_event(AppEvent(
@@ -2720,7 +2778,7 @@ class RequestService(BaseService):
         if old_priority == clean_priority:
             return obj
 
-        updated = await self.repo.update(id, {"priority_definition_id": priority_id})
+        updated = await self.repo.update(id, {"priority_definition_id": priority_id}, commit=False)
         if updated is None:
             raise self.not_found("Cette demande n'existe pas.", error_code=ErrorCode.REQUEST_NOT_FOUND)
 
@@ -2745,7 +2803,7 @@ class RequestService(BaseService):
                 "old_priority": old_priority,
                 "new_priority": clean_priority,
             }),
-        })
+        }, commit=False)
         await emit_event(AppEvent(
             type="request.priority_changed",
             payload={"id": id, "priority": clean_priority},
@@ -2791,7 +2849,7 @@ class RequestService(BaseService):
         await self.repo.update(id, {
             **status_translated,
             "assignee_id": obj.requester_id,
-        })
+        }, commit=False)
 
         await self.detail_repo.create_event({
             "workflow_id": wf_id,
@@ -2813,7 +2871,7 @@ class RequestService(BaseService):
                 "new_status": "rejected",
                 "reason": clean_reason,
             }),
-        })
+        }, commit=False)
 
         if obj.requester_id:
             await emit_notif(
@@ -2825,6 +2883,7 @@ class RequestService(BaseService):
                 request_id=id,
                 action_label="Voir le ticket",
                 action_url=f"/app/requests/{id}",
+                commit=False,
             )
 
         await emit_event(AppEvent(type="request.rejected", payload={"id": id}, target={"roles": "all"}))
