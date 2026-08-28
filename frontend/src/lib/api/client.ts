@@ -150,7 +150,7 @@ export async function apiFetch<T>(
     if ((err as Error).name === "AbortError") {
       throw new Error("La requête a expiré. Vérifiez que le serveur backend est démarré.");
     }
-    throw new Error("Impossible de contacter le serveur. Vérifiez votre connexion.");
+    throw new Error("Échec de connexion. Veuillez réessayer.");
   } finally {
     clearTimeout(timer);
   }
@@ -255,7 +255,7 @@ export async function apiFetchBlob(
     if ((err as Error).name === "AbortError") {
       throw new Error("La requête a expiré. Vérifiez que le serveur backend est démarré.");
     }
-    throw new Error("Impossible de contacter le serveur. Vérifiez votre connexion.");
+    throw new Error("Échec de connexion. Veuillez réessayer.");
   } finally {
     clearTimeout(timer);
   }

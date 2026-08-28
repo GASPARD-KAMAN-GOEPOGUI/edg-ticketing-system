@@ -422,7 +422,7 @@
 }
 
 @utility text-gradient {
-  background: var(--gradient-edg);
+  background: var(--gradient-primary);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;

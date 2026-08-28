@@ -1,4 +1,4 @@
-"""Utilitaires de normalisation des numéros de téléphone — EDG Connect (Guinée)."""
+"""Utilitaires de normalisation des numéros de téléphone — EDG Support (Guinée)."""
 from __future__ import annotations
 
 import re

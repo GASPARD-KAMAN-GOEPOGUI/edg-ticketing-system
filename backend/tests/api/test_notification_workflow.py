@@ -191,6 +191,22 @@ async def test_requester_comment_notifies_current_handler_even_outside_pending(a
     request_id = await _create_ticket(auth_client, unity_id, "comment-generalized")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=860)
 
+    # BR-MESSAGING-OPEN-001 — le demandeur ne peut écrire qu'après que
+    # l'intervenant actuel a lui-même ouvert la conversation. `name` requis :
+    # create_comment() retombe sur `actor.name` quand `_actor_display_name`
+    # ne trouve ni firstname ni name (SimpleNamespace nu de `_dep` sans ça).
+    def _agent_dep_with_name():
+        import types
+        return types.SimpleNamespace(
+            id=860, role="agent-support", unity_id=unity_id, direction_id=None, name="Agent 860",
+        )
+
+    resp = await _call_as(
+        _agent_dep_with_name, "POST", f"/api/v1/requests/{request_id}/comments",
+        {"body": "Bonjour, une précision ?", "is_public": True, "peer_id": "860"},
+    )
+    assert resp.status_code == 201, resp.text
+
     async with auth_client("user") as user_client:
         resp = await user_client.post(
             f"/api/v1/requests/{request_id}/comments",

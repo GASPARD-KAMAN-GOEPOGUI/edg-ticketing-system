@@ -1,6 +1,6 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { requireRole } from "@/lib/auth-guard";
-import { useState, useCallback, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useQueries } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { GlassCard } from "@/components/glass-card";
@@ -17,7 +17,6 @@ import { fr } from "date-fns/locale";
 import { PaginationBar } from "@/components/pagination-bar";
 import { AsyncSwap } from "@/components/async-states";
 import { cn, initialsFor, formatElapsedHours } from "@/lib/utils";
-import { ticketDetailRouteForList } from "@/lib/ticket-navigation";
 
 export const Route = createFileRoute("/app/transmitted")({
   beforeLoad: () => requireRole("agent-support", "chief-service", "chief-departement", "director", "admin"),
@@ -33,9 +32,6 @@ const priorityDotClass: Record<Priority, string> = {
 };
 
 function TransmittedTicketsPage() {
-  const navigate = useNavigate();
-  const detailRoute = ticketDetailRouteForList("/app/transmitted");
-
   const [layout, setLayout] = useState<LayoutMode>("grid");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -78,16 +74,6 @@ function TransmittedTicketsPage() {
     : isError || paged.length === 0
     ? "empty"
     : "ready";
-
-  const openTicketDetail = useCallback((id: string) => {
-    navigate({ to: detailRoute, params: { id } });
-  }, [navigate, detailRoute]);
-  const openTicketDetailFromKeyboard = useCallback((event: React.KeyboardEvent, id: string) => {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      openTicketDetail(id);
-    }
-  }, [openTicketDetail]);
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -181,12 +167,8 @@ function TransmittedTicketsPage() {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -6 }}
                       transition={{ duration: 0.3, delay: i * 0.03 }}
-                      role="link"
-                      tabIndex={0}
-                      onClick={() => openTicketDetail(r.id)}
-                      onKeyDown={(event) => openTicketDetailFromKeyboard(event, r.id)}
                       className={cn(
-                        "flex cursor-pointer items-start gap-4 border-b px-5 py-4 last:border-0 transition-colors hover:bg-background/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                        "flex items-start gap-4 border-b px-5 py-4 last:border-0",
                         r.priority === "critical"
                           ? "border-destructive/30 bg-destructive/3"
                           : r.status === "reopened"
@@ -196,13 +178,7 @@ function TransmittedTicketsPage() {
                     >
                       <div className="min-w-0 flex-1 space-y-1.5">
                         <div className="flex flex-wrap items-center gap-2">
-                          <Link
-                            to={detailRoute}
-                            params={{ id: r.id }}
-                            className="font-mono text-[11px] text-primary hover:underline"
-                          >
-                            {r.ref}
-                          </Link>
+                          <span className="font-mono text-[11px] text-primary">{r.ref}</span>
                           <PriorityBadge priority={r.priority} />
                           <StatusBadge status={r.status} />
                           {r.status === "reopened" && (
@@ -211,13 +187,7 @@ function TransmittedTicketsPage() {
                             </span>
                           )}
                         </div>
-                        <Link
-                          to={detailRoute}
-                          params={{ id: r.id }}
-                          className="block font-semibold leading-snug hover:text-primary"
-                        >
-                          {r.title}
-                        </Link>
+                        <p className="font-semibold leading-snug">{r.title}</p>
                         {r.description && (
                           <p className="line-clamp-1 text-xs text-muted-foreground">{r.description}</p>
                         )}
@@ -250,18 +220,12 @@ function TransmittedTicketsPage() {
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.94 }}
                       transition={{ duration: 0.3, delay: i * 0.04 }}
-                      whileHover={{ y: -3 }}
                     >
                       <GlassCard className={cn(
-                        "flex h-full min-h-[196px] cursor-pointer flex-col gap-3 p-4 transition-shadow hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                        "flex h-full min-h-[196px] flex-col gap-3 p-4",
                         r.priority === "critical" && "border-destructive/40 bg-destructive/3",
                         r.status === "reopened"   && "border-amber-500/40 bg-amber-500/3",
-                      )}
-                        role="link"
-                        tabIndex={0}
-                        onClick={() => openTicketDetail(r.id)}
-                        onKeyDown={(event) => openTicketDetailFromKeyboard(event, r.id)}
-                      >
+                      )}>
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <StatusBadge status={r.status} />
@@ -285,9 +249,7 @@ function TransmittedTicketsPage() {
                           </div>
                         </div>
 
-                        <Link to={detailRoute} params={{ id: r.id }} className="hover:text-primary">
-                          <p className="line-clamp-2 font-semibold leading-snug">{r.title}</p>
-                        </Link>
+                        <p className="line-clamp-2 font-semibold leading-snug">{r.title}</p>
                         <div className={cn("flex items-center gap-1.5 text-xs font-medium", priorityDotClass[r.priority])}>
                           <span className="h-2 w-2 shrink-0 rounded-full bg-current" />
                           {priorityLabels[r.priority]}

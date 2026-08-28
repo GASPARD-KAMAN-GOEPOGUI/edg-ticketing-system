@@ -1,5 +1,5 @@
 """
-Planificateur de tâches APScheduler — EDG Connect.
+Planificateur de tâches APScheduler — EDG Support.
 
 Jobs enregistrés :
   auto_escalation  — toutes les 10 min : escalade automatique SLA

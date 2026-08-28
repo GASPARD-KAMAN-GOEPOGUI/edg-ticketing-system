@@ -153,11 +153,6 @@ export const Route = createFileRoute("/app/requests/$id")({
   ),
 });
 
-// Anciennement masqué temporairement — remis visible sur demande. Repasser à
-// false pour masquer à nouveau l'onglet "Discussions" + le bouton "Ouvrir une
-// discussion" (ex. pendant la refonte titulaire actuel + demandeur en attente).
-const DISCUSSIONS_TAB_ENABLED = true;
-
 const DETAIL_CONTEXTS = {
   requests: {
     eyebrow: "Mon espace",
@@ -803,7 +798,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   // désormais les actions (déplacées depuis les boutons de la card liste).
   // Le contexte personnel ("Mes demandes") reste sur la description.
   const [activeDetailTab, setActiveDetailTab] = useState<DetailTab>(
-    wantsCommentsDeepLink && DISCUSSIONS_TAB_ENABLED
+    wantsCommentsDeepLink
       ? "comments"
       : isPersonalContext ? "journal" : "treatment",
   );
@@ -1151,16 +1146,18 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const requestInfoMut = useMutation({
     // Le ticket reste "En cours" — on ne bascule plus vers "En attente" pour
     // cette action (sur demande explicite : plus de bouton "Reprendre le
-    // traitement" à faire réapparaître). Le demandeur est quand même notifié
-    // par mail + in-app via la notification standard "nouveau message"
-    // déclenchée par la création d'un commentaire public de l'intervenant
-    // assigné (RouteRequest.py create_comment, send_email par défaut).
+    // traitement" à faire réapparaître). Le demandeur est notifié in-app +
+    // email via la notification standard "nouveau message" déclenchée par la
+    // création d'un commentaire public de l'intervenant assigné (RouteRequest.py
+    // create_comment). `peer_id` est obligatoire côté backend pour un commentaire
+    // normal (BR-MESSAGING-PAIR-001) — sans lui la requête échoue en 422.
     mutationFn: () =>
       createComment(id, {
         author_id: authorId,
         author_name: authorName,
         body: infoQuestion.trim(),
         is_public: true,
+        peer_id: r?.assigneeId,
       }),
     onSuccess: () => {
       toast.success("Le demandeur a été notifié.");
@@ -1632,14 +1629,38 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   // La messagerie (Discussions) doit rester distincte du Journal — un message
   // n'y apparaît plus comme entrée générique de la chronologie complète.
   const journalEvents = r.timeline.filter((e) => e.type !== "comment_added");
+  // Historique consultable dès qu'il existe au moins un commentaire visible
+  // pour ce viewer (le backend a déjà filtré par participant) — distinct du
+  // droit d'écrire, qui dépend en plus de l'ouverture de la conversation
+  // courante ci-dessous. Ne jamais supprimer l'historique à la transmission :
+  // ce booléen reste vrai tant qu'un seul message existe, peu importe qui est
+  // l'intervenant actuel maintenant.
+  const hasVisibleComments = r.comments.length > 0;
+  // BR-MESSAGING-OPEN-001 — la conversation courante {demandeur, intervenant
+  // actuel} n'est "ouverte" que si CET intervenant y a lui-même posté au moins
+  // un message public — jamais déduit de la simple présence d'un assignee_id,
+  // ni d'un message public ailleurs sur le ticket (ancien intervenant,
+  // directive). Miroir exact du contrôle serveur (RouteRequest.py,
+  // _current_conversation_opened_by_assignee) — le backend reste l'autorité
+  // finale, ceci ne sert qu'à l'affichage.
+  const currentConversationOpenedByAssignee = Boolean(
+    r.assigneeId
+    && r.comments.some((c) =>
+      !c.isDirective && c.isPublic && c.peerId === r.assigneeId && c.authorId === r.assigneeId,
+    ),
+  );
   // BR-MESSAGING-PAIR-001 — seuls le demandeur et l'intervenant COURANT du
   // ticket peuvent écrire, et seulement dans la conversation courante ; un
   // ancien intervenant garde la lecture de sa conversation (archivée) mais
   // plus l'écriture ; l'admin est en lecture seule (supervision).
+  // BR-MESSAGING-OPEN-001 — le demandeur, en plus, ne peut écrire que si
+  // l'intervenant actuel a lui-même déjà ouvert la conversation ; l'intervenant
+  // actuel, lui, n'est jamais soumis à cette condition (c'est justement lui qui
+  // doit pouvoir l'ouvrir en premier).
   const canWriteConversation = hasAssignee
     && !isAdminSupervision
-    && (isRequesterView || isAssignedToMe)
-    && isViewingCurrentConversation;
+    && isViewingCurrentConversation
+    && (isAssignedToMe || (isRequesterView && currentConversationOpenedByAssignee));
   const commentAuthorProfiles = new Map<string, AccountUser>();
   for (const account of commentAuthorsData ?? []) {
     commentAuthorProfiles.set(String(account.id), account);
@@ -1700,7 +1721,12 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     hasAssignee,
     isAssignedToMe,
   });
-  const canRequestInfo = !isArchived && isAgentOnly && canTicketAction(role, "request_info", r.status, ownershipOptions);
+  // "Ouvrir une discussion" doit être visible pour quiconque possède réellement
+  // le ticket au moment présent (l'a pris depuis la file d'attente OU se l'est
+  // vu assigner par quelqu'un d'autre) — pas seulement agent-support : admin
+  // traite aussi des tickets et doit avoir le même accès une fois assigné.
+  const ownsTicket = !iAmRequester && isAssignedToMe && (role === "agent-support" || role === "admin");
+  const canRequestInfo = !isArchived && ownsTicket && canTicketAction(role, "request_info", r.status, ownershipOptions);
   const canResumeTreatment = !isArchived && isAgentOnly && canTicketAction(role, "resume", r.status, ownershipOptions);
   const canEscalateTicket = !isArchived
     && !iAmRequester
@@ -1752,7 +1778,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const detailTabs: Array<{ key: DetailTab; label: string; count?: number; icon: LucideIcon }> = [
     { key: "description", label: "Description", icon: FileText },
     { key: "journal", label: "Journals", count: journalEvents.length, icon: GitBranch },
-    ...(DISCUSSIONS_TAB_ENABLED
+    ...(hasVisibleComments
       ? [{ key: "comments" as DetailTab, label: "Discussions", count: visibleComments.length, icon: MessageSquare }]
       : []),
     { key: "files", label: "Fichiers", count: attachments.length, icon: Paperclip },
@@ -1827,8 +1853,10 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             </span>
           </button>
         )}
-        {/* C2 — Demander des informations : IN_PROGRESS, agent seulement */}
-        {DISCUSSIONS_TAB_ENABLED && canRequestInfo && (
+        {/* C2 — Demander des informations : IN_PROGRESS, agent seulement.
+            Volontairement indépendant de hasVisibleComments — c'est justement
+            l'action qui crée le tout premier message de la conversation. */}
+        {canRequestInfo && (
           <button
             type="button"
             className="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-left transition hover:bg-amber-500/10"
@@ -2221,6 +2249,11 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
           <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/30 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
             <Lock className="h-3.5 w-3.5 shrink-0" />
             Conversation archivée avec un ancien intervenant — lecture seule. Sélectionnez la conversation "Actuel" pour écrire.
+          </div>
+        ) : isRequesterView && !currentConversationOpenedByAssignee ? (
+          <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/30 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+            <Lock className="h-3.5 w-3.5 shrink-0" />
+            En attente que {assigneeDisplayName} ouvre la discussion. Vous serez notifié dès que ce sera possible.
           </div>
         ) : (
           <div className="mt-5 rounded-2xl border border-border/40 bg-background/45 p-2 shadow-sm">

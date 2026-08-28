@@ -1,5 +1,5 @@
 """
-Services pour les 14 tables de référence EDG Connect.
+Services pour les 14 tables de référence EDG Support.
 Chaque service est une fine couche au-dessus de son repository.
 """
 from __future__ import annotations

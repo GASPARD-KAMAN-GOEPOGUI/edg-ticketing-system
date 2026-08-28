@@ -1,5 +1,5 @@
 """
-Script de verification de la base de donnees EDG Connect.
+Script de verification de la base de donnees EDG Support.
 
 Verifie :
   1. Tables existantes (schema)

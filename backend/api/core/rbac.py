@@ -1,5 +1,5 @@
 """
-RBAC — Rôles et permissions EDG Connect.
+RBAC — Rôles et permissions EDG Support.
 
 Hiérarchie des rôles (du moins au plus privilégié) :
   public < user < agent < chief < director < admin

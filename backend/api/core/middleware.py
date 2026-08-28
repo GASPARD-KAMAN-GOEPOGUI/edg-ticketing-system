@@ -1,5 +1,5 @@
 """
-Middlewares transverses EDG Connect.
+Middlewares transverses EDG Support.
 
 1. RequestLoggingMiddleware
    ─────────────────────────

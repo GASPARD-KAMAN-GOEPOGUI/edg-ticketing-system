@@ -19,6 +19,7 @@ const USER_KEY          = "edg.session.user";
 const ACCESS_TOKEN_KEY  = "edg.auth.access_token";
 const REFRESH_TOKEN_KEY = "edg.auth.refresh_token";
 const TOKEN_EXP_KEY     = "edg.auth.expires_at";   // timestamp ms
+const PENDING_CONSENT_KEY = "edg.auth.pending_consent";  // sessionStorage — jamais localStorage
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -187,6 +188,43 @@ export function clearSession(): void {
 export function isAuthenticated(): boolean {
   if (AUTH_DISABLED) return true;
   return !!getAccessToken() && !isTokenExpired();
+}
+
+// ── Consentement en attente (login → /consent) ────────────────────────────────
+// sessionStorage (jamais localStorage) : le bearer central reçu au login n'est
+// pas encore une session applicative tant que le consentement n'est pas
+// accepté (voir routes/login.tsx, routes/consent.tsx) — auto-effacé à la
+// fermeture de l'onglet, contrairement à ACCESS_TOKEN_KEY/USER_KEY.
+
+export type PendingConsent = {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
+  email: string;
+  suggestedName?: string;
+  suggestedFirstname?: string;
+  suggestedPhone?: string;
+  consentVersion: string;
+};
+
+export function setPendingConsent(consent: PendingConsent): void {
+  if (typeof window === "undefined") return;
+  sessionStorage.setItem(PENDING_CONSENT_KEY, JSON.stringify(consent));
+}
+
+export function getPendingConsent(): PendingConsent | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(PENDING_CONSENT_KEY);
+    return raw ? (JSON.parse(raw) as PendingConsent) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearPendingConsent(): void {
+  if (typeof window === "undefined") return;
+  sessionStorage.removeItem(PENDING_CONSENT_KEY);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

@@ -153,7 +153,7 @@ async def list_by_request(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Accès refusé aux notifications de cette demande.",
             )
-    elif role not in ("agent", "chief", "director", "admin"):
+    elif role not in ("agent-support", "chief-service", "chief-departement", "director", "admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Accès refusé.")
     return await svc.list_by_request(request_id, page=page, limit=limit)
 

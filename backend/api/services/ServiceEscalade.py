@@ -1,5 +1,5 @@
 """
-Service d'escalade automatique SLA — EDG Connect.
+Service d'escalade automatique SLA — EDG Support.
 
 Détecte les tickets dont le SLA est dépassé et les passe au statut 'escalated'.
 Pour chaque ticket : réassigne au chef de service, crée un WorkflowDetail, notifie le chef.

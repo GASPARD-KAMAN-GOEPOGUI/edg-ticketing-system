@@ -50,7 +50,7 @@ class AccountRepository(BaseRepository[Account]):
         page: int = 1,
         limit: int = 20,
     ) -> tuple[list[Account], int]:
-        filters: dict = {"role": ["agent", "chief"]}
+        filters: dict = {"role": ["agent-support", "chief-service", "chief-departement"]}
         if unity_id:
             filters["unity_id"] = unity_id
         if availability:
@@ -221,9 +221,9 @@ class AccountRepository(BaseRepository[Account]):
     # ── Hiérarchie : chefs par unité/direction (pattern edgrh chiefs_by_units) ─
 
     async def find_chiefs_by_unit(self, unit_id: int) -> list[Account]:
-        """Retourne les comptes avec role='chief' dans une unité donnée."""
+        """Retourne les comptes avec role='chief-service' dans une unité donnée."""
         items, _ = await self.list(
-            filters={"unity_id": unit_id, "role": "chief"},
+            filters={"unity_id": unit_id, "role": self._role_filter("chief")},
             only_active=True,
             order_by="name",
             limit=50,
@@ -248,7 +248,7 @@ class AccountRepository(BaseRepository[Account]):
     async def find_support_agent(self) -> Account | None:
         """Retourne le premier agent actif disponible (fallback support général)."""
         items, _ = await self.list(
-            filters={"role": "agent"},
+            filters={"role": "agent-support"},
             only_active=True,
             order_by="name",
             limit=1,

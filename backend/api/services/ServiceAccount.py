@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.core import central_auth
+from api.core import central_auth, mailer
 from api.core.error_codes import ErrorCode
 from api.core.event_bus import AppEvent, emit as emit_event
+from api.core.logger import get_logger
 from api.core.phone import normalize_phone
 from api.core.rbac import normalize_role
 from api.core.ref_validation import check_ref_code
@@ -13,8 +16,56 @@ from api.models.ModelOrganigram import Organigram
 from api.models.ModelUnity import Unity
 from api.repositories import AccountRepository, AccountStatusRepository
 from api.services.base_service import BaseService
+from api.services.NotificationEmitter import _send_email_fire_and_forget
 
 _CENTRAL_NOT_LINKED_MESSAGE = "Ce compte n'est pas rattaché à la plateforme centrale."
+
+_account_email_logger = get_logger("service.AccountService.email")
+
+
+async def _dispatch_account_email(*, kind: str, account_id: int, email: str, name: str) -> None:
+    """
+    Envoi fire-and-forget de l'email de création/association de compte (§6) —
+    même mécanisme que NotificationEmitter._send_email_fire_and_forget (le SMTP
+    peut prendre plusieurs secondes, ça ne doit jamais retarder la réponse HTTP
+    d'inscription/connexion). Ouvre sa PROPRE session DB pour persister le flag
+    anti-doublon dans account.infos : la session de la requête d'origine est déjà
+    fermée quand ce coroutine s'exécute (même pattern que core/scheduler.py).
+
+    Ne relève jamais d'exception — la validation du compte (déjà commitée avant
+    cet appel) ne doit jamais dépendre du succès de l'envoi de l'email.
+    """
+    send_fn = (
+        mailer.send_account_created_email if kind == "created"
+        else mailer.send_account_associated_email
+    )
+    try:
+        sent = await send_fn(email, name)
+    except Exception as exc:
+        sent = False
+        _account_email_logger.warning(
+            "Email compte (%s) — échec inattendu (account_id=%s email=%r) : %s",
+            kind, account_id, email, exc,
+        )
+    _account_email_logger.info(
+        "Email compte (%s) — account_id=%s email=%r envoyé=%s",
+        kind, account_id, email, sent,
+    )
+    if not sent:
+        return
+
+    flag_key = "account_created_email_sent_at" if kind == "created" else "app_associated_email_sent_at"
+    try:
+        from api.configs.Database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            await AccountRepository(session).update_infos(account_id, {
+                flag_key: datetime.utcnow().isoformat(),
+            })
+    except Exception as exc:
+        _account_email_logger.warning(
+            "Email compte (%s) — flag anti-doublon non persisté (account_id=%s) : %s",
+            kind, account_id, exc,
+        )
 
 
 class AccountService(BaseService):
@@ -55,6 +106,42 @@ class AccountService(BaseService):
                 value=matricule,
                 hint="Chaque matricule doit être unique. Vérifiez la valeur saisie.",
             )
+
+    def _notify_account_created(self, account) -> None:
+        """
+        Email A (§6) — déclenché uniquement depuis create(), juste après la
+        persistance locale qui elle-même ne survient qu'après une réponse de
+        succès de central_auth.create_central_account() (aucune exception levée
+        entretemps). Envoi en fire-and-forget (SMTP hors du chemin critique de
+        la réponse HTTP d'inscription, cf. _dispatch_account_email). Idempotence :
+        flag horodaté dans account.infos — chaque ligne Account n'est de toute
+        façon créée qu'une fois (email/central_user_id uniques), ce flag protège
+        surtout un futur appel additionnel (ex. resend manuel) plutôt qu'un
+        doublon dans ce flux lui-même.
+        """
+        infos = account.infos or {}
+        if infos.get("account_created_email_sent_at"):
+            return
+        full_name = f"{account.firstname or ''} {account.name or ''}".strip() or account.name
+        _send_email_fire_and_forget(_dispatch_account_email(
+            kind="created", account_id=account.id, email=account.email, name=full_name,
+        ))
+
+    def _notify_account_associated(self, account) -> None:
+        """
+        Email B (§6) — déclenché uniquement depuis provision_from_central(),
+        appelée uniquement après revalidation centrale réussie (scopes/groupes
+        re-vérifiés par dependencies.py::resolve_or_provision_login_account ou
+        RouteAuth.py::accept_consent). Ne jamais mentionner de "groupe" dans le
+        message — uniquement l'association à l'application.
+        """
+        infos = account.infos or {}
+        if infos.get("app_associated_email_sent_at"):
+            return
+        full_name = f"{account.firstname or ''} {account.name or ''}".strip() or account.name
+        _send_email_fire_and_forget(_dispatch_account_email(
+            kind="associated", account_id=account.id, email=account.email, name=full_name,
+        ))
 
     @staticmethod
     def _org_kind_from(unity: Unity, org: Organigram) -> str:
@@ -297,7 +384,10 @@ class AccountService(BaseService):
         # Invariant : aucun compte local ne doit exister sans identité centrale.
         password = data.pop("password")
         group_codename = central_auth.group_for_role(data.get("role", "user"))
-        machine_token = await central_auth.get_machine_token()
+        # BR-CENTRAL-CREATE-SOURCE-TOKEN-001 — la création de compte central
+        # s'authentifie désormais par source_token (dans create_central_account),
+        # plus par token machine ; celui-ci n'est récupéré que si l'activation
+        # ci-dessous s'avère nécessaire.
         central_result = await central_auth.create_central_account(
             group_codename=group_codename,
             email=data["email"],
@@ -305,19 +395,82 @@ class AccountService(BaseService):
             firstname=data.get("firstname") or data["name"],
             last_name=data["name"],
             password=password,
-            machine_token=machine_token,
         )
         data["central_user_id"] = central_result["user_id"]
         data["central_user_uuid"] = central_result["user_uuid"]
 
+        # Le central peut créer le compte inactif selon le groupe (le champ
+        # user_is_activated de la réponse n'est pas garanti "true" pour tous les
+        # groupes/instances — cf. §12 du README). Sans cette activation, le compte
+        # local est marqué actif alors que le central refuse la connexion avec un
+        # simple "identifiants invalides", indiscernable d'un mauvais mot de passe.
+        if central_result.get("user_is_activated") is not True:
+            machine_token = await central_auth.get_machine_token()
+            await central_auth.activate_central_account(central_result["user_uuid"], machine_token)
+
         obj = await self.repo.create(data)
         self._logger.info(f"✅ Compte créé — id={obj.id} central_user_id={obj.central_user_id}")
+        self._notify_account_created(obj)
 
         if actor_bearer_token:
             await central_auth.log_central_event(
                 actor_bearer_token, object_id=str(obj.id), action="create", status="success",
                 message=f"Compte créé : {obj.email}", after=data,
             )
+        return obj
+
+    async def provision_from_central(
+        self, *, central_user_id: int, central_user_uuid: str | None, email: str,
+        name: str, firstname: str | None, phone: str | None, role: str,
+        consent_accepted_at: datetime | None = None, consent_version: str | None = None,
+    ):
+        """
+        Matérialise le miroir local d'une identité centrale QUI EXISTE DÉJÀ côté
+        manager-user (pas de création centrale ici, contrairement à create()) —
+        cas d'un login réussi côté central sans compte local correspondant :
+        auto-provisioning silencieux si déjà membre d'un groupe support central,
+        ou rattachement après consentement explicite sinon (voir RouteAuth.py
+        POST /auth/login et POST /auth/consent/accept).
+        """
+        role = normalize_role(role)
+        email = (email or "").strip().lower()
+
+        existing_email = await self.repo.find_by_email(email)
+        if existing_email is not None:
+            raise self.conflict(
+                "Un compte local existe déjà pour cette adresse email.",
+                error_code=ErrorCode.EMAIL_ALREADY_EXISTS,
+                field="email", value=email,
+            )
+
+        data: dict = {
+            "central_user_id": central_user_id,
+            "central_user_uuid": central_user_uuid,
+            "email": email,
+            "name": name,
+            "firstname": firstname,
+            "role": role,
+            "account_status": "active",
+            "status": True,
+            "activated_at": datetime.utcnow(),
+        }
+        if phone:
+            phone = normalize_phone(phone)
+            # Champ secondaire : un conflit ne doit pas bloquer un rattachement dont
+            # l'ancrage fiable (email, garanti unique côté central) est déjà validé.
+            if await self.repo.find_by_phone(phone) is None:
+                data["phone"] = phone
+        if consent_accepted_at is not None:
+            data["consent_accepted_at"] = consent_accepted_at
+        if consent_version is not None:
+            data["consent_version"] = consent_version
+
+        obj = await self.repo.create(data)
+        self._logger.info(
+            f"✅ Compte auto-provisionné depuis le central — id={obj.id} "
+            f"central_user_id={central_user_id} role={role}"
+        )
+        self._notify_account_associated(obj)
         return obj
 
     async def update(

@@ -224,3 +224,142 @@ nouvelle table, colonne ou relation créée.
 inchangés). Aucune migration de base de données.
 
 Fichiers créés : `scripts/dev-lan.ps1`, `docs/DEV-LAN.md`.
+
+---
+
+## Session 2026-08-19 — Rattachement post-login sans compte local (auto-provisioning + consentement)
+
+### Besoin
+`resolve_central_account()` (`backend/api/dependencies.py`) rejetait
+systématiquement avec 401 tout utilisateur authentifié avec succès par la
+plateforme centrale `manager-user` mais sans compte local rattaché
+(`central_user_id`), sans jamais distinguer :
+- un utilisateur **déjà membre** d'un groupe support de cette application
+  (`admin-support`/`qualify-support`/`collaborateur-support`) mais dont le
+  miroir local est absent (compte créé côté central par une autre équipe, ou
+  perdu localement) ;
+- un utilisateur central connu mais **sans aucun groupe** de cette
+  application (ex. seulement `employe-edg`, `manager-link-hub`).
+
+Aucun mécanisme de consentement n'existait dans le code (colonnes DB,
+endpoint, écran) — confirmé par audit exhaustif avant implémentation.
+
+### Constat d'audit préalable
+L'intégration centrale était déjà largement fonctionnelle et testée (login/
+refresh/scopes/groupes, synchronisation de rôle dans `_ROLE_SYNC_SPACE`,
+inscription entièrement câblée au central, opérations de compte via token
+machine). Le changement de mot de passe self-service (`/auth/reset-password`
+→ `central_auth.reset_central_password(..., new_password=...)`) et l'anti-
+doublon inscription (vérifications locales + idempotence du central sur
+`POST /v1/client-app-users/group-membership`) étaient déjà corrects — non
+modifiés. Seul le bug ci-dessus a été traité.
+
+### Backend
+- **`backend/api/core/central_auth.py`** : nouveau `get_profile(bearer_token)`
+  — `GET /api/me` (endpoint confirmé par l'équipe plateforme centrale, hors
+  périmètre du README d'intégration qui ne documente que `DELETE
+  /v1/users/{id}`), renvoie le profil complet (nom/prénom/téléphone/uuid).
+  Nouveau `parse_profile_identity(profile)` — extraction défensive
+  (convention centrale observée ailleurs dans ce module : `name`=prénom,
+  `last_name`=nom de famille ; ne lève jamais, champs manquants → `None`,
+  complétés manuellement sur l'écran de rattachement).
+- **Migration `018_add_consent_to_account.py`** + `ModelAccount.py` :
+  colonnes `consent_accepted_at` (DateTime), `consent_version` (String(50)),
+  nullable, sur `account`.
+- **`backend/api/services/ServiceAccount.py`** : nouvelle méthode
+  `provision_from_central()` — matérialise le miroir local d'une identité
+  **déjà existante** côté central (pas de création centrale, contrairement à
+  `create()`) ; vérifie l'unicité locale email, tolère un conflit de
+  téléphone (champ secondaire, omis plutôt que bloquant).
+- **`backend/api/dependencies.py`** : `resolve_central_account()` refactorisé
+  (extraction de `_ensure_account_active()`/`_sync_role_from_groups()`/
+  `_fetch_scopes_and_groups()`, comportement externe inchangé — toujours
+  strict pour `get_current_user`/SSE). Nouvelle fonction
+  `resolve_or_provision_login_account()`, réservée à `POST /auth/login` :
+  auto-provisionne silencieusement si `role_from_groups(groups)` est non vide
+  (utilisateur déjà dans un groupe support), sinon retourne `(None, scopes)`.
+- **`backend/api/schemas/SchemaAuth.py`** : `ConsentRequiredResponse` (retour
+  de login quand aucun compte n'a pu être résolu/provisionné — 200, jamais
+  401) et `ConsentAcceptRequest`.
+- **`backend/api/routes/RouteAuth.py`** :
+  - `POST /auth/login` — `response_model=Union[TokenResponse,
+    ConsentRequiredResponse]` ; appelle `get_profile()` pour pré-remplir les
+    suggestions (nom/prénom/téléphone) dans les deux branches (provisioning
+    silencieux ou consentement).
+  - **Nouveau** `POST /auth/consent/accept` (bearer central du login, jamais
+    de nouveau `central_login`) — revérifie scopes/groupes côté central
+    (jamais confiance au payload), idempotent si le compte existe déjà
+    (retry réseau/double clic), sinon `add_group_membership(...,
+    "collaborateur-support", ...)` + `provision_from_central(role="user",
+    consent_accepted_at=now(), consent_version=...)`.
+- **`backend/api/main.py`** : `_RATE_LIMITS["/api/v1/auth/consent/accept"] =
+  (5, 60)` — même tier que `/auth/register` (crée aussi un compte).
+- **Tests** (`backend/tests/api/test_auth.py`, fixture `mock_central_auth`
+  étendue avec `get_profile`, `inactive_groups`, `added_memberships`) :
+  auto-provisioning silencieux (rôle mappé correctement pour les 3 groupes
+  support) ; `needs_consent=true` sans groupe support, avec groupes d'autres
+  applications uniquement, et avec groupe support `is_activated=false` ;
+  `POST /auth/consent/accept` — succès, idempotence sur double appel, 401
+  sans bearer/bearer invalide, 422 nom vide. `test_login_compte_non_rattache_
+  retourne_401` renommé/réécrit en `test_login_sans_groupe_support_retourne_
+  needs_consent` (le comportement attendu a changé : 200 + `needs_consent`
+  au lieu de 401 sec). 32/32 tests `test_auth.py` verts ; suite complète
+  `tests/api/` : mêmes 63 échecs pré-existants qu'avant ce changement
+  (vérifié par comparaison stash/baseline — homepage slides, RBAC, workflow
+  tickets, sans rapport avec l'authentification), aucune régression.
+
+### Frontend
+- **`frontend/src/lib/api/auth.ts`** : `loginUser()` retourne désormais
+  `LoginResult` (union discriminée `needsConsent: false/true`). Nouveau
+  `acceptConsent()` — passe le bearer central via un header explicite
+  (`skipAuth: true` + `Authorization` manuel), le token n'étant pas encore en
+  session tant que le consentement n'est pas accepté.
+- **`frontend/src/lib/session.ts`** : `setPendingConsent()`/
+  `getPendingConsent()`/`clearPendingConsent()` — `sessionStorage` (jamais
+  `localStorage`), auto-effacé à la fermeture de l'onglet, distinct de la
+  session applicative persistée.
+- **Nouvelle route `frontend/src/routes/consent.tsx`** — écran de
+  rattachement (email lecture seule, nom/prénom/téléphone pré-remplis mais
+  modifiables, checkbox obligatoire liée à `/legal/terms`/`/legal/privacy`) ;
+  `beforeLoad` redirige vers `/login` si aucun consentement en attente.
+- **`frontend/src/routes/login.tsx`** — si `needsConsent`, stocke la charge
+  utile via `setPendingConsent()` puis navigue vers `/consent` (jamais de
+  `setTokens`/`setUser` avant acceptation).
+- **`frontend/src/routes/admin-login.tsx`** — `needsConsent` traité comme un
+  refus d'accès identique au cas rôle≠admin ; jamais de redirection vers
+  l'écran de consentement depuis cette page (pas d'auto-élévation admin).
+- **Nouvelles pages placeholder** `frontend/src/routes/legal.terms.tsx` /
+  `legal.privacy.tsx` — texte générique marqué « À compléter », rien ne
+  bloque en attendant le texte légal définitif.
+- **`frontend/src/routes/app.profile.tsx`** — correction d'une incohérence
+  détectée à l'audit : la section « Sécurité » affirmait à tort que seul un
+  administrateur pouvait réinitialiser le mot de passe (contredisant le flux
+  self-service `/forgot-password` déjà fonctionnel) ; texte corrigé + lien
+  « Changer le mot de passe ».
+
+### Vérification
+`npx tsc --noEmit` : zéro nouvelle erreur (mêmes 55 erreurs pré-existantes,
+aucune dans les fichiers touchés). Test navigateur (Playwright, dev server
+local) : `/legal/terms`, `/legal/privacy`, `/login` sans erreur console ;
+`/consent` avec charge de consentement simulée en `sessionStorage` — champs
+pré-remplis, checkbox gate le bouton, aucune erreur console/hydratation. Un
+hard-refresh direct sur `/consent` sans consentement en attente déclenche un
+avertissement d'hydratation React (mismatch SSR/CSR) — **reproduit à
+l'identique sur `/admin-login` existant** (non modifié), confirmé pré-
+existant au framework (`ssr:false` + redirection `beforeLoad` sur
+navigation complète) et hors périmètre de cette session.
+
+### Limitation connue liée à l'API centrale
+La forme exacte de la réponse `GET /api/me` (présence garantie d'un
+`uuid`/`user_uuid`, noms de champs) n'a pas pu être observée en conditions
+réelles dans cette session (pas d'accès à un bearer central valide) — le
+parsing est défensif (`parse_profile_identity`) et dégrade proprement (champs
+manquants → `None`, complétés manuellement par l'utilisateur), mais un test
+en conditions réelles avec un compte central de test reste recommandé avant
+mise en production, en particulier pour confirmer que `central_user_uuid`
+est bien capturé (indispensable pour les opérations admin ultérieures sur un
+compte auto-provisionné : activation/désactivation/reset mot de passe).
+
+Fichiers créés : `backend/alembic/versions/018_add_consent_to_account.py`,
+`frontend/src/routes/consent.tsx`, `frontend/src/routes/legal.terms.tsx`,
+`frontend/src/routes/legal.privacy.tsx`.

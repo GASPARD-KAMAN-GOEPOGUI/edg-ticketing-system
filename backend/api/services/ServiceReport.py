@@ -1,5 +1,5 @@
 """
-Service de génération de rapports — EDG Connect.
+Service de génération de rapports — EDG Support.
 Produit les données brutes pour les rapports journaliers, mensuels,
 par service (unity) et par agent.
 """
@@ -1501,7 +1501,7 @@ class ReportService(BaseService):
                 LEFT JOIN unity u ON u.id = a.unity_id AND u.deleted_at IS NULL
                 LEFT JOIN request r ON r.assignee_id = a.id AND {conditions}
                 LEFT JOIN request_status rs ON rs.id = r.request_status_id
-                WHERE a.deleted_at IS NULL AND a.role IN ('agent','chief')
+                WHERE a.deleted_at IS NULL AND a.role IN ('agent-support','chief-service','chief-departement')
                 GROUP BY a.id, a.name, a.role, u.label
                 ORDER BY resolved_total DESC
             """),

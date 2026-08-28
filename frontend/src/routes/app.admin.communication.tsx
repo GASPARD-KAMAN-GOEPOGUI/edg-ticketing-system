@@ -53,8 +53,9 @@ const CATEGORIES = Object.entries(announcementCategoryLabels) as [AnnouncementCa
 const PRIORITIES = Object.entries(announcementPriorityLabels) as [AnnouncementPriority, string][];
 const ROLES_LIST: { value: Role; label: string }[] = [
   { value: "user", label: "Demandeurs internes" },
-  { value: "agent", label: "Agents" },
-  { value: "chief", label: "Chefs de service" },
+  { value: "agent-support", label: "Agents" },
+  { value: "chief-service", label: "Chefs de service" },
+  { value: "chief-departement", label: "Chefs de département" },
   { value: "director", label: "Directeurs" },
   { value: "admin", label: "Administrateurs" },
 ];
@@ -103,7 +104,7 @@ const emptyForm = (): FormState => ({
   publishedAt: new Date().toISOString().slice(0, 16),
   expiresAt: "",
   audience: "internal",
-  selectedRoles: ["user", "agent", "chief", "director", "admin"],
+  selectedRoles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"],
   selectedDirections: [],
   channels: ["internal_notif", "email"],
 });

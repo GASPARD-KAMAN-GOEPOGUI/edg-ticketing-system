@@ -1,5 +1,5 @@
 """
-Service de statistiques agrégées — EDG Connect.
+Service de statistiques agrégées — EDG Support.
 Requêtes SQL directes (lecture seule) pour alimenter tous les dashboards.
 """
 from __future__ import annotations

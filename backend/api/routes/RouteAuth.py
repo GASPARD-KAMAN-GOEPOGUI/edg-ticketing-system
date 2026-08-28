@@ -6,6 +6,13 @@ Endpoints :
   POST /auth/forgot-password   Étape 1 — envoi d'un code de vérification par email (OTP local)
   POST /auth/reset-password    Étape 3 — vérification du code + reset central du mot de passe
   POST /auth/login             Connexion (email/matricule + mot de passe) via le central
+                                Retourne TokenResponse si un compte local existe déjà
+                                ou a pu être auto-provisionné (groupe support central
+                                déjà présent), sinon ConsentRequiredResponse (200) —
+                                voir dependencies.py::resolve_or_provision_login_account.
+  POST /auth/consent/accept    Rattachement après consentement explicite — utilisateur
+                                central authentifié mais sans compte local NI groupe
+                                support (suite d'un login ayant renvoyé needs_consent).
   POST /auth/refresh           Rafraîchissement de l'access token via le central
   POST /auth/logout            Déconnexion (aucune révocation locale, tokens émis par le central)
   GET  /auth/me                Profil de l'utilisateur connecté (compte local)
@@ -26,9 +33,10 @@ import hashlib
 import logging
 import secrets
 from datetime import datetime, timedelta
-from typing import NoReturn
+from typing import NoReturn, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.core import central_auth, mailer
@@ -38,7 +46,10 @@ from api.dependencies import (
     get_current_user,
     get_current_user_optional,
     oauth2_scheme,
-    resolve_central_account,
+    resolve_or_provision_login_account,
+    _ensure_account_active,
+    _sync_role_from_groups,
+    _fetch_scopes_and_groups,
 )
 from api.repositories import AccountRepository
 from api.schemas.SchemaAuth import (
@@ -48,7 +59,9 @@ from api.schemas.SchemaAuth import (
     ResetPasswordRequest,
     RefreshRequest,
     LogoutRequest,
+    ConsentAcceptRequest,
     TokenResponse,
+    ConsentRequiredResponse,
     AccessTokenResponse,
 )
 from api.schemas.SchemaAccount import AccountResponse
@@ -58,6 +71,11 @@ logger = logging.getLogger(__name__)
 
 _RESET_CODE_TTL_MINUTES = 15
 _RESET_CODE_MAX_ATTEMPTS = 5
+# Version courante des CGU/politique de confidentialité présentées à l'écran de
+# consentement (frontend routes/legal.terms.tsx, legal.privacy.tsx). À
+# incrémenter si le texte légal change de façon substantielle — permet de
+# ré-solliciter le consentement des comptes déjà rattachés si besoin un jour.
+_CONSENT_VERSION = "1.0"
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -122,6 +140,27 @@ async def register(
         action="register", target=f"account:{account.id}", ip_address=_client_ip(request),
     )
     return account
+
+
+# ── TEMPORAIRE (2026-08) — diagnostic public "CLIENT_APP_CODE/SECRET rejetés" ──
+# Investigation d'un rejet du couple client_code/client_secret par le central
+# alors que les valeurs sont censées être correctes — volontairement PUBLIC
+# (aucune authentification), pour pouvoir tester avant même qu'un login central
+# fonctionne. Ne renvoie jamais le secret utilisé, seulement le client_code et
+# la réponse brute (code + corps) de la plateforme centrale.
+# ⚠️ RAPPEL : à supprimer (cette route + central_auth.debug_source_token_exchange)
+# une fois le diagnostic terminé — ne doit jamais rester en production.
+class _DebugSourceTokenBody(BaseModel):
+    client_code: Optional[str] = None
+    client_secret: Optional[str] = None
+
+
+@router.post(
+    "/debug/source-token",
+    summary="[TEMPORAIRE — À SUPPRIMER] Diagnostic brut de l'échange source_token avec le central",
+)
+async def debug_source_token(body: _DebugSourceTokenBody = _DebugSourceTokenBody()):
+    return await central_auth.debug_source_token_exchange(body.client_code, body.client_secret)
 
 
 # ── Mot de passe oublié ──────────────────────────────────────────────────────
@@ -237,7 +276,7 @@ async def reset_password_route(
 
 @router.post(
     "/login",
-    response_model=TokenResponse,
+    response_model=Union[TokenResponse, ConsentRequiredResponse],
     summary="Connexion (email/matricule + mot de passe) via la plateforme centrale",
 )
 async def login(
@@ -282,7 +321,32 @@ async def login(
         )
 
     bearer_token = tokens["bearer_token"]
-    account = await resolve_central_account(bearer_token, db)
+    account, scopes = await resolve_or_provision_login_account(bearer_token, db)
+
+    if account is None:
+        # Authentifié par le central, mais aucun groupe support de cette
+        # application (voir dependencies.py::resolve_or_provision_login_account)
+        # → rattachement soumis à consentement explicite, pas de compte créé ici.
+        try:
+            profile = await central_auth.get_profile(bearer_token)
+        except central_auth.CentralAuthError:
+            profile = {}
+        identity = central_auth.parse_profile_identity(profile)
+
+        await _log_auth_event(
+            db, actor=scopes.get("email", email), actor_id=None, actor_role="unknown",
+            action="login_needs_consent", target="auth", ip_address=ip,
+        )
+        return ConsentRequiredResponse(
+            access_token=bearer_token,
+            refresh_token=tokens.get("refresh_token", ""),
+            expires_in=tokens.get("expires_in", 0),
+            email=scopes.get("email", email),
+            suggested_name=identity["name"],
+            suggested_firstname=identity["firstname"],
+            suggested_phone=identity["phone"],
+            consent_version=_CONSENT_VERSION,
+        )
 
     await _log_auth_event(
         db, actor=account.email, actor_id=account.id, actor_role=account.role,
@@ -298,6 +362,94 @@ async def login(
         "refresh_token": tokens.get("refresh_token", ""),
         "token_type": tokens.get("token_type", "bearer"),
         "expires_in": tokens.get("expires_in", 0),
+        "user": account,
+    }
+
+
+# ── Consentement (rattachement sans groupe support central) ──────────────────
+
+@router.post(
+    "/consent/accept",
+    response_model=TokenResponse,
+    summary="Rattachement après consentement — utilisateur central sans groupe support",
+)
+async def accept_consent(
+    request: Request,
+    body: ConsentAcceptRequest,
+    db: AsyncSession = Depends(get_db),
+    bearer_token: str | None = Depends(oauth2_scheme),
+):
+    if not bearer_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentification requise.")
+
+    # Re-vérification complète côté central au moment de l'acceptation — jamais
+    # confiance dans ce que le frontend a affiché sur l'écran de consentement
+    # (email/groupes ont pu changer depuis l'appel /auth/login initial).
+    scopes, groups = await _fetch_scopes_and_groups(bearer_token)
+    central_user_id = scopes.get("user_id")
+    if not central_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session invalide ou expirée.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    account_repo = AccountRepository(db)
+    account = await account_repo.find_by_central_user_id(central_user_id)
+
+    if account is not None:
+        # Idempotence — double soumission / retry réseau du même accept, ou
+        # l'utilisateur a déjà été rattaché entretemps (ex. auto-provisionné par
+        # une autre requête concurrente). On ne recrée rien, on synchronise juste.
+        account = await _sync_role_from_groups(account, groups, account_repo)
+    else:
+        mapped_role = central_auth.role_from_groups(groups)
+        email = (scopes.get("email") or "").strip().lower()
+
+        try:
+            profile = await central_auth.get_profile(bearer_token)
+        except central_auth.CentralAuthError:
+            profile = {}
+        central_uuid = central_auth.parse_profile_identity(profile)["uuid"]
+
+        if not mapped_role:
+            # Cas normal du flux consentement : aucun groupe support pour l'instant
+            # → rattachement au groupe collaborateur-support, rôle local "user".
+            mapped_role = "user"
+            if central_uuid:
+                machine_token = await central_auth.get_machine_token()
+                await central_auth.add_group_membership(central_uuid, "collaborateur-support", machine_token)
+        # Si mapped_role est déjà renseigné (l'utilisateur a été ajouté à un
+        # groupe support entre le login et cette acceptation), on ne touche pas
+        # à ses groupes centraux — juste au miroir local, avec le rôle réel.
+
+        account = await AccountService(db).provision_from_central(
+            central_user_id=central_user_id,
+            central_user_uuid=central_uuid,
+            email=email,
+            name=body.name,
+            firstname=body.firstname,
+            phone=body.phone,
+            role=mapped_role,
+            consent_accepted_at=datetime.utcnow(),
+            consent_version=body.consent_version,
+        )
+        await central_auth.log_central_event(
+            bearer_token, object_id=str(account.id), action="consent_accept", status="success",
+            message=f"Rattachement après consentement : {account.email}",
+        )
+
+    _ensure_account_active(account)
+    await _log_auth_event(
+        db, actor=account.email, actor_id=account.id, actor_role=account.role,
+        action="consent_accept", target=f"account:{account.id}", ip_address=_client_ip(request),
+    )
+
+    return {
+        "access_token": bearer_token,
+        "refresh_token": body.refresh_token,
+        "token_type": "bearer",
+        "expires_in": body.expires_in,
         "user": account,
     }
 

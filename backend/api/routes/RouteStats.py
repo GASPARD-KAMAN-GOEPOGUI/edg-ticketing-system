@@ -1,5 +1,5 @@
 """
-Routes de statistiques opérationnelles — EDG Connect.
+Routes de statistiques opérationnelles — EDG Support.
 Préfixe : /stats  (complète RouteCsatStats.py qui couvre /stats/csat*)
 """
 from __future__ import annotations

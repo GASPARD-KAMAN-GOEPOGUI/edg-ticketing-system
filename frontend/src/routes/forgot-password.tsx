@@ -112,7 +112,7 @@ function ForgotPassword() {
       } else if (err instanceof ApiError) {
         setSendError(err.message || "Une erreur est survenue.");
       } else {
-        setSendError("Impossible de contacter le serveur. Vérifiez votre connexion.");
+        setSendError("Échec de connexion. Veuillez réessayer.");
       }
     } finally {
       setSendLoading(false);
@@ -151,7 +151,7 @@ function ForgotPassword() {
           setResetError(err.message || "Une erreur est survenue.");
         }
       } else {
-        setResetError("Impossible de contacter le serveur. Vérifiez votre connexion.");
+        setResetError("Échec de connexion. Veuillez réessayer.");
       }
     } finally {
       setResetLoading(false);

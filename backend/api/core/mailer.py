@@ -1,5 +1,5 @@
 """
-Mailer EDG Connect — envoi d'emails transactionnels via SMTP async.
+Mailer EDG Support — envoi d'emails transactionnels via SMTP async.
 
 Configuration requise dans .env :
     SMTP_HOST=smtp.gmail.com
@@ -11,11 +11,11 @@ Si SMTP_HOST est vide, l'envoi est ignoré silencieusement (mode dev sans email)
 """
 from __future__ import annotations
 
-import base64
 import logging
 import re
 from datetime import datetime
 from html import escape
+from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 _env = get_environment()
 _templates_dir = Path(__file__).resolve().parents[2] / "templates"
 _logo_path = Path(__file__).resolve().parents[3] / "frontend" / "src" / "assets" / "edg_logo.png"
+_LOGO_CID = "edg_logo"
 
 _EMAIL_VARIANTS = {
     "creation": {
@@ -153,29 +154,61 @@ def _is_configured() -> bool:
     return bool(_env.SMTP_HOST and _env.SMTP_USER and _env.SMTP_PASSWORD)
 
 
-_logo_data_uri_cache: str | None = None
+_logo_bytes_cache: bytes | None = None
+_logo_bytes_loaded = False
 
 
-def _logo_data_uri() -> str:
-    """Logo encodé en base64, embarqué directement dans le HTML (data: URI) plutôt
-    qu'en pièce jointe MIME séparée — certains clients mail (Gmail notamment)
-    affichaient l'image "inline" comme pièce jointe téléchargeable en plus de
-    l'en-tête, même avec Content-Disposition: inline. Un data URI n'a aucune
-    partie MIME séparée : structurellement impossible à afficher en pièce jointe.
+def _logo_bytes() -> bytes | None:
+    """Octets bruts du logo, pour attache MIME inline (Content-ID) — voir
+    _attach_logo(). Le data URI direct dans le HTML (essayé avant) n'était pas
+    fiable : plusieurs clients mail (Gmail notamment) le bloquent/n'affichent
+    rien. Le CID est la méthode standard, correctement affichée en corps
+    d'email — à condition que Content-Disposition soit bien "inline" (pas
+    "attachment") pour ne pas apparaître comme pièce jointe téléchargeable.
     Mis en cache (le fichier ne change pas en cours d'exécution)."""
-    global _logo_data_uri_cache
-    if _logo_data_uri_cache is None:
+    global _logo_bytes_cache, _logo_bytes_loaded
+    if not _logo_bytes_loaded:
+        _logo_bytes_loaded = True
         try:
-            encoded = base64.b64encode(_logo_path.read_bytes()).decode("ascii")
-            _logo_data_uri_cache = f"data:image/png;base64,{encoded}"
+            _logo_bytes_cache = _logo_path.read_bytes()
         except Exception as exc:
             logger.debug("Logo email non chargé : %s", exc)
-            _logo_data_uri_cache = ""
-    return _logo_data_uri_cache
+            _logo_bytes_cache = None
+    return _logo_bytes_cache
+
+
+def _attach_logo(msg: MIMEMultipart) -> None:
+    """Attache le logo en pièce inline (Content-ID), référencée dans le HTML via
+    src="cid:edg_logo" (voir _render_template). Silencieux si le fichier logo
+    est introuvable — l'email part quand même, juste sans logo."""
+    data = _logo_bytes()
+    if not data:
+        return
+    image = MIMEImage(data, _subtype="png")
+    image.add_header("Content-ID", f"<{_LOGO_CID}>")
+    image.add_header("Content-Disposition", "inline", filename="edg_logo.png")
+    msg.attach(image)
+
+
+def _build_message(*, to_email: str, subject: str, html: str) -> MIMEMultipart:
+    """Construit le message MIME complet (HTML + logo inline) — source unique
+    pour les 4 fonctions d'envoi, pour ne pas dupliquer la structure
+    multipart/related + attache du logo à chaque endroit."""
+    msg = MIMEMultipart("related")
+    msg["From"] = f"EDG Support <{_env.SMTP_USER}>"
+    msg["To"] = to_email
+    msg["Subject"] = subject
+
+    alt = MIMEMultipart("alternative")
+    alt.attach(MIMEText(html, "html", "utf-8"))
+    msg.attach(alt)
+
+    _attach_logo(msg)
+    return msg
 
 
 def _render_template(template_name: str, **context: object) -> str:
-    data = {"year": datetime.now().year, "logo_data_uri": _logo_data_uri(), **context}
+    data = {"year": datetime.now().year, "logo_cid": f"cid:{_LOGO_CID}", **context}
     template = (_templates_dir / template_name).read_text(encoding="utf-8")
     template = re.sub(
         r'{%\s*include\s+"([^"]+)"\s*%}',
@@ -316,6 +349,101 @@ def _notification_context(
     return str(variant["template"]), context
 
 
+def _app_login_url() -> str | None:
+    """URL de connexion de l'application — dérivée de CORS_ORIGINS (première
+    origine configurée), seule information d'URL publique déjà présente dans
+    la configuration ; pas de variable d'environnement dédiée à ce jour."""
+    origins = _env.CORS_ORIGINS
+    if not origins:
+        return None
+    return f"{origins[0].rstrip('/')}/login"
+
+
+async def send_account_created_email(to_email: str, name: str = "") -> bool:
+    """
+    Email A — compte nouvellement créé ET validé par la plateforme centrale
+    (voir ServiceAccount.create()). Ne jamais appeler avant confirmation
+    réelle de cette validation. Catch-and-log comme send_notification_email() :
+    un échec d'envoi ne doit jamais remettre en cause la création du compte.
+    """
+    if not _is_configured():
+        logger.warning("SMTP non configuré — email de création de compte non envoyé à %r", to_email)
+        return False
+
+    subject = "Votre compte a été créé avec succès"
+    greeting = f"Bonjour {name}, v" if name else "V"
+    login_url = _app_login_url()
+    html = _render_template(
+        "account_created_email.html",
+        title=subject,
+        color="#008D24",
+        icon="&#10004;",
+        headline="Compte créé avec succès",
+        subtitle=(
+            f"{greeting}otre compte EDG Support a été créé et est maintenant actif. "
+            "Vous pouvez dès à présent vous connecter avec les identifiants choisis lors "
+            "de votre inscription."
+        ),
+        details={"Adresse email": to_email},
+        action_url=login_url,
+        action_label="Se connecter",
+        support_email="support@edg-support.gn",
+        support_phone="(+224) 153 456 789",
+    )
+
+    msg = _build_message(to_email=to_email, subject=subject, html=html)
+
+    try:
+        await _smtp_send(msg)
+        logger.info("Email de création de compte envoyé à %r", to_email)
+        return True
+    except Exception as exc:
+        logger.warning("Echec email de création de compte à %r : %s", to_email, exc)
+        return False
+
+
+async def send_account_associated_email(to_email: str, name: str = "") -> bool:
+    """
+    Email B — compte central existant nouvellement associé à CETTE application
+    (voir ServiceAccount.provision_from_central()), après validation centrale
+    réelle (scopes/groupes revérifiés). Ne jamais parler de "groupe" ici — le
+    message porte uniquement sur l'association à l'application.
+    """
+    if not _is_configured():
+        logger.warning("SMTP non configuré — email d'association de compte non envoyé à %r", to_email)
+        return False
+
+    subject = "Votre compte a été associé à l'application avec succès"
+    greeting = f"Bonjour {name}, v" if name else "V"
+    login_url = _app_login_url()
+    html = _render_template(
+        "account_associated_email.html",
+        title=subject,
+        color="#008D24",
+        icon="&#10004;",
+        headline="Association réussie",
+        subtitle=(
+            f"{greeting}otre compte a été associé à l'application EDG Support avec succès. "
+            "Vous pouvez dès à présent y accéder avec vos identifiants habituels."
+        ),
+        details={"Adresse email": to_email},
+        action_url=login_url,
+        action_label="Accéder à l'application",
+        support_email="support@edg-support.gn",
+        support_phone="(+224) 153 456 789",
+    )
+
+    msg = _build_message(to_email=to_email, subject=subject, html=html)
+
+    try:
+        await _smtp_send(msg)
+        logger.info("Email d'association de compte envoyé à %r", to_email)
+        return True
+    except Exception as exc:
+        logger.warning("Echec email d'association de compte à %r : %s", to_email, exc)
+        return False
+
+
 async def send_reset_code_email(to_email: str, code: str, name: str = "") -> bool:
     """
     Envoie le code de réinitialisation par email.
@@ -326,7 +454,7 @@ async def send_reset_code_email(to_email: str, code: str, name: str = "") -> boo
         logger.warning("SMTP non configuré — email non envoyé à %r", to_email)
         return False
 
-    subject = "Votre code de réinitialisation EDG Connect"
+    subject = "Votre code de réinitialisation EDG Support"
     greeting = f"Bonjour {name}, v" if name else "V"
     html = _render_template(
         "reset_code_email.html",
@@ -344,14 +472,7 @@ async def send_reset_code_email(to_email: str, code: str, name: str = "") -> boo
         support_phone="(+224) 153 456 789",
     )
 
-    # Le logo est embarqué en data URI directement dans le HTML (voir
-    # _logo_data_uri()) — plus besoin de multipart/related ni de pièce jointe
-    # MIME séparée pour l'image.
-    msg = MIMEMultipart("alternative")
-    msg["From"] = f"EDG Connect <{_env.SMTP_USER}>"
-    msg["To"] = to_email
-    msg["Subject"] = subject
-    msg.attach(MIMEText(html, "html", "utf-8"))
+    msg = _build_message(to_email=to_email, subject=subject, html=html)
 
     await _smtp_send(msg)
     logger.info("Email reset envoyé à %r", to_email)
@@ -424,14 +545,7 @@ async def send_notification_email(
         request_details=request_details,
     )
 
-    # Le logo est embarqué en data URI directement dans le HTML (voir
-    # _logo_data_uri()) — plus besoin de multipart/related ni de pièce jointe
-    # MIME séparée pour l'image.
-    msg = MIMEMultipart("alternative")
-    msg["From"] = f"EDG Connect <{_env.SMTP_USER}>"
-    msg["To"] = to_email
-    msg["Subject"] = title
-    msg.attach(MIMEText(html, "html", "utf-8"))
+    msg = _build_message(to_email=to_email, subject=title, html=html)
     try:
         await _smtp_send(msg)
         logger.info("Email notification envoyé à %r : %s", to_email, title)

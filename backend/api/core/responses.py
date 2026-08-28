@@ -1,5 +1,5 @@
 """
-Modèles de réponse API uniformisés EDG Connect.
+Modèles de réponse API uniformisés EDG Support.
 
 Toutes les réponses de l'API suivent l'un de ces deux formats :
 

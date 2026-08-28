@@ -471,9 +471,11 @@ class RequestRepository(BaseRepository[Request]):
         """
         Calcule la prochaine référence unique pour une base donnée.
 
-        Nouvelle forme métier :
-            DIR-DEPT-SVC-HHMMSSYYYMMDD-SEQ
-        (direction / département / service du demandeur, résolus via l'organigramme)
+        Forme métier : EDG-AA-SEQ (ex. EDG-26-00001) — la séquence repart de
+        00001 à chaque changement d'année (base = "EDG-AA" change avec l'année,
+        donc le préfixe filtré ci-dessous ne matche que les refs de l'année en
+        cours). Largeur minimale 5 chiffres, extensible sans plafond (le format
+        `:0{width}d` n'écrête jamais un nombre plus grand que la largeur).
 
         La méthode conserve aussi l'ancien appel next_ref(year) par prudence.
         Elle se base sur le MAX du suffixe parmi TOUTES les lignes, y compris
@@ -485,7 +487,7 @@ class RequestRepository(BaseRepository[Request]):
             seq_width = 4
         else:
             prefix = f"{base.rstrip('-').upper()}-"
-            seq_width = 3
+            seq_width = 5
         stmt = select(Request.ref).where(Request.ref.like(f"{prefix}%"))
         refs = [row[0] for row in (await self.session.execute(stmt)).all()]
         max_num = 0

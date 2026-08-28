@@ -92,7 +92,7 @@ async def _scope_stmt(stmt, db: AsyncSession, actor):
             return stmt.where(False)
         return stmt.where(Request.unity_id.in_(allowed_ids))
 
-    if role in {"chief", "agent"}:
+    if role in {"chief-service", "chief-departement", "agent-support"}:
         if unity_id is None and actor_id is None:
             return stmt.where(False)
         clauses = []

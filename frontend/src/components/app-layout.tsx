@@ -27,7 +27,6 @@ import {
   Ticket,
   Timer,
   ShieldAlert,
-  Megaphone,
   Database,
   Network,
   Layers,
@@ -168,7 +167,6 @@ const navItems: NavItem[] = [
   { to: "/app/admin/ticket-trace", label: "Traçabilité ticket", icon: Search, roles: ["admin"], group: "Audit & Traçabilité" },
 
   // ── Admin — Système ───────────────────────────────────────────────────────
-  { to: "/app/admin/communication", label: "Communication",         icon: Megaphone, roles: ["admin"], group: "Système" },
   { to: "/app/admin/knowledge",     label: "Base de connaissances", icon: Library,   roles: ["admin"], group: "Système" },
 
   // ── Ressources (tous) ─────────────────────────────────────────────────────
@@ -395,7 +393,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
           {/* User info + role switcher */}
           <div className="shrink-0 border-t border-border/30 p-2 xl:p-3">
-            <RoleSwitcher role={role} onChange={setRole} collapsed={collapsed} userName={displayName} userAvatar={sessionUser?.avatar} />
+            <RoleSwitcher role={role} onChange={setRole} collapsed={collapsed} userName={displayName} userEmail={sessionUser?.email} userAvatar={sessionUser?.avatar} />
           </div>
         </aside>
 
@@ -506,7 +504,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 >
                   <Logo size="sm" showText={false} />
                   <div className="flex items-center gap-1.5">
-                    <span className="text-sm font-bold tracking-tight text-foreground">EDG-SUP</span>
+                    <span className="text-sm font-bold tracking-tight text-foreground">EDG Support</span>
                   </div>
                 </Link>
 
@@ -776,16 +774,47 @@ function RoleSwitcher({
   onChange,
   collapsed,
   userName,
+  userEmail,
   userAvatar,
 }: {
   role: Role;
   onChange: (r: Role) => void;
   collapsed: boolean;
   userName?: string;
+  userEmail?: string;
   userAvatar?: string;
 }) {
+  const router = useRouter();
   const roles: Role[] = ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"];
   const initials = userName ? getInitials(userName) : role.slice(0, 2).toUpperCase();
+
+  const handleLogout = async () => {
+    const rt = getRefreshToken();
+    if (rt) {
+      try { await logoutUser(rt); } catch { /* best-effort */ }
+    }
+    clearSession();
+    router.navigate({ to: "/" });
+  };
+
+  const profileMenuItems = (
+    <>
+      <DropdownMenuItem asChild>
+        <Link to="/app/profile">Profil & Paramètres</Link>
+      </DropdownMenuItem>
+      <DropdownMenuItem asChild>
+        <Link to="/app/notifications">Notifications</Link>
+      </DropdownMenuItem>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem
+        className="text-destructive focus:text-destructive cursor-pointer"
+        onClick={handleLogout}
+      >
+        <LogOut className="mr-2 h-4 w-4" />
+        Déconnexion
+      </DropdownMenuItem>
+    </>
+  );
 
   const avatar = (
     <div className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-lg bg-primary text-[11px] font-bold text-background">
@@ -804,19 +833,32 @@ function RoleSwitcher({
     </div>
   );
 
-  // En production (auth réelle), le rôle vient du JWT — pas de switcher
+  // En production (auth réelle), le rôle vient du JWT — pas de switcher,
+  // mais le bloc reste cliquable pour ouvrir le même menu de profil que le header.
   if (!AUTH_DISABLED) {
     return (
-      <div
-        className={cn(
-          "flex w-full items-center rounded-xl bg-card/60 py-2.5",
-          "justify-center px-2",
-          !collapsed && "xl:justify-start xl:gap-2.5 xl:px-3",
-        )}
-      >
-        {avatar}
-        {label}
-      </div>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          className={cn(
+            "flex w-full items-center rounded-xl bg-card/60 py-2.5 text-left transition-colors hover:bg-card",
+            "justify-center px-2",
+            !collapsed && "xl:justify-start xl:gap-2.5 xl:px-3",
+          )}
+        >
+          {avatar}
+          {label}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" side="top" className="w-56">
+          <DropdownMenuLabel>
+            <div className="font-semibold">{userName || "Mon compte"}</div>
+            {userEmail && (
+              <div className="text-[11px] font-normal text-muted-foreground truncate">{userEmail}</div>
+            )}
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          {profileMenuItems}
+        </DropdownMenuContent>
+      </DropdownMenu>
     );
   }
 
@@ -857,6 +899,8 @@ function RoleSwitcher({
             )}
           </DropdownMenuItem>
         ))}
+        <DropdownMenuSeparator />
+        {profileMenuItems}
       </DropdownMenuContent>
     </DropdownMenu>
   );

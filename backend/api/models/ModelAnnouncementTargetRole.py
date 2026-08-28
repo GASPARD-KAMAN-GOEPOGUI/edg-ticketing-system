@@ -18,8 +18,8 @@ class AnnouncementTargetRole(Base, BaseColumns):
         Integer, ForeignKey("announcement.id", ondelete="CASCADE"), nullable=False
     )
     role: Mapped[str] = mapped_column(
-        SAEnum("public", "user", "agent", "chief", "director", "dg", "admin",
-               name="ann_target_role_enum"),
+        SAEnum("public", "user", "agent-support", "chief-service", "chief-departement",
+               "director", "admin", name="ann_target_role_enum"),
         nullable=False,
     )
 

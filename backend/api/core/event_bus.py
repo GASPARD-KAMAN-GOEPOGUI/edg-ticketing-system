@@ -1,5 +1,5 @@
 """
-Event bus interne EDG Connect — pub/sub asyncio en mémoire.
+Event bus interne EDG Support — pub/sub asyncio en mémoire.
 
 Architecture :
   - Chaque client SSE connecté s'abonne avec subscribe(user_id, role)

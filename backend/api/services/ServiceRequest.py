@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import unicodedata
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -453,26 +452,6 @@ class RequestService(BaseService):
     def _same_account(left: Any, right: Any) -> bool:
         return left is not None and right is not None and str(left) == str(right)
 
-    @staticmethod
-    def _reference_part(value: str | None, fallback: str) -> str:
-        raw = value or fallback
-        ascii_value = unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode("ascii")
-        compact = re.sub(r"[^A-Za-z0-9]", "", ascii_value).upper()
-        return (compact or fallback.upper()).ljust(3, "X")[:3]
-
-    @staticmethod
-    def _unity_ref_source(unity: Unity | None, *, prefer_tail: bool = False) -> str | None:
-        if unity is None:
-            return None
-        if unity.aleas:
-            return unity.aleas
-        if unity.codename:
-            if prefer_tail:
-                parts = [p for p in re.split(r"[-_\s]+", unity.codename) if p]
-                return parts[-1] if parts else unity.codename
-            return unity.codename
-        return unity.label
-
     async def _ref_unity_by_id(self, unity_id: Any) -> Unity | None:
         if unity_id is None:
             return None
@@ -519,61 +498,14 @@ class RequestService(BaseService):
             node = parent_row.scalar_one_or_none()
         return chain
 
-    async def _requester_ref_hierarchy(self, data: dict) -> tuple[Unity | None, Unity | None, Unity | None]:
-        """Retourne (direction, departement, service) via l'organigramme du demandeur.
+    @staticmethod
+    def _build_reference_base(submitted_at: datetime) -> str:
+        """Base de référence métier : EDG-{AA}, ex. EDG-26 pour 2026.
 
-        Formule de référence métier : direction du demandeur / département du
-        demandeur / service du demandeur. Quand un niveau intermédiaire n'existe
-        pas dans l'organigramme (ex : direction sans département dédié), le
-        département reprend la direction.
+        La séquence (partie après la base, gérée par repo.next_ref) repart de
+        00001 à chaque changement d'année — voir RepositoryRequest.next_ref().
         """
-        requester_unity: Unity | None = None
-        requester_id = data.get("requester_id")
-        if requester_id is not None:
-            try:
-                requester_id_int = int(requester_id)
-            except (TypeError, ValueError):
-                requester_id_int = 0
-            if requester_id_int:
-                row = await self.session.execute(
-                    select(Account.unity_id)
-                    .where(Account.id == requester_id_int)
-                    .where(Account.deleted_at.is_(None))
-                    .limit(1)
-                )
-                requester_unity = await self._ref_unity_by_id(row.scalar_one_or_none())
-
-        base_unit = (
-            requester_unity
-            or await self._ref_unity_by_id(data.get("on_behalf_unity_id"))
-            or await self._ref_unity_by_id(data.get("unity_id"))
-            or await self._ref_unity_by_id(data.get("direction_id"))
-        )
-        if base_unit is None:
-            return None, None, None
-
-        chain = await self._org_chain_for_unity(base_unit.id)
-        if not chain:
-            chain = [base_unit]
-
-        service = chain[0]
-        direction = chain[-1]
-        departement = chain[1] if len(chain) >= 3 else None
-        return direction, departement, service
-
-    async def _build_reference_base(self, data: dict, submitted_at: datetime) -> str:
-        direction, departement, service = await self._requester_ref_hierarchy(data)
-        direction_code = self._reference_part(self._unity_ref_source(direction), "GEN")
-        departement_code = self._reference_part(
-            self._unity_ref_source(departement, prefer_tail=True), direction_code
-        )
-        service_code = self._reference_part(self._unity_ref_source(service, prefer_tail=True), "UNK")
-        stamp = (
-            f"{submitted_at:%H%M%S}"
-            f"{submitted_at.year % 1000:03d}"
-            f"{submitted_at:%m%d}"
-        )
-        return f"{direction_code}-{departement_code}-{service_code}-{stamp}"
+        return f"EDG-{submitted_at.year % 100:02d}"
 
     async def _direction_unity_ids(self, direction_id: int | str | None) -> set[int]:
         """Retourne la direction et ses services via organigramme + parent_direction_id."""
@@ -980,7 +912,7 @@ class RequestService(BaseService):
             select(Account.id)
             .outerjoin(load_sq, Account.id == load_sq.c.assignee_id)
             .where(Account.unity_id == unity_id)
-            .where(Account.role == "agent")
+            .where(Account.role == "agent-support")
             .where(Account.account_status == "active")
             .where(or_(Account.availability.is_(None), Account.availability == "available"))
             .where(Account.deleted_at.is_(None))
@@ -1090,7 +1022,7 @@ class RequestService(BaseService):
                     else None
                 )
                 assignee_id = auto_assignee_id or (chief.id if chief else None)
-                assignee_role = "agent" if auto_assignee_id else "chief"
+                assignee_role = "agent-support" if auto_assignee_id else "chief-service"
                 event_label = f"Orientation automatique — {matched.name}"
                 if auto_assignee_id:
                     event_label = f"{event_label} — auto-assignation agent"
@@ -1237,7 +1169,7 @@ class RequestService(BaseService):
             )
 
         submitted_at = datetime.now(timezone.utc)
-        ref_base = await self._build_reference_base(data, submitted_at)
+        ref_base = self._build_reference_base(submitted_at)
         category_code = data.get("category")
         raw_description = data.get("description", "")
 
@@ -1316,7 +1248,7 @@ class RequestService(BaseService):
         await emit_event(AppEvent(
             type="request.created",
             payload={"id": obj.id, "ref": ref, "category": category_code},
-            target={"roles": ["agent", "chief", "director", "admin"]},
+            target={"roles": ["agent-support", "chief-service", "chief-departement", "director", "admin"]},
         ))
 
         # BR-NOTIFICATION-WORKFLOW-001 §5 — le demandeur doit être informé que son
@@ -1466,8 +1398,12 @@ class RequestService(BaseService):
             ))
             # Notification individuelle au demandeur (CDC §6.3). BR-NOTIFICATION-
             # WORKFLOW-001 §22 — seuls les événements importants/actionnables
-            # (information requise, escalade) déclenchent un email ; les étapes de
-            # progression routinière restent App-only pour éviter le bruit.
+            # déclenchent un email ; les étapes de progression routinière restent
+            # App-only pour éviter le bruit. Exception ajoutée (2026-08) : "in_progress"
+            # passe aussi par email — c'est le statut posé par une prise/assignation
+            # depuis la File d'attente (BR-QUEUE-AUTO-START-001), le demandeur doit être
+            # notifié par mail dès qu'un intervenant prend effectivement son ticket
+            # (couvre aussi la reprise pending → in_progress, même signal côté demandeur).
             # "qualifying" volontairement absent (harmonisation statuts/notifications,
             # 2026-08) : c'est un état technique de file d'attente (pas encore de
             # prise en charge active), donc pas d'événement métier distinct pour le
@@ -1476,7 +1412,7 @@ class RequestService(BaseService):
             _notif_map = {
                 "qualified":    ("Ticket qualifié", "Votre ticket {ref} a été qualifié et sera traité prochainement.", "info", False),
                 "assigned":     ("Ticket pris en charge", "Votre ticket {ref} a été pris en charge par un intervenant.", "info", False),
-                "in_progress":  ("Ticket en cours de traitement", "Votre ticket {ref} est maintenant en cours de traitement.", "info", False),
+                "in_progress":  ("Ticket en cours de traitement", "Votre ticket {ref} est maintenant en cours de traitement.", "info", True),
                 "escalated":    ("Ticket escaladé", "Votre ticket {ref} a nécessité une prise en charge complémentaire.", "warning", True),
             }
             if status_code in _notif_map and obj is not None and obj.requester_id:

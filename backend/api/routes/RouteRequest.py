@@ -326,6 +326,30 @@ def _visible_comment_responses(
     return visible
 
 
+def _current_conversation_opened_by_assignee(comments: list, assignee_id) -> bool:
+    """
+    BR-MESSAGING-OPEN-001 — la conversation privée {demandeur, intervenant actuel}
+    n'est considérée "ouverte" que si CET intervenant y a lui-même posté au moins
+    un commentaire public dans CETTE conversation précise (peer_id == son propre
+    id) — jamais déduit de la simple présence d'un assignee_id sur le ticket, ni
+    d'un commentaire public quelconque ailleurs sur le ticket (ex. une directive,
+    ou un ancien intervenant avant réaffectation).
+    """
+    assignee_str = str(assignee_id)
+    for event in comments:
+        infos = event.infos if isinstance(event.infos, dict) else {}
+        if infos.get("is_directive"):
+            continue
+        if str(infos.get("peer_id")) != assignee_str:
+            continue
+        if infos.get("is_public") is not True:
+            continue
+        author_id = infos.get("actor_id") or (str(event.agent_id) if getattr(event, "agent_id", None) else None)
+        if author_id and str(author_id) == assignee_str:
+            return True
+    return False
+
+
 async def _attach_participant_avatars(schema: RequestResponse, svc: RequestService) -> RequestResponse:
     """
     Résout par lot les avatars des intervenants d'un ticket (demandeur, assigné,
@@ -1498,6 +1522,19 @@ async def create_comment(
             )
         peer_id = str(assignee_id)
 
+        # BR-MESSAGING-OPEN-001 — le demandeur ne peut écrire dans la conversation
+        # courante que si l'intervenant actuel l'a lui-même déjà ouverte (≥1
+        # commentaire public de sa part, dans CETTE conversation). L'intervenant
+        # actuel, lui, n'est jamais soumis à ce verrou — c'est justement lui qui
+        # doit pouvoir l'ouvrir en premier (§2/§15 de la règle métier).
+        if actor_id_str == str(requester_id):
+            existing_comments = await detail_repo.list_comments_by_request(request_id)
+            if not _current_conversation_opened_by_assignee(existing_comments, assignee_id):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="L'intervenant actuel n'a pas encore ouvert de discussion sur ce ticket.",
+                )
+
     attachment_infos: dict = {}
     if body.attachment_id is not None:
         att = await att_svc.get_by_id(body.attachment_id)
@@ -1588,7 +1625,7 @@ async def create_comment(
     # BR-NOTIFICATION-WORKFLOW-001 §11 — commentaire de l'intervenant actuel
     # destiné au demandeur : réutilise le marqueur existant `is_public` (visible
     # citoyen) comme signal explicite d'intention, plutôt que de deviner.
-    # App-only (pas d'email systématique, pour éviter le bruit).
+    # App + email (le demandeur doit être notifié même hors ligne).
     elif (
         body.is_public
         and not body.is_directive
@@ -1607,7 +1644,6 @@ async def create_comment(
             request_id=request_id,
             action_label="Voir le ticket",
             action_url=f"/app/requests/{request_id}",
-            send_email=False,
         )
 
     # Directive : notification nominative a l'agent assigne uniquement (BR-NOTIF-001).
@@ -1623,6 +1659,20 @@ async def create_comment(
             action_label="Voir le ticket",
             action_url=f"/app/requests/{request_id}",
         )
+
+    # Temps réel — aucun événement SSE n'existait jusqu'ici sur la création d'un
+    # commentaire (seul le AppEvent générique "notification.created" partait, non
+    # mappé à ["request", id] côté frontend). Nécessaire pour que l'ouverture
+    # d'une discussion (ou la transmission déjà couverte par request.transmitted)
+    # rafraîchisse la fiche ticket déjà ouverte chez l'autre participant sans
+    # rechargement manuel — même pattern que le reste de l'app (AppEvent + roles: all,
+    # RBAC de lecture déjà géré par _visible_comment_responses côté GET).
+    from api.core.event_bus import AppEvent, emit as emit_event
+    await emit_event(AppEvent(
+        type="request.comment_added",
+        payload={"id": request_id, "peer_id": peer_id},
+        target={"roles": "all"},
+    ))
 
     return event
 

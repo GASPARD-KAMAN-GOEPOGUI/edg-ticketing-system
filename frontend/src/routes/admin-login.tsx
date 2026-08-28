@@ -52,6 +52,14 @@ function AdminLogin() {
     try {
       const result = await loginUser({ identifier: trimmedId, password });
 
+      if (result.needsConsent) {
+        // Authentifié par le central mais sans compte local ni groupe support —
+        // jamais d'auto-élévation admin depuis cette page. L'utilisateur peut
+        // repasser par /login pour un rattachement en rôle "user" standard.
+        setError("Accès refusé — Ce compte ne dispose pas des privilèges administrateur système.");
+        return;
+      }
+
       if (result.user.role !== "admin") {
         clearSession();
         setError("Accès refusé — Ce compte ne dispose pas des privilèges administrateur système.");
@@ -86,7 +94,7 @@ function AdminLogin() {
           setError("Erreur de connexion. Vérifiez votre connexion réseau.");
         }
       } else {
-        setError("Impossible de contacter le serveur. Vérifiez votre connexion.");
+        setError("Échec de connexion. Veuillez réessayer.");
       }
     } finally {
       setIsLoading(false);

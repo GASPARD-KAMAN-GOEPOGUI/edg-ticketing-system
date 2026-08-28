@@ -211,6 +211,13 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
     ["my-tickets"],
     ["requests-history"],
   ],
+  // BR-MESSAGING-OPEN-001 — ouverture/réponse dans une discussion ticket : la
+  // fiche déjà ouverte chez l'autre participant (demandeur ou intervenant actuel)
+  // doit se rafraîchir sans rechargement manuel (nouveaux messages, passage de
+  // "discussion non ouverte" à "discussion ouverte" → composer qui apparaît).
+  "request.comment_added": [
+    ["request"],
+  ],
 
   // ── Escalades ───────────────────────────────────────────────────────────────
   "escalation.created": [

@@ -139,3 +139,113 @@ def test_single_detail_row_still_renders_correctly():
     )
     _assert_no_raw_template_syntax(html)
     assert "Objet" in html
+
+
+# ── 5. Emails de validation de compte (création / association) ────────────────
+# Notification post-validation plateforme centrale — voir ServiceAccount.py
+# (_dispatch_account_email) : les deux nouveaux templates ne sont qu'un
+# {% include %} du template de base, mais leur contenu (action_url absent si
+# CORS_ORIGINS vide) doit rester sans balise Jinja brute, comme les autres.
+
+def test_account_created_email_renders_clean_sans_action_url():
+    html = mailer._render_template(
+        "account_created_email.html",
+        title="Votre compte a été créé avec succès",
+        color="#008D24",
+        icon="&#10004;",
+        headline="Compte créé avec succès",
+        subtitle="Votre compte EDG Support a été créé et est maintenant actif.",
+        details={"Adresse email": "nouveau@test.edg.gn"},
+        action_url=None,
+        action_label="Se connecter",
+        support_email="support@edg-support.gn",
+        support_phone="(+224) 153 456 789",
+    )
+    _assert_no_raw_template_syntax(html)
+    assert "nouveau@test.edg.gn" in html
+
+
+def test_account_associated_email_renders_clean_avec_action_url():
+    html = mailer._render_template(
+        "account_associated_email.html",
+        title="Votre compte a été associé à l'application avec succès",
+        color="#008D24",
+        icon="&#10004;",
+        headline="Association réussie",
+        subtitle="Votre compte a été associé à l'application EDG Support avec succès.",
+        details={"Adresse email": "existant@test.edg.gn"},
+        action_url="http://localhost:5173/login",
+        action_label="Accéder à l'application",
+        support_email="support@edg-support.gn",
+        support_phone="(+224) 153 456 789",
+    )
+    _assert_no_raw_template_syntax(html)
+    assert "existant@test.edg.gn" in html
+    assert "groupe" not in html.lower()
+
+
+async def test_send_account_associated_email_content_ne_mentionne_jamais_groupe(monkeypatch):
+    """Garde-fou §6 : le message d'association ne doit jamais employer le mot
+    'groupe' — uniquement l'association à l'application, indépendamment du
+    groupe central réel de l'utilisateur."""
+    monkeypatch.setattr(mailer, "_is_configured", lambda: True)
+    captured: dict = {}
+
+    async def _fake_smtp_send(msg):
+        captured["msg"] = msg
+
+    monkeypatch.setattr(mailer, "_smtp_send", _fake_smtp_send)
+
+    sent = await mailer.send_account_associated_email("guard@test.edg.gn", "Jean Dupont")
+    assert sent is True
+
+    # Structure MIME : related (logo inline en CID) > alternative > text/html —
+    # voir mailer.py::_build_message(). Le HTML est donc 2 niveaux sous le message,
+    # plus 1 niveau direct comme avant l'ajout du logo inline.
+    html = captured["msg"].get_payload()[0].get_payload()[0].get_payload(decode=True).decode("utf-8")
+    assert "groupe" not in html.lower()
+    assert "associé" in html.lower()
+
+
+# ── 6. Logo inline (Content-ID) ────────────────────────────────────────────────
+# Remplace l'ancien data URI (non fiable — Gmail notamment n'affichait rien) par
+# une pièce MIME inline référencée via cid: — voir mailer.py::_attach_logo().
+
+def test_render_template_reference_le_logo_en_cid_pas_en_data_uri():
+    html = mailer._render_template(
+        "account_created_email.html",
+        title="t", color="#000", icon="&#10004;", headline="h", subtitle="s",
+        details={}, action_url=None, action_label="a",
+        support_email="support@edg-support.gn", support_phone="(+224) 153 456 789",
+    )
+    assert f'src="cid:{mailer._LOGO_CID}"' in html
+    assert "data:image" not in html
+
+
+async def test_send_account_created_email_attache_le_logo_en_inline_pas_en_piece_jointe(monkeypatch):
+    monkeypatch.setattr(mailer, "_is_configured", lambda: True)
+    captured: dict = {}
+
+    async def _fake_smtp_send(msg):
+        captured["msg"] = msg
+
+    monkeypatch.setattr(mailer, "_smtp_send", _fake_smtp_send)
+
+    sent = await mailer.send_account_created_email("nouveau@test.edg.gn", "Jean Dupont")
+    assert sent is True
+
+    msg = captured["msg"]
+    assert msg.get_content_type() == "multipart/related"
+
+    # La pièce logo doit exister, porter le bon Content-ID, et être marquée
+    # "inline" — jamais "attachment" (sinon Gmail l'affiche comme pièce jointe
+    # téléchargeable en plus du corps, le problème que ce mécanisme évite).
+    logo_parts = [
+        part for part in msg.walk()
+        if part.get_content_type() == "image/png"
+    ]
+    assert len(logo_parts) == 1
+    logo_part = logo_parts[0]
+    assert logo_part["Content-ID"] == f"<{mailer._LOGO_CID}>"
+    assert logo_part.get_content_disposition() == "inline"
+    assert logo_part.get_payload(decode=True) == mailer._logo_bytes()

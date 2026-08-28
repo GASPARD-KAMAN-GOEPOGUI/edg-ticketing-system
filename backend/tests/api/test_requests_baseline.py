@@ -33,7 +33,7 @@ async def _ensure_test_account(
     account_id: int,
     *,
     unity_id: int | None,
-    role: str = "agent",
+    role: str = "agent-support",
     email: str | None = None,
 ) -> None:
     from api.models.ModelAccount import Account
@@ -54,7 +54,7 @@ async def _ensure_test_account(
                 email=email or f"compte.test.{account_id}@test.edg.gn",
                 role=role,
                 account_status="active",
-                availability="available" if role in {"agent", "chief"} else None,
+                availability="available" if role in {"agent-support", "chief-service", "chief-departement"} else None,
                 matricule=f"TST{account_id:05d}",
                 is_edg_employee=True,
             ))
@@ -207,7 +207,7 @@ class TestCreationDemandeBaseline:
         data = body.get("data", body)
         assert "id" in data
         assert "ref" in data
-        assert re.fullmatch(r"[A-Z0-9]{3}-[A-Z0-9]{3}-[A-Z0-9]{3}-\d{13}-\d{3}", data["ref"])
+        assert re.fullmatch(r"EDG-\d{2}-\d{5,}", data["ref"])
         assert "request_status" in data
 
     async def test_creation_statut_initial_est_new(self, auth_client, unity_id):
@@ -254,7 +254,7 @@ class TestCreationDemandeBaseline:
                 name="Agent Auto Assign",
                 firstname="Auto",
                 email="auto.assign@test.edg.gn",
-                role="agent",
+                role="agent-support",
                 account_status="active",
                 availability="available",
                 matricule="AUTOASSIGN001",
@@ -435,7 +435,7 @@ class TestAssignationEscaladeRoles:
         assert patched.status_code in (400, 422)
 
     async def test_agent_peut_s_auto_assigner_ticket_libre(self, auth_client):
-        await _ensure_test_account(2, unity_id=1, role="agent")
+        await _ensure_test_account(2, unity_id=1, role="agent-support")
 
         async with auth_client("admin") as c:
             rid = await self._create_ticket(c)
@@ -451,8 +451,8 @@ class TestAssignationEscaladeRoles:
         assert data.get("request_status") == "in_progress"
 
     async def test_agent_ne_peut_pas_assigner_un_autre_agent(self, auth_client):
-        await _ensure_test_account(2, unity_id=1, role="agent")
-        await _ensure_test_account(202, unity_id=1, role="agent")
+        await _ensure_test_account(2, unity_id=1, role="agent-support")
+        await _ensure_test_account(202, unity_id=1, role="agent-support")
 
         async with auth_client("admin") as c:
             rid = await self._create_ticket(c)
@@ -463,7 +463,7 @@ class TestAssignationEscaladeRoles:
         assert assigned.status_code == 403
 
     async def test_chef_peut_assigner_agent_de_son_service(self, auth_client):
-        await _ensure_test_account(202, unity_id=1, role="agent")
+        await _ensure_test_account(202, unity_id=1, role="agent-support")
 
         async with auth_client("admin") as c:
             rid = await self._create_ticket(c)
@@ -478,7 +478,7 @@ class TestAssignationEscaladeRoles:
 
     async def test_chef_ne_peut_pas_assigner_agent_hors_service(self, auth_client):
         await _ensure_test_unity(22, parent_direction_id=1)
-        await _ensure_test_account(203, unity_id=22, role="agent")
+        await _ensure_test_account(203, unity_id=22, role="agent-support")
 
         async with auth_client("admin") as c:
             rid = await self._create_ticket(c)
@@ -489,7 +489,7 @@ class TestAssignationEscaladeRoles:
         assert assigned.status_code == 403
 
     async def test_agent_peut_escalader_son_ticket_assigne_avec_motif(self, auth_client):
-        await _ensure_test_account(2, unity_id=1, role="agent")
+        await _ensure_test_account(2, unity_id=1, role="agent-support")
 
         async with auth_client("admin") as c:
             rid = await self._create_ticket(c)
@@ -505,8 +505,8 @@ class TestAssignationEscaladeRoles:
         assert escalated.status_code == 201
 
     async def test_agent_ne_peut_pas_escalader_ticket_non_assigne_a_lui(self, auth_client):
-        await _ensure_test_account(2, unity_id=1, role="agent")
-        await _ensure_test_account(202, unity_id=1, role="agent")
+        await _ensure_test_account(2, unity_id=1, role="agent-support")
+        await _ensure_test_account(202, unity_id=1, role="agent-support")
 
         async with auth_client("admin") as c:
             rid = await self._create_ticket(c)
@@ -603,7 +603,7 @@ class TestAssignationEscaladeRoles:
         réouvre seul, sans approbation d'un chef — remplace les anciens tests
         d'approbation/refus (`/request-reopen` + `/reject-reopen`/`/reopen`
         deux-phases), routes supprimées."""
-        await _ensure_test_account(2, unity_id=1, role="agent")
+        await _ensure_test_account(2, unity_id=1, role="agent-support")
 
         async with auth_client("admin") as c:
             rid = await self._create_ticket(c)
@@ -636,7 +636,7 @@ class TestAssignationEscaladeRoles:
         )
 
     async def test_reopen_sans_motif_est_refuse(self, auth_client):
-        await _ensure_test_account(2, unity_id=1, role="agent")
+        await _ensure_test_account(2, unity_id=1, role="agent-support")
 
         async with auth_client("admin") as c:
             rid = await self._create_ticket(c)
@@ -653,7 +653,7 @@ class TestAssignationEscaladeRoles:
         assert reopened.status_code == 400
 
     async def test_non_demandeur_ne_peut_pas_reouvrir(self, auth_client):
-        await _ensure_test_account(2, unity_id=1, role="agent")
+        await _ensure_test_account(2, unity_id=1, role="agent-support")
 
         async with auth_client("admin") as c:
             rid = await self._create_ticket(c)
@@ -725,7 +725,7 @@ class TestDirectionRoleAlignment:
 
     async def test_directeur_peut_resoudre_ticket_service_de_sa_direction(self, auth_client):
         await self._prepare_direction_scope()
-        await _ensure_test_account(9202, unity_id=9101, role="agent")
+        await _ensure_test_account(9202, unity_id=9101, role="agent-support")
 
         async with auth_client("user") as c:
             rid = await self._create_ticket(c, 9101)
@@ -1005,6 +1005,24 @@ class TestCommentairesBaseline:
                 else:
                     app.dependency_overrides.pop(get_current_user, None)
             assert qualified.status_code == 200, qualified.text
+
+            # BR-MESSAGING-OPEN-001 — l'intervenant actuel (7601) doit d'abord ouvrir
+            # la conversation avant que le demandeur (admin id=6) puisse y écrire.
+            def _agent_dep():
+                return SimpleNamespace(id=7601, role="agent-support", unity_id=unity_id, direction_id=None, name="Agent Test")
+            app.dependency_overrides[get_current_user] = _agent_dep
+            try:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client3:
+                    opened = await client3.post(
+                        f"/api/v1/requests/{request_id}/comments",
+                        json={"body": "Bonjour, une précision ?", "is_public": True, "peer_id": "7601"},
+                    )
+            finally:
+                if previous_override is not None:
+                    app.dependency_overrides[get_current_user] = previous_override
+                else:
+                    app.dependency_overrides.pop(get_current_user, None)
+            assert opened.status_code == 201, opened.text
 
             created = await c.post(f"/api/v1/requests/{request_id}/comments", json={
                 "body": "Commentaire audit timeline.",

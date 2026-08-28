@@ -16,10 +16,13 @@ import { Route as KnowledgeRouteImport } from './routes/knowledge'
 import { Route as HelpRouteImport } from './routes/help'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as CreateRequestRouteImport } from './routes/create-request'
+import { Route as ConsentRouteImport } from './routes/consent'
 import { Route as AppRouteImport } from './routes/app'
 import { Route as AdminLoginRouteImport } from './routes/admin-login'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppIndexRouteImport } from './routes/app.index'
+import { Route as LegalTermsRouteImport } from './routes/legal.terms'
+import { Route as LegalPrivacyRouteImport } from './routes/legal.privacy'
 import { Route as AppTransmittedRouteImport } from './routes/app.transmitted'
 import { Route as AppSupervisionRouteImport } from './routes/app.supervision'
 import { Route as AppStrategicDashboardRouteImport } from './routes/app.strategic-dashboard'
@@ -103,6 +106,11 @@ const CreateRequestRoute = CreateRequestRouteImport.update({
   path: '/create-request',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ConsentRoute = ConsentRouteImport.update({
+  id: '/consent',
+  path: '/consent',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppRoute = AppRouteImport.update({
   id: '/app',
   path: '/app',
@@ -122,6 +130,16 @@ const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AppRoute,
+} as any)
+const LegalTermsRoute = LegalTermsRouteImport.update({
+  id: '/legal/terms',
+  path: '/legal/terms',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LegalPrivacyRoute = LegalPrivacyRouteImport.update({
+  id: '/legal/privacy',
+  path: '/legal/privacy',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const AppTransmittedRoute = AppTransmittedRouteImport.update({
   id: '/transmitted',
@@ -364,6 +382,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin-login': typeof AdminLoginRoute
   '/app': typeof AppRouteWithChildren
+  '/consent': typeof ConsentRoute
   '/create-request': typeof CreateRequestRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/help': typeof HelpRoute
@@ -388,6 +407,8 @@ export interface FileRoutesByFullPath {
   '/app/strategic-dashboard': typeof AppStrategicDashboardRoute
   '/app/supervision': typeof AppSupervisionRoute
   '/app/transmitted': typeof AppTransmittedRoute
+  '/legal/privacy': typeof LegalPrivacyRoute
+  '/legal/terms': typeof LegalTermsRoute
   '/app/': typeof AppIndexRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/communication': typeof AppAdminCommunicationRoute
@@ -423,6 +444,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin-login': typeof AdminLoginRoute
+  '/consent': typeof ConsentRoute
   '/create-request': typeof CreateRequestRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/help': typeof HelpRoute
@@ -447,6 +469,8 @@ export interface FileRoutesByTo {
   '/app/strategic-dashboard': typeof AppStrategicDashboardRoute
   '/app/supervision': typeof AppSupervisionRoute
   '/app/transmitted': typeof AppTransmittedRoute
+  '/legal/privacy': typeof LegalPrivacyRoute
+  '/legal/terms': typeof LegalTermsRoute
   '/app': typeof AppIndexRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/communication': typeof AppAdminCommunicationRoute
@@ -484,6 +508,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin-login': typeof AdminLoginRoute
   '/app': typeof AppRouteWithChildren
+  '/consent': typeof ConsentRoute
   '/create-request': typeof CreateRequestRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/help': typeof HelpRoute
@@ -508,6 +533,8 @@ export interface FileRoutesById {
   '/app/strategic-dashboard': typeof AppStrategicDashboardRoute
   '/app/supervision': typeof AppSupervisionRoute
   '/app/transmitted': typeof AppTransmittedRoute
+  '/legal/privacy': typeof LegalPrivacyRoute
+  '/legal/terms': typeof LegalTermsRoute
   '/app/': typeof AppIndexRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/communication': typeof AppAdminCommunicationRoute
@@ -546,6 +573,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin-login'
     | '/app'
+    | '/consent'
     | '/create-request'
     | '/forgot-password'
     | '/help'
@@ -570,6 +598,8 @@ export interface FileRouteTypes {
     | '/app/strategic-dashboard'
     | '/app/supervision'
     | '/app/transmitted'
+    | '/legal/privacy'
+    | '/legal/terms'
     | '/app/'
     | '/app/admin/audit'
     | '/app/admin/communication'
@@ -605,6 +635,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/admin-login'
+    | '/consent'
     | '/create-request'
     | '/forgot-password'
     | '/help'
@@ -629,6 +660,8 @@ export interface FileRouteTypes {
     | '/app/strategic-dashboard'
     | '/app/supervision'
     | '/app/transmitted'
+    | '/legal/privacy'
+    | '/legal/terms'
     | '/app'
     | '/app/admin/audit'
     | '/app/admin/communication'
@@ -665,6 +698,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin-login'
     | '/app'
+    | '/consent'
     | '/create-request'
     | '/forgot-password'
     | '/help'
@@ -689,6 +723,8 @@ export interface FileRouteTypes {
     | '/app/strategic-dashboard'
     | '/app/supervision'
     | '/app/transmitted'
+    | '/legal/privacy'
+    | '/legal/terms'
     | '/app/'
     | '/app/admin/audit'
     | '/app/admin/communication'
@@ -726,6 +762,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminLoginRoute: typeof AdminLoginRoute
   AppRoute: typeof AppRouteWithChildren
+  ConsentRoute: typeof ConsentRoute
   CreateRequestRoute: typeof CreateRequestRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
   HelpRoute: typeof HelpRoute
@@ -733,6 +770,8 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   RegisterRoute: typeof RegisterRoute
   TrackRoute: typeof TrackRoute
+  LegalPrivacyRoute: typeof LegalPrivacyRoute
+  LegalTermsRoute: typeof LegalTermsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -786,6 +825,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CreateRequestRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/consent': {
+      id: '/consent'
+      path: '/consent'
+      fullPath: '/consent'
+      preLoaderRoute: typeof ConsentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/app': {
       id: '/app'
       path: '/app'
@@ -813,6 +859,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/'
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
+    }
+    '/legal/terms': {
+      id: '/legal/terms'
+      path: '/legal/terms'
+      fullPath: '/legal/terms'
+      preLoaderRoute: typeof LegalTermsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/legal/privacy': {
+      id: '/legal/privacy'
+      path: '/legal/privacy'
+      fullPath: '/legal/privacy'
+      preLoaderRoute: typeof LegalPrivacyRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/app/transmitted': {
       id: '/app/transmitted'
@@ -1273,6 +1333,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminLoginRoute: AdminLoginRoute,
   AppRoute: AppRouteWithChildren,
+  ConsentRoute: ConsentRoute,
   CreateRequestRoute: CreateRequestRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
   HelpRoute: HelpRoute,
@@ -1280,6 +1341,8 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   RegisterRoute: RegisterRoute,
   TrackRoute: TrackRoute,
+  LegalPrivacyRoute: LegalPrivacyRoute,
+  LegalTermsRoute: LegalTermsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

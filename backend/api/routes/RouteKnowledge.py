@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import HTTPException
-from api.dependencies import get_db, get_current_user, require_roles
+from api.dependencies import get_db, get_current_user_optional, require_roles
 from api.schemas.SchemaKnowledgeArticle import (
     KnowledgeArticleCreate,
     KnowledgeArticleResponse,
@@ -19,7 +19,6 @@ from api.services import KnowledgeArticleService
 router = APIRouter(
     prefix="/knowledge",
     tags=["knowledge"],
-    dependencies=[Depends(get_current_user)],
 )
 
 # Router public : lecture seule des articles publiés, sans authentification (CDC §6.6)
@@ -41,10 +40,10 @@ async def list_knowledge(
     q: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=200),
-    actor=Depends(get_current_user),
+    actor=Depends(get_current_user_optional),
     svc: KnowledgeArticleService = Depends(_svc),
 ):
-    is_editor = actor.role in _EDITOR_ROLES
+    is_editor = actor is not None and actor.role in _EDITOR_ROLES
     if q:
         published_only = True if not is_editor else (published is not False)
         return await svc.search(q, published_only=published_only, page=page, limit=limit)
@@ -56,11 +55,11 @@ async def list_knowledge(
 @router.get("/{id}", response_model=KnowledgeArticleResponse)
 async def get_knowledge(
     id: str,
-    actor=Depends(get_current_user),
+    actor=Depends(get_current_user_optional),
     svc: KnowledgeArticleService = Depends(_svc),
 ):
     article = await svc.get_by_id(id)
-    if not article.is_published and actor.role not in _EDITOR_ROLES:
+    if not article.is_published and (actor is None or actor.role not in _EDITOR_ROLES):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Cet article n'est pas encore publié.",

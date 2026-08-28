@@ -1,5 +1,5 @@
 """
-Couche de stockage de fichiers — EDG Connect.
+Couche de stockage de fichiers — EDG Support.
 
 Par défaut : stockage local dans uploads/.
 Extension point MinIO : remplacer les méthodes par des appels boto3/aiobotocore.

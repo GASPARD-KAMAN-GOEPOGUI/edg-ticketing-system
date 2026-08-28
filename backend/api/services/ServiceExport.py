@@ -1,5 +1,5 @@
 """
-Service d'export de rapports — EDG Connect.
+Service d'export de rapports — EDG Support.
 Formats supportés : CSV, Excel (xlsx), PDF.
 """
 from __future__ import annotations
@@ -84,7 +84,7 @@ def make_branded_pdf(doc_title: str):
             self.set_xy(0, 17)
             self.set_font("Helvetica", "", 8)
             self.set_text_color(120, 120, 120)
-            self.cell(self.w, 5, pdf_safe_text("EDG Connect — Électricité de Guinée"), align="C")
+            self.cell(self.w, 5, pdf_safe_text("EDG Support — Électricité de Guinée"), align="C")
             self.set_y(max(24.0, logo_bottom_y + 2.0))
             self.set_draw_color(26, 82, 118)
             self.set_line_width(0.4)

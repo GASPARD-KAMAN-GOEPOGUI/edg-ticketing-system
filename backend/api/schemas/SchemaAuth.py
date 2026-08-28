@@ -75,6 +75,33 @@ class LogoutRequest(BaseModel):
     access_token: Optional[str] = None
 
 
+class ConsentAcceptRequest(BaseModel):
+    """
+    Rattachement après consentement — utilisateur authentifié par le central mais
+    sans groupe support de cette application (voir POST /auth/login ->
+    ConsentRequiredResponse). refresh_token/expires_in sont ré-échoués tels quels
+    depuis cette réponse : le bearer central obtenu au login reste valide, pas de
+    nouvel appel central_login nécessaire ici.
+    """
+    refresh_token: str
+    expires_in: int
+    consent_version: str
+    name: str
+    firstname: Optional[str] = None
+    phone: Optional[str] = None
+
+    @validator("name")
+    def name_not_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Le nom ne peut pas être vide.")
+        return v
+
+    @validator("phone")
+    def _validate_phone(cls, v):
+        return validate_guinea_phone(v)
+
+
 # ── Sortie ────────────────────────────────────────────────────────────────────
 
 class TokenResponse(BaseModel):
@@ -84,6 +111,27 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     expires_in: int          # secondes avant expiration de l'access token
     user: AccountResponse
+
+
+class ConsentRequiredResponse(BaseModel):
+    """
+    Retournée par POST /auth/login (200, PAS 401) quand l'authentification
+    centrale a réussi mais qu'aucun compte local n'est rattaché ET que
+    l'utilisateur n'appartient à aucun groupe support de cette application
+    (admin-support/qualify-support/collaborateur-support) — voir
+    dependencies.py::resolve_or_provision_login_account. access_token/
+    refresh_token/expires_in sont le bearer central déjà valide, à réutiliser
+    tel quel pour POST /auth/consent/accept une fois le consentement donné.
+    """
+    needs_consent: bool = True
+    access_token: str
+    refresh_token: str
+    expires_in: int
+    email: str
+    suggested_name: Optional[str] = None
+    suggested_firstname: Optional[str] = None
+    suggested_phone: Optional[str] = None
+    consent_version: str
 
 
 class AccessTokenResponse(BaseModel):

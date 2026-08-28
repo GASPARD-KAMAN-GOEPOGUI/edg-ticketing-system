@@ -1,4 +1,4 @@
-"""Point d'entrée de l'application FastAPI — EDG Connect API."""
+"""Point d'entrée de l'application FastAPI — EDG Support API."""
 
 from __future__ import annotations
 
@@ -85,16 +85,18 @@ env = get_environment()
 # Sinon : fenêtre glissante en mémoire (monoprocessus uniquement, dev).
 #
 # Routes protégées et limites :
-#   /api/v1/auth/login           → 10 req / 60 s
-#   /api/v1/auth/register        → 5  req / 60 s
-#   /api/v1/auth/forgot-password → 3  req / 60 s
-#   /api/v1/auth/reset-password  → 3  req / 60 s
+#   /api/v1/auth/login            → 10 req / 60 s
+#   /api/v1/auth/register         → 5  req / 60 s
+#   /api/v1/auth/forgot-password  → 3  req / 60 s
+#   /api/v1/auth/reset-password   → 3  req / 60 s
+#   /api/v1/auth/consent/accept   → 5  req / 60 s (crée un compte, même tier que register)
 
 _RATE_LIMITS: dict[str, tuple[int, int]] = {
     "/api/v1/auth/login":            (10, 60),
     "/api/v1/auth/register":         (5,  60),
     "/api/v1/auth/forgot-password":  (3,  60),
     "/api/v1/auth/reset-password":   (3,  60),
+    "/api/v1/auth/consent/accept":   (5,  60),
 }
 
 

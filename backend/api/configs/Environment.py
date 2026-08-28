@@ -6,7 +6,7 @@ from pydantic import BaseSettings
 
 class Environment(BaseSettings):
     # App
-    APP_NAME: str = "EDG Connect API"
+    APP_NAME: str = "EDG Support API"
     APP_VERSION: str = "0.1.0"
     APP_ENV: str = "development"
     DEBUG_MODE: bool = False

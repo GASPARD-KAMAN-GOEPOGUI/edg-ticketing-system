@@ -41,10 +41,7 @@ export function Logo({
       {showText && (
         <div className="flex flex-col leading-none">
           <span className={cn("text-base font-bold tracking-tight", onDark ? "text-white" : "")}>
-            EDG<span className={onDark ? "text-white/70" : "text-primary"}>-SUP</span>
-          </span>
-          <span className={cn("text-[10px] uppercase tracking-[0.18em]", onDark ? "text-white/60" : "text-muted-foreground/70")}>
-            EDG Support
+            EDG<span className={onDark ? "text-white/70" : "text-primary"}> Support</span>
           </span>
         </div>
       )}

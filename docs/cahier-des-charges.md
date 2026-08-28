@@ -446,3 +446,4 @@ La mise en place de cette application de Ticketing/Support permettra à la DSI d
 | Date | Évolution |
 | --- | --- |
 | 2026-08-15 | Ajout de l'export du dossier complet d'une demande, réservé à l'espace Administration (§10.5) — détails techniques dans `docs/mise-a-jour-backend.md`. |
+| 2026-08-19 | Rattachement post-login pour un utilisateur authentifié par la plateforme centrale sans compte local (auto-provisioning silencieux si groupe support déjà présent, sinon écran de consentement `/consent` puis rattachement à `collaborateur-support`) — nouvel endpoint `POST /auth/consent/accept`, nouvelles pages `/legal/terms` et `/legal/privacy` — détails techniques dans `docs/mise-a-jour-backend.md`. |

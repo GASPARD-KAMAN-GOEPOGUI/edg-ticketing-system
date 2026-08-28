@@ -1,5 +1,5 @@
 """
-Barrel export — tous les services EDG Connect.
+Barrel export — tous les services EDG Support.
 """
 from api.services.base_service import BaseService
 

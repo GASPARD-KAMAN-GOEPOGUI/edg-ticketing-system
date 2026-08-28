@@ -11,10 +11,8 @@ import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
   Bolt,
-  Building2,
   CheckCircle2,
   Clock,
-  Compass,
   FilePlus,
   FileText,
   HeartHandshake,
@@ -31,6 +29,7 @@ import {
   Zap,
   Bell,
   Info,
+  History,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { AnimatePresence } from "framer-motion";
@@ -47,13 +46,13 @@ import { fetchActiveDirectionsCount } from "@/lib/api/directions-units";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "EDG Connect — Espace employé EDG" },
+      { title: "EDG Support — Espace employé EDG" },
       {
         name: "description",
         content:
           "Plateforme interne de gestion des tickets pour les employés d'Électricité de Guinée. Soumettez, suivez et résolvez vos incidents.",
       },
-      { property: "og:title", content: "EDG Connect" },
+      { property: "og:title", content: "EDG Support" },
       {
         property: "og:description",
         content: "L'espace numérique des employés EDG — tickets, suivi, support, en un seul endroit.",
@@ -114,24 +113,24 @@ function ServicesSection() {
         {[
           {
             icon: Bolt,
-            title: "Ticket d'incident",
-            desc: "Panne, court-circuit, équipement défectueux : ouvrez un ticket et suivez son traitement en temps réel.",
+            title: "Créer un ticket en quelques clics",
+            desc: "Décrivez votre besoin avec un titre, une description et des pièces jointes. Une référence de suivi est générée immédiatement.",
             cta: "Créer un ticket",
             to: "/login",
           },
           {
-            icon: FileText,
-            title: "Ticket de service",
-            desc: "Attestations, rapports, certificats administratifs : soumettez votre ticket et suivez-le jusqu'à la remise du document.",
-            cta: "Créer un ticket",
+            icon: Bell,
+            title: "Suivi en temps réel",
+            desc: "Recevez une notification à chaque étape clé : prise en charge, transmission, résolution, fermeture.",
+            cta: "Se connecter",
             to: "/login",
           },
           {
-            icon: HeartHandshake,
-            title: "Assistance informatique",
-            desc: "Un problème d'accès ou d'outil ? Ouvrez un ticket auprès de l'équipe support DSI et suivez sa résolution.",
-            cta: "Créer un ticket",
-            to: "/login",
+            icon: History,
+            title: "Historique et traçabilité",
+            desc: "Consultez à tout moment l'historique complet de votre ticket et l'intervenant actuellement en charge.",
+            cta: "Suivre un ticket",
+            to: "/track",
           },
         ].map((s) => (
           <motion.div
@@ -177,25 +176,25 @@ function HowSection() {
       n: "01",
       icon: FilePlus,
       title: "Création",
-      desc: "Connectez-vous avec votre compte EDG et décrivez votre besoin en quelques clics. Une référence de suivi est générée immédiatement.",
+      desc: "Connectez-vous avec votre compte EDG et décrivez votre besoin. Une référence de suivi est générée et votre ticket rejoint la file d'attente.",
     },
     {
       n: "02",
-      icon: Compass,
-      title: "Qualification",
-      desc: "Le ticket est analysé puis orienté vers la direction et le service compétents selon sa nature et sa priorité.",
+      icon: Users,
+      title: "Prise en charge",
+      desc: "Un agent support prend le ticket depuis la file d'attente et le traite ; il peut le transmettre à un autre intervenant si nécessaire.",
     },
     {
       n: "03",
-      icon: Clock,
-      title: "Traitement",
-      desc: "Un agent prend en charge le ticket et vous tient informé de chaque avancée, en temps réel.",
+      icon: CheckCircle2,
+      title: "Résolution & validation",
+      desc: "Une fois la solution apportée, vous confirmez que la résolution répond bien à votre besoin.",
     },
     {
       n: "04",
-      icon: CheckCircle2,
-      title: "Résolution",
-      desc: "Le ticket est clôturé dès la résolution confirmée et vous êtes notifié instantanément.",
+      icon: ShieldCheck,
+      title: "Fermeture ou réouverture",
+      desc: "Le ticket est officiellement clôturé. Si le besoin persiste, vous pouvez le rouvrir pour relancer le traitement.",
     },
   ] as const;
 
@@ -244,83 +243,6 @@ function HowSection() {
   );
 }
 
-function ForWhoSection() {
-  const profiles = [
-    {
-      icon: Users,
-      gradient: "gradient-accent",
-      shadow: "shadow-accent/30",
-      title: "Demandeur",
-      subtitle: "Employé EDG — tout niveau",
-      desc: "Créez vos tickets de support, suivez leur traitement en temps réel et échangez directement avec l'agent en charge de votre dossier.",
-      cta: "Ouvrir un ticket",
-      to: "/login",
-    },
-    {
-      icon: Building2,
-      gradient: "gradient-primary",
-      shadow: "shadow-primary/30",
-      title: "Agent & Chef de service",
-      subtitle: "Traitement et supervision",
-      desc: "Prenez en charge les tickets de votre file d'attente, collaborez avec les autres services par la transmission inter-directions et suivez vos délais SLA en continu.",
-      cta: "Espace agent",
-      to: "/login",
-    },
-    {
-      icon: ShieldCheck,
-      gradient: "gradient-primary",
-      shadow: "shadow-primary/25",
-      title: "Directeur",
-      subtitle: "Pilotage et reporting",
-      desc: "Pilotez la performance de votre direction grâce aux KPIs en temps réel, aux rapports CSAT/SLA et aux règles de routage — une vision complète de la qualité de service.",
-      cta: "Tableau de bord",
-      to: "/login",
-    },
-  ] as const;
-
-  return (
-    <section className="mx-auto mt-10 max-w-screen-2xl px-4 sm:mt-16 sm:px-8 lg:mt-20 lg:px-12">
-      <Reveal className="mb-10 text-center sm:mb-12">
-        <h2 className="text-2xl font-bold tracking-tight sm:text-3xl lg:text-4xl">
-          Une plateforme pour tous les employés EDG
-        </h2>
-        <p className="mt-3 text-sm text-muted-foreground sm:text-base">
-          Chaque rôle dispose d'un espace adapté à ses responsabilités.
-        </p>
-      </Reveal>
-
-      <div className="grid gap-5 md:grid-cols-3">
-        {profiles.map((p, i) => (
-          <Reveal key={p.title} delay={i * 0.07}>
-            <GlassCard
-              strong
-              className="group flex h-full flex-col gap-6 p-7 transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl"
-            >
-              <div className="flex items-center gap-4">
-                <div className={`grid h-14 w-14 shrink-0 place-items-center rounded-2xl ${p.gradient} shadow-lg ${p.shadow}`}>
-                  <p.icon className="h-7 w-7 text-background" />
-                </div>
-                <div>
-                  <h3 className="text-xl font-bold">{p.title}</h3>
-                  <p className="text-xs text-muted-foreground">{p.subtitle}</p>
-                </div>
-              </div>
-              <p className="flex-1 leading-relaxed text-muted-foreground">{p.desc}</p>
-              <div>
-                <Button asChild className={`rounded-full ${p.gradient} shadow-md ${p.shadow}`}>
-                  <Link to={p.to}>
-                    {p.cta} <ArrowRight className="ml-1.5 h-4 w-4" />
-                  </Link>
-                </Button>
-              </div>
-            </GlassCard>
-          </Reveal>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function TrustSection() {
   const features = [
     { icon: ShieldCheck,    t: "Sécurisé",    d: "Contrôle d'accès strict (RBAC), authentification JWT et biométrie optionnelle." },
@@ -339,7 +261,7 @@ function TrustSection() {
               <span className="text-gradient">confiance</span>.
             </h2>
             <p className="mt-3 text-muted-foreground">
-              EDG Connect centralise le traitement des tickets internes, avec une
+              EDG Support centralise le traitement des tickets internes, avec une
               traçabilité complète et un suivi en temps réel à chaque étape.
               Chaque employé sait à tout moment où en est son dossier — et qui en a la charge.
             </p>
@@ -755,7 +677,7 @@ function renderSection(section: SectionConfig, missionText: string) {
     case "mission":  return <MissionBand key="mission" text={missionText} />;
     case "services": return <ServicesSection key="services" />;
     case "how":      return <HowSection key="how" />;
-    case "for-who":  return <ForWhoSection key="for-who" />;
+    case "for-who":  return null;
     case "trust":    return <TrustSection key="trust" />;
     default:         return (
       <CustomSection
@@ -876,8 +798,8 @@ function Home() {
 
               <motion.div variants={stagger} className="mt-10 grid grid-cols-3 gap-3 sm:gap-8">
                 {[
-                  { v: "24/7", l: "Disponibilité" },
-                  { v: "< 4h", l: "Délai critique" },
+                  { v: "Temps réel", l: "Notifications" },
+                  { v: "Traçable", l: "Historique complet" },
                   { v: dirCountLoading ? "…" : activeDirectionsCount != null ? String(activeDirectionsCount) : "—", l: "Directions actives" },
                 ].map((s) => (
                   <motion.div key={s.l} variants={fadeUp}>

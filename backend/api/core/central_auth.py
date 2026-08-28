@@ -54,11 +54,18 @@ class CentralInvalidSourceToken(CentralAuthError):
 
 
 class CentralIdentityConflict(CentralAuthError):
-    """status == "identity_conflict" sur POST /v1/client-app-users/group-membership."""
+    """HTTP 409 (status "identity_already_exists") sur POST /v1/client-app-users/
+    group-membership — un compte existe déjà avec le même email/téléphone."""
 
 
 class CentralValidationError(CentralAuthError):
     """400/422 renvoyé par le central (ex. politique de mot de passe) — message relayé."""
+
+
+class CentralInvalidPhoneFormat(CentralValidationError):
+    """422 (status "invalid_phone_format") sur POST /v1/client-app-users/
+    group-membership — statut fonctionnel documenté, message fixe dédié
+    (voir create_central_account), distinct des CentralValidationError génériques."""
 
 
 class CentralPermissionDenied(CentralAuthError):
@@ -106,6 +113,49 @@ async def get_source_token() -> str:
         raise CentralUnavailableError(f"Le central a répondu {response.status_code}.")
     response.raise_for_status()
     return response.json()["source_token"]
+
+
+# ── TEMPORAIRE (2026-08) — diagnostic public du rejet CLIENT_APP_CODE/SECRET ──
+# À SUPPRIMER avec la route qui l'utilise (RouteAuth.py::debug_source_token) une
+# fois l'investigation terminée. Ne masque rien de la réponse centrale (sauf le
+# secret, jamais renvoyé) pour permettre de voir la cause exacte du rejet.
+async def debug_source_token_exchange(
+    client_code: str | None = None, client_secret: str | None = None,
+) -> dict[str, Any]:
+    env = get_environment()
+    code = client_code or env.CLIENT_APP_CODE
+    secret = client_secret or env.CLIENT_APP_SECRET
+    if not code or not secret:
+        return {
+            "ok": False,
+            "error": "CLIENT_APP_CODE/CLIENT_APP_SECRET non configurés (et non fournis en paramètre).",
+        }
+    try:
+        async with httpx.AsyncClient(**_client_kwargs()) as client:
+            response = await client.post(
+                "/v1/client-app-auth/source-token",
+                json={"client_code": code, "client_secret": secret},
+            )
+    except httpx.HTTPError as exc:
+        return {
+            "ok": False,
+            "error": f"Service central indisponible : {exc}",
+            "client_code_used": code,
+            "central_base_url": env.CENTRAL_AUTH_BASE_URL,
+        }
+
+    try:
+        body: Any = response.json()
+    except Exception:
+        body = response.text
+
+    return {
+        "ok": response.status_code < 400,
+        "status_code": response.status_code,
+        "client_code_used": code,
+        "central_base_url": env.CENTRAL_AUTH_BASE_URL,
+        "response_body": body,
+    }
 
 
 async def get_machine_token() -> str:
@@ -237,7 +287,7 @@ async def get_groups(bearer_token: str) -> list[dict[str, Any]]:
 
 
 def role_from_groups(groups: list[dict[str, Any]]) -> Optional[str]:
-    """Mappe les groupes centraux actifs vers un rôle EDG Connect (priorité admin > agent-support > user)."""
+    """Mappe les groupes centraux actifs vers un rôle EDG Support (priorité admin > agent-support > user)."""
     active = {
         (group.get("codename") or "").strip().lower()
         for group in groups
@@ -251,7 +301,7 @@ def role_from_groups(groups: list[dict[str, Any]]) -> Optional[str]:
 
 def group_for_role(role: str) -> str:
     """
-    Inverse de GROUP_ROLE_PRIORITY : rôle local EDG Connect -> groupe central.
+    Inverse de GROUP_ROLE_PRIORITY : rôle local EDG Support -> groupe central.
     Rôles sans groupe central dédié (chief-service, chief-departement, director,
     public) retombent sur "collaborateur-support" — établit une identité centrale
     et une capacité d'authentification de base, sans jamais influencer le rôle
@@ -264,6 +314,54 @@ def group_for_role(role: str) -> str:
         if mapped_role == normalized:
             return codename
     return _DEFAULT_GROUP_CODENAME
+
+
+async def get_profile(bearer_token: str) -> dict[str, Any]:
+    """GET /api/me — profil complet (nom, prénom, téléphone, uuid) de l'utilisateur
+    connecté. Distinct de get_scopes()/get_groups() : ceux-ci ne renvoient que
+    user_id/email/codenames, jamais assez pour matérialiser un compte local
+    (nom NOT NULL) lors d'un rattachement (auto-provisioning ou consentement)."""
+    try:
+        async with httpx.AsyncClient(**_client_kwargs()) as client:
+            response = await client.get(
+                "/api/me",
+                headers={"Authorization": f"Bearer {bearer_token}"},
+            )
+    except httpx.HTTPError as exc:
+        raise CentralUnavailableError(f"Service d'authentification central indisponible : {exc}") from exc
+
+    if response.status_code in (401, 403):
+        raise CentralInvalidCredentials("Session invalide ou expirée.")
+    if response.status_code >= 500:
+        raise CentralUnavailableError(f"Le central a répondu {response.status_code}.")
+    response.raise_for_status()
+    return response.json()
+
+
+def parse_profile_identity(profile: dict[str, Any]) -> dict[str, Optional[str]]:
+    """
+    Extrait uuid/nom/prénom/téléphone d'une réponse GET /api/me.
+
+    Convention centrale déjà observée ailleurs dans ce module
+    (create_central_account/update_central_account) : le payload envoyé AU central
+    utilise "name" pour le prénom et "last_name" pour le nom de famille. On suppose
+    la même convention en LECTURE ici. Si "last_name" est absent de la réponse, on
+    retombe sur "name" comme nom de famille (colonne locale account.name, NOT NULL)
+    sans deviner de prénom, plutôt que de mal assigner les deux.
+
+    Ne lève jamais d'exception — un profil partiel ou de forme inattendue reste
+    exploitable : les champs manquants restent None et sont alors complétés
+    manuellement par l'utilisateur sur l'écran de rattachement (consentement).
+    """
+    uuid = profile.get("uuid") or profile.get("user_uuid")
+    phone = profile.get("phone") or profile.get("telephone")
+    if profile.get("last_name"):
+        last_name = profile.get("last_name")
+        first_name = profile.get("name") or profile.get("first_name") or profile.get("firstname")
+    else:
+        last_name = profile.get("name") or profile.get("full_name")
+        first_name = profile.get("first_name") or profile.get("firstname")
+    return {"uuid": uuid, "name": last_name, "firstname": first_name, "phone": phone}
 
 
 def _raise_for_mutation_status(response: httpx.Response) -> None:
@@ -283,12 +381,15 @@ def _raise_for_mutation_status(response: httpx.Response) -> None:
 
 async def create_central_account(
     *, group_codename: str, email: str, phone: str, firstname: str, last_name: str,
-    password: str, machine_token: str,
+    password: str,
 ) -> dict[str, Any]:
-    """POST /v1/client-app-users/group-membership — authentifié par token machine.
-    Le README générique (Link Hub) décrit cet appel comme public, sans bearer — ce
-    n'est pas le cas pour cette instance manager-user, qui exige le token machine
-    même pour la création de compte."""
+    """POST /v1/client-app-users/group-membership — authentifié par source_token
+    dans le corps de la requête (mise à jour du endpoint central, plus de token
+    machine ni d'en-tête Authorization pour cet appel précis — contrairement aux
+    autres mutations /v1/client-app-users/* qui restent au token machine).
+    Retry une fois avec un nouveau source_token si le central le signale invalide/
+    expiré, même mécanisme que central_login()."""
+    source_token = await get_source_token()
     payload = {
         "group_codename": group_codename,
         "email": email,
@@ -297,19 +398,42 @@ async def create_central_account(
         "last_name": last_name,
         "password": password,
     }
-    try:
+
+    async def _attempt(token: str) -> httpx.Response:
         async with httpx.AsyncClient(**_client_kwargs()) as client:
-            response = await client.post(
+            return await client.post(
                 "/v1/client-app-users/group-membership",
-                json=payload,
-                headers={"Authorization": f"Bearer {machine_token}"},
+                json={**payload, "source_token": token},
             )
+
+    try:
+        response = await _attempt(source_token)
     except httpx.HTTPError as exc:
         raise CentralUnavailableError(f"Service d'authentification central indisponible : {exc}") from exc
 
+    if _is_invalid_source_token(response):
+        source_token = await get_source_token()
+        try:
+            response = await _attempt(source_token)
+        except httpx.HTTPError as exc:
+            raise CentralUnavailableError(f"Service d'authentification central indisponible : {exc}") from exc
+
     if response.status_code in (401, 403):
-        raise CentralInvalidClientCredentials("Token machine rejeté par le central.")
-    if response.status_code in (400, 422):
+        raise CentralInvalidClientCredentials("source_token rejeté par le central.")
+    if response.status_code == 409:
+        try:
+            message = response.json().get("message")
+        except Exception:
+            message = None
+        raise CentralIdentityConflict(
+            message or "Un compte existe déjà avec cet email ou ce téléphone (identity_already_exists)."
+        )
+    if response.status_code == 422:
+        # invalid_phone_format — seul statut 422 documenté pour cet endpoint.
+        # Message fixe volontaire (pas de relais du message central), demandé
+        # explicitement pour cet écran d'inscription.
+        raise CentralInvalidPhoneFormat("Le numéro de téléphone n'est pas au bon format.")
+    if response.status_code == 400:
         try:
             message = response.json().get("message")
         except Exception:
@@ -319,10 +443,7 @@ async def create_central_account(
         raise CentralUnavailableError(f"Le central a répondu {response.status_code}.")
     response.raise_for_status()
 
-    data = response.json()
-    if data.get("status") == "identity_conflict":
-        raise CentralIdentityConflict(data.get("message") or "Conflit d'identité détecté par la plateforme centrale.")
-    return data
+    return response.json()
 
 
 async def update_central_account(

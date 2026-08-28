@@ -67,7 +67,7 @@ export const DEFAULT_SECTIONS: SectionConfig[] = [
 export const DEFAULT_CONFIG: HomepageConfig = {
   sections: DEFAULT_SECTIONS,
   missionText:
-    "EDG Support est la plateforme unique et officielle qui centralise tous vos tickets, incidents et réclamations vers la bonne direction — pour les citoyens, les clients et les agents d'Électricité de Guinée.",
+    "EDG Support est la plateforme unique et officielle qui centralise les tickets internes des employés d'Électricité de Guinée et les oriente vers la bonne direction pour un traitement rapide et tracé.",
 };
 
 export function loadHomepageConfig(): HomepageConfig {

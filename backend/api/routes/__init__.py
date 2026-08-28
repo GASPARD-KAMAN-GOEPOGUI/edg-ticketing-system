@@ -1,5 +1,5 @@
 """
-Barrel export — tous les routers EDG Connect.
+Barrel export — tous les routers EDG Support.
 Convention de nommage : Route{Domaine}.py
 """
 from api.routes.health import router as health_router

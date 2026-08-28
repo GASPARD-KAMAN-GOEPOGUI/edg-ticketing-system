@@ -1,5 +1,5 @@
 """
-Barrel export — tous les repositories EDG Connect.
+Barrel export — tous les repositories EDG Support.
 Pattern : Repository{NomModèle}
 """
 from api.repositories.base_repository import (

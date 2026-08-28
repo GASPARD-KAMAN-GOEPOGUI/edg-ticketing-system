@@ -8,7 +8,7 @@ import { useState } from "react";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { loginUser } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
-import { setUser, setTokens, clearSession, getDefaultRouteForRole, isAuthenticated, getRole } from "@/lib/session";
+import { setUser, setTokens, clearSession, getDefaultRouteForRole, isAuthenticated, getRole, setPendingConsent } from "@/lib/session";
 import type { Role } from "@/lib/mock-data";
 
 export const Route = createFileRoute("/login")({
@@ -47,6 +47,23 @@ function Login() {
     try {
       const result = await loginUser({ identifier: identifier.trim(), password });
 
+      if (result.needsConsent) {
+        // Authentifié par le central, mais aucun compte local ni groupe support
+        // de cette application — écran de consentement avant tout accès.
+        setPendingConsent({
+          accessToken: result.accessToken,
+          refreshToken: result.refreshToken,
+          expiresIn: result.expiresIn,
+          email: result.email,
+          suggestedName: result.suggestedName,
+          suggestedFirstname: result.suggestedFirstname,
+          suggestedPhone: result.suggestedPhone,
+          consentVersion: result.consentVersion,
+        });
+        navigate({ to: "/consent", replace: true });
+        return;
+      }
+
       clearSession();
       setTokens(result.accessToken, result.refreshToken, result.expiresIn);
 
@@ -81,7 +98,7 @@ function Login() {
           setError(err.message || "Une erreur est survenue. Réessayez.");
         }
       } else {
-        setError("Impossible de contacter le serveur. Vérifiez votre connexion.");
+        setError("Échec de connexion. Veuillez réessayer.");
       }
       setIsLoading(false);
     }

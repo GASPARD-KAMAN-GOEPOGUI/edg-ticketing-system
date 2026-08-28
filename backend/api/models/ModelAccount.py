@@ -78,6 +78,10 @@ class Account(Base, BaseColumns):
     # ── Dates ─────────────────────────────────────────────────────────────────
     activated_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 
+    # ── Consentement (rattachement post-login sans groupe support central) ─────
+    consent_accepted_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    consent_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
     # ── Relations ─────────────────────────────────────────────────────────────
     unity: Mapped[Optional[Unity]] = relationship(
         "Unity",

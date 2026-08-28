@@ -8,9 +8,21 @@ test avec un `central_user_id` correspondant à l'identité centrale simulée.
 """
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from tests.conftest import _TestSession
+
+
+async def _flush_background_emails() -> None:
+    """Attend la complétion des tâches d'envoi email fire-and-forget déjà
+    planifiées (NotificationEmitter._send_email_fire_and_forget), y compris
+    celles déclenchées par ServiceAccount (_dispatch_account_email)."""
+    from api.services.NotificationEmitter import _background_email_tasks
+
+    if _background_email_tasks:
+        await asyncio.gather(*_background_email_tasks, return_exceptions=True)
 
 
 async def _create_linked_account(
@@ -122,10 +134,13 @@ class TestLoginEndpoint:
         r = await anon_client.post("/api/v1/auth/login", json={"identifier": "x"})
         assert r.status_code == 422
 
-    async def test_login_compte_non_rattache_retourne_401(self, anon_client, mock_central_auth, setup_db):
+    async def test_login_sans_groupe_support_retourne_needs_consent(
+        self, anon_client, mock_central_auth, setup_db,
+    ):
         """
-        Identifiants valides côté central mais aucun compte local avec ce
-        central_user_id → 401 explicite (pas de rattachement automatique).
+        Identifiants valides côté central, aucun compte local avec ce
+        central_user_id, ET aucun groupe support central (ni aucun groupe du
+        tout) → 200 avec needs_consent=true (pas de 401, pas de compte créé).
         """
         mock_central_auth.register(
             email="orphan@test.edg.gn", password="Pwd123!", user_id=9001,
@@ -134,7 +149,72 @@ class TestLoginEndpoint:
             "identifier": "orphan@test.edg.gn",
             "password": "Pwd123!",
         })
-        assert r.status_code == 401
+        assert r.status_code == 200
+        body = r.json().get("data", r.json())
+        assert body["needs_consent"] is True
+        assert body["email"] == "orphan@test.edg.gn"
+        assert body["access_token"]
+        assert body["consent_version"]
+
+        from tests.conftest import _TestSession
+        from api.models.ModelAccount import Account
+        from sqlalchemy import select
+        async with _TestSession() as session:
+            result = await session.execute(select(Account).where(Account.central_user_id == 9001))
+            assert result.scalar_one_or_none() is None
+
+    async def test_login_groupe_dautres_applications_uniquement_retourne_needs_consent(
+        self, anon_client, mock_central_auth, setup_db,
+    ):
+        """Groupes centraux d'autres applications (employe-edg, manager-link-hub)
+        uniquement → traité comme "aucun groupe support", needs_consent=true."""
+        mock_central_auth.register(
+            email="other-app@test.edg.gn", password="Pwd123!", user_id=9020,
+            groups=["employe-edg", "manager-link-hub"],
+        )
+        r = await anon_client.post("/api/v1/auth/login", json={
+            "identifier": "other-app@test.edg.gn", "password": "Pwd123!",
+        })
+        assert r.status_code == 200
+        assert r.json().get("data", r.json())["needs_consent"] is True
+
+    async def test_login_groupe_support_desactive_retourne_needs_consent(
+        self, anon_client, mock_central_auth, setup_db,
+    ):
+        """Un groupe support central présent mais is_activated=False ne doit pas
+        déclencher l'auto-provisioning — traité comme "aucun groupe support"."""
+        mock_central_auth.register(
+            email="inactive-group@test.edg.gn", password="Pwd123!", user_id=9021,
+            inactive_groups=["collaborateur-support"],
+        )
+        r = await anon_client.post("/api/v1/auth/login", json={
+            "identifier": "inactive-group@test.edg.gn", "password": "Pwd123!",
+        })
+        assert r.status_code == 200
+        assert r.json().get("data", r.json())["needs_consent"] is True
+
+    async def test_login_auto_provisionne_si_groupe_support_deja_present(
+        self, anon_client, mock_central_auth, setup_db,
+    ):
+        """
+        Identifiants valides côté central, aucun compte local, MAIS l'utilisateur
+        appartient déjà à un groupe support central → auto-provisioning silencieux,
+        login réussi directement (pas de needs_consent), rôle mappé depuis le groupe.
+        """
+        mock_central_auth.register(
+            email="already-agent@test.edg.gn", password="Pwd123!", user_id=9022,
+            groups=["qualify-support"], name="Camara", firstname="Ibrahim", phone="+224620000001",
+        )
+        r = await anon_client.post("/api/v1/auth/login", json={
+            "identifier": "already-agent@test.edg.gn", "password": "Pwd123!",
+        })
+        assert r.status_code == 200
+        body = r.json().get("data", r.json())
+        assert "needs_consent" not in body
+        assert body["access_token"]
+        assert body["user"]["role"] == "agent-support"
+        assert body["user"]["central_user_id"] == 9022
+        assert body["user"]["name"] == "Camara"
 
     async def test_login_succes_retourne_tokens_et_role_mappe(self, anon_client, mock_central_auth, setup_db):
         """
@@ -313,3 +393,349 @@ class TestLogout:
         """Logout sans session active reste un no-op silencieux (204)."""
         r = await anon_client.post("/api/v1/auth/logout", json={"refresh_token": "fake"})
         assert r.status_code == 204
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Auth — consentement (rattachement sans groupe support central)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestConsentAccept:
+    async def _login_needs_consent(self, anon_client, mock_central_auth, *, email: str, user_id: int):
+        mock_central_auth.register(email=email, password="Pwd123!", user_id=user_id)
+        login_r = await anon_client.post("/api/v1/auth/login", json={
+            "identifier": email, "password": "Pwd123!",
+        })
+        assert login_r.status_code == 200
+        body = login_r.json().get("data", login_r.json())
+        assert body["needs_consent"] is True
+        return body
+
+    async def test_consent_accept_succes_cree_compte_role_user(
+        self, anon_client, mock_central_auth, setup_db,
+    ):
+        consent = await self._login_needs_consent(
+            anon_client, mock_central_auth, email="consent-ok@test.edg.gn", user_id=9030,
+        )
+        r = await anon_client.post(
+            "/api/v1/auth/consent/accept",
+            headers={"Authorization": f"Bearer {consent['access_token']}"},
+            json={
+                "refresh_token": consent["refresh_token"],
+                "expires_in": consent["expires_in"],
+                "consent_version": consent["consent_version"],
+                "name": "Diallo",
+                "firstname": "Mamadou",
+                "phone": "+224620000099",
+            },
+        )
+        assert r.status_code == 200
+        body = r.json().get("data", r.json())
+        assert body["access_token"] == consent["access_token"]
+        assert body["user"]["role"] == "user"
+        assert body["user"]["name"] == "Diallo"
+        assert body["user"]["central_user_id"] == 9030
+
+        # Rattaché au groupe collaborateur-support côté central (idempotence de
+        # groupe déjà garantie par le central — ici on vérifie juste l'appel).
+        assert any(g == "collaborateur-support" for _, g in mock_central_auth.added_memberships)
+
+        from tests.conftest import _TestSession
+        from api.models.ModelAccount import Account
+        from sqlalchemy import select
+        async with _TestSession() as session:
+            result = await session.execute(select(Account).where(Account.central_user_id == 9030))
+            account = result.scalar_one()
+            assert account.consent_accepted_at is not None
+            assert account.consent_version == consent["consent_version"]
+
+    async def test_consent_accept_idempotent_sur_double_appel(
+        self, anon_client, mock_central_auth, setup_db,
+    ):
+        """Un second appel avec le même bearer (retry réseau / double clic) ne doit
+        pas créer un second compte — juste retourner le compte déjà rattaché."""
+        consent = await self._login_needs_consent(
+            anon_client, mock_central_auth, email="consent-retry@test.edg.gn", user_id=9031,
+        )
+        payload = {
+            "refresh_token": consent["refresh_token"],
+            "expires_in": consent["expires_in"],
+            "consent_version": consent["consent_version"],
+            "name": "Bah", "firstname": "Fatoumata",
+        }
+        headers = {"Authorization": f"Bearer {consent['access_token']}"}
+
+        first = await anon_client.post("/api/v1/auth/consent/accept", headers=headers, json=payload)
+        assert first.status_code == 200
+        second = await anon_client.post("/api/v1/auth/consent/accept", headers=headers, json=payload)
+        assert second.status_code == 200
+        assert (
+            first.json().get("data", first.json())["user"]["id"]
+            == second.json().get("data", second.json())["user"]["id"]
+        )
+
+        from tests.conftest import _TestSession
+        from api.models.ModelAccount import Account
+        from sqlalchemy import select, func
+        async with _TestSession() as session:
+            result = await session.execute(
+                select(func.count()).select_from(Account).where(Account.central_user_id == 9031)
+            )
+            assert result.scalar_one() == 1
+
+    async def test_consent_accept_sans_bearer_retourne_401(self, anon_client):
+        r = await anon_client.post("/api/v1/auth/consent/accept", json={
+            "refresh_token": "x", "expires_in": 180, "consent_version": "1.0", "name": "Test",
+        })
+        assert r.status_code == 401
+
+    async def test_consent_accept_bearer_invalide_retourne_401(self, anon_client, mock_central_auth):
+        r = await anon_client.post(
+            "/api/v1/auth/consent/accept",
+            headers={"Authorization": "Bearer not-a-real-token"},
+            json={"refresh_token": "x", "expires_in": 180, "consent_version": "1.0", "name": "Test"},
+        )
+        assert r.status_code == 401
+
+    async def test_consent_accept_nom_vide_retourne_422(
+        self, anon_client, mock_central_auth, setup_db,
+    ):
+        consent = await self._login_needs_consent(
+            anon_client, mock_central_auth, email="consent-badname@test.edg.gn", user_id=9032,
+        )
+        r = await anon_client.post(
+            "/api/v1/auth/consent/accept",
+            headers={"Authorization": f"Bearer {consent['access_token']}"},
+            json={
+                "refresh_token": consent["refresh_token"],
+                "expires_in": consent["expires_in"],
+                "consent_version": consent["consent_version"],
+                "name": "   ",
+            },
+        )
+        assert r.status_code == 422
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Notification email — compte créé / associé, après validation centrale réelle
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestAccountValidationEmails:
+    """
+    Couvre §10 de la demande "notification email post-validation centrale" :
+      - Cas 1 (création) : POST /auth/register -> AccountService.create() ->
+        email de création seulement après le succès réel de
+        central_auth.create_central_account() (mock_central_auth simule ce
+        succès ; un échec central lève avant toute persistance locale, donc
+        avant tout envoi -- voir test dédié ci-dessous).
+      - Cas 2 (association) : login auto-provisioning ET consent/accept ->
+        AccountService.provision_from_central() -> email d'association,
+        jamais le mot "groupe".
+      - Anti-doublon : un compte ne peut être créé deux fois pour le même
+        email/central_user_id (contrainte unique) -> un seul envoi possible
+        par identité, vérifié explicitement sur les scénarios de retry déjà
+        couverts par ailleurs (409 sur email dupliqué, idempotence consent).
+      - Erreur d'envoi : ne remet jamais en cause la validation du compte.
+    """
+
+    def _patch_created(self, monkeypatch):
+        calls: list[dict] = []
+
+        async def _fake_send(to_email, name=""):
+            calls.append({"to_email": to_email, "name": name})
+            return True
+
+        monkeypatch.setattr("api.core.mailer.send_account_created_email", _fake_send)
+        return calls
+
+    def _patch_associated(self, monkeypatch):
+        calls: list[dict] = []
+
+        async def _fake_send(to_email, name=""):
+            calls.append({"to_email": to_email, "name": name})
+            return True
+
+        monkeypatch.setattr("api.core.mailer.send_account_associated_email", _fake_send)
+        return calls
+
+    # ── Cas 1 — création ──────────────────────────────────────────────────────
+
+    async def test_register_succes_envoie_email_creation(
+        self, anon_client, mock_central_auth, monkeypatch,
+    ):
+        calls = self._patch_created(monkeypatch)
+        r = await anon_client.post("/api/v1/auth/register", json={
+            "name": "Test", "firstname": "Creation", "email": "creation.email@test.edg.gn",
+            "password": "Password123!",
+        })
+        assert r.status_code == 201
+        await _flush_background_emails()
+
+        assert len(calls) == 1
+        assert calls[0]["to_email"] == "creation.email@test.edg.gn"
+
+    async def test_register_echec_central_naucun_email(
+        self, anon_client, mock_central_auth, monkeypatch,
+    ):
+        """Si la plateforme centrale rejette la création (ex. politique de mot de
+        passe), AccountService.create() lève avant toute persistance locale —
+        aucun compte créé, donc aucun email de succès ne doit être envoyé."""
+        calls = self._patch_created(monkeypatch)
+
+        import api.core.central_auth as central_auth_module
+
+        async def _fake_create_central_account_fails(**kwargs):
+            raise central_auth_module.CentralValidationError("Politique de mot de passe non respectée.")
+
+        monkeypatch.setattr(central_auth_module, "create_central_account", _fake_create_central_account_fails)
+
+        r = await anon_client.post("/api/v1/auth/register", json={
+            "name": "Test", "email": "central-fail@test.edg.gn", "password": "Password123!",
+        })
+        assert r.status_code >= 400
+        await _flush_background_emails()
+        assert calls == []
+
+        from api.models.ModelAccount import Account
+        from sqlalchemy import select
+        async with _TestSession() as session:
+            result = await session.execute(select(Account).where(Account.email == "central-fail@test.edg.gn"))
+            assert result.scalar_one_or_none() is None
+
+    async def test_register_double_soumission_un_seul_email(
+        self, anon_client, mock_central_auth, monkeypatch,
+    ):
+        """La deuxième tentative de création avec le même email échoue en 409
+        (compte déjà créé) avant tout appel central -- un seul email envoyé au total."""
+        calls = self._patch_created(monkeypatch)
+        payload = {
+            "name": "Test", "email": "double.register@test.edg.gn", "password": "Password123!",
+        }
+        first = await anon_client.post("/api/v1/auth/register", json=payload)
+        assert first.status_code == 201
+        second = await anon_client.post("/api/v1/auth/register", json=payload)
+        assert second.status_code == 409
+        await _flush_background_emails()
+
+        assert len(calls) == 1
+
+    async def test_register_echec_smtp_compte_reste_cree(
+        self, anon_client, mock_central_auth, monkeypatch,
+    ):
+        """Un échec temporaire d'envoi (ex. SMTP indisponible) ne doit jamais
+        remettre en cause la création/validation du compte -- il reste actif.
+        L'erreur est journalisée par _dispatch_account_email() (warning avec
+        account_id/email/exception -- voir ServiceAccount.py) ; on vérifie ici
+        le comportement observable (tentative faite, compte quand même actif)
+        plutôt que le flux stdout du logger (StreamHandler lié à un stdout figé
+        à sa création, non fiable à capturer via capsys une fois d'autres tests
+        déjà passés par ce logger)."""
+        attempts: list[str] = []
+
+        async def _fake_send_raises(to_email, name=""):
+            attempts.append(to_email)
+            raise RuntimeError("SMTP timeout simulé")
+
+        monkeypatch.setattr("api.core.mailer.send_account_created_email", _fake_send_raises)
+
+        r = await anon_client.post("/api/v1/auth/register", json={
+            "name": "Test", "email": "smtp-fail@test.edg.gn", "password": "Password123!",
+        })
+        assert r.status_code == 201
+        await _flush_background_emails()
+
+        assert attempts == ["smtp-fail@test.edg.gn"]
+
+        from api.models.ModelAccount import Account
+        from sqlalchemy import select
+        async with _TestSession() as session:
+            result = await session.execute(select(Account).where(Account.email == "smtp-fail@test.edg.gn"))
+            account = result.scalar_one()
+            assert account.status is True
+            assert account.account_status == "active"
+
+        from api.models.ModelAccount import Account
+        from sqlalchemy import select
+        async with _TestSession() as session:
+            result = await session.execute(select(Account).where(Account.email == "smtp-fail@test.edg.gn"))
+            account = result.scalar_one()
+            assert account.status is True
+            assert account.account_status == "active"
+
+    # ── Cas 2 — association (login auto-provisioning) ────────────────────────
+
+    async def test_login_auto_provision_envoie_email_association(
+        self, anon_client, mock_central_auth, setup_db, monkeypatch,
+    ):
+        calls = self._patch_associated(monkeypatch)
+        mock_central_auth.register(
+            email="assoc-login@test.edg.gn", password="Pwd123!", user_id=9040,
+            groups=["qualify-support"], name="Sow", firstname="Alpha",
+        )
+        r = await anon_client.post("/api/v1/auth/login", json={
+            "identifier": "assoc-login@test.edg.gn", "password": "Pwd123!",
+        })
+        assert r.status_code == 200
+        await _flush_background_emails()
+
+        assert len(calls) == 1
+        assert calls[0]["to_email"] == "assoc-login@test.edg.gn"
+
+    # ── Cas 2 — association (consentement explicite) ──────────────────────────
+
+    async def test_consent_accept_envoie_email_association(
+        self, anon_client, mock_central_auth, setup_db, monkeypatch,
+    ):
+        calls = self._patch_associated(monkeypatch)
+        mock_central_auth.register(email="assoc-consent@test.edg.gn", password="Pwd123!", user_id=9041)
+        login_r = await anon_client.post("/api/v1/auth/login", json={
+            "identifier": "assoc-consent@test.edg.gn", "password": "Pwd123!",
+        })
+        consent = login_r.json().get("data", login_r.json())
+        assert consent["needs_consent"] is True
+
+        r = await anon_client.post(
+            "/api/v1/auth/consent/accept",
+            headers={"Authorization": f"Bearer {consent['access_token']}"},
+            json={
+                "refresh_token": consent["refresh_token"],
+                "expires_in": consent["expires_in"],
+                "consent_version": consent["consent_version"],
+                "name": "Barry",
+            },
+        )
+        assert r.status_code == 200
+        await _flush_background_emails()
+
+        assert len(calls) == 1
+        assert calls[0]["to_email"] == "assoc-consent@test.edg.gn"
+
+    async def test_consent_accept_double_appel_un_seul_email(
+        self, anon_client, mock_central_auth, setup_db, monkeypatch,
+    ):
+        """Répétition de la validation (double clic / retry réseau sur le même
+        bearer) -- provision_from_central() n'est appelée qu'une fois, le second
+        appel emprunte la branche de synchronisation (compte déjà existant)."""
+        calls = self._patch_associated(monkeypatch)
+        mock_central_auth.register(email="assoc-retry@test.edg.gn", password="Pwd123!", user_id=9042)
+        login_r = await anon_client.post("/api/v1/auth/login", json={
+            "identifier": "assoc-retry@test.edg.gn", "password": "Pwd123!",
+        })
+        consent = login_r.json().get("data", login_r.json())
+        payload = {
+            "refresh_token": consent["refresh_token"],
+            "expires_in": consent["expires_in"],
+            "consent_version": consent["consent_version"],
+            "name": "Diallo",
+        }
+        headers = {"Authorization": f"Bearer {consent['access_token']}"}
+
+        first = await anon_client.post("/api/v1/auth/consent/accept", headers=headers, json=payload)
+        assert first.status_code == 200
+        second = await anon_client.post("/api/v1/auth/consent/accept", headers=headers, json=payload)
+        assert second.status_code == 200
+        await _flush_background_emails()
+
+        assert len(calls) == 1
+
+    # Garde-fou "le mot 'groupe' n'apparaît jamais dans l'email d'association"
+    # -> tests/core/test_mailer_templates.py::test_send_account_associated_email_content_ne_mentionne_jamais_groupe

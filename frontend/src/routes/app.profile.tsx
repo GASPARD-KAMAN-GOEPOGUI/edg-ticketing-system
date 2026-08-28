@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { GlassCard } from "@/components/glass-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,11 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useRole, useUser, roleLabels, setUser, clearUser } from "@/lib/session";
 import { useTheme } from "@/lib/use-theme";
 import { fetchDirections, fetchUnits } from "@/lib/api/directions-units";
@@ -26,13 +22,33 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchMe, updateMe, uploadAvatar, deleteAvatar, buildAvatarUrl } from "@/lib/api/accounts";
 import { fetchRequests } from "@/lib/api/requests";
 import { cn } from "@/lib/utils";
-import { isValidGuineaPhone, PHONE_FORMAT_HINT } from "@/lib/phone";
+import { PHONE_FORMAT_HINT } from "@/lib/phone";
+import { usePhoneInput } from "@/hooks/use-phone-input";
 import type { LucideIcon } from "lucide-react";
 import {
-  User, Shield, Bell, Palette, Camera, Loader2,
-  Building2, Briefcase, Phone, Mail, Lock, CheckCircle2,
-  Sun, Moon, Monitor, Globe, LogOut, Zap, FileText,
-  ChevronRight, Info, Smartphone, Trash2,
+  User,
+  Shield,
+  Bell,
+  Palette,
+  Camera,
+  Loader2,
+  Building2,
+  Briefcase,
+  Phone,
+  Mail,
+  Lock,
+  CheckCircle2,
+  Sun,
+  Moon,
+  Monitor,
+  Globe,
+  LogOut,
+  Zap,
+  FileText,
+  ChevronRight,
+  Info,
+  Smartphone,
+  Trash2,
 } from "lucide-react";
 
 export const Route = createFileRoute("/app/profile")({
@@ -40,14 +56,21 @@ export const Route = createFileRoute("/app/profile")({
   component: ProfilePage,
 });
 
-
 type Section = "info" | "pro" | "security" | "notifications" | "appearance";
 
 // ── Section card header ───────────────────────────────────────────────────
 function SectionHeader({
-  icon: Icon, label, desc, color = "bg-primary/10", iconColor = "text-primary",
+  icon: Icon,
+  label,
+  desc,
+  color = "bg-primary/10",
+  iconColor = "text-primary",
 }: {
-  icon: LucideIcon; label: string; desc: string; color?: string; iconColor?: string;
+  icon: LucideIcon;
+  label: string;
+  desc: string;
+  color?: string;
+  iconColor?: string;
 }) {
   return (
     <div className="flex items-center gap-3 border-b border-border/40 pb-4">
@@ -64,8 +87,16 @@ function SectionHeader({
 
 // ── Notification row ──────────────────────────────────────────────────────
 function NotifRow({
-  label, desc, value, set,
-}: { label: string; desc: string; value: boolean; set: (v: boolean) => void }) {
+  label,
+  desc,
+  value,
+  set,
+}: {
+  label: string;
+  desc: string;
+  value: boolean;
+  set: (v: boolean) => void;
+}) {
   return (
     <div className="flex items-center justify-between rounded-xl bg-card/40 px-4 py-3">
       <div>
@@ -106,13 +137,20 @@ function ProfilePage() {
     onSuccess: (updated) => {
       toast.success("Modifications enregistrées");
       if (sessionUser) {
-        setUser({ ...sessionUser, name: updated.name, firstname: updated.firstname ?? undefined, email: updated.email, phone: updated.phone ?? undefined, avatar: updated.avatar });
+        setUser({
+          ...sessionUser,
+          name: updated.name,
+          firstname: updated.firstname ?? undefined,
+          email: updated.email,
+          phone: updated.phone ?? undefined,
+          avatar: updated.avatar,
+        });
       }
       queryClient.invalidateQueries({ queryKey: ["me"] });
     },
     onError: (err: unknown) => {
       // Log pour debug
-      // eslint-disable-next-line no-console
+
       console.error("updateMe error:", err);
       // Si ApiError (détail backend), afficher message + hint
       if (err instanceof ApiError || (err as any)?.errorCode) {
@@ -211,7 +249,8 @@ function ProfilePage() {
   });
   const { data: statResolved } = useQuery({
     queryKey: ["profile-stats", "resolved", sessionUser?.id],
-    queryFn: () => fetchRequests({ requester_id: sessionUser!.id, request_status: "resolved", limit: 1 }),
+    queryFn: () =>
+      fetchRequests({ requester_id: sessionUser!.id, request_status: "resolved", limit: 1 }),
     ..._statsOpts,
   });
   const { data: statSlaOk } = useQuery({
@@ -220,17 +259,18 @@ function ProfilePage() {
     ..._statsOpts,
   });
 
-  const totalRequests  = statTotal?.total ?? 0;
-  const totalResolved  = statResolved?.total ?? 0;
-  const slaPercent     = totalRequests > 0
-    ? Math.round(((statSlaOk?.total ?? 0) / totalRequests) * 100)
-    : 100;
+  const totalRequests = statTotal?.total ?? 0;
+  const totalResolved = statResolved?.total ?? 0;
+  const slaPercent =
+    totalRequests > 0 ? Math.round(((statSlaOk?.total ?? 0) / totalRequests) * 100) : 100;
 
-  const fullDisplayName = me
-    ? [me.firstname, me.name].filter(Boolean).join(" ")
-    : "Démo EDG";
+  const fullDisplayName = me ? [me.firstname, me.name].filter(Boolean).join(" ") : "Démo EDG";
   const parts = fullDisplayName.split(" ");
-  const initials = parts.map((p) => p[0]).join("").slice(0, 2).toUpperCase();
+  const initials = parts
+    .map((p) => p[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
 
   const [section, setSection] = useState<Section>("info");
   const [modalOpen, setModalOpen] = useState(false);
@@ -244,7 +284,7 @@ function ProfilePage() {
   const [fName, setFName] = useState("");
   const [lName, setLName] = useState("");
   const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
+  const phoneInput = usePhoneInput();
   const [lang, setLang] = useState("fr");
 
   useEffect(() => {
@@ -258,10 +298,9 @@ function ProfilePage() {
       setLName(nameParts.slice(1).join(" ") ?? "");
     }
     setEmail(me.email);
-    setPhone(me.phone ?? "");
+    phoneInput.reset(me.phone ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me]);
-
-  const phoneInvalid = phone.trim().length > 0 && !isValidGuineaPhone(phone);
 
   // Sécurité
   const [twoFactor, setTwoFactor] = useState(false);
@@ -289,24 +328,26 @@ function ProfilePage() {
   const [compact, setCompact] = useState(false);
 
   const navItems: { id: Section; label: string; desc: string; icon: LucideIcon }[] = [
-    { id: "info",          label: "Informations personnelles", desc: "Nom, email, téléphone",        icon: User },
-    { id: "pro",           label: "Profil professionnel",      desc: "Poste, direction, matricule",   icon: Briefcase },
-    { id: "security",      label: "Sécurité",                  desc: "Mot de passe, 2FA, sessions",  icon: Shield },
-    { id: "notifications", label: "Notifications",             desc: "Email, in-app, alertes",        icon: Bell },
-    { id: "appearance",    label: "Apparence",                 desc: "Thème, langue, densité",        icon: Palette },
+    { id: "info", label: "Informations personnelles", desc: "Nom, email, téléphone", icon: User },
+    {
+      id: "pro",
+      label: "Profil professionnel",
+      desc: "Poste, direction, matricule",
+      icon: Briefcase,
+    },
+    { id: "security", label: "Sécurité", desc: "Mot de passe, 2FA, sessions", icon: Shield },
+    { id: "notifications", label: "Notifications", desc: "Email, in-app, alertes", icon: Bell },
+    { id: "appearance", label: "Apparence", desc: "Thème, langue, densité", icon: Palette },
   ];
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-
       {/* ── En-tête ── */}
       <header>
         <div className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
           <User className="h-3 w-3" /> Mon compte
         </div>
-        <h1 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">
-          Profil & Paramètres
-        </h1>
+        <h1 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">Profil & Paramètres</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Gérez vos informations personnelles et vos préférences.
         </p>
@@ -314,10 +355,8 @@ function ProfilePage() {
 
       {/* ── Layout principal ── */}
       <div className="mx-auto max-w-lg space-y-4">
-
         {/* ════ Carte profil ════ */}
         <GlassCard className="overflow-hidden p-0">
-
           {/* Bannière avec dégradé EDG */}
           <div className="relative h-28 bg-primary">
             {/* Badge rôle en haut à droite */}
@@ -349,10 +388,11 @@ function ProfilePage() {
                 onClick={() => fileInputRef.current?.click()}
                 className="absolute -bottom-1 -right-1 grid h-7 w-7 place-items-center rounded-full border-2 border-background bg-card shadow-md transition hover:bg-muted disabled:opacity-50"
               >
-                {uploadAvatarMut.isPending
-                  ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-                  : <Camera className="h-3.5 w-3.5 text-muted-foreground" />
-                }
+                {uploadAvatarMut.isPending ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                ) : (
+                  <Camera className="h-3.5 w-3.5 text-muted-foreground" />
+                )}
               </button>
               {/* Trash button — delete photo (only when avatar exists) */}
               {avatarPreview && (
@@ -363,10 +403,11 @@ function ProfilePage() {
                   onClick={() => deleteAvatarMut.mutate()}
                   className="absolute -bottom-1 -left-1 grid h-7 w-7 place-items-center rounded-full border-2 border-background bg-card shadow-md transition hover:bg-destructive/10 disabled:opacity-50"
                 >
-                  {deleteAvatarMut.isPending
-                    ? <Loader2 className="h-3.5 w-3.5 animate-spin text-destructive" />
-                    : <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                  }
+                  {deleteAvatarMut.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-destructive" />
+                  ) : (
+                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                  )}
                 </button>
               )}
               <input
@@ -381,7 +422,9 @@ function ProfilePage() {
             {/* Nom + email + statut */}
             <div className="flex-1 pb-1 pt-12">
               <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-lg font-bold leading-tight">{fName} {lName}</h2>
+                <h2 className="text-lg font-bold leading-tight">
+                  {fName} {lName}
+                </h2>
                 <span className="flex items-center gap-1 text-[11px] text-success">
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success" />
                   En ligne
@@ -395,21 +438,35 @@ function ProfilePage() {
           <div className="grid grid-cols-3 divide-x divide-border/40 border-t border-border/40 text-center">
             <div className="py-4">
               <div className="text-2xl font-bold">
-                {statTotal ? totalRequests : <span className="text-base text-muted-foreground">—</span>}
+                {statTotal ? (
+                  totalRequests
+                ) : (
+                  <span className="text-base text-muted-foreground">—</span>
+                )}
               </div>
               <div className="mt-0.5 text-[11px] font-medium text-muted-foreground">Tickets</div>
             </div>
             <div className="py-4">
               <div className="text-2xl font-bold text-success">
-                {statResolved ? totalResolved : <span className="text-base text-muted-foreground">—</span>}
+                {statResolved ? (
+                  totalResolved
+                ) : (
+                  <span className="text-base text-muted-foreground">—</span>
+                )}
               </div>
               <div className="mt-0.5 text-[11px] font-medium text-muted-foreground">Résolues</div>
             </div>
             <div className="py-4">
               <div className="text-2xl font-bold text-primary">
-                {statTotal ? `${slaPercent}%` : <span className="text-base text-muted-foreground">—</span>}
+                {statTotal ? (
+                  `${slaPercent}%`
+                ) : (
+                  <span className="text-base text-muted-foreground">—</span>
+                )}
               </div>
-              <div className="mt-0.5 text-[11px] font-medium text-muted-foreground">Respect délai</div>
+              <div className="mt-0.5 text-[11px] font-medium text-muted-foreground">
+                Respect délai
+              </div>
             </div>
           </div>
         </GlassCard>
@@ -432,19 +489,23 @@ function ProfilePage() {
                     : "border-border/40 bg-card/50 hover:border-border/70 hover:bg-card hover:shadow-sm",
                 )}
               >
-                <div className={cn(
-                  "grid h-10 w-10 place-items-center rounded-xl transition-colors",
-                  active
-                    ? "bg-primary text-background"
-                    : "bg-muted text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary",
-                )}>
+                <div
+                  className={cn(
+                    "grid h-10 w-10 place-items-center rounded-xl transition-colors",
+                    active
+                      ? "bg-primary text-background"
+                      : "bg-muted text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary",
+                  )}
+                >
                   <Icon className="h-5 w-5" />
                 </div>
                 <div>
-                  <p className={cn(
-                    "text-sm font-semibold leading-tight",
-                    active ? "text-primary" : "text-foreground",
-                  )}>
+                  <p
+                    className={cn(
+                      "text-sm font-semibold leading-tight",
+                      active ? "text-primary" : "text-foreground",
+                    )}
+                  >
                     {label}
                   </p>
                   <p className="mt-0.5 text-[11px] text-muted-foreground">{desc}</p>
@@ -458,7 +519,10 @@ function ProfilePage() {
         <Button
           variant="outline"
           className="w-full gap-2 rounded-xl border-destructive/30 text-destructive hover:bg-destructive/8 hover:border-destructive/50"
-          onClick={() => { clearUser(); window.location.href = "/"; }}
+          onClick={() => {
+            clearUser();
+            window.location.href = "/";
+          }}
         >
           <LogOut className="h-4 w-4" />
           Se déconnecter
@@ -473,7 +537,6 @@ function ProfilePage() {
           </DialogTitle>
 
           <div className="space-y-4">
-
             {/* ── Informations personnelles ── */}
             {section === "info" && (
               <GlassCard className="space-y-6">
@@ -525,12 +588,14 @@ function ProfilePage() {
                   </Label>
                   <Input
                     id="phone"
+                    ref={phoneInput.ref}
                     type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
+                    inputMode="tel"
+                    value={phoneInput.display}
+                    onChange={phoneInput.onChange}
                     placeholder="+224 6XX XX XX XX"
                   />
-                  {phoneInvalid && (
+                  {phoneInput.hasError && (
                     <p className="text-xs text-destructive">
                       Format invalide. Attendu : {PHONE_FORMAT_HINT}.
                     </p>
@@ -540,17 +605,17 @@ function ProfilePage() {
                 <div className="flex justify-end border-t border-border/40 pt-4">
                   <Button
                     className="rounded-xl gradient-primary text-background shadow-md shadow-primary/30"
-                    disabled={updateMeMut.isPending || phoneInvalid}
+                    disabled={updateMeMut.isPending || phoneInput.hasError}
                     onClick={() =>
                       updateMeMut.mutate(
-                          {
-                            firstname: fName.trim() || undefined,
-                            name: lName.trim() || fName.trim(),
-                            phone: phone.trim() || undefined,
-                            email: email.trim() || undefined,
-                          },
-                          { onSuccess: () => setModalOpen(false) },
-                        )
+                        {
+                          firstname: fName.trim() || undefined,
+                          name: lName.trim() || fName.trim(),
+                          phone: phoneInput.value || undefined,
+                          email: email.trim() || undefined,
+                        },
+                        { onSuccess: () => setModalOpen(false) },
+                      )
                     }
                   >
                     <CheckCircle2 className="mr-2 h-4 w-4" />
@@ -574,17 +639,32 @@ function ProfilePage() {
                 <div className="flex items-start gap-2 rounded-xl border border-info/20 bg-info/5 p-3 text-sm text-info">
                   <Info className="mt-0.5 h-4 w-4 shrink-0" />
                   <span>
-                    Ces informations sont en lecture seule. Contactez les Ressources Humaines
-                    pour toute modification.
+                    Ces informations sont en lecture seule. Contactez les Ressources Humaines pour
+                    toute modification.
                   </span>
                 </div>
 
                 <div className="space-y-2">
                   {[
-                    { label: "Matricule",  value: me?.matricule ?? "—", icon: FileText,  mono: true  },
-                    { label: "Poste",      value: me?.job ?? "—",       icon: Briefcase, mono: false },
-                    { label: "Direction",  value: (directionsData.find((d) => d.id === me?.direction_id)?.name ?? me?.direction_id ?? "—").toUpperCase(), icon: Building2, mono: false },
-                    { label: "Service",    value: unitsData.find((u) => u.id === me?.unit_id)?.name ?? me?.unit_id ?? "—", icon: Zap, mono: false },
+                    { label: "Matricule", value: me?.matricule ?? "—", icon: FileText, mono: true },
+                    { label: "Poste", value: me?.job ?? "—", icon: Briefcase, mono: false },
+                    {
+                      label: "Direction",
+                      value: (
+                        directionsData.find((d) => d.id === me?.direction_id)?.name ??
+                        me?.direction_id ??
+                        "—"
+                      ).toUpperCase(),
+                      icon: Building2,
+                      mono: false,
+                    },
+                    {
+                      label: "Service",
+                      value:
+                        unitsData.find((u) => u.id === me?.unit_id)?.name ?? me?.unit_id ?? "—",
+                      icon: Zap,
+                      mono: false,
+                    },
                   ].map(({ label, value, icon: Icon, mono }) => (
                     <div
                       key={label}
@@ -595,7 +675,9 @@ function ProfilePage() {
                         <span className="text-sm text-muted-foreground">{label}</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className={cn("text-sm font-medium", mono && "font-mono text-primary")}>
+                        <span
+                          className={cn("text-sm font-medium", mono && "font-mono text-primary")}
+                        >
                           {value}
                         </span>
                         <Lock className="h-3.5 w-3.5 text-muted-foreground/40" />
@@ -612,15 +694,17 @@ function ProfilePage() {
                 <SectionHeader
                   icon={Shield}
                   label="Mot de passe"
-                  desc="Géré par la plateforme centrale"
-                  color="bg-amber-500/10"
-                  iconColor="text-amber-500"
+                  desc="Identité gérée par la plateforme centrale EDG"
                 />
                 <p className="text-sm text-muted-foreground">
-                  Le mot de passe de votre compte est désormais géré par la plateforme
-                  centrale d&apos;authentification EDG. Contactez un administrateur pour
-                  le réinitialiser.
+                  Votre mot de passe est géré par la plateforme centrale d&apos;authentification
+                  EDG, mais vous pouvez le modifier vous-même à tout moment via un code de
+                  vérification envoyé par email — aucune intervention d&apos;un administrateur
+                  n&apos;est nécessaire.
                 </p>
+                <Button asChild variant="outline" className="rounded-full">
+                  <Link to="/forgot-password">Changer le mot de passe</Link>
+                </Button>
               </GlassCard>
             )}
 
@@ -635,23 +719,55 @@ function ProfilePage() {
 
                 <div>
                   <h4 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    <Bell className="h-3.5 w-3.5" />Notifications in-app
+                    <Bell className="h-3.5 w-3.5" />
+                    Notifications in-app
                   </h4>
                   <div className="space-y-2">
-                    <NotifRow label="Toutes les notifications"  desc="Activez ou désactivez toutes les alertes in-app" value={nInApp}      set={setNInApp} />
-                    <NotifRow label="Alertes délais critiques"     desc="Délais dépassés ou proches d'expiration"         value={nSLA}        set={setNSLA} />
-                    <NotifRow label="Escalades reçues"          desc="Tickets transmis à votre niveau"              value={nEscalade}   set={setNEscalade} />
-                    <NotifRow label="Résolution de tickets"    desc="Notification quand un ticket est résolu"      value={nResolution} set={setNResolution} />
+                    <NotifRow
+                      label="Toutes les notifications"
+                      desc="Activez ou désactivez toutes les alertes in-app"
+                      value={nInApp}
+                      set={setNInApp}
+                    />
+                    <NotifRow
+                      label="Alertes délais critiques"
+                      desc="Délais dépassés ou proches d'expiration"
+                      value={nSLA}
+                      set={setNSLA}
+                    />
+                    <NotifRow
+                      label="Escalades reçues"
+                      desc="Tickets transmis à votre niveau"
+                      value={nEscalade}
+                      set={setNEscalade}
+                    />
+                    <NotifRow
+                      label="Résolution de tickets"
+                      desc="Notification quand un ticket est résolu"
+                      value={nResolution}
+                      set={setNResolution}
+                    />
                   </div>
                 </div>
 
                 <div>
                   <h4 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    <Mail className="h-3.5 w-3.5" />Email
+                    <Mail className="h-3.5 w-3.5" />
+                    Email
                   </h4>
                   <div className="space-y-2">
-                    <NotifRow label="Alertes délais par email"  desc="Envoi email pour les délais critiques"         value={nEmail}         set={setNEmail} />
-                    <NotifRow label="Nouveaux commentaires"  desc="Réponses sur vos tickets en cours"            value={nEmailComments} set={setNEmailComments} />
+                    <NotifRow
+                      label="Alertes délais par email"
+                      desc="Envoi email pour les délais critiques"
+                      value={nEmail}
+                      set={setNEmail}
+                    />
+                    <NotifRow
+                      label="Nouveaux commentaires"
+                      desc="Réponses sur vos tickets en cours"
+                      value={nEmailComments}
+                      set={setNEmailComments}
+                    />
                   </div>
                 </div>
 
@@ -696,10 +812,14 @@ function ProfilePage() {
                   <div className="grid grid-cols-3 gap-3">
                     <button
                       type="button"
-                      onClick={() => { if (dark) toggleDark(); }}
+                      onClick={() => {
+                        if (dark) toggleDark();
+                      }}
                       className={cn(
                         "relative flex flex-col overflow-hidden rounded-2xl border-2 transition hover:scale-[1.02]",
-                        !dark ? "border-primary shadow-md shadow-primary/20" : "border-border/40 hover:border-border",
+                        !dark
+                          ? "border-primary shadow-md shadow-primary/20"
+                          : "border-border/40 hover:border-border",
                       )}
                     >
                       <div className="h-20 w-full bg-white p-2">
@@ -713,8 +833,14 @@ function ProfilePage() {
                           </div>
                         </div>
                       </div>
-                      <div className={cn("flex items-center justify-center gap-1.5 py-2 text-xs font-medium", !dark ? "text-primary" : "text-muted-foreground")}>
-                        <Sun className="h-3.5 w-3.5" />Clair
+                      <div
+                        className={cn(
+                          "flex items-center justify-center gap-1.5 py-2 text-xs font-medium",
+                          !dark ? "text-primary" : "text-muted-foreground",
+                        )}
+                      >
+                        <Sun className="h-3.5 w-3.5" />
+                        Clair
                       </div>
                       {!dark && (
                         <div className="absolute right-2 top-2 grid h-5 w-5 place-items-center rounded-full bg-primary text-background">
@@ -725,10 +851,14 @@ function ProfilePage() {
 
                     <button
                       type="button"
-                      onClick={() => { if (!dark) toggleDark(); }}
+                      onClick={() => {
+                        if (!dark) toggleDark();
+                      }}
                       className={cn(
                         "relative flex flex-col overflow-hidden rounded-2xl border-2 transition hover:scale-[1.02]",
-                        dark ? "border-primary shadow-md shadow-primary/20" : "border-border/40 hover:border-border",
+                        dark
+                          ? "border-primary shadow-md shadow-primary/20"
+                          : "border-border/40 hover:border-border",
                       )}
                     >
                       <div className="h-20 w-full bg-slate-900 p-2">
@@ -742,8 +872,14 @@ function ProfilePage() {
                           </div>
                         </div>
                       </div>
-                      <div className={cn("flex items-center justify-center gap-1.5 py-2 text-xs font-medium", dark ? "text-primary" : "text-muted-foreground")}>
-                        <Moon className="h-3.5 w-3.5" />Sombre
+                      <div
+                        className={cn(
+                          "flex items-center justify-center gap-1.5 py-2 text-xs font-medium",
+                          dark ? "text-primary" : "text-muted-foreground",
+                        )}
+                      >
+                        <Moon className="h-3.5 w-3.5" />
+                        Sombre
                       </div>
                       {dark && (
                         <div className="absolute right-2 top-2 grid h-5 w-5 place-items-center rounded-full bg-primary text-background">
@@ -764,7 +900,8 @@ function ProfilePage() {
                         </div>
                       </div>
                       <div className="flex items-center justify-center gap-1.5 py-2 text-xs font-medium text-muted-foreground">
-                        <Monitor className="h-3.5 w-3.5" />Système
+                        <Monitor className="h-3.5 w-3.5" />
+                        Système
                       </div>
                       <span className="absolute inset-x-0 bottom-8 text-center text-[9px] text-muted-foreground">
                         Bientôt
@@ -776,7 +913,10 @@ function ProfilePage() {
                 <div className="flex justify-end border-t border-border/40 pt-4">
                   <Button
                     className="rounded-xl gradient-primary text-background shadow-md shadow-primary/30"
-                    onClick={() => { toast.success("Préférences d'apparence enregistrées"); setModalOpen(false); }}
+                    onClick={() => {
+                      toast.success("Préférences d'apparence enregistrées");
+                      setModalOpen(false);
+                    }}
                   >
                     <CheckCircle2 className="mr-2 h-4 w-4" />
                     Appliquer
@@ -784,7 +924,6 @@ function ProfilePage() {
                 </div>
               </GlassCard>
             )}
-
           </div>
         </DialogContent>
       </Dialog>

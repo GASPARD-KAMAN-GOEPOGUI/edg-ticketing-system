@@ -1,5 +1,5 @@
 """
-BaseService — classe de base pour tous les services EDG Connect.
+BaseService — classe de base pour tous les services EDG Support.
 Injecte la session SQLAlchemy et expose les helpers communs.
 """
 from __future__ import annotations

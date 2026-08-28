@@ -1,5 +1,5 @@
 """
-Fixtures communes pour tous les tests API EDG Connect.
+Fixtures communes pour tous les tests API EDG Support.
 
 Stratégie :
   - Base SQLite in-memory → tests isolés, pas de MySQL requis
@@ -89,6 +89,16 @@ async def _override_get_db() -> AsyncGenerator[AsyncSession, None]:
 
 # Override global : toute la suite de tests utilise SQLite
 app.dependency_overrides[get_db] = _override_get_db
+
+# RateLimitMiddleware (main.py) partage un store en mémoire pour tout le
+# process pytest (pas de Redis en test) — sans ceci, les nombreux tests qui
+# appellent POST /auth/login dans le même fichier finissent par dépasser la
+# limite de prod (10/60s) et échouent avec 429, sans rapport avec ce qu'ils
+# testent réellement. Purement un ajustement de suite de tests, la valeur de
+# _RATE_LIMITS en production (main.py) n'est pas modifiée.
+from api import main as _main_module
+for _path in _main_module._RATE_LIMITS:
+    _main_module._RATE_LIMITS[_path] = (100_000, 60)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -229,16 +239,23 @@ class _CentralAuthRegistry:
     def __init__(self) -> None:
         self.users: dict[str, dict] = {}   # email(lower) -> {password, user_id, uuid, groups}
         self.tokens: dict[str, str] = {}   # bearer -> email(lower)
+        self.added_memberships: list[tuple[str, str]] = []  # (user_uuid, group_codename)
 
     def register(
         self, *, email: str, password: str, user_id: int,
-        groups: list[str] | None = None, uuid: str | None = None,
+        groups: list[str] | None = None, inactive_groups: list[str] | None = None,
+        uuid: str | None = None,
+        name: str | None = None, firstname: str | None = None, phone: str | None = None,
     ) -> None:
         self.users[email.lower()] = {
             "password": password,
             "user_id": user_id,
             "uuid": uuid or f"uuid-{user_id}",
             "groups": groups or [],
+            "inactive_groups": inactive_groups or [],
+            "name": name,
+            "firstname": firstname,
+            "phone": phone,
         }
 
     def _generate_id(self) -> int:
@@ -296,7 +313,25 @@ async def mock_central_auth(monkeypatch):
         email = registry.tokens.get(bearer_token)
         if email is None:
             raise central_auth_module.CentralInvalidCredentials("Session invalide.")
-        return [{"codename": g, "is_activated": True} for g in registry.users[email]["groups"]]
+        user = registry.users[email]
+        return [
+            {"codename": g, "is_activated": True} for g in user["groups"]
+        ] + [
+            {"codename": g, "is_activated": False} for g in user.get("inactive_groups", [])
+        ]
+
+    async def fake_get_profile(bearer_token: str):
+        email = registry.tokens.get(bearer_token)
+        if email is None:
+            raise central_auth_module.CentralInvalidCredentials("Session invalide.")
+        user = registry.users[email]
+        return {
+            "uuid": user["uuid"],
+            "email": email,
+            "name": user.get("firstname"),        # convention centrale : name = prénom
+            "last_name": user.get("name"),         # last_name = nom de famille
+            "phone": user.get("phone"),
+        }
 
     async def fake_log_central_event(*args, **kwargs):
         return None
@@ -306,7 +341,7 @@ async def mock_central_auth(monkeypatch):
     async def fake_get_machine_token():
         return "central-machine-token"
 
-    async def fake_create_central_account(*, group_codename, email, phone, firstname, last_name, password, machine_token):
+    async def fake_create_central_account(*, group_codename, email, phone, firstname, last_name, password):
         user_id = registry._generate_id()
         uuid = f"uuid-{user_id}"
         registry.users[email.lower()] = {
@@ -321,6 +356,7 @@ async def mock_central_auth(monkeypatch):
         return {"user_uuid": user_uuid, "email": email, "phone": phone, "name": firstname, "last_name": last_name}
 
     async def fake_add_group_membership(user_uuid, group_codename, machine_token):
+        registry.added_memberships.append((user_uuid, group_codename))
         return None
 
     async def fake_remove_group_membership(user_uuid, group_codename, machine_token):
@@ -342,6 +378,7 @@ async def mock_central_auth(monkeypatch):
     monkeypatch.setattr(central_auth_module, "central_refresh", fake_central_refresh)
     monkeypatch.setattr(central_auth_module, "get_scopes", fake_get_scopes)
     monkeypatch.setattr(central_auth_module, "get_groups", fake_get_groups)
+    monkeypatch.setattr(central_auth_module, "get_profile", fake_get_profile)
     monkeypatch.setattr(central_auth_module, "log_central_event", fake_log_central_event)
     monkeypatch.setattr(central_auth_module, "get_machine_token", fake_get_machine_token)
     monkeypatch.setattr(central_auth_module, "create_central_account", fake_create_central_account)

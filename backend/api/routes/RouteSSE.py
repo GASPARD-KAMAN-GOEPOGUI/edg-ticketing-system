@@ -1,5 +1,5 @@
 """
-Route SSE — Server-Sent Events pour les mises à jour temps réel EDG Connect.
+Route SSE — Server-Sent Events pour les mises à jour temps réel EDG Support.
 
 Authentification :
   Le token bearer central est passé via query param (?token=...) car l'API

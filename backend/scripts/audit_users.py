@@ -38,7 +38,10 @@ async def main():
         print("-" * 90)
 
         issues = []
-        valid_roles = {"public", "user", "agent", "chief", "director", "dg", "admin"}
+        valid_roles = {
+            "public", "user", "agent-support", "chief-service", "chief-departement",
+            "director", "admin",
+        }
 
         for row in rows:
             id_, email, role, acc_status, status, deleted_at, created_at = row

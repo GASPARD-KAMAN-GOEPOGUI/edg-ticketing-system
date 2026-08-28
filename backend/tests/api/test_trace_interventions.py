@@ -281,6 +281,19 @@ async def test_non_current_handler_comment_not_attached_to_intervention(auth_cli
     request_id = await _create_ticket(auth_client, unity_id, "requester-comment")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=1008)
 
+    # BR-MESSAGING-OPEN-001 — l'intervenant actuel doit d'abord ouvrir la
+    # conversation avant que le demandeur puisse y écrire.
+    app.dependency_overrides[get_current_user] = _dep(1008, "agent-support", unity_id)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            opened = await client.post(
+                f"/api/v1/requests/{request_id}/comments",
+                json={"body": "Bonjour, une précision ?", "is_public": True, "peer_id": "1008"},
+            )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+    assert opened.status_code == 201, opened.text
+
     async with auth_client("user") as user_client:
         resp = await user_client.post(
             f"/api/v1/requests/{request_id}/comments",
@@ -291,7 +304,10 @@ async def test_non_current_handler_comment_not_attached_to_intervention(auth_cli
     async with auth_client("admin") as admin_client:
         timeline_resp = await admin_client.get(f"/api/v1/requests/{request_id}/timeline")
     assert timeline_resp.status_code == 200
-    comment_event = next(e for e in timeline_resp.json()["data"] if e["event_type"] == "comment_added")
+    comment_event = next(
+        e for e in timeline_resp.json()["data"]
+        if e["event_type"] == "comment_added" and e["comment"] == "Toujours en panne ?"
+    )
     assert comment_event["infos"].get("intervention_id") is None
 
 

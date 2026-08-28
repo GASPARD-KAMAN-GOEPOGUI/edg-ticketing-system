@@ -1,5 +1,5 @@
 """
-Logger centralisé EDG Connect.
+Logger centralisé EDG Support.
 
 Fournit :
   - Niveau SUCCESS (25) entre INFO et WARNING

@@ -1,5 +1,5 @@
 """
-Chiffrement/déchiffrement des champs sensibles — EDG Connect.
+Chiffrement/déchiffrement des champs sensibles — EDG Support.
 
 Utilise Fernet (AES-128-CBC + HMAC-SHA256) de la bibliothèque `cryptography`.
 La clé doit être une chaîne base64-url de 32 octets générée par Fernet.generateKey().

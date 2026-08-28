@@ -1,5 +1,5 @@
 """
-Gestionnaires d'exceptions globaux FastAPI — EDG Connect.
+Gestionnaires d'exceptions globaux FastAPI — EDG Support.
 
 Chaque handler :
   1. Logue UNE seule ligne d'erreur (lisible, pas de traceback brut)
@@ -25,11 +25,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from api.configs.Environment import get_environment
 from api.core.central_auth import (
     CentralAuthError,
     CentralIdentityConflict,
     CentralInvalidClientCredentials,
     CentralInvalidCredentials,
+    CentralInvalidPhoneFormat,
     CentralPermissionDenied,
     CentralUnavailableError,
     CentralValidationError,
@@ -127,11 +129,23 @@ async def edg_exception_handler(request: Request, exc: EDGException) -> JSONResp
 async def central_auth_exception_handler(request: Request, exc: CentralAuthError) -> JSONResponse:
     """
     Convertit les exceptions centrales (central_auth.py) en réponse standardisée.
-    identity_conflict -> 409, validation -> 400, indisponibilité/config -> 503,
-    identifiants centraux invalides -> 401, droits/scope insuffisants -> 403.
+    identity_already_exists -> 409, invalid_phone_format -> 422, validation -> 400,
+    indisponibilité/config -> 503, identifiants centraux invalides -> 401,
+    droits/scope insuffisants -> 403.
+
+    BR-CENTRAL-GENERIC-ERROR-001 — seuls les statuts fonctionnels DOCUMENTÉS par
+    le central (identité déjà existante, format téléphone invalide) sont des
+    informations légitimes pour l'utilisateur et gardent donc leur message
+    précis. Tout le reste (indisponibilité, credentials rejetés, erreurs
+    imprévues) est généralisé en "Échec de connexion." pour ne jamais exposer de
+    détail technique/interne (ex. "CLIENT_APP_CODE") — sauf en DEBUG_MODE, où le
+    vrai message reste affiché pour investiguer. Le vrai message est de toute
+    façon toujours écrit dans le log ci-dessous, DEBUG_MODE ou non.
     """
     if isinstance(exc, CentralIdentityConflict):
         status_code, error_code = 409, "CENTRAL_IDENTITY_CONFLICT"
+    elif isinstance(exc, CentralInvalidPhoneFormat):
+        status_code, error_code = 422, "CENTRAL_INVALID_PHONE_FORMAT"
     elif isinstance(exc, CentralValidationError):
         status_code, error_code = 400, "CENTRAL_VALIDATION_ERROR"
     elif isinstance(exc, CentralPermissionDenied):
@@ -145,9 +159,15 @@ async def central_auth_exception_handler(request: Request, exc: CentralAuthError
 
     logger.warning(f"❌ {error_code} [{status_code}] — {exc}")
 
+    is_documented_functional_status = isinstance(exc, (CentralIdentityConflict, CentralInvalidPhoneFormat))
+    if is_documented_functional_status or get_environment().DEBUG_MODE:
+        message = str(exc)
+    else:
+        message = "Échec de connexion. Réessayez plus tard."
+
     return JSONResponse(
         status_code=status_code,
-        content=_error_body(message=str(exc), error_code=error_code),
+        content=_error_body(message=message, error_code=error_code),
     )
 
 

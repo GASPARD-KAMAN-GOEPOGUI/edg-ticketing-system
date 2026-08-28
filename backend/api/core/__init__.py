@@ -1,5 +1,5 @@
 """
-api.core — Composants transverses EDG Connect.
+api.core — Composants transverses EDG Support.
 
 Exports principaux :
     ErrorCode               — codes d'erreur constants

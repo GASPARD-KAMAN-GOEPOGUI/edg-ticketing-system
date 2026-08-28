@@ -1,5 +1,5 @@
 """
-Codes d'erreur centralisés pour l'API EDG Connect.
+Codes d'erreur centralisés pour l'API EDG Support.
 Chaque code identifie de façon unique un type d'erreur métier
 et peut être utilisé par le frontend pour afficher des messages localisés.
 """

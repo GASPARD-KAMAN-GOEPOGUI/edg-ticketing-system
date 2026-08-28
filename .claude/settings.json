@@ -96,7 +96,23 @@
       "Bash(\"./venv/Scripts/python.exe\" \"C:\\\\Users\\\\HP\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-HP-Desktop-reactproject-EDG-Connect--1-\\\\77e02d5e-d004-47fa-89d1-78aaa15ff965\\\\scratchpad\\\\test_dossier_pdf.py\")",
       "Bash(grep -i 'requests.$id\\\\|requests.ts')",
       "Bash(\"./venv/Scripts/python.exe\" -m pytest tests/api/test_request_export.py -q --no-header -p no:logging)",
-      "Bash(\"./venv/Scripts/python.exe\" -m pytest \"tests/api/test_notification_workflow.py::test_cancel_emails_requester_but_stays_app_only_for_assignee\" -q --no-header -p no:logging)"
+      "Bash(\"./venv/Scripts/python.exe\" -m pytest \"tests/api/test_notification_workflow.py::test_cancel_emails_requester_but_stays_app_only_for_assignee\" -q --no-header -p no:logging)",
+      "Bash(./venv/Scripts/python.exe -m pytest tests/api/test_auth.py -v)",
+      "Bash(./venv/Scripts/python.exe -m pytest tests/api/test_auth.py -v --tb=short -p no:logging)",
+      "Bash(./venv/Scripts/python.exe -m pytest tests/ -q -p no:logging)",
+      "Bash(./venv/Scripts/python.exe -m pytest tests/api/ -q -p no:logging)",
+      "Bash(curl -sf http://localhost:3000)",
+      "Bash(break)",
+      "Bash(rm -rf node_modules/.vite)",
+      "Bash(nohup npx vite dev --force --port 3000)",
+      "Bash(echo \"started, pid=$!\")",
+      "Bash(node \"C:\\\\Users\\\\HP\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-HP-Desktop-reactproject-EDG-Connect--1-\\\\4f9a66d0-2278-4a8f-acff-fc736c2b3e1b\\\\scratchpad\\\\smoke.mjs\")",
+      "Bash(./venv/Scripts/python.exe -m alembic current)",
+      "Bash(./venv/Scripts/python.exe -m alembic history --verbose)",
+      "Bash(./venv/Scripts/python.exe -m alembic upgrade head)",
+      "Bash(curl -sf http://localhost:8000/health)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8000/api/v1/auth/me)"
     ]
   }
 }

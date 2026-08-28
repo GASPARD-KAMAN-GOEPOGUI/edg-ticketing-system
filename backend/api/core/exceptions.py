@@ -1,5 +1,5 @@
 """
-Hiérarchie d'exceptions métier EDG Connect.
+Hiérarchie d'exceptions métier EDG Support.
 
 Chaque exception transporte :
   - message   : texte lisible par l'utilisateur
@@ -18,7 +18,7 @@ from api.core.error_codes import ErrorCode
 
 
 class EDGException(Exception):
-    """Exception métier de base — toutes les exceptions EDG Connect en héritent."""
+    """Exception métier de base — toutes les exceptions EDG Support en héritent."""
 
     def __init__(
         self,

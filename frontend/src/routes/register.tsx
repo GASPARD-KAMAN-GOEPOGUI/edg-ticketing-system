@@ -6,9 +6,12 @@ import { Label } from "@/components/ui/label";
 import { Logo } from "@/components/logo";
 import { useState } from "react";
 import { ArrowLeft, ArrowRight, CheckCircle2, Eye, EyeOff, Loader2 } from "lucide-react";
-import { registerUser } from "@/lib/api/auth";
+import { registerUser, loginUser } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
-import { isValidGuineaPhone, PHONE_FORMAT_HINT } from "@/lib/phone";
+import { setTokens, setUser, setPendingConsent, getDefaultRouteForRole } from "@/lib/session";
+import { PHONE_FORMAT_HINT } from "@/lib/phone";
+import { usePhoneInput } from "@/hooks/use-phone-input";
+import type { Role } from "@/lib/mock-data";
 
 export const Route = createFileRoute("/register")({
   head: () => ({ meta: [{ title: "Inscription — EDG Support" }] }),
@@ -57,13 +60,16 @@ function Register() {
     firstName: "",
     lastName: "",
     email: "",
-    phone: "",
     password: "",
     confirmPassword: "",
   });
+  const phoneInput = usePhoneInput();
 
   const [isLoading, setIsLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
+  // true si la connexion automatique post-inscription a échoué (rare — le compte
+  // est quand même bien créé) : on retombe alors sur un bouton "Se connecter" manuel.
+  const [autoLoginFailed, setAutoLoginFailed] = useState(false);
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm({ ...form, [k]: e.target.value });
@@ -71,29 +77,73 @@ function Register() {
   const passwordMismatch =
     form.confirmPassword.length > 0 && form.password !== form.confirmPassword;
   const passwordTooShort = form.password.length > 0 && form.password.length < 8;
-  const phoneInvalid = form.phone.trim().length > 0 && !isValidGuineaPhone(form.phone);
   const canContinue =
     !!form.firstName &&
     !!form.email &&
-    !phoneInvalid &&
+    !phoneInput.hasError &&
     form.password.length >= 8 &&
     form.password === form.confirmPassword;
 
   const handleRegister = async () => {
     setIsLoading(true);
     setApiError(null);
+    setAutoLoginFailed(false);
+    const email = form.email.trim();
+    const password = form.password;
     try {
       const lastName = form.lastName.trim();
       const firstName = form.firstName.trim();
       await registerUser({
-        name: lastName || firstName,         // nom de famille (obligatoire en base)
+        name: lastName || firstName, // nom de famille (obligatoire en base)
         firstname: lastName ? firstName : undefined, // prénom uniquement si nom fourni
-        email: form.email.trim(),
-        phone: form.phone.trim() || undefined,
-        password: form.password,
+        email,
+        phone: phoneInput.value || undefined,
+        password,
       });
-      // Ne pas stocker la session — l'utilisateur doit se connecter explicitement
       setStep(3);
+
+      // Connexion automatique post-inscription — le compte (local + central) et
+      // son mot de passe existent déjà, l'utilisateur ne doit pas les ressaisir.
+      // Erreur ici volontairement non fatale pour l'écran : le compte est bien
+      // créé quoi qu'il arrive, seul l'accès automatique peut échouer.
+      try {
+        const result = await loginUser({ identifier: email, password });
+        if (result.needsConsent) {
+          setPendingConsent({
+            accessToken: result.accessToken,
+            refreshToken: result.refreshToken,
+            expiresIn: result.expiresIn,
+            email: result.email,
+            suggestedName: result.suggestedName,
+            suggestedFirstname: result.suggestedFirstname,
+            suggestedPhone: result.suggestedPhone,
+            consentVersion: result.consentVersion,
+          });
+          navigate({ to: "/consent", replace: true });
+          return;
+        }
+
+        const role = (result.user.role as Role) || "user";
+        setTokens(result.accessToken, result.refreshToken, result.expiresIn);
+        setUser({
+          id: result.user.id,
+          name: result.user.name,
+          firstname: result.user.firstname ?? undefined,
+          email: result.user.email,
+          role,
+          phone: result.user.phone,
+          avatar: result.user.avatar,
+          direction_id: result.user.direction_id ?? undefined,
+          unit_id: result.user.unit_id ?? undefined,
+        });
+        // Laisse l'écran "Compte créé" s'afficher brièvement (retour visuel que
+        // tout a fonctionné) avant de basculer automatiquement dans l'espace.
+        window.setTimeout(() => {
+          navigate({ to: getDefaultRouteForRole(role) as "/", replace: true });
+        }, 1500);
+      } catch {
+        setAutoLoginFailed(true);
+      }
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 409) {
@@ -104,7 +154,7 @@ function Register() {
           setApiError(err.message || "Une erreur est survenue. Réessayez.");
         }
       } else {
-        setApiError("Impossible de contacter le serveur. Vérifiez votre connexion.");
+        setApiError("Échec de connexion. Veuillez réessayer.");
       }
     } finally {
       setIsLoading(false);
@@ -136,7 +186,10 @@ function Register() {
             {[1, 2, 3].map((i) => (
               <div
                 key={i}
-                className={"h-1.5 flex-1 rounded-full transition-colors " + (step >= i ? "bg-primary" : "bg-muted")}
+                className={
+                  "h-1.5 flex-1 rounded-full transition-colors " +
+                  (step >= i ? "bg-primary" : "bg-muted")
+                }
               />
             ))}
           </div>
@@ -146,24 +199,52 @@ function Register() {
             <div className="mt-6 space-y-4 animate-fade-in">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
-                  <Label>Prénom <span className="text-destructive">*</span></Label>
-                  <Input className="mt-1.5 h-12" placeholder="Votre prénom" value={form.firstName} onChange={set("firstName")} />
+                  <Label>
+                    Prénom <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    className="mt-1.5 h-12"
+                    placeholder="Votre prénom"
+                    value={form.firstName}
+                    onChange={set("firstName")}
+                  />
                 </div>
                 <div>
                   <Label>Nom</Label>
-                  <Input className="mt-1.5 h-12" placeholder="Votre nom" value={form.lastName} onChange={set("lastName")} />
+                  <Input
+                    className="mt-1.5 h-12"
+                    placeholder="Votre nom"
+                    value={form.lastName}
+                    onChange={set("lastName")}
+                  />
                 </div>
               </div>
 
               <div>
-                <Label>Email <span className="text-destructive">*</span></Label>
-                <Input className="mt-1.5 h-12" type="email" placeholder="vous@example.com" value={form.email} onChange={set("email")} />
+                <Label>
+                  Email <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  className="mt-1.5 h-12"
+                  type="email"
+                  placeholder="vous@example.com"
+                  value={form.email}
+                  onChange={set("email")}
+                />
               </div>
 
               <div>
                 <Label>Téléphone</Label>
-                <Input className="mt-1.5 h-12" placeholder="+224 6XX XX XX XX" value={form.phone} onChange={set("phone")} />
-                {phoneInvalid && (
+                <Input
+                  ref={phoneInput.ref}
+                  type="tel"
+                  inputMode="tel"
+                  className="mt-1.5 h-12"
+                  placeholder="+224 6XX XX XX XX"
+                  value={phoneInput.display}
+                  onChange={phoneInput.onChange}
+                />
+                {phoneInput.hasError && (
                   <p className="mt-1.5 text-xs text-destructive">
                     Format invalide. Attendu : {PHONE_FORMAT_HINT}.
                   </p>
@@ -171,7 +252,9 @@ function Register() {
               </div>
 
               <div>
-                <Label>Mot de passe <span className="text-destructive">*</span></Label>
+                <Label>
+                  Mot de passe <span className="text-destructive">*</span>
+                </Label>
                 <PasswordInput
                   className="mt-1.5 h-12"
                   placeholder="Minimum 8 caractères"
@@ -186,7 +269,9 @@ function Register() {
               </div>
 
               <div>
-                <Label>Confirmer le mot de passe <span className="text-destructive">*</span></Label>
+                <Label>
+                  Confirmer le mot de passe <span className="text-destructive">*</span>
+                </Label>
                 <PasswordInput
                   className="mt-1.5 h-12"
                   placeholder="Répétez votre mot de passe"
@@ -198,11 +283,13 @@ function Register() {
                     Les mots de passe ne correspondent pas.
                   </p>
                 )}
-                {!passwordMismatch && form.confirmPassword.length > 0 && form.password === form.confirmPassword && (
-                  <p className="mt-1.5 flex items-center gap-1 text-xs text-success">
-                    <CheckCircle2 className="h-3.5 w-3.5" /> Mots de passe identiques
-                  </p>
-                )}
+                {!passwordMismatch &&
+                  form.confirmPassword.length > 0 &&
+                  form.password === form.confirmPassword && (
+                    <p className="mt-1.5 flex items-center gap-1 text-xs text-success">
+                      <CheckCircle2 className="h-3.5 w-3.5" /> Mots de passe identiques
+                    </p>
+                  )}
               </div>
 
               <Button
@@ -229,7 +316,9 @@ function Register() {
               <dl className="space-y-2 rounded-2xl border border-border/50 bg-background/50 p-4 text-sm">
                 <div className="flex justify-between gap-3">
                   <dt className="text-muted-foreground">Nom complet</dt>
-                  <dd>{form.firstName} {form.lastName}</dd>
+                  <dd>
+                    {form.firstName} {form.lastName}
+                  </dd>
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt className="text-muted-foreground">Email</dt>
@@ -237,7 +326,7 @@ function Register() {
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt className="text-muted-foreground">Téléphone</dt>
-                  <dd>{form.phone || "—"}</dd>
+                  <dd>{phoneInput.display || "—"}</dd>
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt className="text-muted-foreground">Mot de passe</dt>
@@ -261,7 +350,14 @@ function Register() {
               )}
 
               <div className="flex gap-2">
-                <Button variant="ghost" onClick={() => { setStep(1); setApiError(null); }} disabled={isLoading}>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setStep(1);
+                    setApiError(null);
+                  }}
+                  disabled={isLoading}
+                >
                   <ArrowLeft className="mr-1 h-4 w-4" /> Retour
                 </Button>
                 <Button
@@ -289,19 +385,26 @@ function Register() {
                 <CheckCircle2 className="h-8 w-8 text-success" />
               </div>
               <div>
-                <h2 className="text-xl font-semibold">
-                  Compte créé, {form.firstName} !
-                </h2>
+                <h2 className="text-xl font-semibold">Compte créé, {form.firstName} !</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Votre compte a bien été créé. Connectez-vous pour accéder à votre espace.
+                  {autoLoginFailed
+                    ? "Votre compte a bien été créé. Connectez-vous pour accéder à votre espace."
+                    : "Vous allez être redirigé vers votre espace…"}
                 </p>
               </div>
-              <Button
-                onClick={() => navigate({ to: "/login" })}
-                className="h-12 w-full rounded-full gradient-primary"
-              >
-                Se connecter
-              </Button>
+              {autoLoginFailed ? (
+                <Button
+                  onClick={() => navigate({ to: "/login" })}
+                  className="h-12 w-full rounded-full gradient-primary"
+                >
+                  Se connecter
+                </Button>
+              ) : (
+                <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Connexion en cours…
+                </div>
+              )}
             </div>
           )}
         </GlassCard>
