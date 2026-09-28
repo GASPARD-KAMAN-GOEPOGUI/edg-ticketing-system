@@ -876,7 +876,7 @@ function DirectorSupervisionCenter({
               <Input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Recherche globale : numéro, objet, demandeur, agent..."
+                placeholder="Recherche globale : numéro, objet, requérant, agent..."
                 className="h-10 rounded-full pl-9"
               />
             </div>
@@ -962,7 +962,7 @@ function DirectorSupervisionCenter({
                   <th className="px-4 py-3 text-left font-semibold">Service</th>
                   <th className="px-4 py-3 text-left font-semibold">Direction</th>
                   <th className="px-4 py-3 text-left font-semibold">Agent affecté</th>
-                  <th className="px-4 py-3 text-left font-semibold">Demandeur</th>
+                  <th className="px-4 py-3 text-left font-semibold">Requérant</th>
                   <th className="px-4 py-3 text-left font-semibold">Création</th>
                   <th className="px-4 py-3 text-left font-semibold">Mise à jour</th>
                   <th className="px-4 py-3 text-left font-semibold">Échéance délai</th>

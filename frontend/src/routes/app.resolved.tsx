@@ -100,7 +100,7 @@ function ResolvedTicketsPage() {
             <input
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-              placeholder="Rechercher par référence, titre, demandeur…"
+              placeholder="Rechercher par référence, titre, requérant…"
               className="h-11 w-full rounded-xl border border-border/50 bg-background/50 pl-9 pr-9 text-sm outline-none focus:border-primary/40"
             />
             {search && (
@@ -142,7 +142,7 @@ function ResolvedTicketsPage() {
               {isError
                 ? "Impossible de charger vos tickets résolus."
                 : searchTerm
-                  ? "Essayez une autre référence, un titre ou un demandeur."
+                  ? "Essayez une autre référence, un titre ou un requérant."
                   : "Vous n'avez encore terminé le traitement d'aucun ticket."}
             </p>
           </GlassCard>

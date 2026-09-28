@@ -481,7 +481,7 @@ function QualifyTab() {
                           />
                           <p className="mt-1 text-xs text-muted-foreground">
                             Lue par le chef de division support puis par le technicien.
-                            Jamais visible du demandeur. Obligatoire pour prendre comme
+                            Jamais visible du requérant. Obligatoire pour prendre comme
                             pour orienter le ticket.
                           </p>
                         </div>

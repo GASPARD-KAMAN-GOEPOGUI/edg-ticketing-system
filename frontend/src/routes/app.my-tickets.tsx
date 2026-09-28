@@ -334,7 +334,7 @@ function MyTicketsPage() {
               <Input
                 value={search}
                 onChange={handleSearch}
-                placeholder="Rechercher par référence, titre, demandeur…"
+                placeholder="Rechercher par référence, titre, requérant…"
                 className="h-11 pl-9"
               />
             </div>

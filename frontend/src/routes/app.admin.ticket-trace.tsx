@@ -50,7 +50,7 @@ function buildRows(r: RequestItem): Row[] {
   rows.push({
     key: "creation",
     actorName: r.requesterName,
-    actorRole: "Demandeur",
+    actorRole: "Requérant",
     action: "Création du ticket",
     startedAt: r.createdAt,
     current: false,
@@ -83,7 +83,7 @@ function buildRows(r: RequestItem): Row[] {
     rows.push({
       key: "closure",
       actorName: r.requesterName,
-      actorRole: "Demandeur",
+      actorRole: "Requérant",
       action: "Confirmation & clôture du ticket",
       startedAt: r.closedAt,
       current: false,
@@ -199,7 +199,7 @@ function TicketTracePage() {
                 <div className="mt-1 text-sm font-semibold">{currentHolder}</div>
               </div>
               <div className="rounded-xl border border-border/40 bg-background/40 p-3">
-                <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Demandeur</div>
+                <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Requérant</div>
                 <div className="mt-1 text-sm font-semibold">{ticket.requesterName}</div>
               </div>
               <div className="rounded-xl border border-border/40 bg-background/40 p-3">

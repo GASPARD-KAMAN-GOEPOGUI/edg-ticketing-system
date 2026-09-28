@@ -147,7 +147,7 @@ function TransmittedTicketsPage() {
               {isError
                 ? "Impossible de charger vos tickets transmis."
                 : searchTerm
-                ? "Essayez une autre référence, un titre ou un demandeur."
+                ? "Essayez une autre référence, un titre ou un requérant."
                 : "Vous n'avez encore transmis le traitement d'aucun ticket."}
             </p>
           </GlassCard>

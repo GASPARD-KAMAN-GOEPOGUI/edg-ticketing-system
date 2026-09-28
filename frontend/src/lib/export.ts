@@ -22,7 +22,7 @@ function toRow(r: RequestItem, directionMap: Map<string, string>) {
     "Catégorie":          r.category,
     "Priorité":           priorityLabels[r.priority] ?? r.priority,
     "Statut":             statusLabels[r.status as keyof typeof statusLabels] ?? r.status,
-    "Demandeur":          r.requesterName,
+    "Requérant":          r.requesterName,
     "Direction":          (r.directionId ? directionMap.get(String(r.directionId)) : undefined) ?? "—",
     "Agent assigné":      r.assigneeName ?? "—",
     "Date résolution":    dateClosed,
@@ -57,7 +57,7 @@ export function exportXLSX(
     { wch: 20 }, // Catégorie
     { wch: 10 }, // Priorité
     { wch: 14 }, // Statut
-    { wch: 24 }, // Demandeur
+    { wch: 24 }, // Requérant
     { wch: 22 }, // Direction
     { wch: 16 }, // Agent assigné
     { wch: 18 }, // Date résolution

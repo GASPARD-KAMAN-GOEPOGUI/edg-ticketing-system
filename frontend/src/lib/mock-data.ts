@@ -468,7 +468,7 @@ export const requests: RequestItem[] = [
     comments: [],
     timeline: [
       { id: "t1", type: "created", label: "Ticket créé", at: h(30) },
-      { id: "t2", type: "pending", label: "En attente du demandeur", at: h(12) },
+      { id: "t2", type: "pending", label: "En attente du requérant", at: h(12) },
     ],
   },
   {
@@ -615,7 +615,7 @@ export const requests: RequestItem[] = [
     timeline: [
       { id: "t1", type: "created", label: "Ticket créé", at: h(96) },
       { id: "t2", type: "resolved", label: "Marquée résolue", at: h(72) },
-      { id: "t3", type: "reopened", label: "Réouvert par le demandeur", at: h(8) },
+      { id: "t3", type: "reopened", label: "Réouvert par le requérant", at: h(8) },
     ],
   },
   {
@@ -1008,7 +1008,7 @@ export const requests: RequestItem[] = [
     timeline: [
       { id: "t1", type: "created", label: "Ticket créé", at: h(36) },
       { id: "t2", type: "resolved", label: "Marquée résolue", at: h(24) },
-      { id: "t3", type: "reopened", label: "Réouvert par le demandeur", at: h(4) },
+      { id: "t3", type: "reopened", label: "Réouvert par le requérant", at: h(4) },
     ],
   },
   {

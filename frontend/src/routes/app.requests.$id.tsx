@@ -280,7 +280,7 @@ const COMMENT_EMOJIS = [
 ] as const;
 
 const PARTICIPANT_ROLE_LABELS: Record<string, string> = {
-  user: "Demandeur",
+  user: "Requérant",
   "chief-service": "Chef de Service",
   technicien: "Technicien",
   "chef-division-support": "Chef de Division Support",
@@ -1749,7 +1749,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       {pvAwaitingValidation && (
         <div className="col-span-full flex items-center gap-2 rounded-xl border border-border/50 bg-muted/30 px-4 py-2.5 text-sm text-muted-foreground">
           <Clock className="h-4 w-4 shrink-0" />
-          En attente de la validation du dépannage par le demandeur — le PV
+          En attente de la validation du dépannage par le requérant — le PV
           pourra ensuite être soumis au chef de division.
         </div>
       )}
@@ -2351,7 +2351,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
 
           {/* Procédure EDG/PS-GSI/Pro-02 tâche 2.1 — « Qualifier la demande »,
               point de contrôle « vérification de l'état réel de la requête ».
-              Le constat est visible du demandeur (il porte sur son matériel),
+              Le constat est visible du requérant (il porte sur son matériel),
               contrairement à la solution proposée par le chef de service. */}
           <Dialog
             open={showFieldCheckForm}
@@ -2373,7 +2373,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                 </DialogTitle>
                 <DialogDescription>
                   Comparez l'état réel de la requête à ce qui a été décrit, avant
-                  d'intervenir. Votre constat est visible du demandeur.
+                  d'intervenir. Votre constat est visible du requérant.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-3 py-2">
@@ -2564,7 +2564,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                   Terminer le traitement
                 </DialogTitle>
                 <DialogDescription>
-                  L'ensemble du ticket est complètement traité. Le demandeur sera notifié
+                  L'ensemble du ticket est complètement traité. Le requérant sera notifié
                   et pourra confirmer la résolution ou demander une réouverture.
                 </DialogDescription>
               </DialogHeader>
@@ -3131,7 +3131,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
 
               {/* Procédure EDG/PS-GSI/Pro-02 tâche 1.3 — piste de résolution
                   décrite par le chef de service à l'imputation. Réservée aux
-                  intervenants du support : jamais rendue pour le demandeur
+                  intervenants du support : jamais rendue pour le requérant
                   (la requête n'est même pas émise — voir canSeeProposedSolution). */}
               {proposedSolution && (
                 <div className="mt-3 rounded-2xl border border-info/25 bg-info/8 p-4">
@@ -3147,7 +3147,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
 
               {/* Procédure EDG/PS-GSI/Pro-02 tâche 2.1 — constat du traitant
                   actuel. Contrairement à la solution proposée ci-dessus, il est
-                  rendu pour tout le monde, demandeur inclus : il dit ce qui a
+                  rendu pour tout le monde, requérant inclus : il dit ce qui a
                   réellement été trouvé sur place. */}
               {lastFieldCheck && (
                 <div className={cn(
@@ -3851,14 +3851,14 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             <DialogContent className="max-h-[80dvh] overflow-y-auto sm:max-w-lg">
               <DialogHeader>
                 <DialogTitle>Détails du ticket</DialogTitle>
-                <DialogDescription>Demandeur, traitement et délai de ce ticket.</DialogDescription>
+                <DialogDescription>Requérant, traitement et délai de ce ticket.</DialogDescription>
               </DialogHeader>
               <div>
                 <div className="mb-2 mt-2 flex items-center gap-2">
                   <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-sky-500/15 text-sky-500">
                     <Building2 className="h-3.5 w-3.5" />
                   </span>
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-sky-500">Demandeur</h4>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-sky-500">Requérant</h4>
                 </div>
                 <dl className="space-y-0 text-sm">
                   {authorType === "internal" && (
@@ -3878,7 +3878,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                     </>
                   )}
                   <div className="flex items-center justify-between gap-3 border-b border-border/30 py-3">
-                    <dt className="text-xs text-muted-foreground">Demandeur</dt>
+                    <dt className="text-xs text-muted-foreground">Requérant</dt>
                     <dd className="truncate font-medium" title={r.requesterName}>{r.requesterName}</dd>
                   </div>
                 </dl>
