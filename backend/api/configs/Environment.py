@@ -45,7 +45,17 @@ class Environment(BaseSettings):
     # groupe ou une révocation côté central met jusqu'à TTL secondes à être vu —
     # d'où une valeur volontairement basse. 0 désactive le cache (comportement
     # historique, un appel réseau par requête).
-    CENTRAL_AUTH_CACHE_TTL: int = 45
+    # Relevé de 45 à 180 s le 2026-09-28. Mesure : chaque expiration du cache
+    # coûte un aller-retour au central, soit ~800 ms sur liaison chaude et
+    # plusieurs secondes à froid. À 45 s, un utilisateur qui lit un écran une
+    # minute repayait ce coût à chaque clic. 180 s espacent les appels sans
+    # rendre la révocation théorique.
+    #
+    # ⚠️ CONTREPARTIE DE SÉCURITÉ, ASSUMÉE ET RÉGLABLE : une révocation ou un
+    # changement de groupe côté central met jusqu'à TTL secondes à être vu.
+    # Abaisser cette valeur dans `.env` si la politique de sécurité l'exige ;
+    # 0 désactive le cache (un appel réseau par requête, comportement d'origine).
+    CENTRAL_AUTH_CACHE_TTL: int = 180
 
     # Seed — structure organisationnelle (unity + organigram)
     # True : le demarrage reinsere l'organigramme EDG de reference (comportement

@@ -430,6 +430,27 @@ class RequestRepository(BaseRepository[Request]):
         _HANDOVER_EVENTS = (
             "'treatment_transmitted', 'distributed_to_division', 'distribution_assigned'"
         )
+        # `assigned` (assignation directe depuis la File d'attente, ou endpoint
+        # assign() dedie) est traite a part : ce meme type d'evenement sert aussi
+        # a l'AUTO-assignation (« Prendre le ticket »), qui ne transmet rien. On
+        # ne le retient donc que si le destinataire differe de l'emetteur.
+        #
+        # `agent_id` porte le destinataire (create_event ecrit dest_id dedans).
+        # Il est NULL sur les assignations anterieures a BR-TRANSMIT-HANDOVER-001
+        # etendue (2026-09-28), qui n'enregistraient pas la destination : ces
+        # evenements-la restent donc exclus, faute de pouvoir distinguer une
+        # auto-assignation d'une assignation a un tiers. Choix conservateur,
+        # assume — mieux vaut un historique incomplet qu'un faux « j'ai transmis ».
+        _HANDOVER_CLAUSE = f"""
+                  AND (
+                    wd.event_type IN ({_HANDOVER_EVENTS})
+                    OR (
+                      wd.event_type = 'assigned'
+                      AND wd.agent_id IS NOT NULL
+                      AND CAST(wd.agent_id AS CHAR) != :actor_id
+                    )
+                  )
+        """
         params = {"actor_id": str(actor_id)}
         search_clause = ""
         if search and search.strip():
@@ -452,8 +473,8 @@ class RequestRepository(BaseRepository[Request]):
                 FROM workflow_detail wd
                 JOIN workflow wf ON wf.id = wd.workflow_id
                 JOIN request r   ON r.id = wf.request_id AND r.deleted_at IS NULL
-                WHERE wd.event_type IN ({_HANDOVER_EVENTS})
-                  AND wd.deleted_at IS NULL
+                WHERE wd.deleted_at IS NULL
+                  {_HANDOVER_CLAUSE}
                   AND JSON_UNQUOTE(JSON_EXTRACT(wd.infos, '$.actor_id')) = :actor_id
                   AND (r.assignee_id IS NULL OR r.assignee_id != :actor_id)
                   {search_clause}
@@ -470,8 +491,8 @@ class RequestRepository(BaseRepository[Request]):
             FROM workflow_detail wd
             JOIN workflow wf ON wf.id = wd.workflow_id
             JOIN request r   ON r.id = wf.request_id AND r.deleted_at IS NULL
-            WHERE wd.event_type IN ({_HANDOVER_EVENTS})
-              AND wd.deleted_at IS NULL
+            WHERE wd.deleted_at IS NULL
+              {_HANDOVER_CLAUSE}
               AND JSON_UNQUOTE(JSON_EXTRACT(wd.infos, '$.actor_id')) = :actor_id
               AND (r.assignee_id IS NULL OR r.assignee_id != :actor_id)
               {search_clause}

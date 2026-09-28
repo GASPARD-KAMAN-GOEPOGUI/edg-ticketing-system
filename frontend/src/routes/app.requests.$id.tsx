@@ -97,7 +97,6 @@ import {
   FileText,
   Lightbulb,
   User,
-  AlertTriangle,
   CheckCircle2,
   ArrowUpRight,
   Building2,
@@ -130,6 +129,7 @@ import {
   Send,
   FileSpreadsheet,
   MoreHorizontal,
+  SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -1653,7 +1653,17 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const updatedAtLabel = formatTicketDateTime(r.updatedAt);
   const canShowQuickActions = canEdit || canCancel || canClose || canRequestReopen || canShowClosedRequestAction;
   const hasRequestActions = canShowQuickActions;
+  // Un ticket encore en File d'attente n'a ni catégorie, ni priorité, ni
+  // organisation traitante : la seule action qui le concerne est sa
+  // qualification (procédure EDG/PS-GSI/Pro-02, tâches 1.2/1.3), et elle se
+  // fait dans la File d'attente — pas ici. La fiche ouverte depuis la
+  // notification « Nouveau ticket à qualifier » offre donc l'entrée vers le
+  // formulaire de qualification du ticket, au lieu de laisser l'utilisateur
+  // revenir à la file et y retrouver son ticket.
+  const canQualifyFromQueue = !isArchived && !isFinal && !iAmRequester
+    && Boolean(r.inTriage) && (role === "chief-service" || role === "admin");
   const hasTreatmentActions = !isRequesterView && (
+    canQualifyFromQueue ||
     (r.status === "reopened" && !r.assigneeId) ||
     canSelfAssign ||
     canAssignTicket ||
@@ -1831,6 +1841,23 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
               de résoudre ce ticket.
             </span>
           </div>
+        )}
+        {canQualifyFromQueue && (
+          <Link
+            to="/app/queue"
+            search={{ ticket: id }}
+            className="col-span-full flex items-start gap-3 rounded-xl border border-warning/40 bg-warning/8 p-3 text-left transition hover:bg-warning/12"
+          >
+            <SlidersHorizontal className="mt-0.5 h-4 w-4 shrink-0 text-warning-foreground dark:text-warning" />
+            <span>
+              <span className="block text-sm font-semibold text-warning-foreground dark:text-warning">
+                Qualifier ce ticket
+              </span>
+              <span className="text-xs text-muted-foreground">
+                Catégorie, priorité et solution proposée, dans la File d'attente
+              </span>
+            </span>
+          </Link>
         )}
         {canDownloadPv && pvButton}
         {pvCircuitButtons}
@@ -2168,19 +2195,10 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
               </DropdownMenu>
             )}
 
-            {isArchived && (
-              <div className="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3">
-                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
-                <div className="flex-1">
-                  <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">
-                    Ticket archivé
-                  </p>
-                  <p className="mt-0.5 text-sm text-amber-600/80 dark:text-amber-400/70">
-                    Consultation admin en lecture seule. Les actions métier sont désactivées.
-                  </p>
-                </div>
-              </div>
-            )}
+            {/* Bandeau « Ticket archivé » retiré le 2026-09-28 : placé à côté du
+                titre, il lui volait la largeur et le rendait illisible. L'état du
+                ticket reste porté par son badge de statut, et la lecture seule
+                par l'absence d'actions — le bandeau n'apportait rien de plus. */}
           </div>
         )}
 

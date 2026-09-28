@@ -74,7 +74,13 @@ async def _get_dir_unity_ids(db: AsyncSession, dir_unity_id: int) -> set[int]:
     return ids
 
 
-def _check_request_access(actor, req, allowed_dir_unity_ids: set[int] | None = None) -> None:
+def _check_request_access(
+    actor,
+    req,
+    allowed_dir_unity_ids: set[int] | None = None,
+    *,
+    read_only: bool = False,
+) -> None:
     """
     Vérifie que l'acteur a le droit d'accéder à la demande `req`.
     Lève HTTP 403 si l'acteur est hors périmètre.
@@ -86,6 +92,8 @@ def _check_request_access(actor, req, allowed_dir_unity_ids: set[int] | None = N
       user             → uniquement ses propres demandes
       chief-service / technicien / chef-division-support
                        → demandes de leur unité (service) uniquement
+      chief-service    → + LECTURE de toute demande encore dans la File d'attente
+                         (`read_only=True`, voir ci-dessous)
       admin            → accès global
     """
     actor_id = getattr(actor, "id", None)
@@ -109,6 +117,24 @@ def _check_request_access(actor, req, allowed_dir_unity_ids: set[int] | None = N
             )
         return
 
+    # File d'attente — un ticket non encore qualifie n'a pas d'unite traitante
+    # (`unity_id IS NULL`) ni d'assigne : aucun perimetre d'unite ne peut donc
+    # l'autoriser, et le chef de service se voyait refuser la fiche du ticket
+    # qu'il doit justement qualifier (notification « Nouveau ticket a
+    # qualifier » → « Ticket introuvable »). La LECTURE s'aligne donc sur les
+    # droits deja accordes a la File d'attente elle-meme : `_queue_manage_guard`
+    # ouvre la liste de triage et la qualification au chef de service et a
+    # l'admin sans borne d'unite.
+    #
+    # `read_only` est indispensable : cette fonction garde aussi les mutations
+    # (PUT /requests/{id} notamment). Sans le drapeau, tout ticket etant cree
+    # `in_triage=True`, n'importe quel chef de service hors perimetre pourrait
+    # le modifier — exactement le verrou du Lot 2.1
+    # (test_patch_blocks_staff_outside_perimeter). L'ecriture reste donc bornee
+    # a l'unite, et passe par la route dediee `/qualify`, gardee a part.
+    if read_only and role == "chief-service" and getattr(req, "in_triage", False):
+        return
+
     if role in {"chief-service", "technicien", "chef-division-support"}:
         allowed_ids = set(allowed_dir_unity_ids or set())
         if actor.unity_id is not None:
@@ -122,12 +148,15 @@ def _check_request_access(actor, req, allowed_dir_unity_ids: set[int] | None = N
         )
 
 
-async def _resolve_access(actor, req, db: AsyncSession) -> None:
-    """Wrapper async : pré-calcule les unity_ids autorisés puis vérifie l'accès."""
+async def _resolve_access(actor, req, db: AsyncSession, *, read_only: bool = False) -> None:
+    """Wrapper async : pré-calcule les unity_ids autorisés puis vérifie l'accès.
+
+    `read_only=True` sur les seules routes de consultation (voir
+    `_check_request_access`) — jamais sur une route qui écrit."""
     # Les deux seuls roles qui beneficiaient d'un perimetre elargi
     # (chief-departement, director) ont ete retires le 2026-09-25 : les roles
     # operationnels restants sont bornes a leur propre unite.
-    _check_request_access(actor, req, None)
+    _check_request_access(actor, req, None, read_only=read_only)
 
 
 async def _check_unity_access(actor, unity_id: str, db: AsyncSession) -> None:

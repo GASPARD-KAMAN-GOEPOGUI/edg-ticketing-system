@@ -126,9 +126,19 @@ async def _get_shared_client() -> httpx.AsyncClient:
                 limits=httpx.Limits(
                     max_keepalive_connections=10,
                     max_connections=20,
-                    # Le central reste joignable entre deux requêtes d'un même
-                    # écran ; 60 s couvrent largement un parcours utilisateur.
-                    keepalive_expiry=60.0,
+                    # Mesure du 2026-09-28 sur liaison lente : une connexion
+                    # DÉJÀ établie répond en ~800 ms, une connexion à froid en
+                    # 16 à 25 s — la poignée de main TLS coûte donc l'essentiel
+                    # du temps. Les 60 s d'origine couvraient « un parcours
+                    # utilisateur », mais pas une pause : dès que l'utilisateur
+                    # lisait un écran plus d'une minute, le clic suivant
+                    # repayait le TLS complet. D'où la lenteur ressentie au
+                    # PREMIER clic après une pause, et elle seule.
+                    #
+                    # 10 minutes couvrent les pauses réelles. Aucune contrepartie
+                    # de sécurité : garder une connexion TCP ouverte ne prolonge
+                    # aucune autorisation, contrairement au cache des scopes.
+                    keepalive_expiry=600.0,
                 ),
             )
     return _shared
@@ -150,6 +160,56 @@ async def close_central_client() -> None:
     if _shared is not None and not _shared.is_closed:
         await _shared.aclose()
     _shared = None
+
+
+def _readable_validation_error(response: httpx.Response) -> str:
+    """Traduit un refus de validation du central en phrase lisible.
+
+    Le central renvoie le format d'erreur FastAPI/pydantic — une LISTE d'objets
+    `{loc, msg, type, ctx}`. Relayée telle quelle, elle s'affichait à
+    l'utilisateur sous sa forme brute :
+
+        [{'loc': ['body', 'password'], 'msg': 'ensure this value has at least
+         8 characters', 'type': 'value_error.any_str.min_length', ...}]
+
+    On en extrait le champ et la contrainte pour en faire une phrase française.
+    Le JSON brut n'est jamais montré : il part dans les logs, pas à l'écran.
+    """
+    prefix = "La plateforme centrale a refusé la demande"
+    try:
+        body = response.json()
+    except Exception:
+        return f"{prefix}."
+
+    detail = body.get("detail") if isinstance(body, dict) else body
+
+    if isinstance(detail, str) and detail.strip():
+        return f"{prefix} : {detail.strip()}"
+
+    if isinstance(detail, list):
+        champs = {
+            "password": "le mot de passe",
+            "email": "l'adresse email",
+            "phone": "le numéro de téléphone",
+        }
+        messages: list[str] = []
+        for item in detail:
+            if not isinstance(item, dict):
+                continue
+            loc = item.get("loc") or []
+            champ = champs.get(str(loc[-1]) if loc else "", None)
+            limite = (item.get("ctx") or {}).get("limit_value")
+            type_ = str(item.get("type") or "")
+            if champ and "min_length" in type_ and limite:
+                messages.append(f"{champ} doit contenir au moins {limite} caractères")
+            elif champ and "max_length" in type_ and limite:
+                messages.append(f"{champ} ne doit pas dépasser {limite} caractères")
+            elif champ:
+                messages.append(f"{champ} n'est pas valide")
+        if messages:
+            return f"{prefix} : " + ", ".join(messages) + "."
+
+    return f"{prefix} (format ou politique de mot de passe)."
 
 
 def _mask(payload: dict[str, Any]) -> dict[str, Any]:
@@ -294,8 +354,17 @@ async def central_login(email: str, password: str) -> dict[str, Any]:
     # password"), 401 gardé pour compatibilité avec la doc générique du README.
     if response.status_code in (401, 403):
         raise CentralInvalidCredentials("Identifiant ou mot de passe incorrect.")
+    # 400/422 — la plateforme centrale REFUSE la requête sur le fond (politique de
+    # mot de passe, format d'email…). Sans ce cas, `raise_for_status()` laissait
+    # remonter un `HTTPStatusError` brut jusqu'au middleware, et l'utilisateur
+    # recevait « Une erreur interne s'est produite » (500) pour un simple mot de
+    # passe trop court — message trompeur, et diagnostic impossible.
+    if response.status_code in (400, 422):
+        raise CentralValidationError(_readable_validation_error(response))
     if response.status_code >= 500:
-        raise CentralUnavailableError(f"Le central a répondu {response.status_code}.")
+        raise CentralUnavailableError(
+            f"La plateforme centrale a répondu {response.status_code}."
+        )
     response.raise_for_status()
     return _normalize_token_response(response.json())
 

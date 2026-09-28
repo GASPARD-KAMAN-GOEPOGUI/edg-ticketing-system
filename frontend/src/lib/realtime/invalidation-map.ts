@@ -16,216 +16,75 @@
 
 export type QueryKeyPrefix = readonly unknown[];
 
+/** Toutes les listes de tickets de l'application.
+ *
+ *  ⚠️ AJOUTER ICI toute nouvelle liste de tickets. C'est l'omission de cette
+ *  étape qui avait rendu sept écrans muets au temps réel jusqu'au 2026-09-28.
+ *  Une clé listée mais absente de l'écran courant ne coûte rien ; une clé
+ *  oubliée se voit tout de suite — l'écran n'affiche plus la réalité. */
+const TICKET_LISTS: QueryKeyPrefix[] = [
+  ["request"],              // préfixe : couvre ["request", id, …]
+  ["requests"],             // liste paginée /requests/
+  ["queue"],                // plomberie partagée (tableaux de bord)
+  ["qualify"],              // File d'attente — lit fetchTriage, PAS ["queue"]
+  ["triage"],
+  ["my-tickets"],           // Ma boîte de traitement
+  ["transmitted-by-me"],    // Tickets transmis
+  ["resolved-by-me"],       // Tickets résolus
+  ["distribution"],         // Distribution du chef de division
+  ["pv-tracking"],          // Suivi des interventions
+  ["requests-history"],     // Historique
+  ["tickets-supervision"],  // Supervision
+];
+
+/** Compteurs, badges et statistiques dérivés des tickets : ils vieillissent
+ *  exactement au même rythme que les listes ci-dessus. */
+const TICKET_COUNTERS: QueryKeyPrefix[] = [
+  ["my-tickets-stats"],
+  ["my-tickets-transmitted-count"],
+  ["my-tickets-retransmitted-count"],
+  ["my-stats"],
+  ["stats"],
+  ["dashboard-stats"],
+  ["sla-center"],
+];
+
+const TICKET_TOUCHED: QueryKeyPrefix[] = [...TICKET_LISTS, ...TICKET_COUNTERS];
+
 export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
   // ── Demandes ────────────────────────────────────────────────────────────────
-  "request.created": [
-    ["request"],          // détail + sous-queries
-    ["requests"],         // liste
-    ["queue"],            // file d'attente
-    ["my-tickets"],       // mes tickets
-    ["requests-history"],
-    ["my-tickets-stats"],
-    ["stats"],
-    ["dashboard-stats"],
-    ["triage"],
-    ["sla-center"],
-  ],
-  "request.updated": [
-    ["request"],
-    ["requests"],
-    ["queue"],
-    ["tickets-supervision"],
-    ["my-tickets"],
-    ["requests-history"],
-    ["my-tickets-stats"],
-    ["stats"],
-    ["dashboard-stats"],
-    ["sla-center"],
-  ],
-  "request.status_changed": [
-    ["request"],
-    ["requests"],
-    ["queue"],
-    ["tickets-supervision"],
-    ["my-tickets"],
-    ["requests-history"],
-    ["my-tickets-stats"],
-    ["my-stats"],
-    ["stats"],
-    ["dashboard-stats"],
-    ["triage"],
-    ["sla-center"],
-  ],
-  "request.assigned": [
-    ["request"],
-    ["requests"],
-    ["queue"],
-    ["tickets-supervision"],
-    ["my-tickets"],
-    ["requests-history"],
-    ["my-tickets-stats"],
-    ["my-stats"],
-    ["stats"],
-  ],
-  "request.closed": [
-    ["request"],
-    ["requests"],
-    ["queue"],
-    ["tickets-supervision"],
-    ["my-tickets"],
-    ["requests-history"],
-    ["my-tickets-stats"],
-    ["my-stats"],
-    ["stats"],
-    ["dashboard-stats"],
-    ["csat-stats"],
-    ["sla-center"],
-  ],
-  "request.resolved": [
-    ["request"],
-    ["requests"],
-    ["my-tickets"],
-    ["requests-history"],
-    ["my-tickets-stats"],
-    ["my-stats"],
-    ["stats"],
-    ["dashboard-stats"],
-    ["csat-stats"],
-    ["sla-center"],
-  ],
-  "request.reopened": [
-    ["request"],
-    ["requests"],
-    ["queue"],
-    ["tickets-supervision"],
-    ["my-tickets"],
-    ["requests-history"],
-    ["my-tickets-stats"],
-    ["stats"],
-    ["dashboard-stats"],
-    ["sla-center"],
-  ],
-  "request.cancelled": [
-    ["request"],
-    ["requests"],
-    ["queue"],
-    ["tickets-supervision"],
-    ["my-tickets"],
-    ["requests-history"],
-    ["my-tickets-stats"],
-    ["stats"],
-    ["dashboard-stats"],
-  ],
-  "request.deleted": [
-    ["request"],
-    ["requests"],
-    ["queue"],
-    ["tickets-supervision"],
-    ["my-tickets"],
-    ["requests-history"],
-    ["my-tickets-stats"],
-    ["stats"],
-    ["dashboard-stats"],
-    ["triage"],
-    ["sla-center"],
-  ],
-  "request.routed": [
-    ["request"],
-    ["requests"],
-    ["queue"],
-    ["tickets-supervision"],
-    ["my-tickets"],
-    ["requests-history"],
-    ["my-tickets-stats"],
-    ["stats"],
-    ["triage"],
-  ],
-  "request.reassigned": [
-    ["request"],
-    ["requests"],
-    ["queue"],
-    ["tickets-supervision"],
-    ["my-tickets"],
-    ["requests-history"],
-    ["my-tickets-stats"],
-    ["my-stats"],
-    ["stats"],
-  ],
-  // BR-TRANSMIT-001 — "Transmettre le traitement" : change assignee_id sans changer
-  // de statut, même surface d'invalidation que request.assigned/reassigned.
-  "request.transmitted": [
-    ["request"],
-    ["requests"],
-    ["queue"],
-    ["tickets-supervision"],
-    ["my-tickets"],
-    ["requests-history"],
-    ["my-tickets-stats"],
-    ["my-stats"],
-    ["stats"],
-  ],
-  "request.transferred_direction": [
-    ["request"],
-    ["requests"],
-    ["queue"],
-    ["tickets-supervision"],
-    ["my-tickets"],
-    ["requests-history"],
-    ["my-tickets-stats"],
-    ["stats"],
-    ["dashboard-stats"],
-    ["triage"],
-  ],
-  "request.priority_changed": [
-    ["request"],
-    ["requests"],
-    ["queue"],
-    ["tickets-supervision"],
-    ["stats"],
-    ["dashboard-stats"],
-    ["sla-center"],
-  ],
-  // BR-FIELD-CHECK-REQUALIFY-001 — le constat d'intervention requalifie le ticket
-  // (catégorie et priorité constatées sur le terrain). Sans cette entrée,
-  // l'événement n'invalidait rien : le ticket était bien mis à jour en base, mais
-  // l'écran gardait les anciennes valeurs jusqu'à un rechargement manuel. Même
-  // surface d'invalidation que priority_changed, la priorité pilotant le SLA.
-  "request.field_checked": [
-    ["request"],
-    ["requests"],
-    ["queue"],
-    ["tickets-supervision"],
-    ["my-tickets"],
-    ["stats"],
-    ["dashboard-stats"],
-    ["sla-center"],
-  ],
-  "request.rejected": [
-    ["request"],
-    ["requests"],
-    ["queue"],
-    ["tickets-supervision"],
-    ["my-tickets"],
-    ["requests-history"],
-    ["my-tickets-stats"],
-    ["stats"],
-    ["dashboard-stats"],
-    ["triage"],
-  ],
-  "request.reopen_requested": [
-    ["request"],
-    ["requests"],
-    ["my-tickets"],
-    ["requests-history"],
-    ["queue"],
-    ["tickets-supervision"],
-  ],
-  "request.reopen_rejected": [
-    ["request"],
-    ["requests"],
-    ["my-tickets"],
-    ["requests-history"],
-  ],
+  // TOUT evenement `request.*` perime TOUTES les listes de tickets. Le reglage
+  // fin par evenement, en vigueur jusqu'au 2026-09-28, avait produit exactement
+  // ce qu'il promettait d'eviter : sept ecrans ajoutes au fil du temps
+  // (`qualify`, `transmitted-by-me`, `distribution`, `resolved-by-me`,
+  // `pv-tracking` et les deux compteurs) n'etaient rattaches a AUCUN evenement,
+  // et ne se rafraichissaient donc jamais en temps reel.
+  //
+  // Sur-invalider ne coute rien : React Query ne refetch que les requetes
+  // MONTEES. Invalider une cle absente de l'ecran courant est sans effet — a
+  // l'inverse, en oublier une se paie par un ecran qui ment a l'utilisateur.
+  "request.created": TICKET_TOUCHED,
+  "request.updated": TICKET_TOUCHED,
+  "request.status_changed": TICKET_TOUCHED,
+  "request.assigned": TICKET_TOUCHED,
+  "request.closed": TICKET_TOUCHED,
+  "request.resolved": TICKET_TOUCHED,
+  "request.reopened": TICKET_TOUCHED,
+  "request.cancelled": TICKET_TOUCHED,
+  "request.deleted": TICKET_TOUCHED,
+  "request.routed": TICKET_TOUCHED,
+  "request.reassigned": TICKET_TOUCHED,
+  "request.transmitted": TICKET_TOUCHED,
+  "request.transferred_direction": TICKET_TOUCHED,
+  "request.priority_changed": TICKET_TOUCHED,
+  "request.field_checked": TICKET_TOUCHED,
+  "request.rejected": TICKET_TOUCHED,
+  "request.reopen_requested": TICKET_TOUCHED,
+  "request.reopen_rejected": TICKET_TOUCHED,
+  "request.distributed": TICKET_TOUCHED,
+  "request.pv_submitted": TICKET_TOUCHED,
+  "request.pv_archived": TICKET_TOUCHED,
+
   // ── Tâches ──────────────────────────────────────────────────────────────────
   "task.created": [
     ["tasks"],

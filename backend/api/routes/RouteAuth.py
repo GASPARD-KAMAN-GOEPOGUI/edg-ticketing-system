@@ -73,6 +73,16 @@ logger = logging.getLogger(__name__)
 
 _RESET_CODE_TTL_MINUTES = 15
 _RESET_CODE_MAX_ATTEMPTS = 5
+
+# Message unique lorsque la plateforme centrale ne répond pas. L'origine du
+# problème est nommée explicitement : l'authentification lui est entièrement
+# déléguée, et sans cette mention l'utilisateur comme l'exploitant croient à une
+# panne d'EDG Connect et cherchent au mauvais endroit. Formulé sans jargon :
+# aucun code, aucune URL, aucun détail technique.
+_CENTRAL_DOWN_MESSAGE = (
+    "La plateforme centrale d'authentification ne répond pas. "
+    "Réessayez dans quelques instants."
+)
 # Version courante des CGU/politique de confidentialité présentées à l'écran de
 # consentement (frontend routes/legal.terms.tsx, legal.privacy.tsx). À
 # incrémenter si le texte légal change de façon substantielle — permet de
@@ -315,11 +325,32 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Identifiant ou mot de passe incorrect.",
         )
-    except (central_auth.CentralUnavailableError, central_auth.CentralInvalidClientCredentials) as exc:
+    except central_auth.CentralValidationError as exc:
+        # La plateforme centrale refuse la requête sur le fond (politique de mot
+        # de passe, format…). Son message est relayé tel quel : c'est elle qui
+        # connaît sa règle, la paraphraser la trahirait.
+        logger.warning("central_auth: requête refusée par le central (%s)", exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except central_auth.CentralInvalidClientCredentials as exc:
+        # Erreur de CONFIGURATION du serveur (CLIENT_APP_CODE/SECRET), pas une
+        # panne : l'annoncer comme une indisponibilité enverrait l'utilisateur —
+        # et l'exploitant — chercher au mauvais endroit.
+        logger.error("central_auth: identifiants applicatifs rejetés (%s)", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "La configuration d'accès à la plateforme centrale est refusée. "
+                "Contactez l'administrateur système."
+            ),
+        )
+    except central_auth.CentralUnavailableError as exc:
         logger.error("central_auth: échec login (%s)", exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service d'authentification central indisponible.",
+            detail=_CENTRAL_DOWN_MESSAGE,
         )
 
     bearer_token = tokens["bearer_token"]
@@ -469,13 +500,13 @@ async def refresh_token(body: RefreshRequest):
     except central_auth.CentralInvalidCredentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session expirée. Veuillez vous reconnecter.",
+            detail="Session expirée côté plateforme centrale. Veuillez vous reconnecter.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     except central_auth.CentralUnavailableError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service d'authentification central indisponible.",
+            detail=_CENTRAL_DOWN_MESSAGE,
         )
 
     return {
@@ -574,7 +605,7 @@ async def get_me_scopes(bearer_token: str | None = Depends(oauth2_scheme)):
     try:
         return await central_auth.get_scopes(bearer_token)
     except central_auth.CentralUnavailableError:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Service central indisponible.")
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=_CENTRAL_DOWN_MESSAGE)
     except central_auth.CentralAuthError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session invalide ou expirée.")
 
@@ -589,6 +620,6 @@ async def get_me_groups(bearer_token: str | None = Depends(oauth2_scheme)):
     try:
         return await central_auth.get_groups(bearer_token)
     except central_auth.CentralUnavailableError:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Service central indisponible.")
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=_CENTRAL_DOWN_MESSAGE)
     except central_auth.CentralAuthError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session invalide ou expirée.")

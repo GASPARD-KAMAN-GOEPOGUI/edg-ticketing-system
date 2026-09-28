@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_db, get_current_user, require_roles
-from api.core.rbac import normalize_role
 from api.schemas.SchemaAttachment import AttachmentCreate, AttachmentUpdate, AttachmentResponse
 from api.schemas.base import PaginatedResponse
 from api.services import AttachmentService, RequestService
@@ -25,20 +24,18 @@ def _req_svc(db: AsyncSession = Depends(get_db)) -> RequestService:
 
 
 def _check_attachment_access(actor, req) -> None:
-    """Même politique d'accès que dans RouteRequest._check_request_access."""
-    role = normalize_role(actor.role)
-    if role == "admin":
-        return
-    if role == "user":
-        if str(req.requester_id) != str(actor.id):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Accès refusé.")
-        return
-    if role in {"chief-service", "technicien", "chef-division-support"}:
-        if actor.unit_id and req.unit_id and str(req.unit_id) == str(actor.unit_id):
-            return
-        if actor.direction_id and req.direction_id and str(req.direction_id) == str(actor.direction_id):
-            return
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Hors périmètre.")
+    """Délègue à la politique d'accès des demandes.
+
+    La copie locale qui existait ici avait divergé du modèle : elle lisait
+    `req.unit_id`, attribut absent de `Request` (la colonne est `unity_id`), ce
+    qui levait une AttributeError — donc une 500 — pour tout chef de service ou
+    technicien, et elle ignorait les bypass demandeur/assigné ainsi que la File
+    d'attente. Une pièce jointe suit la demande qui la porte : une seule
+    politique, celle de `RouteRequest`, évite toute nouvelle dérive.
+    """
+    from api.routes.RouteRequest import _check_request_access
+
+    _check_request_access(actor, req)
 
 
 @router.get("/by-request/{request_id}", response_model=PaginatedResponse)

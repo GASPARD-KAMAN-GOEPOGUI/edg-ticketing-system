@@ -2689,3 +2689,200 @@ déjà plus depuis le 2026-09-26.
   réglé par la suppression elle-même.
 - Application vérifiée après archivage : file d'attente et listes répondent
   normalement.
+
+---
+
+## Session 2026-09-28 — « Tickets transmis » : l'assignation directe y figure enfin
+
+### Demande
+
+Un chef de division, un chef de service ou un admin qui assigne un ticket depuis
+la File d'attente ou depuis Distribution doit retrouver ce ticket dans
+« Tickets transmis ».
+
+### Ce qui marchait déjà
+
+BR-TRANSMIT-HANDOVER-001 posait déjà le principe « assigner EST transmettre » et
+couvrait trois gestes : `treatment_transmitted`, `distributed_to_division` (le
+chef de service impute à un chef de division) et `distribution_assigned` (le chef
+de division confie à un technicien). **Le cas « depuis Distribution » était donc
+déjà traité.**
+
+### Le trou
+
+L'**assignation directe** produit un événement `assigned`, absent de la liste : un
+chef de service ou un admin qui assigne directement à un technicien depuis la File
+d'attente ne retrouvait le ticket nulle part.
+
+### Le piège, et pourquoi ce n'est pas une ligne
+
+`assigned` sert AUSSI à l'**auto-assignation** (« Prendre le ticket »). L'ajouter
+tel quel aurait produit un faux positif : celui qui se sert lui-même verrait le
+ticket apparaître comme « transmis par lui » dès qu'il passerait ensuite à
+quelqu'un d'autre. Le code se prémunissait déjà de cela pour `distribution_taken`,
+volontairement exclu au motif que « le chef de division se l'assigne à lui-même,
+il ne transmet rien ».
+
+### Correctif
+
+| Fichier | Modification |
+| --- | --- |
+| `api/services/ServiceRequest.py` | Le chemin générique d'événement de statut enregistre désormais `dest_id` sur un événement `assigned` — le chemin `assign()` dédié le faisait déjà |
+| `api/repositories/RepositoryRequest.py` | `assigned` rejoint la sélection, **mais seulement si `agent_id` (le destinataire) diffère de l'émetteur** |
+
+**Choix conservateur assumé** : `agent_id` est NULL sur les assignations
+antérieures à ce lot, qui n'enregistraient pas la destination. Ces événements
+restent donc exclus — impossible d'y distinguer une auto-assignation d'une
+assignation à un tiers. Mieux vaut un historique incomplet qu'un faux
+« j'ai transmis ».
+
+**Libellé corrigé au passage** : l'événement `assigned` du chemin `assign()`
+affichait « Ticket assigné à X — traitement démarré », devenu faux depuis
+BR-TRAITEMENT-PROGRESSIF-001. Le suffixe est retiré.
+
+### Tests
+
+Deux tests ajoutés à `test_treatment_progressive.py` : l'assignation directe
+apparaît bien chez l'émetteur ; l'auto-assignation n'y apparaît jamais, **y
+compris après que le ticket soit passé à quelqu'un d'autre**.
+
+Exécuté : `test_treatment_progressive` 13/13, `test_transmit_treatment` et
+`test_distribution` au vert (aucune régression sur la vue existante).
+`test_queue_auto_start` conserve ses 2 échecs préexistants (attendent 400,
+reçoivent 405 — la route n'accepte pas `PATCH`), sans rapport avec ce lot.
+
+---
+
+## Session 2026-09-28 (suite) — Lenteur d'affichage : mesure puis correctifs
+
+### Symptôme
+
+« Quand je clique sur un menu, dans n'importe quel espace, ça tourne longtemps
+avant d'afficher les données. »
+
+### Mesures (2026-09-28)
+
+| Mesure | Résultat | Conclusion |
+| --- | --- | --- |
+| Volume DB | 9 tickets, 7 comptes, 58 notifications | négligeable |
+| Requêtes SQL, jointures comprises | **0,6 à 28 ms** | **la base est hors de cause** |
+| Plateforme centrale, connexion chaude | **812 ms** de moyenne | lent mais pas anormal |
+| Témoin Google | **409 ms** de moyenne | **la liaison est globalement lente** |
+| Plateforme centrale, connexion **à froid** | **16 à 25 s** | **c'est là que part le temps** |
+
+**L'hypothèse initiale — « la plateforme centrale est lente » — n'est PAS
+confirmée.** À 812 ms contre 409 ms pour Google, elle est deux fois plus lente
+qu'un témoin, ce qui est banal. Le vrai coût est la **poignée de main TLS à
+froid**, qui passe de 800 ms à 25 s sur cette liaison.
+
+### Le mécanisme de la lenteur
+
+Chaque requête authentifiée passe par `get_current_user` → `resolve_central_account`,
+qui appelle le central (scopes + groupes). Deux réglages se combinaient mal :
+
+- cache d'authentification : **45 s** ;
+- maintien de connexion HTTP : **60 s**.
+
+Dès que l'utilisateur lisait un écran plus d'une minute, les deux expiraient. Le
+clic suivant devait donc ré-authentifier **et** rouvrir une connexion TLS à
+froid, pendant que toutes les requêtes de l'écran attendaient derrière le même
+verrou. D'où une lenteur ressentie **au premier clic après une pause**, et elle
+seule.
+
+### Correctifs
+
+| Fichier | Modification | Contrepartie |
+| --- | --- | --- |
+| `api/core/central_auth.py` | `keepalive_expiry` 60 s → **600 s** | **aucune** — une connexion TCP ouverte ne prolonge aucune autorisation |
+| `api/configs/Environment.py` | `CENTRAL_AUTH_CACHE_TTL` 45 s → **180 s** | ⚠️ une révocation côté central met jusqu'à 180 s à être vue. Réglable dans `.env` |
+
+### Carte d'invalidation temps réel — refonte
+
+Problème distinct, trouvé au passage et participant au même ressenti : **sept
+écrans ne se rafraîchissaient jamais** en temps réel, leurs clés n'ayant jamais
+été déclarées — `qualify` (la File d'attente elle-même), `transmitted-by-me`,
+`distribution`, `resolved-by-me`, `pv-tracking` et deux compteurs. Piège
+révélateur : la carte invalidait `["queue"]` alors que la File d'attente lit
+`["qualify"]`.
+
+Trois évènements émis par le backend y étaient également inconnus :
+`request.distributed`, `request.pv_submitted`, `request.pv_archived`.
+
+Le réglage fin par évènement est remplacé par **deux listes partagées**
+(`TICKET_LISTS` + `TICKET_COUNTERS`) que **tout** évènement `request.*` invalide.
+Sur-invalider ne coûte rien — React Query ne refetch que les requêtes montées —
+alors qu'en oublier une se paie par un écran qui ment.
+
+### Garde-fou
+
+`tests/test_realtime_invalidation_coverage.py` compare les évènements réellement
+émis par le backend à ceux déclarés dans la carte, et vérifie que les écrans de
+tickets y figurent. **Vérifié qu'il a du mordant** : retirer un évènement de la
+carte le fait échouer en le nommant. C'est ce qui manquait pour que la dérive se
+voie au lieu de s'installer.
+
+---
+
+## Session 2026-09-28 — Erreurs : nommer la plateforme centrale
+
+### Règle
+
+Quand la cause d'une erreur est la **plateforme centrale**, le message doit le
+dire. L'authentification lui étant entièrement déléguée, une panne de son côté
+se manifeste sur n'importe quelle requête d'EDG Connect : sans cette mention,
+l'utilisateur comme l'exploitant concluent à une panne de l'application et
+cherchent au mauvais endroit.
+
+### État avant
+
+| Situation | Message | Origine visible |
+| --- | --- | --- |
+| Central injoignable | « Service d'authentification central indisponible. » / « Service central indisponible. » | ✅ mais deux formulations |
+| Jeton rejeté | « Session invalide ou expirée. » | ❌ |
+| Session expirée (refresh) | « Session expirée. Veuillez vous reconnecter. » | ❌ |
+| **Mot de passe refusé (422)** | **« Une erreur interne s'est produite » (500)** | ❌ trompeur |
+| **Identifiants applicatifs rejetés** | « …indisponible » | ⚠️ faux : c'est une erreur de **configuration** |
+
+### Correctifs
+
+| Fichier | Modification |
+| --- | --- |
+| `routes/RouteAuth.py` | `_CENTRAL_DOWN_MESSAGE` unique : « La plateforme centrale d'authentification ne répond pas. Réessayez dans quelques instants. » — appliqué aux 4 points d'échec |
+| `routes/RouteAuth.py` | `CentralInvalidClientCredentials` séparé de l'indisponibilité : « La configuration d'accès à la plateforme centrale est refusée. Contactez l'administrateur système. » |
+| `routes/RouteAuth.py` | `CentralValidationError` → **400** avec le motif, au lieu d'un 500 opaque |
+| `routes/RouteAuth.py` | Refresh : « Session expirée **côté plateforme centrale**. » |
+| `dependencies.py` | Validation de session (chemin emprunté par **toute** requête) : 503 nommant la plateforme, 401 « Session rejetée par la plateforme centrale — reconnectez-vous. » |
+| `core/central_auth.py` | `central_login` intercepte 400/422 au lieu de laisser remonter un `HTTPStatusError` brut |
+| `core/central_auth.py` | `_readable_validation_error()` — traduit le format d'erreur FastAPI du central en phrase française |
+
+**Inchangé volontairement** : « Identifiant ou mot de passe incorrect. » Préciser
+l'origine n'aiderait pas l'utilisateur et révélerait l'architecture à qui tente
+de deviner un mot de passe.
+
+### Le piège du message brut
+
+Premier jet : le motif du central était relayé tel quel, et l'utilisateur voyait
+
+```
+[{'loc': ['body', 'password'], 'msg': 'ensure this value has at least 8
+ characters', 'type': 'value_error.any_str.min_length', 'ctx': {...}}]
+```
+
+— précisément le jargon qu'on voulait éviter. `_readable_validation_error()`
+extrait champ et contrainte pour produire une phrase ; le JSON brut reste dans
+les logs.
+
+### Vérification
+
+Instance dédiée, appels réels :
+
+| Test | Avant | Après |
+| --- | --- | --- |
+| Mot de passe trop court | `500` « Une erreur interne s'est produite » | `400` **« La plateforme centrale a refusé la demande : le mot de passe doit contenir au moins 8 caractères. »** |
+| Jeton invalide | `401` « Session invalide ou expirée. » | `401` **« Session rejetée par la plateforme centrale — reconnectez-vous. »** |
+
+Le client frontend relaie `body.message` sans le réécrire : les messages
+arrivent tels quels à l'écran.
+
+Tests : `test_auth`, `test_change_password`, `test_central_group_mapping` →
+**74 réussis, 0 échec**.

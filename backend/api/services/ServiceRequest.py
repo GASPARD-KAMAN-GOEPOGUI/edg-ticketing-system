@@ -2504,6 +2504,16 @@ class RequestService(BaseService):
                 "label": event_label,
                 "actor_id": actor_id,
                 "actor_name": actor_name,
+                # BR-TRANSMIT-HANDOVER-001 — sur une assignation, on enregistre le
+                # DESTINATAIRE (`dest_id` → colonne `agent_id`), comme le fait déjà
+                # le chemin `assign()` dédié. C'est ce qui permet à « Tickets
+                # transmis » de distinguer une assignation à un tiers d'une
+                # auto-assignation (« Prendre le ticket »), qui ne transmet rien.
+                **(
+                    {"dest_id": int(new_assignee_id)}
+                    if event_type == "assigned" and new_assignee_id
+                    else {}
+                ),
                 "activated": True,
                 "infos": self._clean_infos({
                     "event_status": status_code,
@@ -2774,7 +2784,10 @@ class RequestService(BaseService):
             # statut métier résultant réel (in_progress), sans dupliquer
             # l'événement (section 7, BR-QUEUE-AUTO-START-001).
             "event_type": "assigned",
-            "label": f"Ticket assigné à {assignee_name or assignee_id} — traitement démarré",
+            # Plus de « traitement démarré » ici : depuis
+            # BR-TRAITEMENT-PROGRESSIF-001, assigner ne démarre plus le
+            # traitement, qui attend le geste explicite du traitant.
+            "label": f"Ticket assigné à {assignee_name or assignee_id}",
             "actor_id": actor_id,
             "actor_name": actor_name,
             "dest_id": assignee_id,

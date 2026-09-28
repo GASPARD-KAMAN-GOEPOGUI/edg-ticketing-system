@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { requireRole } from "@/lib/auth-guard";
 import { prefetch } from "@/lib/prefetch";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { GlassCard } from "@/components/glass-card";
 import { Button } from "@/components/ui/button";
@@ -87,7 +87,19 @@ const OPERATIONAL_ROLES: Role[] = ["chief-service", "technicien", "chef-division
 // File d'attente — reservee au chef de service (CSSHF) et a l'admin (Module 2).
 const PAGE_ACCESS_ROLES: Role[] = ["chief-service", "admin"];
 
+/** Lien profond depuis une notification « Nouveau ticket à qualifier » :
+ *  `?ticket=<id>` déplie d'emblée la carte du ticket concerné, formulaire de
+ *  qualification ouvert. Sans ça, la notification ne menait qu'à la file
+ *  entière, où il fallait retrouver le ticket soi-même.
+ *  `tab` est toléré (ancien lien `?tab=qualify`) mais n'a plus d'effet : la
+ *  page n'a plus qu'un seul onglet. */
+type QueueSearch = { tab?: string; ticket?: string };
+
 export const Route = createFileRoute("/app/queue")({
+  validateSearch: (search: Record<string, unknown>): QueueSearch => ({
+    tab: typeof search.tab === "string" ? search.tab : undefined,
+    ticket: typeof search.ticket === "string" ? search.ticket : undefined,
+  }),
   beforeLoad: () => requireRole(...PAGE_ACCESS_ROLES),
   head: () => ({ meta: [{ title: "File d'attente — EDG Support" }] }),
   // Précharge les données (pas seulement le chunk JS) au survol du lien —
@@ -118,16 +130,17 @@ const priorityAvatarClass: Record<Priority, string> = {
 // ── Composant racine ───────────────────────────────────────────────────────────
 
 function QueuePage() {
+  const { ticket } = Route.useSearch();
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <QualifyTab />
+      <QualifyTab focusTicketId={ticket} />
     </div>
   );
 }
 
 // ── Onglet : À qualifier ──────────────────────────────────────────────────────
 
-function QualifyTab() {
+function QualifyTab({ focusTicketId }: { focusTicketId?: string }) {
   const sessionUser = useUser();
   const queryClient = useQueryClient();
   const isOperationalRole = Boolean(sessionUser?.role && PAGE_ACCESS_ROLES.includes(sessionUser.role));
@@ -144,8 +157,16 @@ function QualifyTab() {
     const status = normalizeQueueStatus(req.status);
     return QUALIFIABLE_STATUSES.has(status) && !TERMINAL_STATUSES.has(status);
   });
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(focusTicketId ?? null);
   const [forms, setForms] = useState<Record<string, TriageForm>>({});
+
+  // Le ticket visé par le lien profond peut changer sans que la page soit
+  // remontée (deux notifications cliquées d'affilée) : on suit la recherche.
+  // Repli sur `null` volontairement absent — revenir à la file sans `?ticket`
+  // ne doit pas replier une carte que l'utilisateur vient d'ouvrir à la main.
+  useEffect(() => {
+    if (focusTicketId) setExpanded(focusTicketId);
+  }, [focusTicketId]);
 
   function getForm(id: string): TriageForm {
     return forms[id] ?? {
@@ -279,6 +300,22 @@ function QualifyTab() {
     },
   });
 
+  // Le ticket pointé par la notification a pu être qualifié entre-temps (ou par
+  // quelqu'un d'autre) : il n'est alors plus dans la file. Le dire, plutôt que
+  // de laisser l'utilisateur chercher une carte dépliée qui n'existe pas.
+  const focusMissing = Boolean(
+    focusTicketId && !isLoading && !queue.some((req) => req.id === focusTicketId),
+  );
+
+  // Amène la carte visée sous les yeux : la file peut être longue et la carte
+  // dépliée hors de l'écran.
+  useEffect(() => {
+    if (!focusTicketId || isLoading) return;
+    document
+      .getElementById(`queue-ticket-${focusTicketId}`)
+      ?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [focusTicketId, isLoading, queue.length]);
+
   const listState: "loading" | "empty" | "ready" = isLoading
     ? "loading"
     : isError || queue.length === 0
@@ -295,6 +332,16 @@ function QualifyTab() {
           </p>
         )}
       </header>
+
+      {focusMissing && (
+        <GlassCard className="flex items-start gap-3 py-4">
+          <History className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">
+            Le ticket de cette notification n'est plus en attente de qualification —
+            il a déjà été qualifié ou orienté.
+          </p>
+        </GlassCard>
+      )}
 
       <AsyncSwap
         state={listState}
@@ -347,7 +394,14 @@ function QualifyTab() {
             const isTaking = takeMut.isPending && takeMut.variables?.id === req.id;
 
             return (
-              <GlassCard key={req.id} className="overflow-hidden p-0">
+              <GlassCard
+                key={req.id}
+                id={`queue-ticket-${req.id}`}
+                className={cn(
+                  "overflow-hidden p-0",
+                  focusTicketId === req.id && "ring-2 ring-primary/40",
+                )}
+              >
                 <button
                   className="flex w-full items-start gap-4 p-5 text-left transition-colors hover:bg-foreground/3"
                   onClick={() => setExpanded(isOpen ? null : req.id)}

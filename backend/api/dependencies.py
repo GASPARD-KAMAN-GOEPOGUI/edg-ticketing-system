@@ -227,15 +227,22 @@ async def _fetch_scopes_and_groups_uncached(token: str) -> tuple[dict, list[dict
             central_auth.get_scopes(token),
             central_auth.get_groups(token),
         )
+    # L'origine du problème est nommée : l'authentification étant entièrement
+    # déléguée, une panne du central se manifeste ici, sur N'IMPORTE QUELLE
+    # requête. Sans cette mention, l'utilisateur comme l'exploitant concluent à
+    # une panne d'EDG Connect et cherchent au mauvais endroit.
     except central_auth.CentralUnavailableError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service d'authentification central indisponible.",
+            detail=(
+                "La plateforme centrale d'authentification ne répond pas. "
+                "Réessayez dans quelques instants."
+            ),
         )
     except central_auth.CentralAuthError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session invalide ou expirée.",
+            detail="Session rejetée par la plateforme centrale — reconnectez-vous.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     return scopes, groups

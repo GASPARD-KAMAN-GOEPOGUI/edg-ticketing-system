@@ -213,3 +213,66 @@ async def test_transmission_ouvre_une_intervention_exigeant_son_propre_constat(
     # Le nouvel intervenant ne peut pas terminer sans avoir fait son constat.
     resp = await _resolve(985, unity_id, request_id)
     assert resp.status_code == 400, resp.text
+
+
+# ── BR-TRANSMIT-HANDOVER-001 étendue — l'assignation directe compte comme un
+#    dessaisissement, mais jamais l'auto-assignation ────────────────────────────
+
+async def _transmitted_ids(actor_id: int, unity_id) -> set[str]:
+    resp = await _call_as(
+        _dep(actor_id, "chief-service", unity_id),
+        "GET",
+        "/api/v1/requests/transmitted?limit=100",
+    )
+    assert resp.status_code == 200, resp.text
+    return {str(item["id"]) for item in resp.json()["data"]["items"]}
+
+
+async def test_assignation_directe_apparait_dans_tickets_transmis(auth_client, unity_id):
+    """Un chef de service qui assigne directement un ticket à un technicien
+    depuis la File d'attente doit le retrouver dans « Tickets transmis » : il
+    s'en est dessaisi, exactement comme par une transmission."""
+    await _ensure_test_account(986, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(987, unity_id=unity_id, role="technicien")
+    request_id = await _create_ticket(auth_client, unity_id, "handover-direct")
+
+    async with auth_client("admin") as admin_client:
+        resp = await admin_client.post(
+            f"/api/v1/requests/{request_id}/qualify",
+            json={"category": "panne", "priority": "medium",
+                  "unit_id": unity_id, "assignee_id": 987},
+        )
+        assert resp.status_code == 200, resp.text
+
+    # L'admin (compte 6 dans les mocks) est l'émetteur de cette assignation.
+    assert request_id in await _transmitted_ids(6, unity_id)
+
+
+async def test_auto_assignation_n_apparait_jamais_dans_tickets_transmis(auth_client, unity_id):
+    """« Prendre le ticket » produit le même événement `assigned` qu'une
+    assignation à un tiers. Sans garde, le ticket finirait par apparaître comme
+    « transmis » par celui qui se l'était simplement attribué — ici on vérifie
+    qu'il n'y apparaît pas, même une fois passé à quelqu'un d'autre."""
+    await _ensure_test_account(988, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(989, unity_id=unity_id, role="technicien")
+    request_id = await _create_ticket(auth_client, unity_id, "handover-self")
+
+    # 988 se prend le ticket pour lui-même depuis la File d'attente.
+    take = await _call_as(
+        _dep(988, "chief-service", unity_id), "POST",
+        f"/api/v1/requests/{request_id}/qualify",
+        {"category": "panne", "priority": "medium",
+         "unit_id": str(unity_id), "assignee_id": "988"},
+    )
+    assert take.status_code == 200, take.text
+    assert request_id not in await _transmitted_ids(988, unity_id)
+
+    # Le ticket part ensuite à quelqu'un d'autre : 988 n'en est plus le traitant,
+    # mais il ne l'a pas transmis pour autant — il ne doit toujours pas y figurer.
+    async with auth_client("admin") as admin_client:
+        moved = await admin_client.post(
+            f"/api/v1/requests/{request_id}/assign?assignee_id=989",
+        )
+        assert moved.status_code == 200, moved.text
+
+    assert request_id not in await _transmitted_ids(988, unity_id)

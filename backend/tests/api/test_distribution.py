@@ -494,3 +494,52 @@ async def test_non_regression_transmission_dynamique_apres_distribution(auth_cli
     )
     assert resp.status_code == 200, resp.text
     assert str(resp.json()["data"]["assignee_id"]) == str(_CDS_A)
+
+
+# ── BR-TRANSMIT-HANDOVER-001 — le CDS retrouve ce qu'il a reparti ─────────────
+
+async def _transmitted_ids(actor_id: int, unity_id: int) -> set[str]:
+    resp = await _call_as(
+        _dep(actor_id, "chef-division-support", unity_id),
+        "GET",
+        "/api/v1/requests/transmitted?limit=100",
+    )
+    assert resp.status_code == 200, resp.text
+    return {str(item["id"]) for item in resp.json()["data"]["items"]}
+
+
+async def test_cds_retrouve_dans_tickets_transmis_ce_qu_il_a_distribue(auth_client, unity_id):
+    """Repartir un ticket a un technicien depuis le menu Distribution est un
+    dessaisissement : le chef de division doit le retrouver dans
+    « Tickets transmis »."""
+    await _setup_actors(unity_id)
+    request_id = await _create_ticket(auth_client, unity_id, "distrib-transmis")
+    await _distribute_to_cds(unity_id, request_id)
+
+    # Avant repartition, le ticket est dans SA file Distribution, pas transmis.
+    assert request_id not in await _transmitted_ids(_CDS_A, unity_id)
+
+    resp = await _call_as(
+        _dep(_CDS_A, "chef-division-support", unity_id), "POST",
+        f"/api/v1/requests/{request_id}/distribution/assign",
+        {"technician_id": str(_TECH_A)},
+    )
+    assert resp.status_code == 200, resp.text
+
+    assert request_id in await _transmitted_ids(_CDS_A, unity_id)
+
+
+async def test_cds_qui_se_prend_le_ticket_ne_le_voit_pas_comme_transmis(auth_client, unity_id):
+    """`distribution_taken` : le CDS se l'assigne a lui-meme, il ne transmet
+    rien — le ticket ne doit pas figurer dans « Tickets transmis »."""
+    await _setup_actors(unity_id)
+    request_id = await _create_ticket(auth_client, unity_id, "distrib-pris")
+    await _distribute_to_cds(unity_id, request_id)
+
+    resp = await _call_as(
+        _dep(_CDS_A, "chef-division-support", unity_id), "POST",
+        f"/api/v1/requests/{request_id}/distribution/take",
+    )
+    assert resp.status_code == 200, resp.text
+
+    assert request_id not in await _transmitted_ids(_CDS_A, unity_id)
