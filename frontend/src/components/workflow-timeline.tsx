@@ -282,7 +282,7 @@ export function WorkflowTimeline({ events, onOpenAttachment }: WorkflowTimelineP
       )}
 
       <Dialog open={showAll} onOpenChange={setShowAll}>
-        <DialogContent className="flex max-h-[80vh] flex-col overflow-hidden sm:max-w-lg">
+        <DialogContent className="flex max-h-[80dvh] flex-col overflow-hidden sm:max-w-lg">
           <DialogHeader className="shrink-0">
             <DialogTitle>Journaux ({events.length})</DialogTitle>
             <DialogDescription>Historique complet des événements de ce ticket.</DialogDescription>

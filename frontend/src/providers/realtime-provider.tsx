@@ -109,7 +109,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     // ciblé par user_id atteint tous les onglets/appareils ouverts de cette
     // personne (chacun a son propre abonnement SSE côté event_bus).
     const offDeactivated = sseClient.on("account.deactivated", () => {
-      toast.error("Votre compte a été désactivé par un administrateur.");
+      toast.error("Votre compte a été désactivé merci de contacter l'administrateur.");
       sseClient.disconnect();
       clearSession();
       router.navigate({ to: "/" });

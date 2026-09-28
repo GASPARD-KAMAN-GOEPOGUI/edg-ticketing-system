@@ -8,12 +8,33 @@ def _payload(response):
     return body.get("data", body)
 
 
+async def _ensure_direction(client) -> str:
+    """Retourne l'id d'une direction, en la creant si aucune n'existe.
+
+    Ce test presupposait qu'une direction preexiste, ce que RIEN ne garantit :
+    `SEED_ORG_STRUCTURE=False` n'en seme aucune, et les unites creees par les
+    autres tests sont libellees « Unite Test N » — or `_kind_from_org` classe par
+    prefixe de libelle, donc elles comptent comme des *units*, jamais comme des
+    directions. Le test ne passait qu'au gre de l'ordre d'execution.
+    """
+    existing = await client.get("/api/v1/directions/?limit=20")
+    assert existing.status_code == 200, existing.text
+    items = _payload(existing)["items"]
+    if items:
+        return items[0]["id"]
+
+    created = await client.post(
+        "/api/v1/directions/",
+        json={"name": "Direction Test Hierarchie", "code": "TDIR-HIER"},
+    )
+    assert created.status_code == 201, created.text
+    return _payload(created)["id"]
+
+
 @pytest.mark.asyncio
 async def test_admin_org_hierarchy_department_unit_activation(auth_client):
     async with auth_client("admin") as client:
-        directions = await client.get("/api/v1/directions/?limit=20")
-        assert directions.status_code == 200
-        direction_id = _payload(directions)["items"][0]["id"]
+        direction_id = await _ensure_direction(client)
 
         department = await client.post(
             "/api/v1/departments/",

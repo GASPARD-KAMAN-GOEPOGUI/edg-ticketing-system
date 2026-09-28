@@ -9,7 +9,7 @@ from api.services import AppreciationService
 router = APIRouter(
     prefix="/stats",
     tags=["csat"],
-    dependencies=[Depends(require_roles("chief", "director", "admin"))],
+    dependencies=[Depends(require_roles("admin"))],
 )
 
 

@@ -22,16 +22,6 @@ export type EscalationStep = {
   comment?: string;
 };
 
-export const DEFAULT_LEVELS = [
-  "Création",
-  "Qualification",
-  "Agent",
-  "Chef de service",
-  "Directeur",
-  "Résolution",
-  "Clôture",
-] as const;
-
 /** Vue simplifiée côté demandeur — 4 étapes lisibles */
 export const REQUESTER_LEVELS = [
   "Soumis",
@@ -39,41 +29,6 @@ export const REQUESTER_LEVELS = [
   "Traitement",
   "Validé",
 ] as const;
-
-export function buildStepsFromStatus(
-  status: string,
-  meta?: { reopened?: boolean; rejected?: boolean; escalationLevel?: "L2" | "L3" },
-): EscalationStep[] {
-  // Index 0=Création 1=Qualification 2=Agent 3=Chef 4=Directeur 5=Résolution 6=Clôture
-  const escalatedIndex =
-    meta?.escalationLevel === "L3" ? 4
-    : 3; // L2 par défaut → Chef de service
-
-  const order: Record<string, number> = {
-    new: 0,
-    qualifying: 1,
-    qualified: 2,   // attendant assignation → niveau Agent
-    assigned: 2,    // assigné à un agent → niveau Agent
-    in_progress: 2, // en traitement agent → niveau Agent
-    pending: 2,     // en attente d'info → niveau Agent
-    escalated: escalatedIndex,
-    resolved: 5,
-    closed: 6,
-    reopened: 1,
-    rejected: 1,
-  };
-  const isRejected = status === "rejected" || meta?.rejected;
-  const isReopened = status === "reopened" || meta?.reopened;
-  const current = order[status] ?? 0;
-  return DEFAULT_LEVELS.map((level, i) => {
-    let st: EscalationStepStatus = "pending";
-    if (i < current) st = "done";
-    else if (i === current) st = "active";
-    if (isRejected && i === current) st = "rejected";
-    if (isReopened && i === current) st = "reopened";
-    return { level, status: st };
-  });
-}
 
 /** Mapping statut → étape simplifiée du demandeur */
 export function buildRequesterStepsFromStatus(
@@ -87,7 +42,6 @@ export function buildRequesterStepsFromStatus(
     qualifying: 1,
     qualified: 1,
     assigned: 1,
-    escalated: 1,
     in_progress: 2,
     pending: 2,
     reopened: 1,

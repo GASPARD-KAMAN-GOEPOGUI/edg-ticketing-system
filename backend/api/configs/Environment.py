@@ -38,6 +38,23 @@ class Environment(BaseSettings):
     # Auth
     DISABLE_AUTH: bool = False
 
+    # Durée de vie (secondes) du cache des scopes/groupes centraux. Chaque requête
+    # protégée validait le bearer token par DEUX appels HTTP à la plateforme
+    # centrale ; un écran qui déclenche 5 requêtes coûtait 10 allers-retours. Le
+    # cache les mutualise par token. Contrepartie assumée : un changement de
+    # groupe ou une révocation côté central met jusqu'à TTL secondes à être vu —
+    # d'où une valeur volontairement basse. 0 désactive le cache (comportement
+    # historique, un appel réseau par requête).
+    CENTRAL_AUTH_CACHE_TTL: int = 45
+
+    # Seed — structure organisationnelle (unity + organigram)
+    # True : le demarrage reinsere l'organigramme EDG de reference (comportement
+    # historique). False : la structure est laissee entierement a la main de
+    # l'admin, qui cree directions et services depuis le back-office ; le seed
+    # n'y touche plus. Les autres references (statuts, priorites, categories)
+    # restent semees dans les deux cas : ce sont des enums techniques.
+    SEED_ORG_STRUCTURE: bool = True
+
     # CORS
     CORS_ORIGINS: List[str] = ["http://localhost:5173"]
 
@@ -50,7 +67,7 @@ class Environment(BaseSettings):
     # SMS Gateway (générique HTTP — ex. Orange Guinée, Vonage, etc.)
     SMS_GATEWAY_URL: str = ""          # ex. https://api.orange.com/smsmessaging/v1/...
     SMS_API_KEY: str = ""              # clé ou token Bearer
-    SMS_SENDER: str = "EDG"            # ID expéditeur par défaut (override CommunicationSetting)
+    SMS_SENDER: str = "EDG"            # ID expéditeur des SMS
 
     # Chiffrement des champs sensibles (Fernet/AES-128)
     ENCRYPTION_KEY: str = ""           # clé Fernet base64 32-bytes ; vide = chiffrement désactivé

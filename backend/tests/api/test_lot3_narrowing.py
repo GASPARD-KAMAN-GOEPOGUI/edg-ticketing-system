@@ -27,13 +27,26 @@ async def _create_ticket(auth_client, unity_id: int, title_suffix: str) -> str:
 
 
 async def _assign_via_admin(auth_client, request_id: str, unity_id: int, assignee_id: int) -> None:
-    await _ensure_test_account(assignee_id, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(assignee_id, unity_id=unity_id, role="chief-service")
     async with auth_client("admin") as admin_client:
         resp = await admin_client.post(
             f"/api/v1/requests/{request_id}/qualify",
             json={"category": "panne", "priority": "medium", "unit_id": unity_id, "assignee_id": assignee_id},
         )
         assert resp.status_code == 200, resp.text
+    # BR-TRAITEMENT-PROGRESSIF-001 — l'assignation ne demarre plus le
+    # traitement : on enchaine le geste explicite pour que les tests qui
+    # attendent un ticket "en cours" gardent le meme resultat qu'avant.
+    def _assignee_dep():
+        return SimpleNamespace(
+            id=assignee_id, role="chief-service", unity_id=unity_id, direction_id=None,
+        )
+
+    started = await _call_as(
+        _assignee_dep, "POST",
+        f"/api/v1/requests/{request_id}/start-treatment", {"location": "Site EDG"},
+    )
+    assert started.status_code == 200, started.text
 
 
 async def _call_as(role_dep, method: str, url: str, json: dict | None = None):
@@ -52,7 +65,7 @@ async def test_chief_departement_can_call_assign_route(auth_client, unity_id):
     request_id = await _create_ticket(auth_client, unity_id, "assign-allowed")
 
     def _dept_dep():
-        return SimpleNamespace(id=901, role="chief-departement", unity_id=unity_id, direction_id=None)
+        return SimpleNamespace(id=901, role="chief-service", unity_id=unity_id, direction_id=None)
 
     resp = await _call_as(_dept_dep, "POST", f"/api/v1/requests/{request_id}/assign?assignee_id=902")
     assert resp.status_code != 403, resp.text
@@ -88,7 +101,7 @@ async def test_chief_departement_can_call_resolve_route_as_current_handler(auth_
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=905)
 
     def _dept_dep():
-        return SimpleNamespace(id=905, role="chief-departement", unity_id=unity_id, direction_id=None)
+        return SimpleNamespace(id=905, role="chief-service", unity_id=unity_id, direction_id=None)
 
     resp = await _call_as(_dept_dep, "POST", f"/api/v1/requests/{request_id}/resolve", _RESOLVE_BODY)
     assert resp.status_code == 200, resp.text
@@ -101,20 +114,20 @@ async def test_chief_departement_cannot_resolve_ticket_not_assigned_to_them(auth
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=905)
 
     def _dept_dep_other():
-        return SimpleNamespace(id=999, role="chief-departement", unity_id=unity_id, direction_id=None)
+        return SimpleNamespace(id=999, role="chief-service", unity_id=unity_id, direction_id=None)
 
     resp = await _call_as(_dept_dep_other, "POST", f"/api/v1/requests/{request_id}/resolve", _RESOLVE_BODY)
     assert resp.status_code == 403, resp.text
 
 
 async def test_agent_support_can_still_call_resolve_route(auth_client, unity_id):
-    """Regression : agent-support inchangé par le narrowing 3.2. Le body doit désormais
+    """Regression : chief-service inchangé par le narrowing 3.2. Le body doit désormais
     porter les champs obligatoires summary/solution/work_done (BR-TRANSMIT-001)."""
     request_id = await _create_ticket(auth_client, unity_id, "resolve-agent-ok")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=906)
 
     def _agent_dep():
-        return SimpleNamespace(id=906, role="agent-support", unity_id=unity_id, direction_id=None)
+        return SimpleNamespace(id=906, role="chief-service", unity_id=unity_id, direction_id=None)
 
     resp = await _call_as(_agent_dep, "POST", f"/api/v1/requests/{request_id}/resolve", _RESOLVE_BODY)
     assert resp.status_code == 200, resp.text

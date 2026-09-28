@@ -44,13 +44,34 @@ async def _create_ticket(auth_client, unity_id: int, title_suffix: str) -> str:
         return str(resp.json()["data"]["id"])
 
 
-async def _assign_via_admin(auth_client, request_id: str, unity_id: int, assignee_id: int) -> None:
+async def _assign_via_admin(
+    auth_client, request_id: str, unity_id: int, assignee_id: int,
+    *, start: bool = True, actor_role: str = "chief-service",
+) -> None:
+    """Qualifie et assigne le ticket, puis DEMARRE le traitement.
+
+    BR-TRAITEMENT-PROGRESSIF-001 — l'assignation ne demarre plus le traitement
+    (elle le faisait jusqu'au 2026-09-27). Ce helper enchaine donc le demarrage
+    par defaut, pour que les tests qui veulent un ticket "en cours" gardent le
+    meme resultat qu'avant sans avoir a connaitre le nouveau geste.
+
+    `start=False` pour les tests qui observent justement l'etat "assigned" ou
+    qui verifient le refus d'une sequence invalide.
+    """
     async with auth_client("admin") as admin_client:
         resp = await admin_client.post(
             f"/api/v1/requests/{request_id}/qualify",
             json={"category": "panne", "priority": "medium", "unit_id": unity_id, "assignee_id": assignee_id},
         )
         assert resp.status_code == 200, resp.text
+    if not start:
+        return
+    started = await _call_as(
+        _dep(assignee_id, actor_role, unity_id), "POST",
+        f"/api/v1/requests/{request_id}/start-treatment",
+        {"location": "Site EDG"},
+    )
+    assert started.status_code == 200, started.text
 
 
 async def _call_as(role_dep, method: str, url: str, json: dict | None = None):
@@ -93,13 +114,13 @@ async def _notifications_for(recipient_id: int, request_id: str) -> list:
 # ── 1-2. Transmission simple : assignee_id change, historique alimenté ────────
 
 async def test_agent_transmits_to_another_agent(auth_client, unity_id):
-    await _ensure_test_account(801, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(802, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(801, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(802, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "agent-to-agent")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=801)
 
     resp = await _call_as(
-        _dep(801, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
+        _dep(801, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
         {"to_user_id": "802", "work_done": "Diagnostic effectué.", "reason": "Intervention réseau nécessaire."},
     )
     assert resp.status_code == 200, resp.text
@@ -123,19 +144,19 @@ async def test_agent_transmits_to_another_agent(auth_client, unity_id):
 # ── 3-4. Historique conservé, un même acteur peut avoir plusieurs cycles ──────
 
 async def test_previous_handler_stays_in_history_and_can_return_later(auth_client, unity_id):
-    await _ensure_test_account(803, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(804, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(803, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(804, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "multi-cycle")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=803)
 
     resp1 = await _call_as(
-        _dep(803, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
+        _dep(803, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
         {"to_user_id": "804", "work_done": "Diagnostic initial.", "reason": "Besoin d'un second avis."},
     )
     assert resp1.status_code == 200, resp1.text
 
     resp2 = await _call_as(
-        _dep(804, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
+        _dep(804, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
         {"to_user_id": "803", "work_done": "Analyse complémentaire.", "reason": "Retour à l'agent initial pour finalisation."},
     )
     assert resp2.status_code == 200, resp2.text
@@ -155,14 +176,14 @@ async def test_previous_handler_stays_in_history_and_can_return_later(auth_clien
 # ── 5. Un acteur non courant ne peut pas transmettre ──────────────────────────
 
 async def test_non_current_handler_cannot_transmit(auth_client, unity_id):
-    await _ensure_test_account(805, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(806, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(807, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(805, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(806, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(807, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "not-current-handler")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=805)
 
     resp = await _call_as(
-        _dep(806, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
+        _dep(806, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
         {"to_user_id": "807", "work_done": "Tentative.", "reason": "Tentative non autorisée."},
     )
     assert resp.status_code == 403, resp.text
@@ -171,13 +192,13 @@ async def test_non_current_handler_cannot_transmit(auth_client, unity_id):
 # ── 6-7. Champs obligatoires (motif / travail effectué) ───────────────────────
 
 async def test_transmit_without_reason_rejected(auth_client, unity_id):
-    await _ensure_test_account(808, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(809, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(808, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(809, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "no-reason")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=808)
 
     resp = await _call_as(
-        _dep(808, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
+        _dep(808, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
         {"to_user_id": "809", "work_done": "Diagnostic.", "reason": "   "},
     )
     assert resp.status_code == 400, resp.text
@@ -185,13 +206,13 @@ async def test_transmit_without_reason_rejected(auth_client, unity_id):
 
 
 async def test_transmit_without_work_done_rejected(auth_client, unity_id):
-    await _ensure_test_account(810, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(811, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(810, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(811, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "no-work-done")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=810)
 
     resp = await _call_as(
-        _dep(810, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
+        _dep(810, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
         {"to_user_id": "811", "work_done": "", "reason": "Motif renseigné."},
     )
     assert resp.status_code == 400, resp.text
@@ -201,10 +222,10 @@ async def test_transmit_without_work_done_rejected(auth_client, unity_id):
 # ── 8-9. Cible inactive / rôle non autorisé ────────────────────────────────────
 
 async def test_transmit_to_inactive_target_rejected(auth_client, unity_id):
-    await _ensure_test_account(812, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(812, unity_id=unity_id, role="chief-service")
     from api.models.ModelAccount import Account
 
-    await _ensure_test_account(813, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(813, unity_id=unity_id, role="chief-service")
     async with _TestSession() as session:
         acc = await session.get(Account, 813)
         acc.status = False
@@ -214,7 +235,7 @@ async def test_transmit_to_inactive_target_rejected(auth_client, unity_id):
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=812)
 
     resp = await _call_as(
-        _dep(812, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
+        _dep(812, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
         {"to_user_id": "813", "work_done": "Diagnostic.", "reason": "Transmission vers cible inactive."},
     )
     assert resp.status_code == 400, resp.text
@@ -222,13 +243,13 @@ async def test_transmit_to_inactive_target_rejected(auth_client, unity_id):
 
 
 async def test_transmit_to_unauthorized_role_rejected(auth_client, unity_id):
-    await _ensure_test_account(814, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(814, unity_id=unity_id, role="chief-service")
     await _ensure_test_account(815, unity_id=unity_id, role="user")
     request_id = await _create_ticket(auth_client, unity_id, "unauthorized-role-target")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=814)
 
     resp = await _call_as(
-        _dep(814, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
+        _dep(814, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
         {"to_user_id": "815", "work_done": "Diagnostic.", "reason": "Transmission vers un rôle non traitant."},
     )
     assert resp.status_code == 400, resp.text
@@ -247,13 +268,13 @@ async def test_transmit_across_directions_allowed(auth_client, unity_id):
         await session.refresh(other)
         other_direction_id = other.id
 
-    await _ensure_test_account(816, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(817, unity_id=other_direction_id, role="director")
+    await _ensure_test_account(816, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(817, unity_id=other_direction_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "cross-direction")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=816)
 
     resp = await _call_as(
-        _dep(816, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
+        _dep(816, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
         {"to_user_id": "817", "work_done": "Diagnostic.", "reason": "Besoin d'arbitrage d'une autre direction."},
     )
     assert resp.status_code == 200, resp.text
@@ -263,12 +284,12 @@ async def test_transmit_across_directions_allowed(auth_client, unity_id):
 # ── 11-12. Terminer le traitement : chief-departement et director sans restriction ──
 
 async def test_chief_departement_can_terminate_treatment_as_current_handler(auth_client, unity_id):
-    await _ensure_test_account(818, unity_id=unity_id, role="chief-departement")
+    await _ensure_test_account(818, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "dept-can-terminate")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=818)
 
     resp = await _call_as(
-        _dep(818, "chief-departement", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
+        _dep(818, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
         _FULL_RESOLVE_BODY,
     )
     assert resp.status_code == 200, resp.text
@@ -276,7 +297,7 @@ async def test_chief_departement_can_terminate_treatment_as_current_handler(auth
 
 
 async def test_director_can_terminate_without_prior_escalation(auth_client, unity_id):
-    await _ensure_test_account(819, unity_id=unity_id, role="director")
+    await _ensure_test_account(819, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "director-no-escalation")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=819)
 
@@ -286,7 +307,7 @@ async def test_director_can_terminate_without_prior_escalation(auth_client, unit
     assert detail.json()["data"]["request_status"] == "in_progress"
 
     resp = await _call_as(
-        _dep(819, "director", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
+        _dep(819, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
         _FULL_RESOLVE_BODY,
     )
     assert resp.status_code == 200, resp.text
@@ -296,21 +317,24 @@ async def test_director_can_terminate_without_prior_escalation(auth_client, unit
 # ── 13-17. Notifications, audit, cycle sur transmission + terminaison ─────────
 
 async def test_transmit_then_terminate_notifies_and_tracks_cycles(auth_client, unity_id):
-    await _ensure_test_account(820, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(820, unity_id=unity_id, role="chief-service")
     await _ensure_test_account(821, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "notify-and-cycle")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=820)
 
     transmit_resp = await _call_as(
-        _dep(820, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
+        _dep(820, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
         {"to_user_id": "821", "work_done": "Diagnostic agent.", "reason": "Validation chef nécessaire."},
     )
     assert transmit_resp.status_code == 200, transmit_resp.text
 
-    # Le nouvel intervenant reçoit une notification de transmission.
-    new_handler_notifs = await _notifications_for(821, request_id)
+    # Le nouvel intervenant reçoit une notification de transmission. On filtre par
+    # titre plutôt que de compter le total : étant `chief-service`, il a aussi reçu
+    # l'alerte de file d'attente à la création du ticket.
+    new_handler_notifs = [
+        n for n in await _notifications_for(821, request_id) if n.title == "Ticket transmis"
+    ]
     assert len(new_handler_notifs) == 1
-    assert new_handler_notifs[0].title == "Ticket transmis"
 
     # BR-NOTIFICATION-WORKFLOW-001 §8 — l'émetteur reçoit une confirmation légère,
     # en plus du "Ticket assigné" déjà reçu lors de la qualification initiale
@@ -366,12 +390,12 @@ async def _retransmitted_ids(role_dep) -> set[str]:
 async def test_transmitted_view_flips_back_to_my_tickets_when_ticket_returns(auth_client, unity_id):
     """Scénario A -> B -> A -> C : chaque bascule doit refléter la responsabilité
     actuelle (assignee_id), pas seulement le fait d'avoir déjà transmis."""
-    await _ensure_test_account(824, unity_id=unity_id, role="agent-support")  # A
-    await _ensure_test_account(825, unity_id=unity_id, role="agent-support")  # B
-    await _ensure_test_account(826, unity_id=unity_id, role="agent-support")  # C
-    a = _dep(824, "agent-support", unity_id)
-    b = _dep(825, "agent-support", unity_id)
-    c = _dep(826, "agent-support", unity_id)
+    await _ensure_test_account(824, unity_id=unity_id, role="chief-service")  # A
+    await _ensure_test_account(825, unity_id=unity_id, role="chief-service")  # B
+    await _ensure_test_account(826, unity_id=unity_id, role="chief-service")  # C
+    a = _dep(824, "chief-service", unity_id)
+    b = _dep(825, "chief-service", unity_id)
+    c = _dep(826, "chief-service", unity_id)
 
     request_id = await _create_ticket(auth_client, unity_id, "flip-back-a-b-a-c")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=824)
@@ -455,8 +479,8 @@ async def test_concurrent_transmission_conflict_is_rejected(auth_client, unity_i
 
     from api.models.ModelRequest import Request as RequestModel
 
-    await _ensure_test_account(822, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(823, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(822, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(823, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "concurrent-conflict")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=822)
 

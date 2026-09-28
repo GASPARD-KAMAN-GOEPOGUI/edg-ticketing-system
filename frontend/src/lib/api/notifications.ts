@@ -32,7 +32,7 @@ export type NotifItem = {
   read: boolean;
   requestId?: string;
   actionUrl?: string;
-  source: "request" | "announcement";
+  source: "request" | "system";
 };
 
 export type PaginatedNotifications = {
@@ -73,7 +73,7 @@ export function mapNotification(raw: RawNotification): NotifItem {
     read: raw.is_read,
     requestId,
     actionUrl: raw.action_url ?? undefined,
-    source: requestId ? "request" : "announcement",
+    source: requestId ? "request" : "system",
   };
 }
 
@@ -82,7 +82,7 @@ export function mapNotification(raw: RawNotification): NotifItem {
 export async function fetchNotifications(params?: {
   meId?: string;
   unread?: boolean;
-  nature?: "annonce" | "demande";
+  nature?: "systeme" | "demande";
   archived?: boolean;
   page?: number;
   limit?: number;
@@ -115,10 +115,6 @@ export async function markAllNotificationsRead(meId?: string): Promise<{ updated
   return apiFetch<{ updated: number }>(`/notifications/read-all${qs}`, {
     method: "POST",
   });
-}
-
-export async function deleteNotification(id: string): Promise<void> {
-  await apiFetch<void>(`/notifications/${id}`, { method: "DELETE" });
 }
 
 export async function restoreNotification(id: string): Promise<NotifItem> {

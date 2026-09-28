@@ -185,6 +185,21 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
     ["dashboard-stats"],
     ["sla-center"],
   ],
+  // BR-FIELD-CHECK-REQUALIFY-001 — le constat d'intervention requalifie le ticket
+  // (catégorie et priorité constatées sur le terrain). Sans cette entrée,
+  // l'événement n'invalidait rien : le ticket était bien mis à jour en base, mais
+  // l'écran gardait les anciennes valeurs jusqu'à un rechargement manuel. Même
+  // surface d'invalidation que priority_changed, la priorité pilotant le SLA.
+  "request.field_checked": [
+    ["request"],
+    ["requests"],
+    ["queue"],
+    ["tickets-supervision"],
+    ["my-tickets"],
+    ["stats"],
+    ["dashboard-stats"],
+    ["sla-center"],
+  ],
   "request.rejected": [
     ["request"],
     ["requests"],
@@ -211,43 +226,6 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
     ["my-tickets"],
     ["requests-history"],
   ],
-  // BR-MESSAGING-OPEN-001 — ouverture/réponse dans une discussion ticket : la
-  // fiche déjà ouverte chez l'autre participant (demandeur ou intervenant actuel)
-  // doit se rafraîchir sans rechargement manuel (nouveaux messages, passage de
-  // "discussion non ouverte" à "discussion ouverte" → composer qui apparaît).
-  "request.comment_added": [
-    ["request"],
-  ],
-
-  // ── Escalades ───────────────────────────────────────────────────────────────
-  "escalation.created": [
-    ["escalations"],
-    ["request"],
-    ["requests"],
-    ["my-tickets"],
-    ["requests-history"],
-    ["stats"],
-  ],
-  "escalation.updated": [
-    ["escalations"],
-    ["request"],
-    ["stats"],
-  ],
-  "escalation.reviewed": [
-    ["escalations"],
-    ["request"],
-    ["stats"],
-  ],
-  "escalation.resolved": [
-    ["escalations"],
-    ["request"],
-    ["requests"],
-    ["my-tickets"],
-    ["requests-history"],
-    ["my-tickets-stats"],
-    ["stats"],
-  ],
-
   // ── Tâches ──────────────────────────────────────────────────────────────────
   "task.created": [
     ["tasks"],
@@ -288,33 +266,6 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
   ],
   "notification.read": [
     ["notifications"],
-  ],
-
-  // ── Annonces ─────────────────────────────────────────────────────────────────
-  "announcement.created": [
-    ["announcements"],
-    ["announcements-active"],
-    ["active-alerts"],
-  ],
-  "announcement.updated": [
-    ["announcements"],
-    ["announcements-active"],
-    ["active-alerts"],
-  ],
-  "announcement.published": [
-    ["announcements"],
-    ["announcements-active"],
-    ["active-alerts"],
-  ],
-  "announcement.closed": [
-    ["announcements"],
-    ["announcements-active"],
-    ["active-alerts"],
-  ],
-  "announcement.deleted": [
-    ["announcements"],
-    ["announcements-active"],
-    ["active-alerts"],
   ],
 
   // ── Utilisateurs ─────────────────────────────────────────────────────────────

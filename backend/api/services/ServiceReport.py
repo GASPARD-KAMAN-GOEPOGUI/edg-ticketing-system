@@ -19,25 +19,20 @@ from api.services.base_service import BaseService
 
 logger = logging.getLogger(__name__)
 
+# "qualified", "pending" et "escalated" supprimes le 2026-09-28.
 ACTIVE_STATUS_CODES = {
     "new",
     "qualifying",
-    "qualified",
     "assigned",
     "in_progress",
-    "pending",
     "pending_validation",
-    "escalated",
     "reopened",
 }
 BACKLOG_STATUS_CODES = {
     "new",
     "qualifying",
-    "qualified",
     "assigned",
-    "pending",
     "pending_validation",
-    "escalated",
     "reopened",
 }
 RESOLVED_STATUS_CODES = {"resolved", "closed"}
@@ -323,7 +318,7 @@ class ReportService(BaseService):
                     evt.reopen_reasons,
                     COALESCE(evt.last_activity_at, r.updated_at, r.created_at) AS last_activity_at,
                     TIMESTAMPDIFF(HOUR, COALESCE(evt.last_activity_at, r.updated_at, r.created_at), NOW()) AS last_activity_age_hours,
-                    CASE WHEN rs.code IN ('new','qualifying','qualified','assigned','in_progress','pending','escalated','reopened')
+                    CASE WHEN rs.code IN ('new','qualifying','assigned','in_progress','reopened')
                           AND TIMESTAMPDIFF(HOUR, COALESCE(evt.last_activity_at, r.updated_at, r.created_at), NOW()) >= :inactive_hours
                          THEN 1 ELSE 0
                     END AS is_inactive,
@@ -358,7 +353,7 @@ class ReportService(BaseService):
                          )
                     END AS closure_minutes,
                     TIMESTAMPDIFF(HOUR, r.created_at, COALESCE(r.closed_at, r.resolved_at, NOW())) AS ticket_age_hours,
-                    CASE WHEN rs.code IN ('new','qualifying','qualified','assigned','in_progress','pending','escalated','reopened')
+                    CASE WHEN rs.code IN ('new','qualifying','assigned','in_progress','reopened')
                          THEN TIMESTAMPDIFF(HOUR, r.created_at, NOW())
                     END AS active_age_hours
                 FROM request r
@@ -371,7 +366,7 @@ class ReportService(BaseService):
                 LEFT JOIN (
                     SELECT
                         w.request_id,
-                        MIN(CASE WHEN wd.event_type IN ('qualifying','qualified','assigned')
+                        MIN(CASE WHEN wd.event_type IN ('qualifying','assigned')
                                  THEN wd.created_at END) AS qualification_at,
                         MIN(CASE WHEN wd.event_type IN ('assigned','reassigned_service')
                                  THEN wd.created_at END) AS assignment_at,
@@ -520,10 +515,14 @@ class ReportService(BaseService):
             metrics["resolved_tickets"] += 1
         if status_code == "in_progress":
             metrics["in_progress_tickets"] += 1
-        if status_code in {"pending", "pending_validation"}:
+        # "pending" (ticket) supprime le 2026-09-28 ; "pending_validation" est
+        # un statut distinct, conserve.
+        if status_code == "pending_validation":
             metrics["pending_tickets"] += 1
             metrics["pending_validation_tickets"] += 1
-        if status_code == "escalated" or escalation_events > 0:
+        # Le statut "escalated" n'existe plus ; les escalades deja TRACEES dans
+        # le journal restent comptees, l'historique ne se reecrit pas.
+        if escalation_events > 0:
             metrics["escalated_tickets"] += 1
         if status_code == "reopened" or reopen_events > 0:
             metrics["reopened_tickets"] += 1
@@ -1501,7 +1500,7 @@ class ReportService(BaseService):
                 LEFT JOIN unity u ON u.id = a.unity_id AND u.deleted_at IS NULL
                 LEFT JOIN request r ON r.assignee_id = a.id AND {conditions}
                 LEFT JOIN request_status rs ON rs.id = r.request_status_id
-                WHERE a.deleted_at IS NULL AND a.role IN ('agent-support','chief-service','chief-departement')
+                WHERE a.deleted_at IS NULL AND a.role IN ('chief-service','technicien','chef-division-support')
                 GROUP BY a.id, a.name, a.role, u.label
                 ORDER BY resolved_total DESC
             """),
@@ -1550,8 +1549,8 @@ class ReportService(BaseService):
                     SUM(CASE WHEN rs.code IN ('resolved','closed')  THEN 1 ELSE 0 END) AS resolved_total,
                     SUM(CASE WHEN rs.code = 'pending'               THEN 1 ELSE 0 END) AS pending_total,
                     SUM(CASE WHEN rs.code = 'escalated'             THEN 1 ELSE 0 END) AS escalated_total,
-                    SUM(CASE WHEN rs.code IN ('new','qualifying','qualified',
-                             'assigned','in_progress','escalated','reopened')
+                    SUM(CASE WHEN rs.code IN ('new','qualifying',
+                             'assigned','in_progress','reopened')
                                                                    THEN 1 ELSE 0 END) AS active,
                     SUM(CASE WHEN r.sla_breached = 1               THEN 1 ELSE 0 END) AS sla_breached,
                     ROUND(AVG(

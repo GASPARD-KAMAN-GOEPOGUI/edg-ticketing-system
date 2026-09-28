@@ -247,7 +247,7 @@ function PersonSheet({
             </div>
 
             <div className="space-y-1 rounded-2xl border border-border/50 bg-muted/15 p-3 text-sm">
-              <InfoLine icon={<BadgeCheck className="h-4 w-4" />} label="Matricule" value={person.matricule} />
+              <InfoLine icon={<BadgeCheck className="h-4 w-4" />} label="Badge" value={person.matricule} />
               <InfoLine icon={<Mail className="h-4 w-4" />} label="Email" value={person.email} />
               <InfoLine icon={<Phone className="h-4 w-4" />} label="Téléphone" value={person.phone} />
               <InfoLine icon={<BriefcaseBusiness className="h-4 w-4" />} label="Fonction" value={person.job} />

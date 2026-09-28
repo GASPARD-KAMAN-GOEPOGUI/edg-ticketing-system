@@ -294,7 +294,7 @@ function AddSectionDialog({ open, onClose, onAdded }: AddDialogProps) {
               id="add-title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Ex : Annonce importante, Maintenance prévue…"
+              placeholder="Ex : Information importante, Maintenance prévue…"
             />
           </div>
 
@@ -952,7 +952,7 @@ function HomepageAdminPage() {
               Slides du carrousel d'accueil
             </h2>
             <p className="text-xs text-muted-foreground">
-              Affiché entre le hero et les annonces — disparaît si aucun slide actif.
+              Affiché juste sous le hero — disparaît si aucun slide actif.
             </p>
           </div>
           <Button

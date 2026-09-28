@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[3]
 def _extract_object_array(text: str, object_name: str, key: str) -> list[str]:
     constants = {
         "AUTHENTICATED_ROLES": [
-            "user", "agent-support", "chief-service", "chief-departement", "director", "admin",
+            "user", "chief-service", "chief-service", "chief-departement", "director", "admin",
         ],
     }
     start = text.index(f"const {object_name}")
@@ -41,17 +41,17 @@ def test_cdc_interface_actions_ticket_par_role_sont_coherentes():
     detail_page = (ROOT / "frontend/src/routes/app.requests.$id.tsx").read_text(encoding="utf-8")
 
     expected_roles = {
-        "assign": ["agent-support", "chief-service", "chief-departement", "director", "admin"],
-        "resolve": ["agent-support", "chief-service", "chief-departement", "director", "admin"],
+        "assign": ["chief-service", "chief-service", "chief-departement", "director", "admin"],
+        "resolve": ["chief-service", "chief-service", "chief-departement", "director", "admin"],
         "reject": ["chief-service", "chief-departement", "admin"],
-        "escalate": ["agent-support", "chief-service", "chief-departement", "director", "admin"],
+        "escalate": ["chief-service", "chief-service", "chief-departement", "director", "admin"],
         "change_priority": ["chief-service", "chief-departement", "director", "admin"],
         "change_service": ["chief-departement", "director", "admin"],
         "transfer_direction": ["director", "admin"],
-        "close": ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"],
+        "close": ["user", "chief-service", "chief-service", "chief-departement", "director", "admin"],
         # BR-REOPEN-QUEUE-001 (révision — réouverture immédiate) : "request_reopen"
         # renommé "reopen", seul comportement métier officiel désormais.
-        "reopen": ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"],
+        "reopen": ["user", "chief-service", "chief-service", "chief-departement", "director", "admin"],
     }
 
     requester_actions = {"close", "reopen"}
@@ -116,7 +116,7 @@ async def test_cdc_role_privilegie_ne_traite_pas_sa_propre_demande(
 ):
     await _ensure_test_unity(1, parent_direction_id=None)
     await _ensure_test_unity(9900, parent_direction_id=None)
-    await _ensure_test_account(202, unity_id=1, role="agent-support")
+    await _ensure_test_account(202, unity_id=1, role="chief-service")
 
     async with auth_client(role) as c:
         created = await c.post("/api/v1/requests/", json={
@@ -151,7 +151,7 @@ async def test_cdc_scenario_soutenance_ticket_complet(auth_client):
     await _ensure_test_organigram(9900)
     await _ensure_test_unity(9901, parent_direction_id=9900)
     await _ensure_test_organigram(9901, parent_unity_id=9900)
-    await _ensure_test_account(2, unity_id=9101, role="agent-support")
+    await _ensure_test_account(2, unity_id=9101, role="chief-service")
     await _ensure_test_account(3, unity_id=9901, role="chief-service")
 
     snapshots = {

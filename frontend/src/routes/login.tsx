@@ -68,7 +68,7 @@ function Login() {
       setTokens(result.accessToken, result.refreshToken, result.expiresIn);
 
       const role = (result.user.role as Role) || "user";
-      const directionId = result.user.direction_id ?? (role === "director" ? result.user.unit_id : undefined);
+      const directionId = result.user.direction_id ?? undefined;
       setUser({
         id: result.user.id,
         name: result.user.name,

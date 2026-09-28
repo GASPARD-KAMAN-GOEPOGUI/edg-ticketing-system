@@ -51,6 +51,14 @@ async def _assign_via_admin(auth_client, request_id: str, unity_id: int, assigne
             json={"category": "panne", "priority": "medium", "unit_id": unity_id, "assignee_id": assignee_id},
         )
         assert resp.status_code == 200, resp.text
+    # BR-TRAITEMENT-PROGRESSIF-001 — l'assignation ne demarre plus le
+    # traitement : on enchaine le geste explicite pour que les tests qui
+    # attendent un ticket "en cours" gardent le meme resultat qu'avant.
+    started = await _call_as(
+        _dep(assignee_id, "chief-service", unity_id), "POST",
+        f"/api/v1/requests/{request_id}/start-treatment", {"location": "Site EDG"},
+    )
+    assert started.status_code == 200, started.text
 
 
 async def _ensure_test_unity(codename: str, label: str) -> int:
@@ -94,77 +102,19 @@ async def _detail(auth_client, request_id: str) -> dict:
     return resp.json()["data"]
 
 
-async def _add_comment_as(request_id: str, account_id: int, role: str, unity_id: int, body: str):
-    # account_id est systématiquement l'assigné courant du ticket au moment de
-    # l'appel (cf. sites d'appel) -> BR-MESSAGING-PAIR-001 : peer_id est
-    # toujours le côté intervenant de la conversation, donc account_id lui-même
-    # ici (pas le demandeur), que le message vienne de lui ou du demandeur.
-    resp = await _call_as(
-        _dep(account_id, role, unity_id), "POST", f"/api/v1/requests/{request_id}/comments",
-        {"body": body, "is_public": False, "peer_id": str(account_id)},
-    )
-    assert resp.status_code in (200, 201), resp.text
-    return resp
-
-
-async def test_intervention_container_groups_comment_and_transmission(auth_client, unity_id):
-    """Intervention 1 (agent A) : commentaire + transmission -> conteneur unique,
-    intervention_order=1, cycle_number=1. Intervention 2 (agent B) : resolution."""
-    await _ensure_test_account(1001, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(1002, unity_id=unity_id, role="agent-support")
-
-    request_id = await _create_ticket(auth_client, unity_id, "container")
-    await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=1001)
-
-    await _add_comment_as(request_id, 1001, "agent-support", unity_id, "Diagnostic matériel.")
-
-    transmit_resp = await _call_as(
-        _dep(1001, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
-        {"to_user_id": "1002", "work_done": "Diagnostic effectue.", "reason": "Remplacement necessaire."},
-    )
-    assert transmit_resp.status_code == 200, transmit_resp.text
-
-    resolve_resp = await _call_as(
-        _dep(1002, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
-        _FULL_RESOLVE_BODY,
-    )
-    assert resolve_resp.status_code == 200, resolve_resp.text
-
-    detail = await _detail(auth_client, request_id)
-    interventions = detail["interventions"]
-    assert len(interventions) == 2
-
-    iv1, iv2 = interventions
-    assert iv1["cycle_number"] == 1
-    assert iv1["intervention_order"] == 1
-    assert str(iv1["actor_id"]) == "1001"
-    assert iv1["comment_count"] == 1
-    assert iv1["decision"] == "transmission"
-    assert iv1["destination_name"] is not None
-    assert str(iv1["destination_id"]) == "1002"
-    assert iv1["work_done"] == "Diagnostic effectue."
-    assert iv1["transmission_reason"] == "Remplacement necessaire."
-
-    assert iv2["cycle_number"] == 1
-    assert iv2["intervention_order"] == 2
-    assert str(iv2["actor_id"]) == "1002"
-    assert iv2["decision"] == "resolution"
-    assert iv2["sla_breached"] is False
-
-
 async def test_intervention_order_resets_per_cycle_and_history_never_lost(auth_client, unity_id):
     """3 cycles (2 reouvertures) : l'ordre des interventions repart a 1 a chaque
     cycle, et les interventions des cycles precedents restent intactes."""
-    await _ensure_test_account(1003, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(1003, unity_id=unity_id, role="chief-service")
     await _ensure_test_account(1004, unity_id=unity_id, role="chief-service")
-    await _ensure_test_account(1005, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(1006, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(1005, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(1006, unity_id=unity_id, role="chief-service")
 
     request_id = await _create_ticket(auth_client, unity_id, "multi-cycle")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=1003)
 
     resolve1 = await _call_as(
-        _dep(1003, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
+        _dep(1003, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
         _FULL_RESOLVE_BODY,
     )
     assert resolve1.status_code == 200, resolve1.text
@@ -184,7 +134,7 @@ async def test_intervention_order_resets_per_cycle_and_history_never_lost(auth_c
 
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=1005)
     resolve2 = await _call_as(
-        _dep(1005, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
+        _dep(1005, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
         _FULL_RESOLVE_BODY,
     )
     assert resolve2.status_code == 200, resolve2.text
@@ -210,12 +160,12 @@ async def test_intervention_order_resets_per_cycle_and_history_never_lost(auth_c
     # fois, chaque passage restant une intervention distincte.
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=1003)
     transmit3 = await _call_as(
-        _dep(1003, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
+        _dep(1003, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
         {"to_user_id": "1006", "work_done": "Reinstallation en cours.", "reason": "Besoin d'un second avis."},
     )
     assert transmit3.status_code == 200, transmit3.text
     resolve3 = await _call_as(
-        _dep(1006, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
+        _dep(1006, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
         _FULL_RESOLVE_BODY,
     )
     assert resolve3.status_code == 200, resolve3.text
@@ -249,7 +199,7 @@ async def test_actor_identity_snapshot_is_frozen(auth_client, unity_id):
     from tests.conftest import _TestSession
     from api.models.ModelAccount import Account
 
-    await _ensure_test_account(1007, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(1007, unity_id=unity_id, role="chief-service")
 
     async with _TestSession() as session:
         acc = (await session.execute(select(Account).where(Account.id == 1007))).scalar_one()
@@ -259,7 +209,7 @@ async def test_actor_identity_snapshot_is_frozen(auth_client, unity_id):
     request_id = await _create_ticket(auth_client, unity_id, "identity-frozen")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=1007)
     resolve_resp = await _call_as(
-        _dep(1007, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
+        _dep(1007, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
         _FULL_RESOLVE_BODY,
     )
     assert resolve_resp.status_code == 200, resolve_resp.text
@@ -274,51 +224,14 @@ async def test_actor_identity_snapshot_is_frozen(auth_client, unity_id):
     assert detail["interventions"][0]["actor_matricule"] == "MAT-ORIGINAL"
 
 
-async def test_non_current_handler_comment_not_attached_to_intervention(auth_client, unity_id):
-    """Un commentaire du demandeur (jamais intervenant courant) reste visible
-    dans l'historique mais n'est rattache a aucun conteneur d'intervention."""
-    await _ensure_test_account(1008, unity_id=unity_id, role="agent-support")
-    request_id = await _create_ticket(auth_client, unity_id, "requester-comment")
-    await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=1008)
-
-    # BR-MESSAGING-OPEN-001 — l'intervenant actuel doit d'abord ouvrir la
-    # conversation avant que le demandeur puisse y écrire.
-    app.dependency_overrides[get_current_user] = _dep(1008, "agent-support", unity_id)
-    try:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            opened = await client.post(
-                f"/api/v1/requests/{request_id}/comments",
-                json={"body": "Bonjour, une précision ?", "is_public": True, "peer_id": "1008"},
-            )
-    finally:
-        app.dependency_overrides.pop(get_current_user, None)
-    assert opened.status_code == 201, opened.text
-
-    async with auth_client("user") as user_client:
-        resp = await user_client.post(
-            f"/api/v1/requests/{request_id}/comments",
-            json={"body": "Toujours en panne ?", "is_public": True, "peer_id": "1008"},
-        )
-        assert resp.status_code in (200, 201), resp.text
-
-    async with auth_client("admin") as admin_client:
-        timeline_resp = await admin_client.get(f"/api/v1/requests/{request_id}/timeline")
-    assert timeline_resp.status_code == 200
-    comment_event = next(
-        e for e in timeline_resp.json()["data"]
-        if e["event_type"] == "comment_added" and e["comment"] == "Toujours en panne ?"
-    )
-    assert comment_event["infos"].get("intervention_id") is None
-
-
 async def test_attachment_attached_to_current_intervention(auth_client, unity_id):
     """Une piece jointe ajoutee par l'intervenant courant est rattachee a son
     intervention ouverte, au meme titre qu'un commentaire."""
-    await _ensure_test_account(1009, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(1009, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "attachment-linked")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=1009)
 
-    app.dependency_overrides[get_current_user] = _dep(1009, "agent-support", unity_id)
+    app.dependency_overrides[get_current_user] = _dep(1009, "chief-service", unity_id)
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             upload_resp = await client.post(
@@ -338,18 +251,18 @@ async def test_attachment_attached_to_current_intervention(auth_client, unity_id
 async def test_intervention_report_aggregates_by_agent_service(auth_client, unity_id):
     """BR-TRACE-001 — /reports/interventions agrege transmissions/resolutions et
     temps par agent/service sans affecter les rapports existants."""
-    await _ensure_test_account(1010, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(1011, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(1010, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(1011, unity_id=unity_id, role="chief-service")
 
     request_id = await _create_ticket(auth_client, unity_id, "report-aggregate")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=1010)
     transmit_resp = await _call_as(
-        _dep(1010, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
+        _dep(1010, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
         {"to_user_id": "1011", "work_done": "Diagnostic.", "reason": "Deuxieme avis."},
     )
     assert transmit_resp.status_code == 200, transmit_resp.text
     resolve_resp = await _call_as(
-        _dep(1011, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
+        _dep(1011, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
         _FULL_RESOLVE_BODY,
     )
     assert resolve_resp.status_code == 200, resolve_resp.text
@@ -369,13 +282,13 @@ async def test_intervention_report_chief_service_is_scoped_to_own_service(auth_c
     """Sécurité — un chef de service ne voit pas les interventions d'un autre service
     en appelant directement /reports/interventions."""
     other_unity_id = await _ensure_test_unity("TST-SCOPE-OTHER", "Service Test Hors Scope")
-    await _ensure_test_account(1020, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(1021, unity_id=other_unity_id, role="agent-support")
+    await _ensure_test_account(1020, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(1021, unity_id=other_unity_id, role="chief-service")
 
     own_request_id = await _create_ticket(auth_client, unity_id, "scope-own-service")
     await _assign_via_admin(auth_client, own_request_id, unity_id, assignee_id=1020)
     own_resolve = await _call_as(
-        _dep(1020, "agent-support", unity_id), "POST", f"/api/v1/requests/{own_request_id}/resolve",
+        _dep(1020, "chief-service", unity_id), "POST", f"/api/v1/requests/{own_request_id}/resolve",
         _FULL_RESOLVE_BODY,
     )
     assert own_resolve.status_code == 200, own_resolve.text
@@ -383,7 +296,7 @@ async def test_intervention_report_chief_service_is_scoped_to_own_service(auth_c
     other_request_id = await _create_ticket(auth_client, other_unity_id, "scope-other-service")
     await _assign_via_admin(auth_client, other_request_id, other_unity_id, assignee_id=1021)
     other_resolve = await _call_as(
-        _dep(1021, "agent-support", other_unity_id), "POST", f"/api/v1/requests/{other_request_id}/resolve",
+        _dep(1021, "chief-service", other_unity_id), "POST", f"/api/v1/requests/{other_request_id}/resolve",
         _FULL_RESOLVE_BODY,
     )
     assert other_resolve.status_code == 200, other_resolve.text
@@ -400,13 +313,13 @@ async def test_intervention_report_chief_service_is_scoped_to_own_service(auth_c
 async def test_reopened_ticket_history_is_never_mutated_by_later_actions(auth_client, unity_id):
     """Principe 2 (BR-TRACE-001) : une intervention figee reste bit-a-bit
     identique apres des actions ulterieures sur d'AUTRES tickets."""
-    await _ensure_test_account(1012, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(1013, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(1012, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(1013, unity_id=unity_id, role="chief-service")
 
     request_id = await _create_ticket(auth_client, unity_id, "immutable-history")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=1012)
     resolve_resp = await _call_as(
-        _dep(1012, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
+        _dep(1012, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
         _FULL_RESOLVE_BODY,
     )
     assert resolve_resp.status_code == 200, resolve_resp.text
@@ -416,7 +329,7 @@ async def test_reopened_ticket_history_is_never_mutated_by_later_actions(auth_cl
     other_request_id = await _create_ticket(auth_client, unity_id, "unrelated")
     await _assign_via_admin(auth_client, other_request_id, unity_id, assignee_id=1012)
     other_resolve = await _call_as(
-        _dep(1012, "agent-support", unity_id), "POST", f"/api/v1/requests/{other_request_id}/resolve",
+        _dep(1012, "chief-service", unity_id), "POST", f"/api/v1/requests/{other_request_id}/resolve",
         _FULL_RESOLVE_BODY,
     )
     assert other_resolve.status_code == 200, other_resolve.text

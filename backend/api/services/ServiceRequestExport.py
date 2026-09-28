@@ -2,7 +2,7 @@
 Export du dossier fonctionnel complet d'une demande — réservé à l'espace Administration.
 
 Reconstruit l'intégralité du parcours d'UNE demande (identification, demandeur,
-structure organisationnelle, acteurs, historique, escalades, conversations,
+structure organisationnelle, acteurs, historique, escalades,
 pièces jointes, notifications) exclusivement depuis les données réellement
 persistées (Request, WorkflowDetail, Attachment, Notification, Organigram) —
 aucune nouvelle donnée, aucune nouvelle relation.
@@ -33,6 +33,9 @@ _ALT_FILL = "EBF5FB"
 _EMPTY_MESSAGE = "Aucune donnée enregistrée"
 _NOT_AVAILABLE = "Information non disponible actuellement"
 
+# Messagerie retiree le 2026-09-25 : plus aucun message n'est cree, mais les
+# evenements deja enregistres restent en base — le journal d'historique les
+# exclut explicitement pour ne pas les faire reapparaitre dans l'export.
 _COMMENT_EVENT = "comment_added"
 _ESCALATION_EVENTS = {"escalation_manual", "escalation_auto"}
 
@@ -248,19 +251,18 @@ class RequestExportService(BaseService):
         actor_rows = self._build_actors(events, req)
         history_rows = self._build_history(events)
         escalation_rows = self._build_escalations(events)
-        conversation_rows = self._build_conversations(events)
         attachment_rows = await self._build_attachments(req)
         notification_rows = await self._build_notifications(req.id)
 
         if fmt == "pdf":
             content = self._render_pdf(
                 req.ref, summary_rows, actor_rows, history_rows, escalation_rows,
-                conversation_rows, attachment_rows, notification_rows,
+                attachment_rows, notification_rows,
             )
         else:
             content = self._render_workbook(
                 summary_rows, actor_rows, history_rows, escalation_rows,
-                conversation_rows, attachment_rows, notification_rows,
+                attachment_rows, notification_rows,
             )
         stamp = datetime.now().strftime("%Y%m%d_%H%M")
         filename = f"Dossier_{req.ref}_{stamp}"
@@ -439,23 +441,6 @@ class RequestExportService(BaseService):
             })
         return rows
 
-    # ── Feuille Conversations ─────────────────────────────────────────────────
-
-    def _build_conversations(self, events: list) -> list[dict[str, Any]]:
-        rows = []
-        for e in events:
-            if e.event_type != _COMMENT_EVENT:
-                continue
-            infos = e.infos or {}
-            rows.append({
-                "Date": e.created_at,
-                "Auteur": e.actor_name or _NOT_AVAILABLE,
-                "Visibilité": "Public (visible du demandeur)" if infos.get("is_public") else "Interne (staff uniquement)",
-                "Message": e.comment or "",
-                "Pièce jointe associée": infos.get("filename") or "—",
-            })
-        return rows
-
     # ── Feuille Pièces jointes ────────────────────────────────────────────────
 
     async def _build_attachments(self, req) -> list[dict[str, Any]]:
@@ -503,7 +488,7 @@ class RequestExportService(BaseService):
 
     def _render_workbook(
         self, summary_rows, actor_rows, history_rows, escalation_rows,
-        conversation_rows, attachment_rows, notification_rows,
+        attachment_rows, notification_rows,
     ) -> bytes:
         try:
             from openpyxl import Workbook
@@ -515,7 +500,6 @@ class RequestExportService(BaseService):
         _write_table_sheet(wb, "Acteurs", actor_rows)
         _write_table_sheet(wb, "Historique", history_rows)
         _write_table_sheet(wb, "Escalades", escalation_rows)
-        _write_table_sheet(wb, "Conversations", conversation_rows)
         _write_table_sheet(wb, "Pièces jointes", attachment_rows)
         _write_table_sheet(wb, "Notifications", notification_rows)
 
@@ -527,7 +511,7 @@ class RequestExportService(BaseService):
 
     def _render_pdf(
         self, ref: str, summary_rows, actor_rows, history_rows, escalation_rows,
-        conversation_rows, attachment_rows, notification_rows,
+        attachment_rows, notification_rows,
     ) -> bytes:
         from api.services.ServiceExport import make_branded_pdf
 
@@ -540,7 +524,6 @@ class RequestExportService(BaseService):
             ("Acteurs", actor_rows),
             ("Historique", history_rows),
             ("Escalades", escalation_rows),
-            ("Conversations", conversation_rows),
             ("Pièces jointes", attachment_rows),
             ("Notifications", notification_rows),
         ):

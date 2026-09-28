@@ -38,7 +38,7 @@ import { toast } from "sonner";
 import { formatElapsedHours } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/sla-center")({
-  beforeLoad: () => requireRole("chief-service", "chief-departement", "director", "admin"),
+  beforeLoad: () => requireRole("admin"),
   head: () => ({ meta: [{ title: "Centre SLA — EDG Support" }] }),
   component: SlaCenterPage,
 });
@@ -107,9 +107,13 @@ function toISODate(d: Date): string {
 function SlaCenterPage() {
   const [role] = useRole();
   const sessionUser = useUser();
-  const isDirector = role === "director";
-  const isChiefService = role === "chief-service";
-  const isChief = role === "chief-service" || role === "chief-departement";
+  // director et chief-departement ont ete retires le 2026-09-25 : cette page
+  // est desormais reservee a l'admin (garde de route), donc perimetre global.
+  const isDirector = false;
+  // chief-service (role supprime) ne peut plus jamais atteindre cette page (garde de route) ;
+  // conserve `false` pour ne pas toucher a la logique downstream qui en depend.
+  const isChiefService = false;
+  const isChief = false;
 
   // Période d'affichage — par défaut les 30 derniers jours, ajustable librement.
   const [startDate, setStartDate] = useState(() => toISODate(new Date(Date.now() - 30 * 86_400_000)));

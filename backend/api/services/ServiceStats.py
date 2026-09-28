@@ -224,17 +224,17 @@ class StatsService(BaseService):
     ) -> list[dict]:
         """Performance par agent : requêtes assignées, résolues, temps moyen.
 
-        `account` n'a pas de colonnes `direction_id`/`unit_id`/`role` avec les
-        valeurs 'agent'/'chief' : le rôle réel est `agent-support` /
-        `chief-service` / `chief-departement` (cf. `ModelAccount.py`), et la
-        direction se dérive de `unity_id` comme pour `requests_by_direction`.
+        `account` n'a pas de colonnes `direction_id`/`unit_id` : les rôles réels
+        sont `chief-service` / `technicien` / `chef-division-support`
+        (cf. `ModelAccount.py`), et la direction se dérive de `unity_id` comme
+        pour `requests_by_direction`.
         `unit_id` filtre directement sur `unity_id` (l'unité de l'agent) ;
         `direction_id` filtre sur la direction résolue (unité elle-même si
         c'est une direction, ou son parent sinon).
         """
         conditions = [
             "a.deleted_at IS NULL",
-            "a.role IN ('agent-support', 'chief-service', 'chief-departement')",
+            "a.role IN ('chief-service', 'technicien', 'chef-division-support')",
         ]
         params: dict = {"limit": limit}
         if direction_id:
@@ -317,26 +317,6 @@ class StatsService(BaseService):
             "assigned_total": 0, "resolved_total": 0, "active_total": 0,
             "sla_breached": 0, "avg_resolution_hours": None, "sla_rate": None,
         }
-
-    # ── Escalades ─────────────────────────────────────────────────────────────
-
-    async def escalation_stats(self) -> dict:
-        """Stats des escalades par statut et niveau (workflow_detail, event_type='escalation_manual')."""
-        result = await self.session.execute(text("""
-            SELECT
-                COUNT(*)                                                                                              AS total,
-                SUM(CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(infos, '$.status')), 'open') = 'open'     THEN 1 ELSE 0 END) AS open,
-                SUM(CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(infos, '$.status')) = 'reviewed'                   THEN 1 ELSE 0 END) AS reviewed,
-                SUM(CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(infos, '$.status')) = 'resolved'                   THEN 1 ELSE 0 END) AS resolved,
-                SUM(CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(infos, '$.status')) = 'rejected'                   THEN 1 ELSE 0 END) AS rejected,
-                SUM(CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(infos, '$.level')) = 'L1'                           THEN 1 ELSE 0 END) AS level_l1,
-                SUM(CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(infos, '$.level')) = 'L2'                           THEN 1 ELSE 0 END) AS level_l2,
-                SUM(CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(infos, '$.level')) = 'L3'                           THEN 1 ELSE 0 END) AS level_l3,
-                SUM(CASE WHEN DATE(created_at) = CURDATE()                                                  THEN 1 ELSE 0 END) AS created_today
-            FROM workflow_detail
-            WHERE event_type = 'escalation_manual' AND deleted_at IS NULL
-        """))
-        return dict(result.mappings().one())
 
     # ── SLA ───────────────────────────────────────────────────────────────────
 

@@ -14,6 +14,10 @@ from api.core.exceptions import ConflictException
 from api.core.error_codes import ErrorCode
 from api.core.event_bus import AppEvent, emit as emit_event
 from api.core.rbac import normalize_role
+# Délai laissé au demandeur avant validation d'office (BR-AUTO-VALIDATION-001).
+# Défini dans le planificateur, qui porte le job : une seule valeur pour le
+# message envoyé au demandeur et pour l'échéance réellement appliquée.
+from api.core.scheduler import AUTO_VALIDATION_DAYS
 from api.core.ticket_actions import (
     BYPASS_TRANSITION_ROLES as _BYPASS_ROLES,
     TERMINAL_STATUSES,
@@ -37,30 +41,29 @@ from api.models.ModelRequestStatus import RequestStatus
 from api.models.ModelUnity import Unity
 from api.models.ModelWorkflow import Workflow
 from api.repositories import RequestRepository, WorkflowDetailRepository
-from api.schemas.SchemaRequest import RequestResponse, RequestListItemResponse
+from api.schemas.SchemaRequest import RequestResponse, RequestListItemResponse, DistributionListItemResponse, PvTrackingItemResponse
 from api.services.base_service import BaseService
-from api.services.NotificationEmitter import emit as emit_notif
+from api.services.NotificationEmitter import emit as emit_notif, emit_bulk
 from api.services.ServiceCrypto import decrypt_field
 
 # Mapping statut → event_type spécifique (CDC §7 + §8)
-# "pending" retiré (harmonisation statuts/notifications, 2026-08) : ce statut
-# n'est plus atteignable (cf. ticket_actions.ALLOWED_TRANSITIONS), donc plus
-# cartographié ici.
+# "pending", "qualified" et "escalated" supprimés du projet (2026-09-28) :
+# plus aucune transition ne les atteint, ils ne sont donc plus cartographiés.
 _STATUS_EVENT_MAP: dict[str, str] = {
     "qualifying":   "qualifying",
-    "qualified":    "qualified",
     "assigned":     "assigned",
     "in_progress":  "in_progress",
     "rejected":     "rejected",
-    "escalated":    "escalated",
 }
+# Procédure EDG/PS-GSI/Pro-02 tâche 2.1 — issue du point de contrôle
+# « vérification de l'état réel de la requête ».
+_FIELD_CHECK_CONFORMITY = frozenset({"conforme", "ecart"})
+
 _STATUS_LABEL_MAP: dict[str, str] = {
     "qualifying":   "Ticket en cours de qualification",
-    "qualified":    "Ticket qualifié",
     "assigned":     "Ticket assigné à un agent",
     "in_progress":  "Prise en charge — traitement en cours",
     "rejected":     "Ticket rejeté",
-    "escalated":    "Ticket escaladé",
 }
 
 
@@ -84,10 +87,9 @@ class RequestService(BaseService):
         if effective_role:
             assert_action_allowed(effective_role, action)
         if actor is not None:
-            allowed_dir_unity_ids = None
-            if normalize_role(effective_role) in {"director", "chief-departement"}:
-                allowed_dir_unity_ids = await self._direction_unity_ids(getattr(actor, "unity_id", None))
-            assert_ticket_scope(actor, obj, action=action, allowed_dir_unity_ids=allowed_dir_unity_ids)
+            # Les deux roles qui beneficiaient d'un perimetre elargi (director,
+            # chief-departement) ont ete retires le 2026-09-25.
+            assert_ticket_scope(actor, obj, action=action, allowed_dir_unity_ids=None)
             assert_role_specific_action_constraints(actor, obj, action)
         if target_status is not None:
             assert_transition_allowed(
@@ -354,22 +356,95 @@ class RequestService(BaseService):
         account = await AccountRepository(self.session).get_by_id(int(account_id))
         if account is None:
             return {}
-        direction = departement = service = None
-        unity_id = getattr(account, "unity_id", None)
-        if unity_id:
-            chain = await self._org_chain_for_unity(unity_id)
-            if chain:
-                service = chain[0]
-                direction = chain[-1]
-                departement = chain[1] if len(chain) >= 3 else None
+        org = await self._org_labels_for_unity(getattr(account, "unity_id", None))
+        # PV d'intervention EDG/PS-GSI/PV-01, bloc « Affectation » — le badge et
+        # le statut (titulaire / prestataire / stagiaire) sont figés ICI, au
+        # moment de l'intervention : un stagiaire devenu titulaire ne doit pas
+        # réécrire ses anciens PV. Le PV imprime le badge ; à défaut (prestataire
+        # ou stagiaire sans badge EDG), il imprime le nom complet, déjà figé
+        # juste au-dessus dans `intervention_actor_name` — la case ne reste
+        # jamais vide sur un document destiné à être signé.
         return self._clean_infos({
             "intervention_actor_id": str(account.id),
             "intervention_actor_name": self._account_display_name(account),
             "intervention_actor_role": normalize_role(getattr(account, "role", None)),
+            "actor_status": getattr(account, "intervenant_status", None),
             "actor_matricule": getattr(account, "matricule", None),
-            "actor_direction_label": direction.label if direction else None,
-            "actor_department_label": departement.label if departement else None,
-            "actor_service_label": service.label if service else None,
+            "actor_direction_label": org.get("direction_label"),
+            "actor_department_label": org.get("department_label"),
+            "actor_service_label": org.get("service_label"),
+        })
+
+    async def _org_labels_for_unity(self, unity_id: Optional[int | str]) -> dict[str, Any]:
+        """Direction / département / service d'une unité, résolus via
+        l'organigramme **à l'instant de l'appel**. Brique commune à tous les
+        figeages d'identité organisationnelle (intervenant, demandeur, service
+        traitant) : ils doivent tous lire l'organigramme de la même façon, sinon
+        deux tickets contemporains pourraient afficher des libellés divergents
+        pour la même unité."""
+        if not unity_id:
+            return {}
+        try:
+            normalized_id = int(unity_id)
+        except (TypeError, ValueError):
+            return {}
+        chain = await self._org_chain_for_unity(normalized_id)
+        if not chain:
+            return {}
+        service = chain[0]
+        direction = chain[-1]
+        departement = chain[1] if len(chain) >= 3 else None
+        return self._clean_infos({
+            "service_label": service.label if service else None,
+            "department_label": departement.label if departement else None,
+            "direction_label": direction.label if direction else None,
+            "direction_id": direction.id if direction else None,
+        })
+
+    async def _requester_identity_snapshot(self, account_id: Optional[int | str]) -> dict[str, Any]:
+        """Identité organisationnelle FIGÉE du demandeur, écrite dans
+        `request.infos` à la création de la demande et jamais recalculée ensuite.
+
+        Sans ce figeage, un demandeur qui change de service ou de fonction
+        réécrit rétroactivement l'origine de TOUS ses anciens tickets : le
+        dossier d'un incident traité en janvier afficherait le service qu'il
+        occupe en décembre. Même principe et même forme que
+        `_actor_identity_snapshot` côté intervenant (BR-TRACE-001)."""
+        if not account_id:
+            return {}
+        from api.repositories.RepositoryAccount import AccountRepository
+
+        account = await AccountRepository(self.session).get_by_id(int(account_id))
+        if account is None:
+            return {}
+        org = await self._org_labels_for_unity(getattr(account, "unity_id", None))
+        return self._clean_infos({
+            "requester_unit_id": getattr(account, "unity_id", None),
+            "requester_job": getattr(account, "job", None),
+            "requester_matricule": getattr(account, "matricule", None),
+            "requester_direction_id": org.get("direction_id"),
+            "requester_direction_label": org.get("direction_label"),
+            "requester_department_label": org.get("department_label"),
+            "requester_service_label": org.get("service_label"),
+        })
+
+    async def _handler_org_snapshot(self, unity_id: Optional[int | str]) -> dict[str, Any]:
+        """Organisation TRAITANTE figée au moment de la qualification.
+
+        `request.unity_id` gèle déjà le service en tant qu'identifiant, mais la
+        direction en est *dérivée* (`unity.parent_direction_id`) et les libellés
+        sont lus en direct : réorganiser l'organigramme ou renommer un service
+        réécrirait donc l'historique. On fige ici les libellés et la direction
+        effectivement retenus le jour de la qualification."""
+        org = await self._org_labels_for_unity(unity_id)
+        if not org:
+            return {}
+        return self._clean_infos({
+            "handler_unit_id": int(unity_id),
+            "handler_direction_id": org.get("direction_id"),
+            "handler_direction_label": org.get("direction_label"),
+            "handler_department_label": org.get("department_label"),
+            "handler_service_label": org.get("service_label"),
         })
 
     async def _open_intervention(
@@ -392,6 +467,32 @@ class RequestService(BaseService):
         infos["intervention_order_in_cycle"] = intervention_order
         infos["current_intervention_id"] = intervention_id
         identity = await self._actor_identity_snapshot(assignee_id)
+        # Procédure EDG/PS-GSI/Pro-02 — le constat terrain (tâche 2.1) précède la
+        # résolution (tâche 2.2). Ces deux tâches sont, dans le document, sous la
+        # responsabilité du SEUL technicien : un chef de service, un chef de
+        # division, un chef de département ou un directeur qui termine un
+        # traitement ne réalise pas une intervention de terrain et n'est donc pas
+        # concerné.
+        #
+        # Le drapeau est posé ICI, à l'ouverture de l'intervention, plutôt que
+        # déduit d'une date en dur : les interventions ouvertes avant la mise en
+        # service de la règle ne le portent pas et restent résolvables — même
+        # logique « absent = antérieur = exempté » que le figeage des identités
+        # organisationnelles.
+        # TSI (tâche 3.4) — nom et badge de l'intervenant courant recopiés sur le
+        # ticket. La requête du tableau de suivi saute volontairement les
+        # relations de workflow (perf), donc `interventions` n'y est pas
+        # reconstruit : sans ce pointeur, le TSI ne pourrait nommer personne.
+        infos["current_intervenant_name"] = identity.get("intervention_actor_name")
+        infos["current_intervenant_badge"] = (
+            identity.get("actor_matricule") or identity.get("intervention_actor_name")
+        )
+        if identity.get("intervention_actor_role") == "technicien":
+            infos["field_check_required"] = True
+        else:
+            # Une transmission d'un technicien vers un autre rôle ne doit pas
+            # laisser traîner le drapeau du précédent.
+            infos.pop("field_check_required", None)
         meta = self._clean_infos({
             "intervention_id": intervention_id,
             "intervention_order": intervention_order,
@@ -549,11 +650,15 @@ class RequestService(BaseService):
         return schema.copy(update=updates)
 
     @staticmethod
-    def _serialize(items: list) -> list:
-        """Convertit les ORM Request en RequestListItemResponse (schéma allégé liste) et déchiffre les champs sensibles."""
+    def _serialize(items: list, schema_cls=RequestListItemResponse) -> list:
+        """Convertit les ORM Request en RequestListItemResponse (schéma allégé liste) et déchiffre les champs sensibles.
+
+        `schema_cls` permet à un appel dont l'endpoint est gardé de servir un
+        schéma plus large — voir `list_distribution`, seule liste autorisée à
+        exposer `proposed_solution`. Par défaut, rien ne change."""
         result = []
         for item in items:
-            schema = RequestListItemResponse.from_orm(item)
+            schema = schema_cls.from_orm(item)
             updates = {"request_status": normalize_status(schema.request_status)}
             if schema.description and schema.description.startswith("enc:"):
                 updates["description"] = decrypt_field(schema.description)
@@ -590,6 +695,10 @@ class RequestService(BaseService):
         assignee_id: Optional[str] = None,
         requester_id: Optional[str] = None,
         exclude_requester_id: Optional[str] = None,
+        # BR-REQUESTER-NEVER-LOSES-001 — quand il est fourni, le périmètre devient
+        # « unité OU je suis demandeur OU je suis assigné » au lieu de la seule
+        # unité (voir RepositoryRequest._apply_filters).
+        scope_actor_id: Optional[str] = None,
         search: Optional[str] = None,
         sla_breached: Optional[bool] = None,
         in_triage: Optional[bool] = None,
@@ -618,6 +727,7 @@ class RequestService(BaseService):
                         "assignee_id": assignee_id,
                         "requester_id": requester_id,
                         "exclude_requester_id": exclude_requester_id,
+                        "scope_actor_id": scope_actor_id,
                     }.items() if v is not None
                 },
                 page=page,
@@ -639,6 +749,8 @@ class RequestService(BaseService):
                 filters["requester_id"] = requester_id
             if exclude_requester_id is not None:
                 filters["exclude_requester_id"] = exclude_requester_id
+            if scope_actor_id is not None:
+                filters["scope_actor_id"] = scope_actor_id
             if sla_breached is not None:
                 filters["sla_breached"] = sla_breached
             if in_triage is not None:
@@ -747,9 +859,20 @@ class RequestService(BaseService):
         Si assignee_id fourni → status=assigned directement (routage vers une personne précise).
         Sinon → status=qualifying (la direction prend en charge).
         """
-        patch = {k: v for k, v in data.items() if k in {"category", "priority"}}
-        # Map direction_id / unit_id → unity_id (compatibilité frontend)
-        if "unit_id" in data:
+        patch = {k: v for k, v in data.items() if k in {"category", "priority", "proposed_solution"}}
+        # Organisation traitante — déterminée par le SERVEUR, pas par le formulaire.
+        # Seule la DSI traite les incidents : le service (et donc, par remontée,
+        # le département et la direction) qui prend en charge la demande est
+        # toujours celui du chef de service qui qualifie. Son rattachement est
+        # déjà renseigné par l'administrateur au back-office, il n'a donc rien à
+        # ressaisir. `unity_id` reste renseigné pour la traçabilité : c'est lui
+        # qui distingue l'organisation TRAITANTE de celle du DEMANDEUR
+        # (`requester_unit_id`, lu sur le compte du demandeur).
+        actor_unity_id = getattr(actor, "unity_id", None)
+        if actor_unity_id is not None:
+            patch["unity_id"] = actor_unity_id
+        elif "unit_id" in data:
+            # Repli : acteur sans rattachement (ex. admin), l'appelant fournit la cible.
             patch["unity_id"] = data["unit_id"]
         elif "direction_id" in data:
             patch["unity_id"] = data["direction_id"]
@@ -757,14 +880,34 @@ class RequestService(BaseService):
 
         assignee_id = data.get("assignee_id")
         assert_qualify_target_allowed(actor_role, actor_id, assignee_id)
-        if assignee_id:
+
+        # BR-DISTRIBUTION-001 — orienter vers un chef de division support n'en fait
+        # PAS le traitant : le ticket entre dans sa file "Distribution"
+        # (`distributor_id` renseigne, `assignee_id` laisse vide) et c'est lui qui
+        # decidera ensuite de le prendre ou de l'assigner a un technicien.
+        target_is_division_chief = False
+        if assignee_id and str(assignee_id) != str(actor_id or ""):
+            row = await self.session.execute(
+                select(Account.role).where(Account.id == int(assignee_id))
+            )
+            target_role_value = row.scalar_one_or_none()
+            target_is_division_chief = (
+                normalize_role(str(target_role_value or "")) == "chef-division-support"
+            )
+
+        if target_is_division_chief:
+            patch["distributor_id"] = int(assignee_id)
+            # Pas de traitant a ce stade : le ticket attend d'etre reparti.
+            patch["request_status"] = "qualifying"
+        elif assignee_id:
             patch["assignee_id"] = int(assignee_id)
-            # BR-QUEUE-AUTO-START-001 — une prise ("Prendre le ticket") ou une
-            # assignation ("Assigner") effective depuis la File d'attente
-            # constitue le démarrage effectif du traitement : le ticket passe
-            # directement à `in_progress`, sans étape "assigned" intermédiaire
-            # nécessitant un second clic "Démarrer traitement".
-            patch["request_status"] = "in_progress"
+            # BR-TRAITEMENT-PROGRESSIF-001 (2026-09-27) — remplace
+            # BR-QUEUE-AUTO-START-001. Une prise ou une assignation depuis la
+            # File d'attente ne démarre plus le traitement : elle désigne un
+            # intervenant, rien de plus. Le traitement ne commence qu'au geste
+            # explicite du traitant (`POST /{id}/start-treatment`), qui seul
+            # peut horodater le vrai début et enregistrer le lieu.
+            patch["request_status"] = "assigned"
         else:
             patch["request_status"] = "qualifying"
 
@@ -775,6 +918,10 @@ class RequestService(BaseService):
             actor=actor,
             actor_role=actor_role,
         )
+        # BR-DISTRIBUTION-001 — un ticket deja oriente vers un CDS ne peut pas etre
+        # re-qualifie/reattribue par le chef de service tant que le CDS n'a pas
+        # tranche : cela le sortirait silencieusement de sa file Distribution.
+        self._assert_not_in_active_distribution(current, actor)
         if assignee_id:
             assert_requester_is_not_handler(current, assignee_id)
         if assignee_id and actor is not None:
@@ -786,9 +933,9 @@ class RequestService(BaseService):
             if assignee_row is None:
                 raise self.not_found("Cet intervenant n'existe pas.", error_code=ErrorCode.ACCOUNT_NOT_FOUND)
             assignee_unity_id, assignee_role = assignee_row
+            # Perimetre elargi supprime avec les roles director/chief-departement
+            # (2026-09-25) : plus aucun role n'en beneficie.
             allowed_scope_unity_ids = None
-            if normalize_role(str(getattr(actor, "role", actor_role or "") or "")) in {"chief-departement", "director"}:
-                allowed_scope_unity_ids = await self._direction_unity_ids(getattr(actor, "unity_id", None))
             assert_assignment_allowed(
                 actor,
                 current,
@@ -797,13 +944,926 @@ class RequestService(BaseService):
                 target_role=assignee_role,
                 allowed_scope_unity_ids=allowed_scope_unity_ids,
             )
-        return await self.update(
+
+        # Traçabilité — l'organisation traitante retenue ici est gelée avec ses
+        # libellés (voir `_handler_org_snapshot`). Fusionné sur les `infos`
+        # existantes du ticket : ce champ JSON porte déjà les pointeurs
+        # d'intervention et le snapshot du demandeur, qu'un remplacement
+        # effacerait.
+        handler_identity = await self._handler_org_snapshot(patch.get("unity_id"))
+        # PV d'intervention EDG/PS-GSI/PV-01, bloc « Réception » — le PV demande
+        # le responsable et son badge. C'est le chef de service qui réceptionne
+        # et qualifie (tâche 1.2). Son identité doit être figée ICI : s'il impute
+        # le ticket à un chef de division, aucune intervention n'est ouverte à
+        # son nom, donc `_actor_identity_snapshot` ne la gèlerait jamais.
+        receiver_identity: dict[str, Any] = {}
+        if actor is not None:
+            receiver_identity = self._clean_infos({
+                "receiver_id": str(getattr(actor, "id", "") or "") or None,
+                "receiver_name": actor_name or self._account_display_name(actor),
+                "receiver_badge": getattr(actor, "matricule", None),
+            })
+        if handler_identity or receiver_identity:
+            current_infos = getattr(current, "infos", None)
+            patch["infos"] = {
+                **(current_infos if isinstance(current_infos, dict) else {}),
+                **handler_identity,
+                **receiver_identity,
+            }
+
+        obj = await self.update(
             id,
             patch,
             actor_id=actor_id,
             actor_name=actor_name,
             actor_role=actor_role,
         )
+
+        # BR-DISTRIBUTION-001 — trace + notification propres a l'entree en Distribution
+        # (l'evenement generique d'`update()` ne couvre pas ce cas : il n'y a pas de
+        # nouveau traitant, donc ni intervention ouverte ni notification "Ticket assigne").
+        if target_is_division_chief:
+            await self._record_distribution_event(
+                id,
+                event_type="distributed_to_division",
+                label=f"Orienté vers le chef de division support — {actor_name or 'Chef de service'}",
+                actor_id=actor_id,
+                actor_name=actor_name,
+                actor_role=actor_role,
+                dest_id=int(assignee_id),
+                dest_role="chef-division-support",
+            )
+            await emit_notif(
+                self.session,
+                recipient_id=str(assignee_id),
+                title="Ticket à répartir",
+                body=(
+                    f"Le ticket {getattr(obj, 'ref', '')} vous a été orienté pour répartition. "
+                    f"Prenez-le en charge ou assignez-le à un technicien de votre division."
+                ),
+                type="info",
+                request_id=str(id),
+                action_label="Ouvrir la Distribution",
+                action_url="/app/distribution",
+                commit=False,
+            )
+            await emit_event(AppEvent(
+                type="request.distributed",
+                payload={"id": str(id), "distributor_id": str(assignee_id)},
+                target={"user_ids": [int(assignee_id)]},
+            ))
+        return obj
+
+    # ── BR-DISTRIBUTION-001 — file "Distribution" du chef de division support ──
+
+    def _assert_not_in_active_distribution(self, current, actor) -> None:
+        """BR-DISTRIBUTION-001 — un ticket en Distribution active (oriente vers un CDS,
+        pas encore reparti) ne peut sortir QUE par les actions de distribution du CDS
+        destinataire (`/distribution/take`, `/distribution/assign`).
+
+        Sans cette garde, l'etat "distributor_id renseigne + assignee_id NULL" rendait
+        le ticket "libre" pour les chemins d'assignation generiques : un technicien du
+        service pouvait s'auto-assigner via POST /{id}/assign, et le chef de service
+        pouvait se le reattribuer via une re-qualification — court-circuitant dans les
+        deux cas la decision de repartition du chef de division.
+
+        Sans effet sur l'existant : la condition ne peut etre vraie que pour un ticket
+        effectivement en Distribution (`distributor_id` NULL partout ailleurs)."""
+        distributor_id = getattr(current, "distributor_id", None)
+        if distributor_id is None:
+            return
+        if getattr(current, "assignee_id", None) is not None:
+            return
+        if normalize_role(str(getattr(actor, "role", "") or "")) == "admin":
+            return
+        # Le chef de division DESTINATAIRE est justement celui que le message
+        # ci-dessous designe comme seul habilite : le bloquer revenait a lui
+        # interdire de prendre en charge un ticket qui l'attend dans SA propre
+        # file de distribution. Seuls les autres restent ecartes — au premier
+        # rang desquels le chef de service qui vient de l'orienter, qui ne doit
+        # pas pouvoir reprendre un ticket qu'il a envoye (BR-DISTRIBUTION-001).
+        actor_id = getattr(actor, "id", None)
+        if actor_id is not None and str(actor_id) == str(distributor_id):
+            return
+        raise self.forbidden(
+            "Ce ticket est en cours de répartition par le chef de division support : "
+            "seul ce dernier peut le prendre en charge ou l'assigner à un technicien."
+        )
+
+    async def _load_distribution_ticket(self, id: str, actor):
+        """Charge un ticket en verifiant qu'il est bien dans la Distribution de l'acteur.
+
+        Garde de securite centrale : elle rend impossible qu'un CDS agisse sur le
+        ticket d'un autre CDS en manipulant l'ID dans la requete HTTP."""
+        current = await self.repo.get_by_id(id)
+        if current is None:
+            raise self.not_found("Ce ticket n'existe pas.", error_code=ErrorCode.REQUEST_NOT_FOUND)
+
+        actor_id = getattr(actor, "id", None)
+        is_admin = normalize_role(str(getattr(actor, "role", "") or "")) == "admin"
+        if not is_admin and str(getattr(current, "distributor_id", None) or "") != str(actor_id or ""):
+            raise self.forbidden(
+                "Ce ticket ne fait pas partie de votre file de distribution.",
+            )
+        if getattr(current, "assignee_id", None) is not None:
+            raise ConflictException(
+                "Ce ticket a déjà été réparti : il n'est plus dans votre file de distribution.",
+                error_code=ErrorCode.TICKET_STATE_CONFLICT,
+            )
+        if normalize_status(current.request_status) in TERMINAL_STATUSES:
+            raise ConflictException(
+                "Ce ticket est clôturé : il ne peut plus être réparti.",
+                error_code=ErrorCode.TICKET_STATE_CONFLICT,
+            )
+        return current
+
+    async def _exit_distribution(
+        self,
+        current,
+        *,
+        new_assignee_id: int,
+        actor_id: Optional[str],
+        actor_name: Optional[str],
+        actor_role: Optional[str],
+        event_type: str,
+        label: str,
+        dest_role: str,
+    ):
+        """Sortie de la file Distribution : designe le responsable OPERATIONNEL.
+
+        Ecriture atomique conditionnelle (`assignee_id IS NULL`) : si deux actions
+        concurrentes ciblent le meme ticket (prise en charge + assignation), une
+        seule peut reussir — le ticket ne peut jamais atterrir dans deux boites de
+        traitement a la fois."""
+        old_status = current.request_status
+        # BR-TRAITEMENT-PROGRESSIF-001 — la sortie de Distribution désigne le
+        # responsable opérationnel ; le traitement démarre à son geste explicite.
+        translated = await self._translate_codes({"request_status": "assigned"})
+        # `opening_meta` porte l'identité FIGÉE du nouvel intervenant (nom, badge,
+        # statut, organisation) produite par `_actor_identity_snapshot`. Elle était
+        # ici silencieusement jetée : les interventions ouvertes par la
+        # distribution — c'est-à-dire le chemin NOMINAL de la procédure — n'avaient
+        # donc aucune identité figée, ni dans le journal d'interventions ni dans le
+        # PV. Elle est désormais jointe à l'événement d'ouverture, comme sur les
+        # chemins `assign()` et `transmit_treatment()`.
+        new_infos, opening_meta = await self._open_intervention(
+            getattr(current, "infos", None), str(new_assignee_id), str(current.id)
+        )
+
+        stmt = (
+            sa_update(RequestModel)
+            .where(RequestModel.id == current.id)
+            .where(RequestModel.assignee_id.is_(None))  # compare-and-set concurrence
+            .values(**translated, assignee_id=new_assignee_id, in_triage=False, infos=new_infos)
+        )
+        result = await self.session.execute(stmt)
+        if result.rowcount == 0:
+            await self.session.rollback()
+            raise ConflictException(
+                "Ce ticket vient d'être réparti par une autre action. Veuillez actualiser la page.",
+                error_code=ErrorCode.TICKET_STATE_CONFLICT,
+            )
+        await self.session.flush()
+        await self.session.refresh(current)
+
+        await self._record_distribution_event(
+            str(current.id),
+            event_type=event_type,
+            label=label,
+            actor_id=actor_id,
+            actor_name=actor_name,
+            actor_role=actor_role,
+            dest_id=new_assignee_id,
+            dest_role=dest_role,
+            old_status=old_status,
+            new_status="in_progress",
+            extra_infos=opening_meta,
+        )
+        await self.session.commit()
+        await self.session.refresh(current)
+        return current
+
+    async def distribution_take(
+        self, id: str, *, actor, actor_name: Optional[str] = None,
+    ):
+        """Le chef de division prend lui-meme le ticket : il devient responsable
+        operationnel et le ticket rejoint SA boite de traitement."""
+        current = await self._load_distribution_ticket(id, actor)
+        actor_id = str(getattr(actor, "id", "") or "")
+        actor_role = normalize_role(str(getattr(actor, "role", "") or ""))
+        assert_requester_is_not_handler(current, actor_id)
+
+        obj = await self._exit_distribution(
+            current,
+            new_assignee_id=int(actor_id),
+            actor_id=actor_id,
+            actor_name=actor_name,
+            actor_role=actor_role,
+            event_type="distribution_taken",
+            label=f"Pris en charge par le chef de division — {actor_name or ''}".strip(" —"),
+            dest_role=actor_role,
+        )
+        await emit_event(AppEvent(
+            type="request.assigned",
+            payload={"id": str(id), "assignee_id": actor_id},
+            target={"roles": "all"},
+        ))
+        return obj
+
+    async def distribution_assign(
+        self, id: str, technician_id: str, *, actor, actor_name: Optional[str] = None,
+    ):
+        """Le chef de division assigne le ticket a un technicien de SA division :
+        le technicien devient responsable operationnel."""
+        current = await self._load_distribution_ticket(id, actor)
+        actor_id = str(getattr(actor, "id", "") or "")
+        actor_role = normalize_role(str(getattr(actor, "role", "") or ""))
+
+        row = await self.session.execute(
+            select(Account.role, Account.unity_id, Account.account_status, Account.name)
+            .where(Account.id == int(technician_id), Account.deleted_at.is_(None))
+        )
+        target = row.first()
+        if target is None:
+            raise self.not_found("Ce technicien n'existe pas.", error_code=ErrorCode.ACCOUNT_NOT_FOUND)
+        target_role, target_unity_id, target_status, target_name = target
+
+        if normalize_role(str(target_role or "")) != "technicien":
+            raise self.forbidden(
+                "Seul un technicien peut recevoir un ticket depuis la distribution.",
+            )
+        if str(target_status or "") != "active":
+            raise self.forbidden("Ce technicien n'est pas actif.")
+        actor_unity_id = getattr(actor, "unity_id", None)
+        if normalize_role(str(getattr(actor, "role", "") or "")) != "admin":
+            if not actor_unity_id or str(target_unity_id or "") != str(actor_unity_id):
+                raise self.forbidden(
+                    "Ce technicien n'appartient pas à votre division.",
+                )
+        assert_requester_is_not_handler(current, technician_id)
+
+        obj = await self._exit_distribution(
+            current,
+            new_assignee_id=int(technician_id),
+            actor_id=actor_id,
+            actor_name=actor_name,
+            actor_role=actor_role,
+            event_type="distribution_assigned",
+            label=f"Assigné au technicien {target_name or ''}".strip(),
+            dest_role="technicien",
+        )
+        await emit_notif(
+            self.session,
+            recipient_id=str(technician_id),
+            title="Ticket assigné",
+            body=(
+                f"Le ticket {getattr(obj, 'ref', '')} vous a été assigné par votre "
+                f"chef de division. Il est disponible dans votre boîte de traitement."
+            ),
+            type="info",
+            request_id=str(id),
+            action_label="Ouvrir le ticket",
+            action_url="/app/my-tickets",
+        )
+        await emit_event(AppEvent(
+            type="request.assigned",
+            payload={"id": str(id), "assignee_id": str(technician_id)},
+            target={"roles": "all"},
+        ))
+        return obj
+
+    async def list_distribution(self, account_id: str, *, page: int = 1, limit: int = 50):
+        """File "Distribution" d'un chef de division : tickets qui lui ont ete
+        orientes et qui n'ont pas encore de responsable operationnel."""
+        items, total = await self.repo.list_distribution_for(account_id, page=page, limit=limit)
+        # Procédure tâche 1.4 — le CDS décide de prendre ou d'affecter DEPUIS la
+        # liste : il lui faut le descriptif de solution proposée sans ouvrir la
+        # fiche. Endpoint déjà gardé par `_distribution_guard`.
+        return self.paginate(
+            self._serialize(items, DistributionListItemResponse), total, page, limit,
+        )
+
+    async def _record_distribution_event(
+        self,
+        request_id: str,
+        *,
+        event_type: str,
+        label: str,
+        actor_id: Optional[str],
+        actor_name: Optional[str],
+        actor_role: Optional[str],
+        dest_id: Optional[int] = None,
+        dest_role: Optional[str] = None,
+        old_status: Optional[str] = None,
+        new_status: Optional[str] = None,
+        extra_infos: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """BR-DISTRIBUTION-001 — journalise une etape de distribution dans le systeme
+        d'audit existant (`workflow_detail`), sans mecanisme parallele.
+
+        `extra_infos` transporte l'identite figee de l'intervention ouverte par
+        cette etape (voir `_exit_distribution`) : sans elle, une intervention nee
+        d'une distribution resterait anonyme dans le journal et sur le PV."""
+        wf_id = await self._get_or_create_workflow(int(request_id))
+        infos: dict[str, Any] = {"source_role": actor_role, **(extra_infos or {})}
+        if dest_role:
+            infos["dest_role"] = dest_role
+        if old_status:
+            infos["old_status"] = old_status
+        if new_status:
+            infos["new_status"] = new_status
+        await self.detail_repo.create_event({
+            "workflow_id": wf_id,
+            "event_type": event_type,
+            "label": label,
+            "actor_id": actor_id,
+            "actor_name": actor_name,
+            **({"dest_id": dest_id} if dest_id else {}),
+            "infos": infos,
+        }, commit=False)
+
+    # ── Constat d'intervention (procédure tâche 2.1) ──────────────────────────
+
+    @staticmethod
+    def _field_check_event(request) -> Optional[Any]:
+        """Constat terrain de l'intervention EN COURS, s'il existe.
+
+        Rattaché à `current_intervention_id` et non au ticket : après une
+        transmission, le nouvel intervenant doit faire SON propre constat — celui
+        de son prédécesseur ne vaut pas pour lui."""
+        infos = request.infos if isinstance(request.infos, dict) else {}
+        intervention_id = infos.get("current_intervention_id")
+        if not intervention_id:
+            return None
+        for event in reversed(request.timelines or []):
+            if event.event_type != "field_check":
+                continue
+            event_infos = event.infos if isinstance(event.infos, dict) else {}
+            if event_infos.get("intervention_id") == intervention_id:
+                return event
+        return None
+
+    def _assert_field_check_done(self, request) -> None:
+        """Procédure EDG/PS-GSI/Pro-02 — la tâche 2.1 (« qualifier la demande »,
+        point de contrôle « vérification de l'état réel de la requête ») précède
+        la 2.2 (« résoudre le problème »). On ne peut donc pas clore un
+        traitement sans avoir consigné son constat.
+
+        N'est exigé que si l'intervention porte `field_check_required`, posé à son
+        ouverture : les interventions antérieures à la règle restent résolvables."""
+        infos = request.infos if isinstance(request.infos, dict) else {}
+        if not infos.get("field_check_required"):
+            return
+        if self._field_check_event(request) is not None:
+            return
+        raise self.bad_request(
+            "Consignez d'abord votre constat d'intervention : la procédure impose "
+            "de vérifier l'état réel de la requête avant de la résoudre.",
+            error_code=ErrorCode.MISSING_REQUIRED_FIELD,
+        )
+
+    async def field_check(
+        self,
+        id: str,
+        *,
+        conformity: str,
+        findings: str,
+        observed_category: Optional[str] = None,
+        observed_priority: Optional[str] = None,
+        actor=None,
+        actor_id: Optional[str] = None,
+        actor_name: Optional[str] = None,
+        actor_role: Optional[str] = None,
+    ):
+        """Tâche 2.1 — l'intervenant confronte l'état réel de la requête à ce qui
+        a été décrit, avant d'intervenir.
+
+        Distinct de la qualification du chef de service (tâches 1.2/1.3, réservée
+        à la File d'attente) : celle-ci oriente le ticket sur pièce, celle-là
+        constate sur le terrain. Aucune table ni colonne : un événement du
+        `workflow_detail`, comme les étapes de distribution."""
+        clean_findings = findings.strip() if isinstance(findings, str) else ""
+        if not clean_findings:
+            raise self.bad_request(
+                "Décrivez ce que vous avez constaté sur le terrain.",
+                error_code=ErrorCode.MISSING_REQUIRED_FIELD,
+            )
+        if conformity not in _FIELD_CHECK_CONFORMITY:
+            raise self.bad_request(
+                "Indiquez si l'état réel est conforme à la demande ou s'il s'en écarte.",
+                error_code=ErrorCode.INVALID_FIELD_VALUE,
+            )
+
+        current = await self.get_by_id(id)
+        if actor is not None:
+            assert_is_current_handler(actor, current)
+
+        infos = current.infos if isinstance(current.infos, dict) else {}
+        intervention_id = infos.get("current_intervention_id")
+        is_gap = conformity == "ecart"
+
+        # BR-FIELD-CHECK-REQUALIFY-001 — le constat REQUALIFIE le ticket.
+        #
+        # La catégorie et la priorité constatées n'étaient consignées que dans
+        # l'événement de workflow : le ticket gardait la qualification faite sur
+        # pièce, et l'écart relevé sur le terrain n'apparaissait nulle part sur la
+        # demande elle-même (ni dans les listes, ni dans les filtres, ni dans les
+        # statistiques, ni dans le calcul du SLA qui dépend de la priorité).
+        # L'intervenant qui constate sur place est la meilleure source : ses
+        # valeurs sont désormais appliquées à la demande. L'ancienne valeur reste
+        # tracée dans l'événement ci-dessous, et le chef de service est prévenu.
+        requalify: dict = {}
+        previous_category = getattr(current, "category", None)
+        previous_priority = getattr(current, "priority", None)
+        if observed_category and str(observed_category) != str(previous_category or ""):
+            requalify["category"] = observed_category
+        if observed_priority and str(observed_priority) != str(previous_priority or ""):
+            requalify["priority"] = observed_priority
+
+        wf_id = await self._get_or_create_workflow(int(id))
+        await self.detail_repo.create_event({
+            "workflow_id": wf_id,
+            "event_type": "field_check",
+            "label": (
+                "Constat d'intervention — écart avec la demande"
+                if is_gap else "Constat d'intervention — conforme à la demande"
+            ),
+            "actor_id": actor_id,
+            "actor_name": actor_name,
+            "infos": self._clean_infos({
+                "actor_role": actor_role,
+                "source_role": actor_role,
+                "conformity": conformity,
+                "findings": clean_findings,
+                "observed_category": observed_category,
+                "observed_priority": observed_priority,
+                # Requalification effective : on garde trace de ce qui portait le
+                # ticket avant le constat, pour savoir ce que le terrain a corrigé.
+                "requalified": bool(requalify),
+                "previous_category": previous_category if "category" in requalify else None,
+                "previous_priority": previous_priority if "priority" in requalify else None,
+                # Rattache le constat à l'intervention, pas au ticket : après une
+                # transmission, le suivant refait le sien.
+                "intervention_id": intervention_id,
+                **self._current_intervention_meta(current.infos),
+            }),
+        }, commit=False)
+
+        # BR-TRAITEMENT-PROGRESSIF-001 — marque le constat SUR LE TICKET, rattaché
+        # à l'intervention en cours. C'est ce marqueur que `start_treatment` lit
+        # pour refuser un démarrage sans constat, sans rejouer tout le journal.
+        marked_infos = dict(current.infos) if isinstance(current.infos, dict) else {}
+        marked_infos["field_check_intervention_id"] = intervention_id
+        marked_infos["field_check_at"] = datetime.now(timezone.utc).isoformat()
+        await self.repo.update(str(id), {"infos": marked_infos}, commit=False)
+
+        if requalify:
+            translated = await self._translate_codes(requalify)
+            updated = await self.repo.update(str(id), translated, commit=False)
+            if updated is None:
+                raise self.not_found(
+                    "Cette demande n'existe pas.", error_code=ErrorCode.REQUEST_NOT_FOUND
+                )
+            self._logger.info(
+                f"Constat — demande {getattr(current, 'ref', id)} requalifiée : "
+                f"{', '.join(f'{k}={v}' for k, v in requalify.items())}"
+            )
+
+        # Un écart remet en cause la qualification, qui appartient au chef de
+        # service (tâches 1.2/1.3) : il doit l'apprendre. Aucun chemin de retour
+        # n'est créé pour autant — transmission et mise en attente restent les
+        # voies existantes.
+        if is_gap:
+            await self._notify_handling_chiefs(current, id, clean_findings, actor_name)
+
+        await emit_event(AppEvent(
+            type="request.field_checked",
+            payload={
+                "id": str(id),
+                "conformity": conformity,
+                "requalified": bool(requalify),
+                **({"category": requalify["category"]} if "category" in requalify else {}),
+                **({"priority": requalify["priority"]} if "priority" in requalify else {}),
+            },
+            target={"roles": "all"},
+        ))
+        return await self.get_by_id(id)
+
+    async def start_treatment(
+        self,
+        id: str,
+        *,
+        location: str,
+        actor=None,
+        actor_id: Optional[str] = None,
+        actor_name: Optional[str] = None,
+        actor_role: Optional[str] = None,
+    ):
+        """BR-TRAITEMENT-PROGRESSIF-001 — « Démarrer le traitement ».
+
+        Deuxième geste du workflow progressif, entre le constat (tâche 2.1) et la
+        résolution (tâche 2.2). Il matérialise le début RÉEL de l'intervention :
+        l'horodatage est pris **ici, côté serveur**, jamais reçu du navigateur.
+
+        Le lieu est saisi par le traitant et lui seul : le demandeur ne le
+        renseigne plus à la création (décision produit du 2026-09-27).
+        """
+        clean_location = location.strip() if isinstance(location, str) else ""
+        if not clean_location:
+            raise self.bad_request(
+                "Indiquez le lieu de l'intervention.",
+                error_code=ErrorCode.MISSING_REQUIRED_FIELD,
+            )
+
+        current = await self.get_by_id(id)
+        if actor is not None:
+            assert_is_current_handler(actor, current)
+
+        # Double démarrage : refus explicite plutôt qu'une transition invalide.
+        if current.request_status == "in_progress":
+            raise self.bad_request(
+                "Le traitement de ce ticket est déjà démarré.",
+                error_code=ErrorCode.INVALID_STATUS_TRANSITION,
+            )
+        if current.request_status != "assigned":
+            raise self.bad_request(
+                "Ce ticket doit vous être assigné avant que vous puissiez démarrer "
+                "son traitement.",
+                error_code=ErrorCode.INVALID_STATUS_TRANSITION,
+            )
+
+        # Démarrage sans constat : refus. On réutilise la garde de `resolve()`
+        # plutôt que d'en écrire une seconde — elle porte déjà la règle exacte
+        # (exigé seulement si l'intervention porte `field_check_required`, donc
+        # du technicien) et retrouve le constat de l'intervention EN COURS, celui
+        # d'un intervenant précédent ne valant pas pour le suivant.
+        self._assert_field_check_done(current)
+        infos = dict(current.infos) if isinstance(current.infos, dict) else {}
+
+        started_at = datetime.now(timezone.utc)
+        infos["treatment_started_at"] = started_at.isoformat()
+        infos["treatment_location"] = clean_location
+
+        translated = await self._translate_codes({"request_status": "in_progress"})
+        updated = await self.repo.update(
+            str(id),
+            # `location_label` est le champ que le PV imprime déjà (`place`) :
+            # on le renseigne ici plutôt que d'en créer un second.
+            {"infos": infos, "location_label": clean_location, **translated},
+            commit=False,
+        )
+        if updated is None:
+            raise self.not_found(
+                "Cette demande n'existe pas.", error_code=ErrorCode.REQUEST_NOT_FOUND
+            )
+
+        wf_id = await self._get_or_create_workflow(int(id))
+        await self.detail_repo.create_event({
+            "workflow_id": wf_id,
+            "event_type": "treatment_started",
+            "label": "Traitement démarré",
+            "actor_id": actor_id,
+            "actor_name": actor_name,
+            "activated": True,
+            "infos": self._clean_infos({
+                "actor_role": actor_role,
+                "source_role": actor_role,
+                "old_status": "assigned",
+                "new_status": "in_progress",
+                "treatment_location": clean_location,
+                "treatment_started_at": started_at.isoformat(),
+                **self._current_intervention_meta(current.infos),
+            }),
+        }, commit=False)
+
+        await emit_event(AppEvent(
+            type="request.status_changed",
+            payload={"id": str(id), "status": "in_progress"},
+            target={"roles": "all"},
+        ))
+        return await self.get_by_id(id)
+
+    async def _notify_handling_chiefs(
+        self, request, request_id: str, findings: str, actor_name: Optional[str],
+    ) -> None:
+        """Prévient le(s) chef(s) de service de l'unité TRAITANTE — celle que la
+        qualification a inscrite sur le ticket. Choix déterministe, plutôt que de
+        rechercher dans le journal qui a qualifié."""
+        if not request.unity_id:
+            return
+        rows = await self.session.execute(
+            select(Account.id).where(
+                Account.unity_id == int(request.unity_id),
+                Account.role == "chief-service",
+                Account.deleted_at.is_(None),
+            )
+        )
+        who = actor_name or "L'intervenant"
+        ref = getattr(request, "ref", "")
+        for (chief_id,) in rows.all():
+            await emit_notif(
+                self.session,
+                recipient_id=str(chief_id),
+                title="Écart constaté sur le terrain",
+                body=(
+                    f"{who} signale un écart entre la demande {ref} "
+                    f"et l'état réel constaté : {findings[:180]}"
+                ),
+                type="warning",
+                request_id=str(request_id),
+                action_label="Ouvrir le ticket",
+                action_url=f"/app/requests/{request_id}",
+                commit=False,
+            )
+
+    # ── PV d'intervention — circuit (procédure tâches 3.3 et 3.4) ─────────────
+
+    @staticmethod
+    def _pv_state(request) -> dict[str, Any]:
+        """État du PV, lu depuis `infos`. Aucune table ni colonne : le PV est un
+        document dérivé du ticket, seul son circuit est journalisé."""
+        infos = request.infos if isinstance(request.infos, dict) else {}
+        return {
+            "validated_at": infos.get("pv_validated_at"),
+            "validated_by": infos.get("pv_validated_by"),
+            "submitted_at": infos.get("pv_submitted_at"),
+            "submitted_by": infos.get("pv_submitted_by"),
+            "archived_at": infos.get("pv_archived_at"),
+            "archived_by": infos.get("pv_archived_by"),
+        }
+
+    async def record_pv_validation(
+        self,
+        request_id: str,
+        *,
+        confirmed: bool,
+        actor_id: Optional[str] = None,
+        actor_name: Optional[str] = None,
+        automatic: bool = False,
+    ) -> bool:
+        """Tâche 3.2 — « valider le dépannage » par le demandeur.
+
+        Appelé depuis `ServiceAppreciation` : la validation n'est pas un geste
+        supplémentaire, c'est la confirmation de résolution que le demandeur
+        donne déjà avec son appréciation. On l'inscrit ici au circuit du PV
+        plutôt que de lui créer une seconde validation concurrente.
+
+        `confirmed=False` (le demandeur conteste, le ticket est rouvert) efface
+        tout le circuit : le PV de l'intervention précédente ne vaut plus, et
+        celle qui suivra devra produire le sien."""
+        current = await self.get_by_id(request_id)
+        infos = dict(current.infos) if isinstance(current.infos, dict) else {}
+        if confirmed:
+            if infos.get("pv_validated_at"):
+                return False  # déjà validé, on ne réécrit pas l'horodatage d'origine
+            infos["pv_validated_at"] = datetime.now(timezone.utc).isoformat()
+            infos["pv_validated_by"] = actor_id
+            # BR-AUTO-VALIDATION-001 — distingue une validation SUBIE (silence du
+            # demandeur pendant le délai) d'une validation DONNÉE. Sans ce drapeau,
+            # les deux seraient indiscernables dans le journal comme dans les
+            # statistiques, et l'on croirait à une approbation explicite.
+            infos["pv_validated_automatically"] = bool(automatic)
+            label = (
+                f"Dépannage validé automatiquement — sans réponse du demandeur "
+                f"sous {AUTO_VALIDATION_DAYS} jours"
+                if automatic
+                else f"Dépannage validé par le demandeur — {actor_name or ''}".strip(" —")
+            )
+        else:
+            for key in (
+                "pv_validated_at", "pv_validated_by",
+                "pv_submitted_at", "pv_submitted_by",
+                "pv_archived_at", "pv_archived_by",
+            ):
+                infos.pop(key, None)
+            label = "Dépannage contesté par le demandeur — circuit du PV réinitialisé"
+
+        await self.repo.update(request_id, {"infos": infos}, commit=False)
+        wf_id = await self._get_or_create_workflow(int(request_id))
+        await self.detail_repo.create_event({
+            "workflow_id": wf_id,
+            "event_type": "pv_validated" if confirmed else "pv_invalidated",
+            "label": label,
+            "actor_id": actor_id,
+            "actor_name": actor_name,
+            "infos": self._clean_infos({
+                "actor_role": "system" if automatic else "user",
+                "source_role": "system" if automatic else "user",
+                "auto_validated": bool(automatic) if confirmed else None,
+            }),
+        }, commit=False)
+
+        # BR-TRAITEMENT-PROGRESSIF-001 — soumission AUTOMATIQUE au chef de
+        # division dès que le demandeur a validé. Le traitant n'a plus de geste
+        # manuel à faire : « Terminer le traitement » enclenche le circuit, la
+        # validation du demandeur (tâche 3.2) le libère. La tâche 3.2 reste donc
+        # un vrai point de contrôle, elle n'est pas court-circuitée.
+        #
+        # Le PV est soumis AU NOM DU TRAITANT (`assignee_id`), pas du demandeur
+        # qui valide : c'est lui qui l'a établi (tâche 3.1).
+        #
+        # Idempotence : on ne soumet que si ce n'est pas déjà fait, donc une
+        # double validation ou un double clic ne produit ni seconde soumission,
+        # ni seconde transition, ni notification en double.
+        if confirmed and not infos.get("pv_submitted_at"):
+            await self._record_pv_submission(
+                current,
+                infos,
+                actor_id=str(current.assignee_id) if current.assignee_id else None,
+                actor_name=infos.get("current_intervenant_name"),
+                actor_role=None,
+            )
+        return True
+
+    def _assert_is_last_handler(self, request, actor) -> None:
+        """Le PV est soumis APRÈS la résolution, donc sur un statut terminal —
+        `assert_is_current_handler` ne convient pas, sa liste de statuts
+        autorisés étant `COLLABORATIVE_STATUSES`. La règle reste la même sur le
+        fond : c'est l'intervenant qui a traité le ticket, pas un rôle."""
+        if normalize_role(str(getattr(actor, "role", "") or "")) == "admin":
+            return
+        assignee_id = getattr(request, "assignee_id", None)
+        actor_id = getattr(actor, "id", None)
+        if assignee_id is None or actor_id is None or str(assignee_id) != str(actor_id):
+            raise self.forbidden(
+                "Seul l'intervenant qui a traité ce ticket peut soumettre son PV.",
+            )
+
+    async def pv_submit(
+        self,
+        id: str,
+        *,
+        attachments: Optional[list[dict]] = None,
+        actor=None,
+        actor_id: Optional[str] = None,
+        actor_name: Optional[str] = None,
+        actor_role: Optional[str] = None,
+    ):
+        """Tâche 3.3 — « Soumettre le PV d'intervention au Chef de division ».
+
+        Le destinataire n'est pas choisi : c'est le chef de division qui a
+        réparti ce ticket (`distributor_id`), déjà enregistré par la tâche 1.4.
+        La pièce jointe facultative est le PV **signé et scanné** — la signature
+        étant manuscrite, c'est ainsi qu'elle entre dans le système."""
+        current = await self.get_by_id(id)
+        if actor is not None:
+            self._assert_is_last_handler(current, actor)
+        if current.request_status not in {"resolved", "closed"}:
+            raise self.bad_request(
+                "Terminez le traitement avant de soumettre le PV d'intervention.",
+                error_code=ErrorCode.INVALID_STATUS_TRANSITION,
+            )
+        # La tâche 3.2 (« valider le dépannage », par le demandeur) précède la
+        # 3.3 : on ne soumet pas au chef de division un PV que le demandeur n'a
+        # pas encore validé.
+        if not self._pv_state(current)["validated_at"]:
+            raise self.bad_request(
+                "Le demandeur n'a pas encore validé le dépannage : le PV ne peut "
+                "pas être soumis.",
+                error_code=ErrorCode.INVALID_STATUS_TRANSITION,
+            )
+
+        infos = dict(current.infos) if isinstance(current.infos, dict) else {}
+        return await self._record_pv_submission(
+            current,
+            infos,
+            actor_id=actor_id,
+            actor_name=actor_name,
+            actor_role=actor_role,
+            attachment_count=len(attachments or []) or None,
+        )
+
+    async def _record_pv_submission(
+        self,
+        current,
+        infos: dict,
+        *,
+        actor_id: Optional[str],
+        actor_name: Optional[str],
+        actor_role: Optional[str],
+        attachment_count: Optional[int] = None,
+    ):
+        """Écrit la soumission du PV — marqueurs, journal, notification au chef de
+        division, événement temps réel.
+
+        Partagée par la soumission manuelle (`pv_submit`) et la soumission
+        AUTOMATIQUE déclenchée par la validation du demandeur
+        (`record_pv_validation`) : un seul endroit produit une soumission, donc
+        les deux chemins ne peuvent pas diverger. `infos` est muté puis écrit par
+        l'appelant unique ci-dessous, ce qui garde l'opération dans la même
+        transaction que ce qui l'a déclenchée.
+
+        **Idempotence** : l'appelant vérifie `pv_submitted_at` avant d'appeler.
+        """
+        request_id = str(current.id)
+        infos["pv_submitted_at"] = datetime.now(timezone.utc).isoformat()
+        infos["pv_submitted_by"] = actor_id
+        obj = await self.repo.update(request_id, {"infos": infos}, commit=False)
+
+        wf_id = await self._get_or_create_workflow(int(request_id))
+        await self.detail_repo.create_event({
+            "workflow_id": wf_id,
+            "event_type": "pv_submitted",
+            "label": f"PV d'intervention soumis au chef de division — {actor_name or ''}".strip(" —"),
+            "actor_id": actor_id,
+            "actor_name": actor_name,
+            "infos": self._clean_infos({
+                "actor_role": actor_role,
+                "source_role": actor_role,
+                "attachment_count": attachment_count,
+            }),
+        }, commit=False)
+
+        if current.distributor_id:
+            await emit_notif(
+                self.session,
+                recipient_id=str(current.distributor_id),
+                title="PV d'intervention à archiver",
+                body=(
+                    f"Le PV du ticket {getattr(current, 'ref', '')} vous est soumis. "
+                    f"Enregistrez-le et archivez-le."
+                ),
+                type="info",
+                request_id=request_id,
+                action_label="Ouvrir le suivi des interventions",
+                action_url="/app/pv-tracking",
+                commit=False,
+            )
+        await emit_event(AppEvent(
+            type="request.pv_submitted",
+            payload={"id": request_id},
+            target={"user_ids": [int(current.distributor_id)]} if current.distributor_id else {"roles": "all"},
+        ))
+        return obj
+
+    async def pv_archive(
+        self,
+        id: str,
+        *,
+        actor=None,
+        actor_id: Optional[str] = None,
+        actor_name: Optional[str] = None,
+        actor_role: Optional[str] = None,
+    ):
+        """Tâche 3.4 — « Enregistrer et archiver le PV d'intervention ».
+
+        Réservé au chef de division destinataire (`distributor_id`), l'admin
+        gardant son bypass habituel. Archiver un PV qui n'a pas été soumis n'a
+        pas de sens : la tâche 3.3 précède la 3.4."""
+        current = await self.get_by_id(id)
+        actor_normalized = normalize_role(str(getattr(actor, "role", actor_role or "") or ""))
+        if actor_normalized != "admin":
+            if not current.distributor_id or str(current.distributor_id) != str(getattr(actor, "id", "")):
+                raise self.forbidden(
+                    "Seul le chef de division qui a réparti ce ticket peut archiver son PV.",
+                )
+        state = self._pv_state(current)
+        if not state["submitted_at"]:
+            raise self.bad_request(
+                "Ce PV n'a pas encore été soumis par l'intervenant.",
+                error_code=ErrorCode.INVALID_STATUS_TRANSITION,
+            )
+
+        infos = dict(current.infos) if isinstance(current.infos, dict) else {}
+        infos["pv_archived_at"] = datetime.now(timezone.utc).isoformat()
+        infos["pv_archived_by"] = actor_id
+        obj = await self.repo.update(id, {"infos": infos}, commit=False)
+
+        wf_id = await self._get_or_create_workflow(int(id))
+        await self.detail_repo.create_event({
+            "workflow_id": wf_id,
+            "event_type": "pv_archived",
+            "label": f"PV d'intervention enregistré et archivé — {actor_name or ''}".strip(" —"),
+            "actor_id": actor_id,
+            "actor_name": actor_name,
+            "infos": self._clean_infos({"actor_role": actor_role, "source_role": actor_role}),
+        }, commit=False)
+
+        await emit_event(AppEvent(
+            type="request.pv_archived",
+            payload={"id": str(id)},
+            target={"roles": "all"},
+        ))
+        return obj
+
+    async def list_pv_tracking(self, account_id: str, *, page: int = 1, limit: int = 50):
+        """TSI — Tableau de Suivi des Interventions (livrable de la tâche 3.4).
+
+        Distinct du rapport `GET /reports/interventions`, qui agrège des
+        statistiques : le TSI est un suivi **ligne à ligne**, du ticket réparti
+        jusqu'à l'archivage de son PV."""
+        items, total = await self.repo.list_pv_tracking_for(account_id, page=page, limit=limit)
+        return self.paginate(self._serialize(items, PvTrackingItemResponse), total, page, limit)
+
+    async def list_resolved_by(self, account_id: str, *, page: int = 1, limit: int = 50):
+        """Onglet « Tickets résolus » — le travail termine de l'intervenant connecte.
+
+        `RequestListItemResponse` et non `RequestResponse` : cette liste n'a
+        besoin ni de l'historique de workflow ni du CSAT, et le schema allege
+        n'expose pas `proposed_solution`.
+        """
+        items, total = await self.repo.list_resolved_by(account_id, page=page, limit=limit)
+        return self.paginate(self._serialize(items, RequestListItemResponse), total, page, limit)
 
     # ── Lectures unitaires ────────────────────────────────────────────────────
 
@@ -912,7 +1972,7 @@ class RequestService(BaseService):
             select(Account.id)
             .outerjoin(load_sq, Account.id == load_sq.c.assignee_id)
             .where(Account.unity_id == unity_id)
-            .where(Account.role == "agent-support")
+            .where(Account.role.in_(["chief-service", "technicien", "chef-division-support"]))
             .where(Account.account_status == "active")
             .where(or_(Account.availability.is_(None), Account.availability == "available"))
             .where(Account.deleted_at.is_(None))
@@ -949,6 +2009,35 @@ class RequestService(BaseService):
         })
 
     # ── Routage automatique ───────────────────────────────────────────────────
+
+    async def _notify_queue_managers(self, obj, *, reason: str) -> None:
+        """Prévient les gestionnaires de la file d'attente qu'un ticket y attend.
+
+        BR-NO-AUTO-HANDOVER-001 — plus aucun ticket n'est attribué automatiquement,
+        donc il n'y a plus d'assigné à notifier. Ce sont les titulaires de la file
+        (chef de service, et l'admin qui y a accès) qu'il faut alerter, sans quoi
+        un ticket pourrait dormir sans que personne ne sache qu'il est arrivé.
+        """
+        from api.repositories.RepositoryAccount import AccountRepository
+
+        acc_repo = AccountRepository(self.session)
+        managers, _ = await acc_repo.list(
+            filters={"role": ["chief-service", "admin"]},
+            only_active=True,
+            limit=50,
+        )
+        for manager in managers:
+            await emit_notif(
+                self.session,
+                recipient_id=str(manager.id),
+                title="Nouveau ticket à qualifier",
+                body=f"Le ticket {obj.ref} est en file d'attente ({reason}).",
+                type="info",
+                request_id=str(obj.id),
+                action_label="Ouvrir la file d'attente",
+                action_url="/app/queue",
+                commit=False,
+            )
 
     async def _apply_routing(
         self,
@@ -1016,16 +2105,14 @@ class RequestService(BaseService):
                     )
                 # Fall-through au bloc triage ci-dessous
             else:
-                auto_assignee_id = (
-                    await self._select_auto_assignee(target_unity_id, exclude_id=actor_id)
-                    if matched.auto_assign
-                    else None
-                )
-                assignee_id = auto_assignee_id or (chief.id if chief else None)
-                assignee_role = "agent-support" if auto_assignee_id else "chief-service"
+                # BR-NO-AUTO-HANDOVER-001 — une règle de routage ORIENTE vers une
+                # unité, elle n'ATTRIBUE plus le ticket à une personne. Aucun
+                # niveau ne doit recevoir un ticket à traiter sans action d'envoi
+                # explicite : le ticket reste donc en file d'attente, où seuls le
+                # chef de service et l'admin le voient, et c'est la qualification
+                # qui désignera le traitant. `matched.auto_assign` est conservé en
+                # base et tracé dans l'événement, mais n'assigne plus personne.
                 event_label = f"Orientation automatique — {matched.name}"
-                if auto_assignee_id:
-                    event_label = f"{event_label} — auto-assignation agent"
 
                 await self.detail_repo.create_event({
                     "workflow_id": wf_id,
@@ -1033,80 +2120,68 @@ class RequestService(BaseService):
                     "label": event_label,
                     "actor_name": actor_name,
                     "actor_id": actor_id,
-                    "dest_id": assignee_id,
+                    "dest_id": None,
                     "unity_id": target_unity_id,
                     "activated": True,
                     "infos": self._clean_infos({
-                        "event_status": "pending_validation",
+                        "event_status": "to_qualify",
                         "rule_id": str(matched.id),
                         "rule_name": matched.name,
                         "auto_assign": matched.auto_assign,
-                        "auto_assigned": auto_assignee_id is not None,
+                        "auto_assigned": False,
                         "source_role": actor_role,
                         "actor_role": actor_role,
-                        "dest_role": assignee_role,
-                        "target_role": assignee_role,
-                        "target_user_id": str(assignee_id) if assignee_id else None,
-                        "target_user_name": self._account_display_name(chief) if not auto_assignee_id else None,
+                        "dest_role": "chief-service",
+                        "target_role": "chief-service",
                         "old_status": getattr(obj, "request_status", None),
-                        "new_status": "assigned",
+                        "new_status": "qualifying",
                         "target_unity_id": target_unity_id,
                     }),
                 }, commit=False)
 
-                assert_transition_allowed(obj.request_status, "assigned", actor_role=actor_role)
-                status_translated = await self._translate_codes({"request_status": "assigned"})
+                assert_transition_allowed(obj.request_status, "qualifying", actor_role=actor_role)
+                status_translated = await self._translate_codes({"request_status": "qualifying"})
                 await self.repo.update(str(obj.id), {
-                    "assignee_id": assignee_id,
                     "unity_id": target_unity_id,
-                    "in_triage": False,
+                    "in_triage": True,
                     **status_translated,
                 }, commit=False)
 
-                if assignee_id:
-                    await emit_notif(
-                        self.session,
-                        recipient_id=str(assignee_id),
-                        title="Nouveau ticket assigné" if auto_assignee_id else "Nouveau ticket à traiter",
-                        body=(
-                            f"Le ticket {obj.ref} vous a été assigné automatiquement. Vous pouvez commencer votre intervention."
-                            if auto_assignee_id
-                            else f"Le ticket {obj.ref} a été routé vers votre service."
-                        ),
-                        type="info",
-                        request_id=str(obj.id),
-                        action_label="Voir le ticket",
-                        action_url=f"/app/requests/{obj.id}",
-                        commit=False,
-                    )
+                await self._notify_queue_managers(obj, reason=f"orienté vers l'unité {target_unity_id}")
 
                 await emit_event(AppEvent(
                     type="request.routed",
                     payload={"id": obj.id, "unity_id": target_unity_id, "rule": matched.name},
                     target={"roles": "all"},
                 ))
-                self._logger.info(f"Demande {obj.ref} routée → unité={target_unity_id} chef={getattr(chief, 'id', None)}")
+                self._logger.info(
+                    f"Demande {obj.ref} orientée → unité={target_unity_id} "
+                    f"(file d'attente, aucune attribution automatique)"
+                )
                 return True
 
-        # Aucune règle OU conflit d'intérêt → triage / support général
-        support = await acc_repo.find_support_agent()
-
+        # Aucune règle OU conflit d'intérêt → file d'attente, SANS traitant.
+        #
+        # BR-NO-AUTO-HANDOVER-001 — ce chemin assignait le ticket au premier agent
+        # actif par ordre alphabétique (find_support_agent), tous rôles
+        # opérationnels confondus : un technicien ou un chef de division pouvait
+        # donc se voir attribuer un ticket sans qu'aucune action d'envoi ne le lui
+        # adresse. Le ticket reste désormais dans la file d'attente, visible du
+        # seul chef de service (et de l'admin), jusqu'à sa qualification.
         await self.detail_repo.create_event({
             "workflow_id": wf_id,
             "event_type": "routed_to_support",
-            "label": "Aucune règle de routage — envoi au support général",
+            "label": "Aucune règle de routage — mise en file d'attente",
             "actor_name": actor_name,
             "actor_id": actor_id,
-            "dest_id": support.id if support else None,
+            "dest_id": None,
             "activated": True,
             "infos": self._clean_infos({
                 "event_status": "to_qualify",
                 "source_role": actor_role,
                 "actor_role": actor_role,
-                "dest_role": "support",
-                "target_role": "support",
-                "target_user_id": str(support.id) if support else None,
-                "target_user_name": self._account_display_name(support) if support else None,
+                "dest_role": "chief-service",
+                "target_role": "chief-service",
                 "old_status": getattr(obj, "request_status", None),
                 "new_status": "qualifying",
             }),
@@ -1115,25 +2190,14 @@ class RequestService(BaseService):
         assert_transition_allowed(obj.request_status, "qualifying", actor_role=actor_role)
         status_qualifying = await self._translate_codes({"request_status": "qualifying"})
         await self.repo.update(str(obj.id), {
-            "assignee_id": support.id if support else None,
+            "assignee_id": None,
             "in_triage": True,
             **status_qualifying,
         }, commit=False)
 
-        if support:
-            await emit_notif(
-                self.session,
-                recipient_id=str(support.id),
-                title="Ticket à qualifier",
-                body=f"Le ticket {obj.ref} arrive au support général (aucune règle de routage).",
-                type="warning",
-                request_id=str(obj.id),
-                action_label="Qualifier",
-                action_url="/app/queue?tab=qualify",
-                commit=False,
-            )
+        await self._notify_queue_managers(obj, reason="aucune règle de routage")
 
-        self._logger.info(f"Demande {obj.ref} → triage (aucune règle matchée)")
+        self._logger.info(f"Demande {obj.ref} → file d'attente (aucun traitant désigné)")
         return False
 
     @staticmethod
@@ -1147,6 +2211,18 @@ class RequestService(BaseService):
 
     async def create(self, data: dict):
         self._logger.info(f"Création demande — catégorie={data.get('category')!r}")
+
+        # BR-NO-ORPHAN-TICKET-001 — toute demande naît DANS la file d'attente.
+        #
+        # `in_triage` valait False par défaut (modèle) et seul le routage, appelé
+        # après l'insertion, le passait à True. Or ce routage est volontairement
+        # « best effort » : en cas d'échec, il journalise et poursuit. Le ticket
+        # restait alors `new`, sans assigné et hors triage — donc invisible à la
+        # fois de la file d'attente (qui exige `in_triage`) et de toute boîte de
+        # traitement : plus personne ne pouvait le prendre en charge.
+        # L'état par défaut doit être l'état sûr ; le routage ne fait plus que
+        # l'affiner.
+        data.setdefault("in_triage", True)
 
         duplicate = await self.repo.find_duplicate(
             title=data.get("title", ""),
@@ -1182,6 +2258,16 @@ class RequestService(BaseService):
             )
             if sla_policy is not None:
                 data["sla_hours"] = sla_policy.resolution_h
+
+        # Traçabilité — identité organisationnelle du demandeur figée ici, une
+        # fois pour toutes (voir `_requester_identity_snapshot`).
+        requester_identity = await self._requester_identity_snapshot(data.get("requester_id"))
+        if requester_identity:
+            existing_infos = data.get("infos")
+            data["infos"] = {
+                **(existing_infos if isinstance(existing_infos, dict) else {}),
+                **requester_identity,
+            }
 
         obj = None
         workflow_steps: list[dict] = []
@@ -1248,7 +2334,7 @@ class RequestService(BaseService):
         await emit_event(AppEvent(
             type="request.created",
             payload={"id": obj.id, "ref": ref, "category": category_code},
-            target={"roles": ["agent-support", "chief-service", "chief-departement", "director", "admin"]},
+            target={"roles": ["chief-service", "technicien", "chef-division-support", "admin"]},
         ))
 
         # BR-NOTIFICATION-WORKFLOW-001 §5 — le demandeur doit être informé que son
@@ -1264,6 +2350,38 @@ class RequestService(BaseService):
                 request_id=str(obj.id),
                 action_label="Voir le ticket",
                 action_url=f"/app/requests/{obj.id}",
+                commit=False,
+            )
+
+        # Les chefs de service (CSSHF) tiennent la File d'attente : ils doivent
+        # apprendre qu'une demande est arrivée même s'ils étaient déconnectés au
+        # moment de sa création. L'événement SSE ci-dessus ne fait que rafraîchir
+        # les écrans déjà ouverts — il ne laisse aucune trace consultable plus
+        # tard. Le fan-out est volontairement limité à `chief-service` : l'admin
+        # voit la même file mais ne qualifie pas, le notifier à chaque création
+        # n'apporterait que du bruit.
+        from api.repositories.RepositoryAccount import AccountRepository
+
+        # `list_by_role_strict` et non `list_by_role` : cette dernière élargit
+        # `chief-service` au groupe {chief-service, technicien,
+        # chef-division-support} via `_role_filter`, ce qui notifierait des rôles
+        # qui n'ont pas accès à la File d'attente.
+        chiefs = await AccountRepository(self.session).list_by_role_strict(
+            "chief-service"
+        )
+        # Un chef de service qui crée sa propre demande reçoit déjà « Ticket
+        # créé » ci-dessus : l'exclure évite une double notification.
+        chief_ids = [str(c.id) for c in chiefs if str(c.id) != str(requester_id or "")]
+        if chief_ids:
+            await emit_bulk(
+                self.session,
+                recipient_ids=chief_ids,
+                title="Nouvelle demande à qualifier",
+                body=f"La demande {ref} vient d'être créée et attend une qualification.",
+                type="info",
+                request_id=str(obj.id),
+                action_label="Ouvrir la File d'attente",
+                action_url="/app/queue?tab=qualify",
                 commit=False,
             )
 
@@ -1343,8 +2461,16 @@ class RequestService(BaseService):
             and current is not None
             and str(new_assignee_id) != str(getattr(current, "assignee_id", None) or "")
         ):
+            # Base de fusion : les `infos` fournies par l'appelant si elles
+            # existent, sinon celles en base. Sans ça, un appelant qui patche
+            # `infos` ET l'assignation (cas de `qualify_triage`, qui y fige
+            # l'organisation traitante) verrait son patch silencieusement
+            # écrasé par l'état relu en base.
+            patched_infos = data.get("infos")
             new_infos, opening_meta = await self._open_intervention(
-                getattr(current, "infos", None), new_assignee_id, id
+                patched_infos if isinstance(patched_infos, dict) else getattr(current, "infos", None),
+                new_assignee_id,
+                id,
             )
             data = {**data, "infos": new_infos}
 
@@ -1410,10 +2536,8 @@ class RequestService(BaseService):
             # demandeur — cf. "new" = file d'attente. "pending" retiré : statut
             # inatteignable désormais (cf. ticket_actions.ALLOWED_TRANSITIONS).
             _notif_map = {
-                "qualified":    ("Ticket qualifié", "Votre ticket {ref} a été qualifié et sera traité prochainement.", "info", False),
                 "assigned":     ("Ticket pris en charge", "Votre ticket {ref} a été pris en charge par un intervenant.", "info", False),
                 "in_progress":  ("Ticket en cours de traitement", "Votre ticket {ref} est maintenant en cours de traitement.", "info", True),
-                "escalated":    ("Ticket escaladé", "Votre ticket {ref} a nécessité une prise en charge complémentaire.", "warning", True),
             }
             if status_code in _notif_map and obj is not None and obj.requester_id:
                 title_tpl, body_tpl, notif_type, send_email_flag = _notif_map[status_code]
@@ -1560,16 +2684,18 @@ class RequestService(BaseService):
         actor_role: Optional[str] = None,
         actor=None,
     ):
-        # BR-QUEUE-AUTO-START-001 — une assignation effective depuis la File
-        # d'attente démarre directement le traitement (`in_progress`), sans
-        # étape "assigned" intermédiaire ni second clic "Démarrer traitement".
+        # BR-TRAITEMENT-PROGRESSIF-001 — assigner désigne un intervenant ; le
+        # traitement ne démarre qu'à son geste explicite (`start_treatment`).
         current = await self._guard_ticket_action(
             id,
             "assign",
-            target_status="in_progress",
+            target_status="assigned",
             actor=actor,
             actor_role=actor_role,
         )
+        # BR-DISTRIBUTION-001 — la Distribution est la seule porte de sortie tant que
+        # le chef de division n'a pas tranche (cf. _assert_not_in_active_distribution).
+        self._assert_not_in_active_distribution(current, actor)
         row = await self.session.execute(
             select(
                 Account.unity_id,
@@ -1596,9 +2722,9 @@ class RequestService(BaseService):
         assignee_name = self._account_display_name(assignee_name_raw, assignee_firstname)
 
         if actor is not None:
+            # Perimetre elargi supprime avec les roles director/chief-departement
+            # (2026-09-25) : plus aucun role n'en beneficie.
             allowed_scope_unity_ids = None
-            if normalize_role(str(getattr(actor, "role", actor_role or "") or "")) in {"chief-departement", "director"}:
-                allowed_scope_unity_ids = await self._direction_unity_ids(getattr(actor, "unity_id", None))
             assert_assignment_allowed(
                 actor,
                 current,
@@ -1621,14 +2747,23 @@ class RequestService(BaseService):
         # BR-TRACE-001 — ouvre l'intervention du nouvel assigné.
         new_infos, opening_meta = await self._open_intervention(current.infos, assignee_id, id)
 
-        # BR-QUEUE-AUTO-START-001 — démarrage immédiat du traitement.
-        translated = await self._translate_codes({"request_status": "in_progress"})
-        obj = await self.repo.update(id, {
+        # BR-TRAITEMENT-PROGRESSIF-001 — le ticket est assigné, pas démarré.
+        translated = await self._translate_codes({"request_status": "assigned"})
+        assign_patch = {
             "assignee_id": assignee_id,
             "in_triage": False,
             "infos": new_infos,
             **translated,
-        }, commit=False)
+        }
+        # BR-QUALIF-ORG-001 — l'organisation traitante est figée à la
+        # qualification et ne doit jamais être réécrite ensuite. Mais une
+        # assignation directe (routage dynamique vers un agent, sans passer par
+        # la file de qualification) laissait `unity_id` vide : le ticket
+        # n'appartenait alors à aucune unité et disparaissait de toutes les vues
+        # scopées par unité. On ne la renseigne donc QUE si elle est encore vide.
+        if current.unity_id is None and assignee_unity_id is not None:
+            assign_patch["unity_id"] = assignee_unity_id
+        obj = await self.repo.update(id, assign_patch, commit=False)
         if obj is None:
             raise self.not_found("Cette demande n'existe pas.", error_code=ErrorCode.REQUEST_NOT_FOUND)
         wf_id_assign = await self._get_or_create_workflow(int(id))
@@ -1782,11 +2917,11 @@ class RequestService(BaseService):
         """
         BR-TRANSMIT-001 — "Terminer le traitement". Autorisé à l'intervenant actuel
         (request.assignee_id == actor.id) parmi les rôles traitants, sans restriction
-        de rôle supplémentaire : remplace l'ancienne exclusion de chief-departement
-        (Lot 3.2) et l'ancienne limite "director → ticket escaladé uniquement"
+        de rôle supplémentaire (les restrictions historiques portaient sur les
+        rôles chef de département et directeur, retirés le 2026-09-25)
         (BR-DIRECTOR-RESOLVE-001). Résumé/solution/travail réalisé désormais
         obligatoires pour tous les rôles (remplace le motif "exceptionnel" réservé
-        à chief-service, Lot 2.6).
+        à chief-service (role supprime), Lot 2.6).
         """
         clean_summary = summary.strip() if isinstance(summary, str) else ""
         clean_solution = solution.strip() if isinstance(solution, str) else ""
@@ -1806,6 +2941,16 @@ class RequestService(BaseService):
         current = await self.get_by_id(id)
         if actor is not None:
             assert_is_current_handler(actor, current)
+        # Procédure tâche 2.1 avant 2.2 — pas de résolution sans constat terrain.
+        self._assert_field_check_done(current)
+        # BR-TRAITEMENT-PROGRESSIF-001 — pas de terminaison sans démarrage. Seul
+        # `assigned` traduit un traitement jamais démarré : un ticket en attente
+        # ou escaladé a, lui, bien été démarré auparavant, et reste résoluble.
+        if current.request_status == "assigned":
+            raise self.bad_request(
+                "Démarrez le traitement avant de le terminer.",
+                error_code=ErrorCode.INVALID_STATUS_TRANSITION,
+            )
         # Transition de statut toujours validée, y compris pour admin (comportement
         # inchangé : BYPASS_TRANSITION_ROLES n'est jamais activé sur ce chemin).
         assert_transition_allowed(current.request_status, "resolved", actor_role=effective_role or None)
@@ -1875,10 +3020,18 @@ class RequestService(BaseService):
         await emit_notif(
             self.session,
             recipient_id=getattr(obj, "requester_id", None),
+            # Titre inchangé (« Ticket résolu ») : le délai de validation est
+            # annoncé dans le corps, pas dans le titre.
             title="Ticket résolu",
             body=(
                 f"Le traitement du ticket {obj.ref} est terminé. Résumé : {clean_summary} "
-                f"Consultez la solution et confirmez la résolution ou réouvrez le ticket si nécessaire."
+                f"Consultez la solution, puis confirmez la résolution ou rouvrez le ticket "
+                f"si le problème persiste. "
+                # BR-AUTO-VALIDATION-001 — le demandeur doit savoir dès maintenant
+                # que son silence vaudra acceptation : la relance part à la
+                # résolution, pas à l'approche de l'échéance.
+                f"Sans réponse de votre part sous {AUTO_VALIDATION_DAYS} jours, "
+                f"la résolution sera validée automatiquement."
             ),
             type="success",
             request_id=id,
@@ -1888,6 +3041,102 @@ class RequestService(BaseService):
         )
         await emit_event(AppEvent(type="request.resolved", payload={"id": id}, target={"roles": "all"}))
         return obj
+
+    async def list_transmit_targets(self, id: str, *, actor) -> dict:
+        """Destinataires autorisés pour « Transmettre le traitement ».
+
+        BR-TRANSMIT-SCOPE-TECH-001 — un technicien ne choisit pas librement dans
+        l'organisation : il ne peut transmettre qu'à ses collègues techniciens du
+        MÊME service, ou remonter au responsable qui lui a distribué ce ticket
+        (`distributor_id` — le chef de division dans le circuit de distribution).
+        Le chef de service n'est donc pas une cible possible pour lui.
+
+        Les autres rôles traitants gardent l'annuaire libre : `restricted=False`,
+        et le client conserve ses filtres direction/département/service.
+
+        Une seule source de vérité : cette méthode alimente la liste affichée ET
+        le contrôle de `transmit_treatment()`. Masquer des champs côté client ne
+        protège rien — l'API resterait appelable directement.
+        """
+        from api.repositories.RepositoryAccount import AccountRepository
+
+        current = await self.repo.get_by_id(id)
+        if current is None:
+            raise self.not_found("Cette demande n'existe pas.", error_code=ErrorCode.REQUEST_NOT_FOUND)
+
+        if normalize_role(getattr(actor, "role", "")) != "technicien":
+            return {"restricted": False, "items": []}
+
+        acc_repo = AccountRepository(self.session)
+        allowed: dict[int, Any] = {}
+
+        # 1. Collègues techniciens du même service (hors soi-même).
+        if getattr(actor, "unity_id", None) is not None:
+            peers, _ = await acc_repo.list(
+                filters={"role": "technicien", "unity_id": actor.unity_id},
+                only_active=True,
+                limit=200,
+            )
+            for peer in peers:
+                if int(peer.id) != int(actor.id):
+                    allowed[int(peer.id)] = peer
+
+        # 2. Sa sortie vers le haut : le chef de division.
+        #
+        # En priorité celui qui lui a distribué CE ticket. À défaut — ticket reçu
+        # par transmission directe, sans passer par la file Distribution, donc
+        # sans `distributor_id` — les chefs de division de son service. Sans ce
+        # repli, un technicien dans ce cas n'aurait AUCUNE cible hiérarchique et
+        # ne pourrait plus faire remonter le ticket : il resterait bloqué avec.
+        distributor_id = getattr(current, "distributor_id", None)
+        if distributor_id is not None and int(distributor_id) != int(actor.id):
+            distributor = await acc_repo.get_by_id(int(distributor_id))
+            if distributor is not None and distributor.status is True:
+                allowed[int(distributor.id)] = distributor
+        elif getattr(actor, "unity_id", None) is not None:
+            chiefs, _ = await acc_repo.list(
+                filters={"role": "chef-division-support", "unity_id": actor.unity_id},
+                only_active=True,
+                limit=50,
+            )
+            for chief in chiefs:
+                if int(chief.id) != int(actor.id):
+                    allowed[int(chief.id)] = chief
+
+        items = [
+            {
+                "id": str(acc.id),
+                "name": self._account_display_name(acc),
+                # « Badge » au sens du formulaire : le matricule du personnel.
+                "matricule": getattr(acc, "matricule", None),
+                "role": normalize_role(acc.role),
+                # Trié en tête : la voie de remontée hiérarchique, qu'elle vienne
+                # du distributeur de ce ticket ou du repli sur le service.
+                "is_distributor": (
+                    int(acc.id) == int(distributor_id) if distributor_id
+                    else normalize_role(acc.role) == "chef-division-support"
+                ),
+            }
+            for acc in allowed.values()
+        ]
+        # Le responsable d'abord (remontée hiérarchique), puis les pairs par nom.
+        items.sort(key=lambda it: (not it["is_distributor"], (it["name"] or "").lower()))
+        return {"restricted": True, "items": items}
+
+    async def _assert_transmit_target_in_scope(self, current, actor, target) -> None:
+        """Verrou serveur de BR-TRANSMIT-SCOPE-TECH-001 (voir list_transmit_targets)."""
+        if actor is None or normalize_role(getattr(actor, "role", "")) != "technicien":
+            return
+
+        allowed_ids = {
+            int(it["id"]) for it in (await self.list_transmit_targets(str(current.id), actor=actor))["items"]
+        }
+        if int(target.id) not in allowed_ids:
+            raise self.forbidden(
+                "En tant que technicien, vous ne pouvez transmettre qu'à un technicien "
+                "de votre service ou au responsable qui vous a confié ce ticket.",
+                hint="Choisissez un destinataire dans la liste proposée.",
+            )
 
     async def transmit_treatment(
         self,
@@ -1948,6 +3197,7 @@ class RequestService(BaseService):
                 "Ce destinataire n'a pas un rôle de traitement autorisé.",
                 error_code=ErrorCode.INVALID_FIELD_VALUE,
             )
+        await self._assert_transmit_target_in_scope(current, actor, target)
         assert_requester_is_not_handler(current, target_id_int)
         target_name = self._account_display_name(target)
 
@@ -2361,18 +3611,10 @@ class RequestService(BaseService):
 
         target_unity_db_id, target_parent_direction_id, target_label = target_unity
         target_direction_id = target_parent_direction_id or target_unity_db_id
+        # La direction de l'acteur n'etait resolue que pour `chief-departement`,
+        # role retire le 2026-09-25 : l'action est desormais reservee a l'admin,
+        # qui a un perimetre global.
         actor_direction_id = None
-        effective_actor_role = str(getattr(actor, "role", actor_role or "") or "").strip().lower()
-        actor_unity_id = getattr(actor, "unity_id", None)
-        if actor is not None and normalize_role(effective_actor_role) in {"chief-service", "chief-departement"} and actor_unity_id is not None:
-            actor_unity_row = await self.session.execute(
-                select(Unity.id, Unity.parent_direction_id)
-                .where(Unity.id == int(actor_unity_id), Unity.deleted_at.is_(None))
-            )
-            actor_unity = actor_unity_row.first()
-            if actor_unity is not None:
-                actor_unity_db_id, actor_parent_direction_id = actor_unity
-                actor_direction_id = actor_parent_direction_id or actor_unity_db_id
 
         if actor is not None:
             assert_service_reassignment_allowed(
@@ -2413,8 +3655,8 @@ class RequestService(BaseService):
                 "event_status": "pending_validation",
                 "source_role": actor_role,
                 "actor_role": actor_role,
-                "dest_role": getattr(chief, "role", None) or "chief",
-                "target_role": getattr(chief, "role", None) or "chief",
+                "dest_role": getattr(chief, "role", None) or "chief-service",
+                "target_role": getattr(chief, "role", None) or "chief-service",
                 "target_user_id": str(chief.id) if chief else None,
                 "target_user_name": self._account_display_name(chief) if chief else None,
                 "previous_unity_id": obj.unity_id,
@@ -2564,6 +3806,10 @@ class RequestService(BaseService):
         previous_assignee_id = obj.assignee_id
         wf_id = await self._get_or_create_workflow(int(id))
         acc_repo = AccountRepository(self.session)
+        # Le role `director` a ete retire le 2026-09-25 : cette recherche
+        # renvoie toujours une liste vide, le transfert de direction ne notifie
+        # donc plus personne nominativement. La variable est conservee car
+        # l'evenement et les notifications traitent deja le cas `None`.
         target_directors = await acc_repo.find_directors_by_direction(int(target_direction_db_id))
         first_director = target_directors[0] if target_directors else None
 
@@ -2581,8 +3827,8 @@ class RequestService(BaseService):
                 "event_status": "qualifying",
                 "source_role": actor_role,
                 "actor_role": actor_role,
-                "dest_role": "director",
-                "target_role": "director",
+                "dest_role": None,
+                "target_role": None,
                 "target_user_id": str(first_director.id) if first_director else None,
                 "target_user_name": self._account_display_name(first_director) if first_director else None,
                 "previous_direction_id": source_direction_id,

@@ -212,7 +212,7 @@ class TestLoginEndpoint:
         body = r.json().get("data", r.json())
         assert "needs_consent" not in body
         assert body["access_token"]
-        assert body["user"]["role"] == "agent-support"
+        assert body["user"]["role"] == "chief-service"
         assert body["user"]["central_user_id"] == 9022
         assert body["user"]["name"] == "Camara"
 
@@ -237,7 +237,7 @@ class TestLoginEndpoint:
         data = body.get("data", body)
         assert data["access_token"]
         assert data["refresh_token"]
-        assert data["user"]["role"] == "agent-support"  # qualify-support -> agent-support
+        assert data["user"]["role"] == "chief-service"  # qualify-support -> chief-service
 
     async def test_login_compte_inactif_retourne_401(self, anon_client, mock_central_auth, setup_db):
         """

@@ -19,7 +19,7 @@ import api.models  # noqa: F401 — enregistre toutes les tables dans Base.metad
 from api.configs.Database import engine, AsyncSessionLocal
 from api.configs.Environment import get_environment
 from api.models.base import Base
-from api.core import register_exception_handlers
+from api.core import central_auth, register_exception_handlers
 from api.core.middleware import RequestLoggingMiddleware, ResponseWrapperMiddleware
 from api.core.scheduler import start_scheduler, stop_scheduler
 from api.seed_references import seed_references
@@ -50,30 +50,23 @@ from api.routes import (
     sla_policy_router,
     sla_policy_read_router,
     routing_rule_router,
-    director_routing_router,
     workflow_router,
     request_workflow_router,
     workflow_detail_router,
     task_router,
     notification_router,
     activity_log_router,
-    knowledge_article_router,
-    announcement_router,
     appreciation_router,
     request_appreciation_router,
     csat_stats_router,
-    communication_setting_router,
     admin_config_router,
     users_router,
     users_me_router,
     users_avatars_router,
     users_staff_router,
-    knowledge_router,
-    knowledge_public_router,
     stats_router,
     agent_stats_router,
     reports_router,
-    escalation_router,
 )
 
 env = get_environment()
@@ -211,6 +204,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     start_scheduler(interval_minutes=10)
     yield
     stop_scheduler()
+    # Libère les connexions keep-alive vers la plateforme centrale.
+    await central_auth.close_central_client()
     logger.info("Arrêt de %s", env.APP_NAME)
 
 
@@ -264,27 +259,20 @@ app.include_router(attachment_router,            prefix=_API)
 app.include_router(sla_policy_read_router,       prefix=_API)
 app.include_router(sla_policy_router,            prefix=_API)
 app.include_router(routing_rule_router,          prefix=_API)
-app.include_router(director_routing_router,      prefix=_API)
 app.include_router(workflow_router,              prefix=_API)
 app.include_router(request_workflow_router,      prefix=_API)
 app.include_router(workflow_detail_router,       prefix=_API)
 app.include_router(task_router,                  prefix=_API)
 app.include_router(notification_router,          prefix=_API)
 app.include_router(activity_log_router,          prefix=_API)
-app.include_router(knowledge_article_router,     prefix=_API)
-app.include_router(announcement_router,          prefix=_API)
 app.include_router(appreciation_router,          prefix=_API)
 app.include_router(request_appreciation_router,  prefix=_API)
 app.include_router(csat_stats_router,            prefix=_API)
-app.include_router(communication_setting_router,   prefix=_API)
 app.include_router(admin_config_router,          prefix=_API)
 app.include_router(users_avatars_router,         prefix=_API)
 app.include_router(users_me_router,              prefix=_API)
 app.include_router(users_staff_router,           prefix=_API)
 app.include_router(users_router,                 prefix=_API)
-app.include_router(knowledge_public_router,      prefix=_API)
-app.include_router(knowledge_router,             prefix=_API)
 app.include_router(stats_router,                 prefix=_API)
 app.include_router(agent_stats_router,           prefix=_API)
 app.include_router(reports_router,               prefix=_API)
-app.include_router(escalation_router,            prefix=_API)

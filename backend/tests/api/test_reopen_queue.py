@@ -61,7 +61,7 @@ def _dep(account_id: int, role: str, unity_id: int | None = None):
 async def _create_ticket_as(role_dep, unity_id: int, title_suffix: str) -> str:
     """Crée un ticket avec `role_dep` comme demandeur (requester_id forcé depuis
     l'acteur authentifié, cf. RouteRequest.create_request) — utilisé pour les
-    scénarios où le demandeur porte un rôle traitant (agent-support, etc.)."""
+    scénarios où le demandeur porte un rôle traitant (chief-service, etc.)."""
     payload = {**_REQUEST_PAYLOAD_BASE, "title": f"Test reopen-queue {title_suffix}", "unity_id": unity_id}
     resp = await _call_as(role_dep, "POST", "/api/v1/requests/", payload)
     assert resp.status_code == 201, resp.text
@@ -75,6 +75,12 @@ async def _assign_via_admin(auth_client, request_id: str, unity_id: int, assigne
             json={"category": "panne", "priority": "medium", "unit_id": unity_id, "assignee_id": assignee_id},
         )
         assert resp.status_code == 200, resp.text
+    # BR-TRAITEMENT-PROGRESSIF-001 — l'assignation ne demarre plus le traitement.
+    started = await _call_as(
+        _dep(assignee_id, "chief-service", unity_id), "POST",
+        f"/api/v1/requests/{request_id}/start-treatment", {"location": "Site EDG"},
+    )
+    assert started.status_code == 200, started.text
 
 
 async def _timeline(auth_client, request_id: str) -> list[dict]:
@@ -87,16 +93,17 @@ async def _timeline(auth_client, request_id: str) -> list[dict]:
 async def _build_resolved_ticket_with_two_cycles(auth_client, unity_id: int, suffix: str, agent_a: int, agent_b: int) -> str:
     """Ticket pris par agent_a, transmis a agent_b, resolu par agent_b — 2 cycles avant reouverture."""
     request_id = await _create_ticket(auth_client, unity_id, suffix)
+    # `_assign_via_admin` enchaine deja le demarrage (BR-TRAITEMENT-PROGRESSIF-001).
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=agent_a)
 
     transmit_resp = await _call_as(
-        _dep(agent_a, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
+        _dep(agent_a, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
         {"to_user_id": str(agent_b), "work_done": "Diagnostic effectue.", "reason": "Intervention specialisee necessaire."},
     )
     assert transmit_resp.status_code == 200, transmit_resp.text
 
     resolve_resp = await _call_as(
-        _dep(agent_b, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
+        _dep(agent_b, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
         _FULL_RESOLVE_BODY,
     )
     assert resolve_resp.status_code == 200, resolve_resp.text
@@ -114,8 +121,8 @@ async def _reopen_as_user(auth_client, request_id: str, reason: str):
 # ── 1-6. Réouverture immédiate : aucune approbation, statut/assignee/in_triage ─
 
 async def test_requester_reopens_immediately_no_approval_needed(auth_client, unity_id):
-    await _ensure_test_account(701, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(702, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(701, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(702, unity_id=unity_id, role="chief-service")
     request_id = await _build_resolved_ticket_with_two_cycles(auth_client, unity_id, "immediate", 701, 702)
 
     resp = await _reopen_as_user(auth_client, request_id, "Le probleme persiste apres la premiere resolution.")
@@ -128,8 +135,8 @@ async def test_requester_reopens_immediately_no_approval_needed(auth_client, uni
 
 
 async def test_reopen_without_reason_rejected(auth_client, unity_id):
-    await _ensure_test_account(703, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(704, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(703, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(704, unity_id=unity_id, role="chief-service")
     request_id = await _build_resolved_ticket_with_two_cycles(auth_client, unity_id, "no-reason", 703, 704)
 
     resp = await _reopen_as_user(auth_client, request_id, "   ")
@@ -139,8 +146,8 @@ async def test_reopen_without_reason_rejected(auth_client, unity_id):
 # ── 7-10. Historique intact, nouveau cycle créé, ancien intervenant non réaffecté ─
 
 async def test_reopen_preserves_history_and_creates_new_cycle(auth_client, unity_id):
-    await _ensure_test_account(705, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(706, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(705, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(706, unity_id=unity_id, role="chief-service")
     request_id = await _build_resolved_ticket_with_two_cycles(auth_client, unity_id, "history-intact", 705, 706)
 
     events_before = await _timeline(auth_client, request_id)
@@ -178,20 +185,20 @@ async def test_reopen_preserves_history_and_creates_new_cycle(auth_client, unity
 # ── 5-6. Critères File d'attente / absence de la boîte de l'ancien intervenant ──
 
 async def test_reopened_ticket_appears_in_triage_and_leaves_old_assignee_list(auth_client, unity_id):
-    await _ensure_test_account(707, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(708, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(707, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(708, unity_id=unity_id, role="chief-service")
     request_id = await _build_resolved_ticket_with_two_cycles(auth_client, unity_id, "queue-visible", 707, 708)
 
     resp = await _reopen_as_user(auth_client, request_id, "Necessite une nouvelle intervention.")
     assert resp.status_code == 200, resp.text
 
-    triage_resp = await _call_as(_dep(707, "agent-support", unity_id), "GET", "/api/v1/requests/triage?limit=100")
+    triage_resp = await _call_as(_dep(707, "chief-service", unity_id), "GET", "/api/v1/requests/triage?limit=100")
     assert triage_resp.status_code == 200, triage_resp.text
     triage_ids = {str(item["id"]) for item in triage_resp.json()["data"]["items"]}
     assert request_id in triage_ids, "le ticket reouvert doit apparaitre dans la File d'attente (/requests/triage)"
 
     old_assignee_resp = await _call_as(
-        _dep(708, "agent-support", unity_id), "GET", "/api/v1/requests/?assignee_id=708",
+        _dep(708, "chief-service", unity_id), "GET", "/api/v1/requests/?assignee_id=708",
     )
     assert old_assignee_resp.status_code == 200, old_assignee_resp.text
     old_assignee_ids = {str(item["id"]) for item in old_assignee_resp.json()["data"]["items"]}
@@ -201,10 +208,10 @@ async def test_reopened_ticket_appears_in_triage_and_leaves_old_assignee_list(au
 # ── Reprise depuis la File d'attente -> nouveau cycle collaboratif (non-régression) ─
 
 async def test_new_agent_can_take_ticket_and_resume_collaborative_workflow(auth_client, unity_id):
-    await _ensure_test_account(709, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(710, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(712, unity_id=unity_id, role="agent-support")  # nouvel agent C
-    await _ensure_test_account(713, unity_id=unity_id, role="agent-support")  # agent D
+    await _ensure_test_account(709, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(710, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(712, unity_id=unity_id, role="chief-service")  # nouvel agent C
+    await _ensure_test_account(713, unity_id=unity_id, role="chief-service")  # agent D
     request_id = await _build_resolved_ticket_with_two_cycles(auth_client, unity_id, "resume-workflow", 709, 710)
 
     resp = await _reopen_as_user(auth_client, request_id, "Necessite une nouvelle intervention.")
@@ -213,26 +220,33 @@ async def test_new_agent_can_take_ticket_and_resume_collaborative_workflow(auth_
     # Un acteur non courant (assignee=None) ne peut ni transmettre ni resoudre tant
     # que personne n'a repris le ticket.
     blocked_transmit = await _call_as(
-        _dep(709, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
+        _dep(709, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
         {"to_user_id": "710", "work_done": "x", "reason": "x"},
     )
     assert blocked_transmit.status_code in (400, 403), blocked_transmit.text
 
     # Agent C (jamais implique avant) prend le ticket depuis la File d'attente.
     take_resp = await _call_as(
-        _dep(712, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/qualify",
+        _dep(712, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/qualify",
         {"category": "panne", "priority": "medium", "unit_id": str(unity_id), "assignee_id": "712"},
     )
     assert take_resp.status_code == 200, take_resp.text
     taken_data = take_resp.json()["data"]
     assert taken_data["assignee_id"] == 712
-    # BR-QUEUE-AUTO-START-001 : la prise depuis la File d'attente (même sur un
-    # ticket réouvert, nouveau cycle) démarre directement le traitement.
-    assert taken_data["request_status"] == "in_progress"
+    # BR-TRAITEMENT-PROGRESSIF-001 : la prise depuis la File d'attente (même sur
+    # un ticket réouvert, nouveau cycle) assigne sans démarrer le traitement.
+    assert taken_data["request_status"] == "assigned"
+
+    # Le traitement demarre au geste explicite du nouvel intervenant.
+    start_resp = await _call_as(
+        _dep(712, "chief-service", unity_id), "POST",
+        f"/api/v1/requests/{request_id}/start-treatment", {"location": "Site EDG"},
+    )
+    assert start_resp.status_code == 200, start_resp.text
 
     # Agent C transmet a Agent D — le workflow collaboratif dynamique a bien repris.
     transmit_resp = await _call_as(
-        _dep(712, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
+        _dep(712, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
         {"to_user_id": "713", "work_done": "Nouveau diagnostic apres reouverture.", "reason": "Intervention complementaire necessaire."},
     )
     assert transmit_resp.status_code == 200, transmit_resp.text
@@ -240,7 +254,7 @@ async def test_new_agent_can_take_ticket_and_resume_collaborative_workflow(auth_
 
     # Agent D termine le nouveau traitement.
     final_resolve = await _call_as(
-        _dep(713, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
+        _dep(713, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
         _FULL_RESOLVE_BODY,
     )
     assert final_resolve.status_code == 200, final_resolve.text
@@ -258,20 +272,20 @@ async def test_new_agent_can_take_ticket_and_resume_collaborative_workflow(auth_
 # ── Autorisation : seul le demandeur peut réouvrir ─────────────────────────────
 
 async def test_non_requester_cannot_reopen(auth_client, unity_id):
-    await _ensure_test_account(714, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(715, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(714, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(715, unity_id=unity_id, role="chief-service")
     request_id = await _build_resolved_ticket_with_two_cycles(auth_client, unity_id, "unauthorized", 714, 715)
 
     resp = await _call_as(
-        _dep(715, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/reopen",
+        _dep(715, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/reopen",
         {"reason": "Tentative non autorisee."},
     )
     assert resp.status_code == 403, resp.text
 
 
 async def test_double_reopen_is_rejected(auth_client, unity_id):
-    await _ensure_test_account(716, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(717, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(716, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(717, unity_id=unity_id, role="chief-service")
     request_id = await _build_resolved_ticket_with_two_cycles(auth_client, unity_id, "double-reopen", 716, 717)
 
     first = await _reopen_as_user(auth_client, request_id, "Motif de test.")
@@ -286,14 +300,14 @@ async def test_double_reopen_is_rejected(auth_client, unity_id):
 # ── Requester ne devient jamais intervenant (BR-REQUESTER-NO-SELF-TREATMENT-001) ─
 
 async def test_requester_cannot_take_own_reopened_ticket(auth_client, unity_id):
-    """A (agent-support) crée son propre ticket, B le traite et le résout, A le
+    """A (chief-service) crée son propre ticket, B le traite et le résout, A le
     réouvre — A ne doit jamais pouvoir se le réassigner lui-même depuis la File
     d'attente, même après réouverture (intégration avec BR-REQUESTER-NO-SELF-
     TREATMENT-001, non affaibli par la réouverture immédiate)."""
-    a = _dep(718, "agent-support", unity_id)
-    b = _dep(719, "agent-support", unity_id)
-    await _ensure_test_account(718, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(719, unity_id=unity_id, role="agent-support")
+    a = _dep(718, "chief-service", unity_id)
+    b = _dep(719, "chief-service", unity_id)
+    await _ensure_test_account(718, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(719, unity_id=unity_id, role="chief-service")
 
     request_id = await _create_ticket_as(a, unity_id, "no-self-take-after-reopen")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=719)
@@ -334,8 +348,8 @@ async def test_reopen_notifications_requester_and_previous_handler(auth_client, 
     from tests.conftest import _TestSession
     from api.models.ModelNotification import Notification
 
-    await _ensure_test_account(720, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(721, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(720, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(721, unity_id=unity_id, role="chief-service")
     request_id = await _build_resolved_ticket_with_two_cycles(auth_client, unity_id, "notify-requester", 720, 721)
 
     resp = await _reopen_as_user(auth_client, request_id, "Motif de test notification.")
@@ -368,8 +382,8 @@ async def test_reopen_notifications_requester_and_previous_handler(auth_client, 
 # ── Pas d'affectation automatique de l'ancien intervenant ──────────────────────
 
 async def test_no_automatic_reassignment_to_previous_agent(auth_client, unity_id):
-    await _ensure_test_account(722, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(723, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(722, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(723, unity_id=unity_id, role="chief-service")
     request_id = await _build_resolved_ticket_with_two_cycles(auth_client, unity_id, "no-auto-reassign", 722, 723)
 
     resp = await _reopen_as_user(auth_client, request_id, "Test non-reaffectation automatique.")
@@ -380,8 +394,8 @@ async def test_no_automatic_reassignment_to_previous_agent(auth_client, unity_id
 # ── Ancien mécanisme supprimé : les routes n'existent plus ─────────────────────
 
 async def test_old_two_phase_routes_no_longer_exist(auth_client, unity_id):
-    await _ensure_test_account(724, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(725, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(724, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(725, unity_id=unity_id, role="chief-service")
     request_id = await _build_resolved_ticket_with_two_cycles(auth_client, unity_id, "old-routes-gone", 724, 725)
 
     # Les anciens chemins ne mènent plus à aucun comportement métier fonctionnel

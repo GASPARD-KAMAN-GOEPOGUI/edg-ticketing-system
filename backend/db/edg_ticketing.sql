@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS `account` (
   `firstname` varchar(200) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `email` varchar(320) COLLATE utf8mb4_unicode_ci NOT NULL,
   `phone` varchar(30) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `role` enum('public','user','agent-support','chief-service','chief-departement','director','admin') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `role` enum('public','user','chief-service','chief-service','chief-departement','director','admin') COLLATE utf8mb4_unicode_ci NOT NULL,
   `account_status` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
   `matricule` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `job` varchar(200) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -79,12 +79,12 @@ CREATE TABLE IF NOT EXISTS `account` (
 INSERT INTO `account` (`unity_id`, `name`, `firstname`, `email`, `phone`, `role`, `account_status`, `matricule`, `job`, `avatar_url`, `is_edg_employee`, `email_verified`, `mfa_enabled`, `availability`, `notif_sla_alerts`, `notif_escalations`, `notif_comments`, `notif_resolutions`, `activated_at`, `id`, `uuid`, `status`, `infos`, `created_at`, `updated_at`, `deleted_at`, `central_user_id`, `central_user_uuid`, `consent_accepted_at`, `consent_version`) VALUES
 (NULL, 'Administrateur EDG', NULL, 'admin@edg.gn', NULL, 'admin', 'active', NULL, NULL, NULL, 1, 1, 0, NULL, 1, 1, 1, 1, NULL, 1, 'bf9a0b7d-7e94-4c2f-a9f1-311f5ac16d38', 1, NULL, '2026-08-11 14:02:56', '2026-08-11 14:02:56', NULL, NULL, NULL, NULL, NULL),
 (16, 'GOEPOGUI', 'GASPARD', 'gaspard@edg.com.gn', NULL, 'admin', 'active', NULL, NULL, NULL, 1, 0, 0, NULL, 1, 1, 1, 1, NULL, 2, '78db3f6f-c968-4706-9428-68be2758899e', 1, '{\"reset_code_hash\": null, \"reset_code_attempts\": 0, \"reset_code_expires_at\": null}', '2026-08-11 15:02:57', '2026-08-12 17:44:27', NULL, 1467, '33de571e94cd11f1b1070afd1ed01c67', NULL, NULL),
-(16, 'Agent 1', 'Test', 'agent1@gmail.com', NULL, 'agent-support', 'active', NULL, NULL, NULL, 0, 0, 0, NULL, 1, 1, 1, 1, NULL, 3, '40a446b0-c15a-493b-a7d8-16f075b58345', 1, NULL, '2026-08-11 16:02:23', '2026-08-13 08:59:32', '2026-08-13 08:59:32', 1468, '0b1a8cae959e11f1824d0afd1ed01c67', NULL, NULL),
-(16, 'agent2', 'Test', 'agent2@gmail.com', NULL, 'agent-support', 'active', NULL, NULL, NULL, 0, 0, 0, NULL, 1, 1, 1, 1, NULL, 4, 'cf5a5281-2005-4fe7-a550-c489f6295579', 1, NULL, '2026-08-11 16:03:16', '2026-08-13 08:59:19', '2026-08-13 08:59:20', 1469, '2ae33ae0959e11f1824d0afd1ed01c67', NULL, NULL),
+(16, 'Agent 1', 'Test', 'agent1@gmail.com', NULL, 'chief-service', 'active', NULL, NULL, NULL, 0, 0, 0, NULL, 1, 1, 1, 1, NULL, 3, '40a446b0-c15a-493b-a7d8-16f075b58345', 1, NULL, '2026-08-11 16:02:23', '2026-08-13 08:59:32', '2026-08-13 08:59:32', 1468, '0b1a8cae959e11f1824d0afd1ed01c67', NULL, NULL),
+(16, 'agent2', 'Test', 'agent2@gmail.com', NULL, 'chief-service', 'active', NULL, NULL, NULL, 0, 0, 0, NULL, 1, 1, 1, 1, NULL, 4, 'cf5a5281-2005-4fe7-a550-c489f6295579', 1, NULL, '2026-08-11 16:03:16', '2026-08-13 08:59:19', '2026-08-13 08:59:20', 1469, '2ae33ae0959e11f1824d0afd1ed01c67', NULL, NULL),
 (NULL, 'GOEPOGUI', 'GASPARD KAMAN', 'gaspardkamangoepogui96@gmail.com', '+224624211919', 'user', 'active', NULL, NULL, NULL, 0, 0, 0, NULL, 1, 1, 1, 1, NULL, 5, '62f46d8d-5de5-4018-82da-f453bd86e358', 1, '{\"reset_code_hash\": \"f4b1f5ecc8c408396170140e5902a2915d5712b116abc84db3f30cb96d53b79c\", \"reset_code_attempts\": 0, \"reset_code_expires_at\": \"2026-08-14T12:42:29.057015\"}', '2026-08-11 16:06:08', '2026-08-14 12:27:29', NULL, 1447, '866ab2f03ce611f1ae520afd1ed01c67', NULL, NULL),
-(16, 'TOURE', 'AMADOU', 'toure@gmail.com', '+224612121212', 'agent-support', 'active', NULL, NULL, NULL, 0, 0, 0, NULL, 1, 1, 1, 1, NULL, 6, '92120037-b130-4868-8cc3-5a2d002e40ad', 1, NULL, '2026-08-11 16:40:28', '2026-08-12 12:52:35', NULL, 1470, '5dbef69895a311f1b0920afd1ed01c67', NULL, NULL),
-(16, 'GOEPOGUI', 'GASPARD KAMUS', 'goepoguigaspardkaman5@gmail.com', NULL, 'agent-support', 'active', NULL, NULL, NULL, 1, 0, 0, NULL, 1, 1, 1, 1, NULL, 7, '775f549e-1c77-4b4e-98ec-0dca60d252d0', 1, 'null', '2026-08-12 11:34:35', '2026-08-17 09:56:43', NULL, 1471, 'cb5b5720964111f1abab0afd1ed01c67', NULL, NULL),
-(16, 'ONIVOGUI', 'PAULETTE', 'onivoguipaulette5@gmail.com', NULL, 'agent-support', 'active', NULL, NULL, NULL, 1, 0, 0, NULL, 1, 1, 1, 1, NULL, 8, 'fcde1fd8-0a5c-486f-a996-3f7a9df2ce1d', 1, 'null', '2026-08-15 12:02:49', '2026-08-15 12:07:14', NULL, 1472, '3c43edce98a111f1990d0afd1ed01c67', NULL, NULL),
+(16, 'TOURE', 'AMADOU', 'toure@gmail.com', '+224612121212', 'chief-service', 'active', NULL, NULL, NULL, 0, 0, 0, NULL, 1, 1, 1, 1, NULL, 6, '92120037-b130-4868-8cc3-5a2d002e40ad', 1, NULL, '2026-08-11 16:40:28', '2026-08-12 12:52:35', NULL, 1470, '5dbef69895a311f1b0920afd1ed01c67', NULL, NULL),
+(16, 'GOEPOGUI', 'GASPARD KAMUS', 'goepoguigaspardkaman5@gmail.com', NULL, 'chief-service', 'active', NULL, NULL, NULL, 1, 0, 0, NULL, 1, 1, 1, 1, NULL, 7, '775f549e-1c77-4b4e-98ec-0dca60d252d0', 1, 'null', '2026-08-12 11:34:35', '2026-08-17 09:56:43', NULL, 1471, 'cb5b5720964111f1abab0afd1ed01c67', NULL, NULL),
+(16, 'ONIVOGUI', 'PAULETTE', 'onivoguipaulette5@gmail.com', NULL, 'chief-service', 'active', NULL, NULL, NULL, 1, 0, 0, NULL, 1, 1, 1, 1, NULL, 8, 'fcde1fd8-0a5c-486f-a996-3f7a9df2ce1d', 1, 'null', '2026-08-15 12:02:49', '2026-08-15 12:07:14', NULL, 1472, '3c43edce98a111f1990d0afd1ed01c67', NULL, NULL),
 (16, 'KAHN', 'IBRAHIMA', 'ibrahimakahn@edg.com.gn', '+224621666024', 'user', 'active', NULL, NULL, NULL, 0, 0, 0, NULL, 1, 1, 1, 1, NULL, 9, '3c5784b8-097a-4504-83ba-946e64de8afc', 1, NULL, '2026-08-19 09:50:43', '2026-08-19 09:59:06', NULL, 1173, '4ebe0c05036011f1a190dc4546c60ae2', NULL, NULL),
 (NULL, 'GOEPOGUI', 'ALPHONSE', 'alphonse@gmail.com', '+224628481106', 'user', 'active', NULL, NULL, NULL, 0, 0, 0, NULL, 1, 1, 1, 1, NULL, 10, '578d906a-d982-4eba-9ad3-380f3a6cb890', 1, NULL, '2026-08-19 10:46:40', '2026-08-19 10:46:40', NULL, 1474, '45807f8e9bbb11f1bdd90afd1ed01c67', NULL, NULL),
 (NULL, 'DEVINFO 01', 'DIATAS', 'diatasdev01@gmail.com', '+224620114545', 'user', 'active', NULL, NULL, NULL, 0, 0, 0, NULL, 1, 1, 1, 1, NULL, 11, '9996b1c7-35b8-4bef-89c0-b41e4a87d768', 1, NULL, '2026-08-19 10:57:21', '2026-08-19 10:57:21', NULL, 1475, 'c338546e9bbc11f199500afd1ed01c67', NULL, NULL),
@@ -117,41 +117,6 @@ INSERT INTO `account` (`unity_id`, `name`, `firstname`, `email`, `phone`, `role`
 -- --------------------------------------------------------
 
 --
--- Structure de la table `account_status`
---
-
-DROP TABLE IF EXISTS `account_status`;
-CREATE TABLE IF NOT EXISTS `account_status` (
-  `code` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `label` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `sort_order` smallint NOT NULL,
-  `is_builtin` tinyint(1) NOT NULL,
-  `id` int NOT NULL AUTO_INCREMENT,
-  `uuid` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `status` tinyint(1) NOT NULL,
-  `infos` json DEFAULT NULL,
-  `created_at` datetime NOT NULL DEFAULT (now()),
-  `updated_at` datetime NOT NULL DEFAULT (now()),
-  `deleted_at` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `code` (`code`),
-  UNIQUE KEY `uuid` (`uuid`),
-  KEY `idx_ast_status` (`status`,`deleted_at`)
-) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
---
--- Déchargement des données de la table `account_status`
---
-
-INSERT INTO `account_status` (`code`, `label`, `sort_order`, `is_builtin`, `id`, `uuid`, `status`, `infos`, `created_at`, `updated_at`, `deleted_at`) VALUES
-('active', 'Actif', 1, 1, 1, '9ec3d857-ac89-447d-9798-aa7bb7eeef72', 1, NULL, '2026-06-25 19:11:44', '2026-06-25 19:11:44', NULL),
-('inactive', 'Inactif', 2, 1, 2, 'd91a516e-7890-4af1-8e5a-307cf6cd37f3', 1, NULL, '2026-06-25 19:11:44', '2026-06-25 19:11:44', NULL),
-('suspended', 'Suspendu', 3, 1, 3, 'cae6d85b-d41d-4335-8fba-c8df3edc09d4', 1, NULL, '2026-06-25 19:11:44', '2026-06-25 19:11:44', NULL),
-('locked', 'Verrouillé', 4, 1, 4, '392971ba-894d-4698-9bdd-8c61743e519e', 1, NULL, '2026-06-25 19:11:44', '2026-06-25 19:11:44', NULL);
-
--- --------------------------------------------------------
-
---
 -- Structure de la table `activity_log`
 --
 
@@ -159,7 +124,7 @@ DROP TABLE IF EXISTS `activity_log`;
 CREATE TABLE IF NOT EXISTS `activity_log` (
   `actor_id` int DEFAULT NULL,
   `actor` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `actor_role` enum('public','user','agent','chief','director','dg','admin','agent-support','chief-service','chief-departement','unknown') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `actor_role` enum('public','user','agent','chief','director','dg','admin','chief-service','chief-service','chief-departement','unknown') COLLATE utf8mb4_unicode_ci NOT NULL,
   `action` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
   `category` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
   `target` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -194,8 +159,8 @@ INSERT INTO `activity_log` (`actor_id`, `actor`, `actor_role`, `action`, `catego
 (2, 'gaspard@edg.com.gn', 'admin', 'logout', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 5, '8a239381-5d4d-4c4f-96e7-902389938130', 1, NULL, '2026-08-12 11:01:33', '2026-08-12 11:01:33', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 6, '8d89e01e-4d91-4540-992a-1228be63b527', 1, NULL, '2026-08-12 11:22:56', '2026-08-12 11:22:56', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'logout', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 7, '0bcaf0c6-0241-407f-a422-fe33ac329540', 1, NULL, '2026-08-12 11:34:56', '2026-08-12 11:34:56', NULL),
-(7, 'jamasatou1@gmail.com', 'agent-support', 'login', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 8, '2096984e-a4a1-4234-a035-4c32996d8642', 1, NULL, '2026-08-12 11:35:19', '2026-08-12 11:35:19', NULL),
-(7, 'jamasatou1@gmail.com', 'agent-support', 'logout', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 9, 'ccf09d19-6597-4665-996c-e5b4ca5fe085', 1, NULL, '2026-08-12 11:50:04', '2026-08-12 11:50:04', NULL),
+(7, 'jamasatou1@gmail.com', 'chief-service', 'login', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 8, '2096984e-a4a1-4234-a035-4c32996d8642', 1, NULL, '2026-08-12 11:35:19', '2026-08-12 11:35:19', NULL),
+(7, 'jamasatou1@gmail.com', 'chief-service', 'logout', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 9, 'ccf09d19-6597-4665-996c-e5b4ca5fe085', 1, NULL, '2026-08-12 11:50:04', '2026-08-12 11:50:04', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 10, '4f7f7b57-280c-46ef-bb1c-ff49ac6bbf44', 1, NULL, '2026-08-12 11:50:45', '2026-08-12 11:50:45', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 11, '82198508-ea80-4ef5-81f1-edfcfe95909b', 1, NULL, '2026-08-12 12:03:01', '2026-08-12 12:03:01', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 12, '8b6f0f41-aa9d-4e15-a358-77fbb1802baf', 1, NULL, '2026-08-12 12:11:33', '2026-08-12 12:11:33', NULL),
@@ -203,11 +168,11 @@ INSERT INTO `activity_log` (`actor_id`, `actor`, `actor_role`, `action`, `catego
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 14, 'cfb4abad-52dc-4099-b82d-6b04a7dd1e17', 1, NULL, '2026-08-12 12:21:31', '2026-08-12 12:21:31', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 15, '4564c23a-e391-4011-8a69-fbfbda6e791f', 1, NULL, '2026-08-12 12:21:49', '2026-08-12 12:21:49', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'logout', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 16, 'd3b734cc-ba14-47a7-942f-0c30637355a2', 1, NULL, '2026-08-12 12:53:18', '2026-08-12 12:53:18', NULL),
-(7, 'jamasatou1@gmail.com', 'agent-support', 'login', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 17, '9b040ba2-56bb-454f-8e1b-e755f11d1676', 1, NULL, '2026-08-12 12:53:41', '2026-08-12 12:53:41', NULL),
-(7, 'jamasatou1@gmail.com', 'agent-support', 'logout', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 18, 'eb0e6233-256e-48c5-ad96-32e860da9846', 1, NULL, '2026-08-12 12:58:45', '2026-08-12 12:58:45', NULL),
+(7, 'jamasatou1@gmail.com', 'chief-service', 'login', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 17, '9b040ba2-56bb-454f-8e1b-e755f11d1676', 1, NULL, '2026-08-12 12:53:41', '2026-08-12 12:53:41', NULL),
+(7, 'jamasatou1@gmail.com', 'chief-service', 'logout', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 18, 'eb0e6233-256e-48c5-ad96-32e860da9846', 1, NULL, '2026-08-12 12:58:45', '2026-08-12 12:58:45', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 19, '5faac8c1-d5be-47e9-8f2d-a826ae99175f', 1, NULL, '2026-08-12 12:59:51', '2026-08-12 12:59:51', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'logout', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 20, '9813cb42-9332-4233-b0af-24aec07cc5f2', 1, NULL, '2026-08-12 13:00:46', '2026-08-12 13:00:46', NULL),
-(6, 'toure@gmail.com', 'agent-support', 'login', 'auth', 'account:6', '127.0.0.1', NULL, 'success', 21, '776b40bd-9e0e-4d39-adf5-6d0770c03efc', 1, NULL, '2026-08-12 13:01:16', '2026-08-12 13:01:16', NULL),
+(6, 'toure@gmail.com', 'chief-service', 'login', 'auth', 'account:6', '127.0.0.1', NULL, 'success', 21, '776b40bd-9e0e-4d39-adf5-6d0770c03efc', 1, NULL, '2026-08-12 13:01:16', '2026-08-12 13:01:16', NULL),
 (NULL, 'agent1@gmail.com', 'unknown', 'login_failed', 'auth', 'auth', '127.0.0.1', NULL, 'error', 22, '3edd96b2-0478-4e1f-825e-41c57997f80e', 1, NULL, '2026-08-12 15:28:53', '2026-08-12 15:28:53', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 23, 'd2e52575-ace5-4641-b2d1-0c7ae0be69aa', 1, NULL, '2026-08-12 15:29:08', '2026-08-12 15:29:08', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 24, '819901bb-bf28-480b-96c0-5b4f5bf5b61e', 1, NULL, '2026-08-12 15:50:12', '2026-08-12 15:50:12', NULL),
@@ -216,7 +181,7 @@ INSERT INTO `activity_log` (`actor_id`, `actor`, `actor_role`, `action`, `catego
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 27, '4804a30e-094f-42e9-9b96-64350b85e4bb', 1, NULL, '2026-08-12 15:53:19', '2026-08-12 15:53:19', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 28, '811f471e-c828-4db3-af6d-c8167d625375', 1, NULL, '2026-08-12 15:54:17', '2026-08-12 15:54:17', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 29, 'd1354b6d-c8b5-4d86-b7d6-1bb061011977', 1, NULL, '2026-08-12 15:55:21', '2026-08-12 15:55:21', NULL),
-(6, 'toure@gmail.com', 'agent-support', 'logout', 'auth', 'account:6', '127.0.0.1', NULL, 'success', 30, '3ecfd7e4-fceb-4ff9-b578-01d078061c83', 1, NULL, '2026-08-12 16:07:23', '2026-08-12 16:07:23', NULL),
+(6, 'toure@gmail.com', 'chief-service', 'logout', 'auth', 'account:6', '127.0.0.1', NULL, 'success', 30, '3ecfd7e4-fceb-4ff9-b578-01d078061c83', 1, NULL, '2026-08-12 16:07:23', '2026-08-12 16:07:23', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'reset_password', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 31, 'd04dc84f-b331-489a-8a3f-8b9c21f93175', 1, NULL, '2026-08-12 16:23:55', '2026-08-12 16:23:55', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 32, '52726a44-dd70-4728-99a8-89987d32a3a3', 1, NULL, '2026-08-12 16:24:12', '2026-08-12 16:24:12', NULL),
 (NULL, 'gaspard@edg.com.gn', 'unknown', 'login_failed', 'auth', 'auth', '127.0.0.1', NULL, 'error', 33, '49f95517-a375-4e9f-9cc7-b83bf1ecfb2f', 1, NULL, '2026-08-12 16:24:16', '2026-08-12 16:24:16', NULL),
@@ -244,18 +209,18 @@ INSERT INTO `activity_log` (`actor_id`, `actor`, `actor_role`, `action`, `catego
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 55, '5eeac822-97d1-4e68-9712-01f0ed2b9d37', 1, NULL, '2026-08-13 10:23:34', '2026-08-13 10:23:34', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 56, 'b7de28b7-1457-4ab5-90dd-2cb285faad47', 1, NULL, '2026-08-13 10:25:11', '2026-08-13 10:25:11', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'logout', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 57, '986e58e8-e763-4f97-9a40-5daf655509bd', 1, NULL, '2026-08-13 11:04:53', '2026-08-13 11:04:53', NULL),
-(7, 'jamasatou1@gmail.com', 'agent-support', 'login', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 58, '092bdc54-95ac-409f-92a1-e5c7f6f013e2', 1, NULL, '2026-08-13 11:05:18', '2026-08-13 11:05:18', NULL),
-(7, 'jamasatou1@gmail.com', 'agent-support', 'logout', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 59, '510574e6-7f73-4d02-b1df-09456ca99c3a', 1, NULL, '2026-08-13 16:11:10', '2026-08-13 16:11:10', NULL),
+(7, 'jamasatou1@gmail.com', 'chief-service', 'login', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 58, '092bdc54-95ac-409f-92a1-e5c7f6f013e2', 1, NULL, '2026-08-13 11:05:18', '2026-08-13 11:05:18', NULL),
+(7, 'jamasatou1@gmail.com', 'chief-service', 'logout', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 59, '510574e6-7f73-4d02-b1df-09456ca99c3a', 1, NULL, '2026-08-13 16:11:10', '2026-08-13 16:11:10', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 60, 'cf25776b-9d18-4209-a1f5-41c5139c03a6', 1, NULL, '2026-08-13 16:11:35', '2026-08-13 16:11:35', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'logout', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 61, 'fa6e5df3-56b3-42c1-a732-7e714c8f7619', 1, NULL, '2026-08-13 16:13:11', '2026-08-13 16:13:11', NULL),
-(7, 'jamasatou1@gmail.com', 'agent-support', 'login', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 62, 'dc749627-7934-4639-aacf-123bf0d56728', 1, NULL, '2026-08-13 16:13:45', '2026-08-13 16:13:45', NULL),
+(7, 'jamasatou1@gmail.com', 'chief-service', 'login', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 62, 'dc749627-7934-4639-aacf-123bf0d56728', 1, NULL, '2026-08-13 16:13:45', '2026-08-13 16:13:45', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 63, '85e3ecfd-d340-46cf-9e0e-5df1b82c55eb', 1, NULL, '2026-08-14 10:00:36', '2026-08-14 10:00:36', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 64, 'f318fdfa-c876-4d84-ac55-9b7df0806bcb', 1, NULL, '2026-08-14 11:15:34', '2026-08-14 11:15:34', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 65, 'c86c2fdd-b085-4775-868a-976fb447160f', 1, NULL, '2026-08-14 11:20:40', '2026-08-14 11:20:40', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 66, 'd25f17b2-60f0-4f34-b777-3d38d18524dc', 1, NULL, '2026-08-15 11:42:28', '2026-08-15 11:42:28', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'logout', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 67, '8803f579-e77b-48ac-bef6-95ace26a4e0a', 1, NULL, '2026-08-15 12:03:20', '2026-08-15 12:03:20', NULL),
-(8, 'pauletteonivogui2024@gmail.com', 'agent-support', 'login', 'auth', 'account:8', '127.0.0.1', NULL, 'success', 68, 'a9cdbda7-6da9-4a23-b512-6d126987aac6', 1, NULL, '2026-08-15 12:03:39', '2026-08-15 12:03:39', NULL),
-(8, 'onivoguipaulette5@gmail.com', 'agent-support', 'logout', 'auth', 'account:8', '127.0.0.1', NULL, 'success', 69, 'f4fb2b61-3077-4faa-a1aa-54a40a9c96f9', 1, NULL, '2026-08-15 14:47:07', '2026-08-15 14:47:07', NULL),
+(8, 'pauletteonivogui2024@gmail.com', 'chief-service', 'login', 'auth', 'account:8', '127.0.0.1', NULL, 'success', 68, 'a9cdbda7-6da9-4a23-b512-6d126987aac6', 1, NULL, '2026-08-15 12:03:39', '2026-08-15 12:03:39', NULL),
+(8, 'onivoguipaulette5@gmail.com', 'chief-service', 'logout', 'auth', 'account:8', '127.0.0.1', NULL, 'success', 69, 'f4fb2b61-3077-4faa-a1aa-54a40a9c96f9', 1, NULL, '2026-08-15 14:47:07', '2026-08-15 14:47:07', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 70, '6700c912-3f8d-44d1-883c-246b25d183b2', 1, NULL, '2026-08-15 14:47:18', '2026-08-15 14:47:18', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'logout', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 71, '9891c752-7f9b-447d-9505-42340cc820d3', 1, NULL, '2026-08-15 15:37:42', '2026-08-15 15:37:42', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 72, 'bf0342f6-d5a7-4814-ba17-78b6a6b1820b', 1, NULL, '2026-08-15 15:38:17', '2026-08-15 15:38:17', NULL),
@@ -269,18 +234,18 @@ INSERT INTO `activity_log` (`actor_id`, `actor`, `actor_role`, `action`, `catego
 (5, 'gaspardkamangoepogui96@gmail.com', 'user', 'logout', 'auth', 'account:5', '127.0.0.1', NULL, 'success', 80, '969a6341-724a-4259-80a9-6b4404717a14', 1, NULL, '2026-08-17 09:52:56', '2026-08-17 09:52:56', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 81, '1c3eb6be-f910-4511-ba64-cfa357306f7f', 1, NULL, '2026-08-17 09:54:56', '2026-08-17 09:54:56', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'logout', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 82, '34fb3bb9-7b8a-4c65-acf3-796a7a67d922', 1, NULL, '2026-08-17 09:56:58', '2026-08-17 09:56:58', NULL),
-(7, 'goepoguigaspardkaman5@gmail.com', 'agent-support', 'login', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 83, '3c78d50d-9f62-4ab1-9aba-2b52261d1791', 1, NULL, '2026-08-17 09:57:33', '2026-08-17 09:57:33', NULL),
+(7, 'goepoguigaspardkaman5@gmail.com', 'chief-service', 'login', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 83, '3c78d50d-9f62-4ab1-9aba-2b52261d1791', 1, NULL, '2026-08-17 09:57:33', '2026-08-17 09:57:33', NULL),
 (NULL, 'goepoguigaspardkaman5@gmail.com', 'unknown', 'login_failed', 'auth', 'auth', '127.0.0.1', NULL, 'error', 84, '3e0354a6-6cd0-4e85-9f4d-7bfe0ff8c3fb', 1, NULL, '2026-08-17 10:02:46', '2026-08-17 10:02:46', NULL),
-(7, 'goepoguigaspardkaman5@gmail.com', 'agent-support', 'login', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 85, 'aa260cf1-6025-442c-9875-2f03c00926fb', 1, NULL, '2026-08-17 10:03:26', '2026-08-17 10:03:26', NULL),
+(7, 'goepoguigaspardkaman5@gmail.com', 'chief-service', 'login', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 85, 'aa260cf1-6025-442c-9875-2f03c00926fb', 1, NULL, '2026-08-17 10:03:26', '2026-08-17 10:03:26', NULL),
 (5, 'gaspardkamangoepogui96@gmail.com', 'user', 'login', 'auth', 'account:5', '127.0.0.1', NULL, 'success', 86, '3d5aced1-b526-4696-bd81-417986e1c9f6', 1, NULL, '2026-08-17 10:04:00', '2026-08-17 10:04:00', NULL),
-(7, 'goepoguigaspardkaman5@gmail.com', 'agent-support', 'logout', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 87, '688e3e8a-8f8f-431d-9023-5ff78c0a529f', 1, NULL, '2026-08-17 11:55:03', '2026-08-17 11:55:03', NULL),
-(7, 'goepoguigaspardkaman5@gmail.com', 'agent-support', 'logout', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 88, '3c777065-e3f5-4543-badd-e711388ccc6b', 1, NULL, '2026-08-17 11:55:04', '2026-08-17 11:55:04', NULL),
-(7, 'goepoguigaspardkaman5@gmail.com', 'agent-support', 'login', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 89, 'e33538c4-8990-41f3-bbb1-efd1888bdf69', 1, NULL, '2026-08-17 16:12:34', '2026-08-17 16:12:34', NULL),
-(7, 'goepoguigaspardkaman5@gmail.com', 'agent-support', 'login', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 90, 'da1601b3-ad6c-4fd4-b5e9-d421aa16f4d9', 1, NULL, '2026-08-17 16:12:43', '2026-08-17 16:12:43', NULL),
-(7, 'goepoguigaspardkaman5@gmail.com', 'agent-support', 'login', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 91, '89f9a909-1827-4334-adf5-60b0dd244d64', 1, NULL, '2026-08-19 09:37:42', '2026-08-19 09:37:42', NULL),
-(7, 'goepoguigaspardkaman5@gmail.com', 'agent-support', 'logout', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 92, 'c279f24c-3bcb-4800-9b92-06af991950e9', 1, NULL, '2026-08-19 09:39:32', '2026-08-19 09:39:32', NULL),
-(7, 'goepoguigaspardkaman5@gmail.com', 'agent-support', 'login', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 93, 'e2201bd1-cc60-4001-a771-9952c5c1f96e', 1, NULL, '2026-08-19 09:40:26', '2026-08-19 09:40:26', NULL),
-(7, 'goepoguigaspardkaman5@gmail.com', 'agent-support', 'logout', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 94, '98ccdde3-339d-4121-bc0d-937fc5aefa6f', 1, NULL, '2026-08-19 09:48:50', '2026-08-19 09:48:50', NULL),
+(7, 'goepoguigaspardkaman5@gmail.com', 'chief-service', 'logout', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 87, '688e3e8a-8f8f-431d-9023-5ff78c0a529f', 1, NULL, '2026-08-17 11:55:03', '2026-08-17 11:55:03', NULL),
+(7, 'goepoguigaspardkaman5@gmail.com', 'chief-service', 'logout', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 88, '3c777065-e3f5-4543-badd-e711388ccc6b', 1, NULL, '2026-08-17 11:55:04', '2026-08-17 11:55:04', NULL),
+(7, 'goepoguigaspardkaman5@gmail.com', 'chief-service', 'login', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 89, 'e33538c4-8990-41f3-bbb1-efd1888bdf69', 1, NULL, '2026-08-17 16:12:34', '2026-08-17 16:12:34', NULL),
+(7, 'goepoguigaspardkaman5@gmail.com', 'chief-service', 'login', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 90, 'da1601b3-ad6c-4fd4-b5e9-d421aa16f4d9', 1, NULL, '2026-08-17 16:12:43', '2026-08-17 16:12:43', NULL),
+(7, 'goepoguigaspardkaman5@gmail.com', 'chief-service', 'login', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 91, '89f9a909-1827-4334-adf5-60b0dd244d64', 1, NULL, '2026-08-19 09:37:42', '2026-08-19 09:37:42', NULL),
+(7, 'goepoguigaspardkaman5@gmail.com', 'chief-service', 'logout', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 92, 'c279f24c-3bcb-4800-9b92-06af991950e9', 1, NULL, '2026-08-19 09:39:32', '2026-08-19 09:39:32', NULL),
+(7, 'goepoguigaspardkaman5@gmail.com', 'chief-service', 'login', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 93, 'e2201bd1-cc60-4001-a771-9952c5c1f96e', 1, NULL, '2026-08-19 09:40:26', '2026-08-19 09:40:26', NULL),
+(7, 'goepoguigaspardkaman5@gmail.com', 'chief-service', 'logout', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 94, '98ccdde3-339d-4121-bc0d-937fc5aefa6f', 1, NULL, '2026-08-19 09:48:50', '2026-08-19 09:48:50', NULL),
 (9, 'ibrahimakahn@edg.com.gn', 'user', 'register', 'auth', 'account:9', '127.0.0.1', NULL, 'success', 95, 'd1990657-c6e1-482c-9941-096a29af78cb', 1, NULL, '2026-08-19 09:50:43', '2026-08-19 09:50:43', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 96, '649277e1-2b24-4cb1-b025-7d3a95ff11e6', 1, NULL, '2026-08-19 09:56:53', '2026-08-19 09:56:53', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'logout', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 97, 'a9f06e95-1204-49c0-bdfd-1e2545d990c7', 1, NULL, '2026-08-19 09:59:16', '2026-08-19 09:59:16', NULL),
@@ -288,13 +253,13 @@ INSERT INTO `activity_log` (`actor_id`, `actor`, `actor_role`, `action`, `catego
 (NULL, 'ibrahimakahn@edg.com.gn', 'unknown', 'login_failed', 'auth', 'auth', '127.0.0.1', NULL, 'error', 99, 'ad96b056-9f8f-4045-9fa1-075e25f8ead0', 1, NULL, '2026-08-19 10:00:47', '2026-08-19 10:00:47', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 100, '627a1951-ce3b-41b5-803c-3c74a76abf91', 1, NULL, '2026-08-19 10:01:02', '2026-08-19 10:01:02', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'logout', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 101, '91c998ab-0ed4-452f-b04a-70709fbe3ff4', 1, NULL, '2026-08-19 10:14:58', '2026-08-19 10:14:58', NULL),
-(6, 'toure@gmail.com', 'agent-support', 'login', 'auth', 'account:6', '127.0.0.1', NULL, 'success', 102, '648ce6de-df7e-472e-8f9f-20c14e7ad81c', 1, NULL, '2026-08-19 10:15:16', '2026-08-19 10:15:16', NULL),
-(6, 'toure@gmail.com', 'agent-support', 'logout', 'auth', 'account:6', '127.0.0.1', NULL, 'success', 103, '9bab1615-9ea5-43ab-a3c9-2ff4c62642cd', 1, NULL, '2026-08-19 10:23:24', '2026-08-19 10:23:24', NULL),
+(6, 'toure@gmail.com', 'chief-service', 'login', 'auth', 'account:6', '127.0.0.1', NULL, 'success', 102, '648ce6de-df7e-472e-8f9f-20c14e7ad81c', 1, NULL, '2026-08-19 10:15:16', '2026-08-19 10:15:16', NULL),
+(6, 'toure@gmail.com', 'chief-service', 'logout', 'auth', 'account:6', '127.0.0.1', NULL, 'success', 103, '9bab1615-9ea5-43ab-a3c9-2ff4c62642cd', 1, NULL, '2026-08-19 10:23:24', '2026-08-19 10:23:24', NULL),
 (NULL, 'ibrahimakahn@edg.com.gn', 'unknown', 'login_failed', 'auth', 'auth', '127.0.0.1', NULL, 'error', 104, '15081253-5f6d-491f-96bc-0977cec65a30', 1, NULL, '2026-08-19 10:23:35', '2026-08-19 10:23:35', NULL),
 (NULL, 'ibrahimakahn@edg.com.gn', 'unknown', 'login_failed', 'auth', 'auth', '127.0.0.1', NULL, 'error', 105, '3781ad08-3ef6-421d-822c-1b2ea7b693a6', 1, NULL, '2026-08-19 10:32:29', '2026-08-19 10:32:29', NULL),
 (NULL, 'ibrahimakahn@edg.com.gn', 'unknown', 'login_failed', 'auth', 'auth', '127.0.0.1', NULL, 'error', 106, 'ddc4c99d-b1e5-4d28-9fab-be2281395b34', 1, NULL, '2026-08-19 10:39:52', '2026-08-19 10:39:52', NULL),
-(7, 'goepoguigaspardkaman5@gmail.com', 'agent-support', 'login', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 107, 'e151e8bc-ec97-4ec0-9015-72a1ae38b04b', 1, NULL, '2026-08-19 10:41:06', '2026-08-19 10:41:06', NULL),
-(7, 'goepoguigaspardkaman5@gmail.com', 'agent-support', 'logout', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 108, '673abf43-3f1a-44d9-bc24-73f81f6db798', 1, NULL, '2026-08-19 10:41:37', '2026-08-19 10:41:37', NULL),
+(7, 'goepoguigaspardkaman5@gmail.com', 'chief-service', 'login', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 107, 'e151e8bc-ec97-4ec0-9015-72a1ae38b04b', 1, NULL, '2026-08-19 10:41:06', '2026-08-19 10:41:06', NULL),
+(7, 'goepoguigaspardkaman5@gmail.com', 'chief-service', 'logout', 'auth', 'account:7', '127.0.0.1', NULL, 'success', 108, '673abf43-3f1a-44d9-bc24-73f81f6db798', 1, NULL, '2026-08-19 10:41:37', '2026-08-19 10:41:37', NULL),
 (5, 'gaspardkamangoepogui96@gmail.com', 'user', 'login', 'auth', 'account:5', '127.0.0.1', NULL, 'success', 109, '83d6eb18-4087-4d08-966a-aa535e03af07', 1, NULL, '2026-08-19 10:42:02', '2026-08-19 10:42:02', NULL),
 (5, 'gaspardkamangoepogui96@gmail.com', 'user', 'logout', 'auth', 'account:5', '127.0.0.1', NULL, 'success', 110, '5972d3d2-b748-4508-b088-68df40b7f70d', 1, NULL, '2026-08-19 10:42:15', '2026-08-19 10:42:15', NULL),
 (2, 'gaspard@edg.com.gn', 'admin', 'login', 'auth', 'account:2', '127.0.0.1', NULL, 'success', 111, '8d64b64f-9021-4746-8ddb-134af3e55600', 1, NULL, '2026-08-19 10:42:39', '2026-08-19 10:42:39', NULL),
@@ -414,174 +379,6 @@ INSERT INTO `alembic_version` (`version_num`) VALUES
 -- --------------------------------------------------------
 
 --
--- Structure de la table `announcement`
---
-
-DROP TABLE IF EXISTS `announcement`;
-CREATE TABLE IF NOT EXISTS `announcement` (
-  `announcement_category_id` int NOT NULL,
-  `announcement_priority_id` int NOT NULL,
-  `announcement_status_id` int NOT NULL,
-  `author_id` int NOT NULL,
-  `title` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `description` text COLLATE utf8mb4_unicode_ci NOT NULL,
-  `audience` enum('internal','external','all','unit') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'internal',
-  `attachment_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `visibility` enum('public','admin_only') COLLATE utf8mb4_unicode_ci NOT NULL,
-  `published_at` datetime NOT NULL DEFAULT (now()),
-  `expires_at` datetime DEFAULT NULL,
-  `closed_at` datetime DEFAULT NULL,
-  `id` int NOT NULL AUTO_INCREMENT,
-  `uuid` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `status` tinyint(1) NOT NULL,
-  `infos` json DEFAULT NULL,
-  `created_at` datetime NOT NULL DEFAULT (now()),
-  `updated_at` datetime NOT NULL DEFAULT (now()),
-  `deleted_at` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uuid` (`uuid`),
-  KEY `author_id` (`author_id`),
-  KEY `idx_ann_prio_id` (`announcement_priority_id`),
-  KEY `idx_ann_status` (`status`,`deleted_at`),
-  KEY `idx_ann_cat_id` (`announcement_category_id`),
-  KEY `idx_ann_status_id` (`announcement_status_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- --------------------------------------------------------
-
---
--- Structure de la table `announcement_category`
---
-
-DROP TABLE IF EXISTS `announcement_category`;
-CREATE TABLE IF NOT EXISTS `announcement_category` (
-  `code` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `label` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `sort_order` smallint NOT NULL,
-  `is_builtin` tinyint(1) NOT NULL,
-  `id` int NOT NULL AUTO_INCREMENT,
-  `uuid` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `status` tinyint(1) NOT NULL,
-  `infos` json DEFAULT NULL,
-  `created_at` datetime NOT NULL DEFAULT (now()),
-  `updated_at` datetime NOT NULL DEFAULT (now()),
-  `deleted_at` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `code` (`code`),
-  UNIQUE KEY `uuid` (`uuid`),
-  KEY `idx_ac_status` (`status`,`deleted_at`)
-) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
---
--- Déchargement des données de la table `announcement_category`
---
-
-INSERT INTO `announcement_category` (`code`, `label`, `sort_order`, `is_builtin`, `id`, `uuid`, `status`, `infos`, `created_at`, `updated_at`, `deleted_at`) VALUES
-('general', 'Général', 1, 1, 1, 'db2aa753-824f-4e4a-9a53-874403a15094', 1, NULL, '2026-06-25 19:11:44', '2026-06-25 19:11:44', NULL),
-('maintenance', 'Maintenance', 2, 1, 2, '07a19379-db95-4f40-a80c-b407b84039fb', 1, NULL, '2026-06-25 19:11:44', '2026-06-25 19:11:44', NULL),
-('incident', 'Incident', 3, 1, 3, '0c762b7e-79e6-4316-8586-d4591f6e354a', 1, NULL, '2026-06-25 19:11:44', '2026-06-25 19:11:44', NULL),
-('information', 'Information', 4, 1, 4, 'fb4da972-e591-4b6e-ae8b-900570a98a33', 1, NULL, '2026-06-25 19:11:44', '2026-06-25 19:11:44', NULL),
-('urgence', 'Urgence', 5, 1, 5, '0441123d-e16d-41ae-891c-f3ddd451250d', 1, NULL, '2026-06-25 19:11:44', '2026-06-25 19:11:44', NULL);
-
--- --------------------------------------------------------
-
---
--- Structure de la table `announcement_priority`
---
-
-DROP TABLE IF EXISTS `announcement_priority`;
-CREATE TABLE IF NOT EXISTS `announcement_priority` (
-  `code` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `label` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `sort_order` smallint NOT NULL,
-  `is_builtin` tinyint(1) NOT NULL,
-  `id` int NOT NULL AUTO_INCREMENT,
-  `uuid` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `status` tinyint(1) NOT NULL,
-  `infos` json DEFAULT NULL,
-  `created_at` datetime NOT NULL DEFAULT (now()),
-  `updated_at` datetime NOT NULL DEFAULT (now()),
-  `deleted_at` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `code` (`code`),
-  UNIQUE KEY `uuid` (`uuid`),
-  KEY `idx_ap_order` (`sort_order`),
-  KEY `idx_ap_status` (`status`,`deleted_at`)
-) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
---
--- Déchargement des données de la table `announcement_priority`
---
-
-INSERT INTO `announcement_priority` (`code`, `label`, `sort_order`, `is_builtin`, `id`, `uuid`, `status`, `infos`, `created_at`, `updated_at`, `deleted_at`) VALUES
-('low', 'Basse', 1, 1, 1, 'a7602bf2-1a17-4a3c-a80a-9b2f075f4d14', 1, NULL, '2026-06-25 19:11:44', '2026-08-15 15:03:55', NULL),
-('medium', 'Moyenne', 2, 1, 2, '0a6d2341-5769-45d9-bdba-9100863f4c2b', 1, NULL, '2026-06-25 19:11:44', '2026-06-25 19:11:44', NULL),
-('high', 'Haute', 3, 1, 3, '75ae1970-cf5d-4bef-82c9-3b976b1711d5', 1, NULL, '2026-06-25 19:11:44', '2026-06-25 19:11:44', NULL),
-('critical', 'Critique', 4, 1, 4, '752263d3-6d31-4a3a-8cad-0b62583b704c', 1, NULL, '2026-06-25 19:11:44', '2026-06-25 19:11:44', NULL);
-
--- --------------------------------------------------------
-
---
--- Structure de la table `announcement_status`
---
-
-DROP TABLE IF EXISTS `announcement_status`;
-CREATE TABLE IF NOT EXISTS `announcement_status` (
-  `code` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `label` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `sort_order` smallint NOT NULL,
-  `is_builtin` tinyint(1) NOT NULL,
-  `id` int NOT NULL AUTO_INCREMENT,
-  `uuid` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `status` tinyint(1) NOT NULL,
-  `infos` json DEFAULT NULL,
-  `created_at` datetime NOT NULL DEFAULT (now()),
-  `updated_at` datetime NOT NULL DEFAULT (now()),
-  `deleted_at` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `code` (`code`),
-  UNIQUE KEY `uuid` (`uuid`),
-  KEY `idx_anst_status` (`status`,`deleted_at`)
-) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
---
--- Déchargement des données de la table `announcement_status`
---
-
-INSERT INTO `announcement_status` (`code`, `label`, `sort_order`, `is_builtin`, `id`, `uuid`, `status`, `infos`, `created_at`, `updated_at`, `deleted_at`) VALUES
-('draft', 'Brouillon', 1, 1, 1, '70b7ee71-db53-469e-9c20-27b4f8870456', 1, NULL, '2026-06-25 19:11:44', '2026-06-25 19:11:44', NULL),
-('scheduled', 'Planifiée', 2, 1, 2, '8c97933c-5c67-4cdf-bdb9-b15febdb215a', 1, NULL, '2026-06-25 19:11:44', '2026-06-25 19:11:44', NULL),
-('published', 'Publiée', 3, 1, 3, 'c90a4fcb-50b3-4f4d-b50a-7fbf0e0df81e', 1, NULL, '2026-06-25 19:11:44', '2026-06-25 19:11:44', NULL),
-('expired', 'Expirée', 4, 1, 4, '141065ee-b21b-45d2-8747-07e6af88fa71', 1, NULL, '2026-06-25 19:11:44', '2026-06-25 19:11:44', NULL),
-('closed', 'Clôturée', 5, 1, 5, '12560ba1-d51b-4924-9698-8ec05b380c58', 1, NULL, '2026-06-25 19:11:44', '2026-06-25 19:11:44', NULL),
-('cancelled', 'Annulée', 6, 1, 6, '986fc13e-b4f5-4a65-98ab-19a61092cae3', 1, NULL, '2026-06-25 19:11:44', '2026-06-25 19:11:44', NULL);
-
--- --------------------------------------------------------
-
---
--- Structure de la table `announcement_target_role`
---
-
-DROP TABLE IF EXISTS `announcement_target_role`;
-CREATE TABLE IF NOT EXISTS `announcement_target_role` (
-  `announcement_id` int NOT NULL,
-  `role` enum('public','user','agent','chief','director','dg','admin') COLLATE utf8mb4_unicode_ci NOT NULL,
-  `id` int NOT NULL AUTO_INCREMENT,
-  `uuid` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `status` tinyint(1) NOT NULL,
-  `infos` json DEFAULT NULL,
-  `created_at` datetime NOT NULL DEFAULT (now()),
-  `updated_at` datetime NOT NULL DEFAULT (now()),
-  `deleted_at` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_atrole_ann_role` (`announcement_id`,`role`),
-  UNIQUE KEY `uuid` (`uuid`),
-  KEY `idx_atrole_status` (`status`,`deleted_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- --------------------------------------------------------
-
---
 -- Structure de la table `appreciation`
 --
 
@@ -648,122 +445,6 @@ INSERT INTO `attachment` (`request_id`, `uploader_id`, `filename`, `storage_path
 (9, 7, 'edg recrutement.jpg', 'requests/9/975e2876_edg_recrutement.jpg', 'image/jpeg', 66482, NULL, 'clean', 3, '8f2cdc49-5c8a-4a8e-9a94-88f674565d61', 1, NULL, '2026-08-19 09:41:14', '2026-08-19 09:41:14', NULL),
 (10, 34, 'Facture Master BS.pdf', 'requests/10/46f00d3e_Facture_Master_BS.pdf', 'application/pdf', 664407, NULL, 'clean', 4, '6323e633-8b4b-4535-8780-48e5cc7fd396', 1, NULL, '2026-08-27 12:05:20', '2026-08-27 12:05:20', NULL),
 (11, 34, 'edg recrutement.jpg', 'requests/11/7c451265_edg_recrutement.jpg', 'image/jpeg', 66482, NULL, 'clean', 5, '5d774991-127d-4871-8edb-89aadf06d7fe', 1, NULL, '2026-08-27 15:10:34', '2026-08-27 15:10:34', NULL);
-
--- --------------------------------------------------------
-
---
--- Structure de la table `communication_setting`
---
-
-DROP TABLE IF EXISTS `communication_setting`;
-CREATE TABLE IF NOT EXISTS `communication_setting` (
-  `updated_by` int DEFAULT NULL,
-  `internal_notif_on` tinyint(1) NOT NULL,
-  `email_on` tinyint(1) NOT NULL,
-  `sms_on` tinyint(1) NOT NULL,
-  `banner_on` tinyint(1) NOT NULL,
-  `whatsapp_on` tinyint(1) NOT NULL,
-  `push_mobile_on` tinyint(1) NOT NULL,
-  `sender_email` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `sender_sms` varchar(11) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `reply_to` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `id` int NOT NULL AUTO_INCREMENT,
-  `uuid` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `status` tinyint(1) NOT NULL,
-  `infos` json DEFAULT NULL,
-  `created_at` datetime NOT NULL DEFAULT (now()),
-  `updated_at` datetime NOT NULL DEFAULT (now()),
-  `deleted_at` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uuid` (`uuid`),
-  KEY `updated_by` (`updated_by`),
-  KEY `idx_comms_status` (`status`,`deleted_at`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
---
--- Déchargement des données de la table `communication_setting`
---
-
-INSERT INTO `communication_setting` (`updated_by`, `internal_notif_on`, `email_on`, `sms_on`, `banner_on`, `whatsapp_on`, `push_mobile_on`, `sender_email`, `sender_sms`, `reply_to`, `id`, `uuid`, `status`, `infos`, `created_at`, `updated_at`, `deleted_at`) VALUES
-(NULL, 1, 1, 1, 1, 0, 0, 'noreply@edg.gn', 'EDG', 'support@edg.gn', 1, '69481a6f-e2c3-4395-82dd-9398bb224241', 1, NULL, '2026-08-12 08:54:29', '2026-08-12 08:54:29', NULL);
-
--- --------------------------------------------------------
-
---
--- Structure de la table `knowledge_article`
---
-
-DROP TABLE IF EXISTS `knowledge_article`;
-CREATE TABLE IF NOT EXISTS `knowledge_article` (
-  `author_id` int DEFAULT NULL,
-  `title` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `excerpt` text COLLATE utf8mb4_unicode_ci NOT NULL,
-  `body` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
-  `category` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `read_time` smallint NOT NULL,
-  `author` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `is_published` tinyint(1) NOT NULL,
-  `is_archived` tinyint(1) NOT NULL,
-  `tags` json DEFAULT NULL,
-  `published_at` datetime DEFAULT NULL,
-  `id` int NOT NULL AUTO_INCREMENT,
-  `uuid` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `status` tinyint(1) NOT NULL,
-  `infos` json DEFAULT NULL,
-  `created_at` datetime NOT NULL DEFAULT (now()),
-  `updated_at` datetime NOT NULL DEFAULT (now()),
-  `deleted_at` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uuid` (`uuid`),
-  KEY `author_id` (`author_id`),
-  KEY `idx_kb_status` (`status`,`deleted_at`),
-  KEY `idx_kb_cat` (`category`),
-  KEY `idx_kb_pub` (`is_published`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
---
--- Déchargement des données de la table `knowledge_article`
---
-
-INSERT INTO `knowledge_article` (`author_id`, `title`, `excerpt`, `body`, `category`, `read_time`, `author`, `is_published`, `is_archived`, `tags`, `published_at`, `id`, `uuid`, `status`, `infos`, `created_at`, `updated_at`, `deleted_at`) VALUES
-(NULL, 'T1', ' KJFKDJFKDJFKJ KJFKDJFKDJFKJ KJFKDJFKDJFKJ KJFKDJFKDJFKJ KJFKDJFKDJFKJ KJFKDJFKDJFKJKJFKDJFKDJFKJKJFKDJFKDJFKJV VKJFKDJFKDJFKJKJFKDJFKDJFKJ', 'Lorme Fais maintenant une vérification fonctionnelle finale de l\'export Admin sans modifier l\'architecture actuelle. Génère réellement des exports .xlsx à partir de plusieurs demandes représentatives et inspecte leur contenu feuille par feuille. Vérifie particulièrement que la Synthèse contient toutes les informations essentielles de la demande, que les Acteurs affichent clairement identité + rôle + actions, que l\'Historique restitue fidèlement le parcours chronologique, que les Conversations contiennent auteur + visibilité + message + date, que les Affectations/Transmissions sont correctement représentées, et que les informations d\'annulation, résolution, fermeture et escalade apparaissent lorsqu\'elles existent. Vérifie également qu\'aucune donnée SLA/délai n\'est présente, qu\'aucune donnée d\'une autre demande ne fuit dans l\'export et qu\'un export ne provoque aucun effet métier. Ne modifie le code que si tu identifies un véritable problème fonctionnel. À la fin, donne-moi un rapport précis des vérifications effectuées et des éventuelles corrections.', 'pannes', 1, 'GASPARD KAMAN', 0, 0, '[\"T1\", \"T2\"]', '2026-08-28 11:10:41', 1, '1408095f-b9e5-497c-a05c-0698f0babaaa', 1, 'null', '2026-08-15 15:37:09', '2026-08-28 11:11:04', NULL);
-
--- --------------------------------------------------------
-
---
--- Structure de la table `knowledge_category`
---
-
-DROP TABLE IF EXISTS `knowledge_category`;
-CREATE TABLE IF NOT EXISTS `knowledge_category` (
-  `code` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `label` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `sort_order` smallint NOT NULL,
-  `is_builtin` tinyint(1) NOT NULL,
-  `id` int NOT NULL AUTO_INCREMENT,
-  `uuid` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `status` tinyint(1) NOT NULL,
-  `infos` json DEFAULT NULL,
-  `created_at` datetime NOT NULL DEFAULT (now()),
-  `updated_at` datetime NOT NULL DEFAULT (now()),
-  `deleted_at` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `code` (`code`),
-  UNIQUE KEY `uuid` (`uuid`),
-  KEY `idx_kc_status` (`status`,`deleted_at`),
-  KEY `idx_kc_order` (`sort_order`)
-) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
---
--- Déchargement des données de la table `knowledge_category`
---
-
-INSERT INTO `knowledge_category` (`code`, `label`, `sort_order`, `is_builtin`, `id`, `uuid`, `status`, `infos`, `created_at`, `updated_at`, `deleted_at`) VALUES
-('faq', 'FAQ', 1, 1, 1, 'ac35e655-4b58-4fc3-95fa-e87d06e5f752', 1, NULL, '2026-06-25 19:11:44', '2026-06-25 19:11:44', NULL),
-('procedure', 'Procédures internes', 2, 1, 2, 'f280c05f-9f13-44c2-9a49-0747b449ae53', 1, NULL, '2026-06-25 19:11:44', '2026-06-25 19:11:44', NULL),
-('technique', 'Documentation technique', 3, 1, 3, '36f2f1e1-f55f-4a42-b305-b94ab8daa429', 1, NULL, '2026-06-25 19:11:44', '2026-06-25 19:11:44', NULL),
-('reglementation', 'Réglementation', 4, 1, 4, '06a2c60c-fa1c-4d35-b02b-67b980f0112c', 1, NULL, '2026-06-25 19:11:44', '2026-06-25 19:11:44', NULL),
-('formation', 'Formation', 5, 1, 5, '9610ee81-bcc9-42a8-87ca-cdc83a074e91', 1, NULL, '2026-06-25 19:11:44', '2026-06-25 19:11:44', NULL);
 
 -- --------------------------------------------------------
 
@@ -1533,8 +1214,8 @@ CREATE TABLE IF NOT EXISTS `workflow_detail` (
 INSERT INTO `workflow_detail` (`workflow_id`, `unity_id`, `agent_id`, `task_id`, `parent_id`, `event_type`, `label`, `actor_name`, `accepted`, `activated`, `comment`, `id`, `uuid`, `status`, `infos`, `created_at`, `updated_at`, `deleted_at`) VALUES
 (1, NULL, 2, NULL, NULL, 'created', 'Demande créée par l\'utilisateur', 'GASPARD GOEPOGUI', NULL, 1, NULL, 1, '5457c76b-7436-4a9b-b535-19439cd3aab9', 1, '{\"reason\": null, \"actor_id\": \"2\", \"actor_role\": \"admin\", \"new_status\": \"new\", \"old_status\": null, \"source_role\": \"admin\", \"target_role\": null, \"event_status\": \"new\", \"target_user_id\": null}', '2026-08-12 10:07:50', '2026-08-12 10:07:50', NULL),
 (1, NULL, 2, NULL, 1, 'routed_to_support', 'Aucune règle de routage — envoi au support général', 'GASPARD GOEPOGUI', NULL, 1, NULL, 2, 'ecd05550-4ab7-4297-95f7-e492c172ed0d', 1, '{\"reason\": null, \"actor_id\": \"2\", \"dest_role\": \"support\", \"actor_role\": \"admin\", \"new_status\": \"qualifying\", \"old_status\": \"new\", \"source_role\": \"admin\", \"target_role\": \"support\", \"event_status\": \"to_qualify\", \"target_user_id\": null}', '2026-08-12 10:07:50', '2026-08-12 10:07:50', NULL),
-(1, NULL, 7, NULL, 2, 'in_progress', 'Pris en charge par Jams jamsatou1 — traitement démarré', 'Jams jamsatou1', NULL, 1, NULL, 3, '4b640090-3a1d-426f-ae4a-af7f0a549bbe', 1, '{\"reason\": null, \"actor_id\": \"7\", \"actor_role\": \"agent-support\", \"new_status\": \"in_progress\", \"old_status\": \"in_progress\", \"source_role\": \"agent-support\", \"target_role\": null, \"event_status\": \"in_progress\", \"changed_fields\": [\"assignee_id\", \"category\", \"in_triage\", \"infos\", \"priority\", \"request_status\", \"unity_id\"], \"target_user_id\": null, \"intervention_id\": \"req1-c1-i1\", \"intervention_order\": 1, \"actor_service_label\": \"Service Étude & Digitalisation\", \"actor_direction_label\": \"Direction des Systèmes d\'Information\", \"intervention_actor_id\": \"7\", \"actor_department_label\": \"Département Étude et Développement\", \"intervention_actor_name\": \"Jams jamsatou1\", \"intervention_actor_role\": \"agent-support\", \"intervention_cycle_number\": 1}', '2026-08-12 11:35:42', '2026-08-12 11:35:42', NULL),
-(1, NULL, 6, NULL, 3, 'treatment_transmitted', 'Traitement transmis à AMADOU TOURE', 'Jams jamsatou1', NULL, 1, 'ttttttttttttttttteee', 4, '87f3a2fe-7687-4245-840e-fac652261f16', 1, '{\"reason\": \"ttttttttttttttttteee\", \"actor_id\": \"7\", \"ended_at\": \"2026-08-12T12:56:28.730791\", \"dest_role\": \"agent-support\", \"work_done\": \"yyyyyyyyyyyyyyyyyy\", \"actor_role\": \"agent-support\", \"new_status\": \"in_progress\", \"old_status\": \"in_progress\", \"started_at\": \"2026-08-12T10:07:49\", \"instruction\": \"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\", \"source_role\": \"agent-support\", \"target_role\": \"agent-support\", \"cycle_number\": 1, \"target_user_id\": \"6\", \"intervention_id\": \"req1-c1-i1\", \"new_assignee_id\": 6, \"duration_seconds\": 10119, \"target_user_name\": \"AMADOU TOURE\", \"next_intervention\": {\"started_at\": \"2026-08-12T12:56:28.730791\", \"intervention_id\": \"req1-c1-i2\", \"intervention_order\": 2, \"actor_service_label\": \"Service Étude & Digitalisation\", \"actor_direction_label\": \"Direction des Systèmes d\'Information\", \"intervention_actor_id\": \"6\", \"actor_department_label\": \"Département Étude et Développement\", \"intervention_actor_name\": \"AMADOU TOURE\", \"intervention_actor_role\": \"agent-support\", \"intervention_cycle_number\": 1}, \"intervention_order\": 1, \"actor_service_label\": \"Service Étude & Digitalisation\", \"previous_assignee_id\": 7, \"actor_direction_label\": \"Direction des Systèmes d\'Information\", \"intervention_actor_id\": \"7\", \"actor_department_label\": \"Département Étude et Développement\", \"intervention_actor_name\": \"Jams jamsatou1\", \"intervention_actor_role\": \"agent-support\", \"intervention_cycle_number\": 1}', '2026-08-12 12:56:29', '2026-08-12 12:56:29', NULL),
+(1, NULL, 7, NULL, 2, 'in_progress', 'Pris en charge par Jams jamsatou1 — traitement démarré', 'Jams jamsatou1', NULL, 1, NULL, 3, '4b640090-3a1d-426f-ae4a-af7f0a549bbe', 1, '{\"reason\": null, \"actor_id\": \"7\", \"actor_role\": \"chief-service\", \"new_status\": \"in_progress\", \"old_status\": \"in_progress\", \"source_role\": \"chief-service\", \"target_role\": null, \"event_status\": \"in_progress\", \"changed_fields\": [\"assignee_id\", \"category\", \"in_triage\", \"infos\", \"priority\", \"request_status\", \"unity_id\"], \"target_user_id\": null, \"intervention_id\": \"req1-c1-i1\", \"intervention_order\": 1, \"actor_service_label\": \"Service Étude & Digitalisation\", \"actor_direction_label\": \"Direction des Systèmes d\'Information\", \"intervention_actor_id\": \"7\", \"actor_department_label\": \"Département Étude et Développement\", \"intervention_actor_name\": \"Jams jamsatou1\", \"intervention_actor_role\": \"chief-service\", \"intervention_cycle_number\": 1}', '2026-08-12 11:35:42', '2026-08-12 11:35:42', NULL),
+(1, NULL, 6, NULL, 3, 'treatment_transmitted', 'Traitement transmis à AMADOU TOURE', 'Jams jamsatou1', NULL, 1, 'ttttttttttttttttteee', 4, '87f3a2fe-7687-4245-840e-fac652261f16', 1, '{\"reason\": \"ttttttttttttttttteee\", \"actor_id\": \"7\", \"ended_at\": \"2026-08-12T12:56:28.730791\", \"dest_role\": \"chief-service\", \"work_done\": \"yyyyyyyyyyyyyyyyyy\", \"actor_role\": \"chief-service\", \"new_status\": \"in_progress\", \"old_status\": \"in_progress\", \"started_at\": \"2026-08-12T10:07:49\", \"instruction\": \"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\", \"source_role\": \"chief-service\", \"target_role\": \"chief-service\", \"cycle_number\": 1, \"target_user_id\": \"6\", \"intervention_id\": \"req1-c1-i1\", \"new_assignee_id\": 6, \"duration_seconds\": 10119, \"target_user_name\": \"AMADOU TOURE\", \"next_intervention\": {\"started_at\": \"2026-08-12T12:56:28.730791\", \"intervention_id\": \"req1-c1-i2\", \"intervention_order\": 2, \"actor_service_label\": \"Service Étude & Digitalisation\", \"actor_direction_label\": \"Direction des Systèmes d\'Information\", \"intervention_actor_id\": \"6\", \"actor_department_label\": \"Département Étude et Développement\", \"intervention_actor_name\": \"AMADOU TOURE\", \"intervention_actor_role\": \"chief-service\", \"intervention_cycle_number\": 1}, \"intervention_order\": 1, \"actor_service_label\": \"Service Étude & Digitalisation\", \"previous_assignee_id\": 7, \"actor_direction_label\": \"Direction des Systèmes d\'Information\", \"intervention_actor_id\": \"7\", \"actor_department_label\": \"Département Étude et Développement\", \"intervention_actor_name\": \"Jams jamsatou1\", \"intervention_actor_role\": \"chief-service\", \"intervention_cycle_number\": 1}', '2026-08-12 12:56:29', '2026-08-12 12:56:29', NULL),
 (2, NULL, 5, NULL, NULL, 'created', 'Demande créée par l\'utilisateur', 'GASPARD KAMAN GOEPOGUI', NULL, 1, NULL, 5, 'de82901d-7e8e-40c4-8645-a1763cfd9587', 1, '{\"reason\": null, \"actor_id\": \"5\", \"actor_role\": \"user\", \"new_status\": \"new\", \"old_status\": null, \"source_role\": \"user\", \"target_role\": null, \"event_status\": \"new\", \"target_user_id\": null}', '2026-08-12 17:37:03', '2026-08-12 17:37:03', NULL),
 (2, NULL, 5, NULL, 5, 'routed_to_support', 'Aucune règle de routage — envoi au support général', 'GASPARD KAMAN GOEPOGUI', NULL, 1, NULL, 6, '395b0b1f-a53e-497c-9457-f1c37a4ecfa2', 1, '{\"reason\": null, \"actor_id\": \"5\", \"dest_role\": \"support\", \"actor_role\": \"user\", \"new_status\": \"qualifying\", \"old_status\": \"new\", \"source_role\": \"user\", \"target_role\": \"support\", \"event_status\": \"to_qualify\", \"target_user_id\": null}', '2026-08-12 17:37:04', '2026-08-12 17:37:04', NULL),
 (2, NULL, 5, NULL, 6, 'cancelled', 'Demande annulée — mon problème est resolue correctement', 'GASPARD KAMAN GOEPOGUI', NULL, 1, 'mon problème est resolue correctement', 7, '39d3277d-b5c6-4cf4-81d9-decfd05d0eac', 1, '{\"reason\": \"mon problème est resolue correctement\", \"actor_id\": \"5\", \"actor_role\": \"user\", \"new_status\": \"cancelled\", \"old_status\": \"cancelled\", \"source_role\": \"user\", \"target_role\": null, \"event_status\": \"cancelled\", \"target_user_id\": null}', '2026-08-13 09:49:01', '2026-08-13 09:49:01', NULL),
@@ -1542,32 +1223,32 @@ INSERT INTO `workflow_detail` (`workflow_id`, `unity_id`, `agent_id`, `task_id`,
 (3, NULL, 2, NULL, NULL, 'created', 'Demande créée par l\'utilisateur', 'GASPARD GOEPOGUI', NULL, 1, NULL, 9, '042d0b3f-61d8-4b66-ac75-9bcc897d1448', 1, '{\"reason\": null, \"actor_id\": \"2\", \"actor_role\": \"admin\", \"new_status\": \"new\", \"old_status\": null, \"source_role\": \"admin\", \"target_role\": null, \"event_status\": \"new\", \"target_user_id\": null}', '2026-08-13 11:03:36', '2026-08-13 11:03:36', NULL),
 (3, NULL, 2, NULL, 9, 'routed_to_support', 'Aucune règle de routage — envoi au support général', 'GASPARD GOEPOGUI', NULL, 1, NULL, 10, 'da3f58fb-5738-4e75-a401-62d987646f0c', 1, '{\"reason\": null, \"actor_id\": \"2\", \"dest_role\": \"support\", \"actor_role\": \"admin\", \"new_status\": \"qualifying\", \"old_status\": \"new\", \"source_role\": \"admin\", \"target_role\": \"support\", \"event_status\": \"to_qualify\", \"target_user_id\": null}', '2026-08-13 11:03:38', '2026-08-13 11:03:38', NULL),
 (3, NULL, 2, NULL, 10, 'attachment_added', 'Pièce jointe ajoutée — edg recrutement.jpg', 'GASPARD GOEPOGUI', NULL, 1, NULL, 11, '7e0558c1-55e6-421d-b0a6-002afbc01c9c', 1, '{\"reason\": null, \"actor_id\": \"2\", \"filename\": \"edg recrutement.jpg\", \"mime_type\": \"image/jpeg\", \"actor_role\": \"admin\", \"new_status\": null, \"old_status\": null, \"size_bytes\": 66482, \"scan_status\": \"clean\", \"source_role\": \"admin\", \"target_role\": null, \"event_status\": \"qualifying\", \"attachment_id\": \"1\", \"request_status\": \"qualifying\", \"target_user_id\": null}', '2026-08-13 11:03:43', '2026-08-13 11:03:43', NULL),
-(3, NULL, 7, NULL, 11, 'in_progress', 'Pris en charge par Jams jamsatou1 — traitement démarré', 'Jams jamsatou1', NULL, 1, NULL, 12, '4f815653-df9f-49d9-8d1d-7683961f7cd5', 1, '{\"reason\": null, \"actor_id\": \"7\", \"actor_role\": \"agent-support\", \"new_status\": \"in_progress\", \"old_status\": \"in_progress\", \"source_role\": \"agent-support\", \"target_role\": null, \"event_status\": \"in_progress\", \"changed_fields\": [\"assignee_id\", \"category\", \"in_triage\", \"infos\", \"priority\", \"request_status\", \"unity_id\"], \"target_user_id\": null, \"intervention_id\": \"req3-c1-i1\", \"intervention_order\": 1, \"actor_service_label\": \"Service Étude & Digitalisation\", \"actor_direction_label\": \"Direction des Systèmes d\'Information\", \"intervention_actor_id\": \"7\", \"actor_department_label\": \"Département Étude et Développement\", \"intervention_actor_name\": \"Jams jamsatou1\", \"intervention_actor_role\": \"agent-support\", \"intervention_cycle_number\": 1}', '2026-08-13 11:06:55', '2026-08-13 11:06:55', NULL),
-(3, NULL, 7, NULL, 12, 'comment_added', 'Commentaire public ajouté', 'Jams jamsatou1', NULL, 1, 'Pouvez-vous me faire savoir  ce qui ne march pas ?', 13, 'afde5185-10f8-470b-abc8-8e9df1c3fb2a', 1, '{\"reason\": null, \"actor_id\": \"7\", \"is_public\": true, \"actor_role\": \"agent-support\", \"new_status\": null, \"old_status\": null, \"visibility\": \"public\", \"source_role\": \"agent-support\", \"target_role\": null, \"event_status\": \"in_progress\", \"request_status\": \"in_progress\", \"target_user_id\": null, \"intervention_id\": \"req3-c1-i1\", \"intervention_order\": 1, \"intervention_cycle_number\": 1}', '2026-08-13 12:29:18', '2026-08-13 16:21:24', '2026-08-13 16:21:24'),
-(3, NULL, 7, NULL, 13, 'pending', 'Informations complémentaires demandées', 'Jams jamsatou1', NULL, 1, NULL, 14, '509bd8e4-960b-452e-aefb-9100f94d0384', 1, '{\"reason\": null, \"actor_id\": \"7\", \"actor_role\": \"agent-support\", \"new_status\": \"pending\", \"old_status\": \"pending\", \"source_role\": \"agent-support\", \"target_role\": null, \"event_status\": \"pending\", \"changed_fields\": [\"request_status\"], \"target_user_id\": null}', '2026-08-13 12:29:23', '2026-08-13 12:29:23', NULL),
-(3, NULL, 7, NULL, 14, 'in_progress', 'Prise en charge — traitement en cours', 'Jams jamsatou1', NULL, 1, NULL, 15, '86830d92-5d99-4d7c-80ca-683a12e8a6da', 1, '{\"reason\": null, \"actor_id\": \"7\", \"actor_role\": \"agent-support\", \"new_status\": \"in_progress\", \"old_status\": \"in_progress\", \"source_role\": \"agent-support\", \"target_role\": null, \"event_status\": \"in_progress\", \"changed_fields\": [\"request_status\"], \"target_user_id\": null}', '2026-08-13 12:31:02', '2026-08-13 12:31:02', NULL),
-(3, NULL, 7, NULL, 15, 'comment_added', 'Commentaire public ajouté', 'Jams jamsatou1', NULL, 1, 'bonjour', 16, 'd96d87db-5b52-40e7-a49e-bab4ad3f0674', 1, '{\"reason\": null, \"actor_id\": \"7\", \"is_public\": true, \"actor_role\": \"agent-support\", \"new_status\": null, \"old_status\": null, \"visibility\": \"public\", \"source_role\": \"agent-support\", \"target_role\": null, \"event_status\": \"in_progress\", \"request_status\": \"in_progress\", \"target_user_id\": null, \"intervention_id\": \"req3-c1-i1\", \"intervention_order\": 1, \"intervention_cycle_number\": 1}', '2026-08-13 16:10:01', '2026-08-13 16:10:01', NULL),
+(3, NULL, 7, NULL, 11, 'in_progress', 'Pris en charge par Jams jamsatou1 — traitement démarré', 'Jams jamsatou1', NULL, 1, NULL, 12, '4f815653-df9f-49d9-8d1d-7683961f7cd5', 1, '{\"reason\": null, \"actor_id\": \"7\", \"actor_role\": \"chief-service\", \"new_status\": \"in_progress\", \"old_status\": \"in_progress\", \"source_role\": \"chief-service\", \"target_role\": null, \"event_status\": \"in_progress\", \"changed_fields\": [\"assignee_id\", \"category\", \"in_triage\", \"infos\", \"priority\", \"request_status\", \"unity_id\"], \"target_user_id\": null, \"intervention_id\": \"req3-c1-i1\", \"intervention_order\": 1, \"actor_service_label\": \"Service Étude & Digitalisation\", \"actor_direction_label\": \"Direction des Systèmes d\'Information\", \"intervention_actor_id\": \"7\", \"actor_department_label\": \"Département Étude et Développement\", \"intervention_actor_name\": \"Jams jamsatou1\", \"intervention_actor_role\": \"chief-service\", \"intervention_cycle_number\": 1}', '2026-08-13 11:06:55', '2026-08-13 11:06:55', NULL),
+(3, NULL, 7, NULL, 12, 'comment_added', 'Commentaire public ajouté', 'Jams jamsatou1', NULL, 1, 'Pouvez-vous me faire savoir  ce qui ne march pas ?', 13, 'afde5185-10f8-470b-abc8-8e9df1c3fb2a', 1, '{\"reason\": null, \"actor_id\": \"7\", \"is_public\": true, \"actor_role\": \"chief-service\", \"new_status\": null, \"old_status\": null, \"visibility\": \"public\", \"source_role\": \"chief-service\", \"target_role\": null, \"event_status\": \"in_progress\", \"request_status\": \"in_progress\", \"target_user_id\": null, \"intervention_id\": \"req3-c1-i1\", \"intervention_order\": 1, \"intervention_cycle_number\": 1}', '2026-08-13 12:29:18', '2026-08-13 16:21:24', '2026-08-13 16:21:24'),
+(3, NULL, 7, NULL, 13, 'pending', 'Informations complémentaires demandées', 'Jams jamsatou1', NULL, 1, NULL, 14, '509bd8e4-960b-452e-aefb-9100f94d0384', 1, '{\"reason\": null, \"actor_id\": \"7\", \"actor_role\": \"chief-service\", \"new_status\": \"pending\", \"old_status\": \"pending\", \"source_role\": \"chief-service\", \"target_role\": null, \"event_status\": \"pending\", \"changed_fields\": [\"request_status\"], \"target_user_id\": null}', '2026-08-13 12:29:23', '2026-08-13 12:29:23', NULL),
+(3, NULL, 7, NULL, 14, 'in_progress', 'Prise en charge — traitement en cours', 'Jams jamsatou1', NULL, 1, NULL, 15, '86830d92-5d99-4d7c-80ca-683a12e8a6da', 1, '{\"reason\": null, \"actor_id\": \"7\", \"actor_role\": \"chief-service\", \"new_status\": \"in_progress\", \"old_status\": \"in_progress\", \"source_role\": \"chief-service\", \"target_role\": null, \"event_status\": \"in_progress\", \"changed_fields\": [\"request_status\"], \"target_user_id\": null}', '2026-08-13 12:31:02', '2026-08-13 12:31:02', NULL),
+(3, NULL, 7, NULL, 15, 'comment_added', 'Commentaire public ajouté', 'Jams jamsatou1', NULL, 1, 'bonjour', 16, 'd96d87db-5b52-40e7-a49e-bab4ad3f0674', 1, '{\"reason\": null, \"actor_id\": \"7\", \"is_public\": true, \"actor_role\": \"chief-service\", \"new_status\": null, \"old_status\": null, \"visibility\": \"public\", \"source_role\": \"chief-service\", \"target_role\": null, \"event_status\": \"in_progress\", \"request_status\": \"in_progress\", \"target_user_id\": null, \"intervention_id\": \"req3-c1-i1\", \"intervention_order\": 1, \"intervention_cycle_number\": 1}', '2026-08-13 16:10:01', '2026-08-13 16:10:01', NULL),
 (3, NULL, 2, NULL, 16, 'comment_added', 'Commentaire interne ajouté', 'GASPARD GOEPOGUI', NULL, 1, '@Jams jamsatou1 oui bonjour monsieur veuillez me dire le souci', 17, 'b2039176-e39c-43b0-af42-1a99adb3e403', 1, '{\"reason\": null, \"actor_id\": \"2\", \"is_public\": false, \"actor_role\": \"admin\", \"new_status\": null, \"old_status\": null, \"visibility\": \"internal\", \"reply_to_id\": \"16\", \"source_role\": \"admin\", \"target_role\": null, \"event_status\": \"in_progress\", \"request_status\": \"in_progress\", \"target_user_id\": null}', '2026-08-13 16:12:49', '2026-08-13 16:12:49', NULL),
-(4, NULL, 7, NULL, NULL, 'created', 'Demande créée par l\'utilisateur', 'Jams jamsatou1', NULL, 1, NULL, 18, 'b5c300ba-456f-410b-8cec-7f06b210720f', 1, '{\"reason\": null, \"actor_id\": \"7\", \"actor_role\": \"agent-support\", \"new_status\": \"new\", \"old_status\": null, \"source_role\": \"agent-support\", \"target_role\": null, \"event_status\": \"new\", \"target_user_id\": null}', '2026-08-14 11:05:44', '2026-08-14 11:05:44', NULL),
-(4, NULL, 7, NULL, 18, 'routed_to_support', 'Aucune règle de routage — envoi au support général', 'Jams jamsatou1', NULL, 1, NULL, 19, '42cce473-8671-42f5-af09-0cefb92702a8', 1, '{\"reason\": null, \"actor_id\": \"7\", \"dest_role\": \"support\", \"actor_role\": \"agent-support\", \"new_status\": \"qualifying\", \"old_status\": \"new\", \"source_role\": \"agent-support\", \"target_role\": \"support\", \"event_status\": \"to_qualify\", \"target_user_id\": null}', '2026-08-14 11:05:45', '2026-08-14 11:05:45', NULL),
-(4, NULL, 7, NULL, 19, 'cancelled', 'Demande annulée — je suis deja satisfait', 'Jams jamsatou1', NULL, 1, 'je suis deja satisfait', 20, 'd16076f3-d275-4572-aa6a-9e9b74f83d4c', 1, '{\"reason\": \"je suis deja satisfait\", \"actor_id\": \"7\", \"actor_role\": \"agent-support\", \"new_status\": \"cancelled\", \"old_status\": \"cancelled\", \"source_role\": \"agent-support\", \"target_role\": null, \"event_status\": \"cancelled\", \"target_user_id\": null}', '2026-08-14 11:13:33', '2026-08-14 11:13:33', NULL),
-(5, NULL, 7, NULL, NULL, 'created', 'Demande créée par l\'utilisateur', 'Jams jamsatou1', NULL, 1, NULL, 21, 'f21ebec6-fe37-4f67-b9ec-c459ce419e4d', 1, '{\"reason\": null, \"actor_id\": \"7\", \"actor_role\": \"agent-support\", \"new_status\": \"new\", \"old_status\": null, \"source_role\": \"agent-support\", \"target_role\": null, \"event_status\": \"new\", \"target_user_id\": null}', '2026-08-14 11:43:26', '2026-08-14 11:43:26', NULL),
-(5, NULL, 7, NULL, 21, 'routed_to_support', 'Aucune règle de routage — envoi au support général', 'Jams jamsatou1', NULL, 1, NULL, 22, 'f356dac7-66f6-4a46-9fde-ccd3b3becdbf', 1, '{\"reason\": null, \"actor_id\": \"7\", \"dest_role\": \"support\", \"actor_role\": \"agent-support\", \"new_status\": \"qualifying\", \"old_status\": \"new\", \"source_role\": \"agent-support\", \"target_role\": \"support\", \"event_status\": \"to_qualify\", \"target_user_id\": null}', '2026-08-14 11:43:27', '2026-08-14 11:43:27', NULL),
-(5, NULL, 7, NULL, 22, 'attachment_added', 'Pièce jointe ajoutée — WhatsApp Image 2026-08-07 at 1.46.51 PM.jpeg', 'Jams jamsatou1', NULL, 1, NULL, 23, '01319b90-aab1-4402-ab6f-13e5837fed41', 1, '{\"reason\": null, \"actor_id\": \"7\", \"filename\": \"WhatsApp Image 2026-08-07 at 1.46.51 PM.jpeg\", \"mime_type\": \"image/jpeg\", \"actor_role\": \"agent-support\", \"new_status\": null, \"old_status\": null, \"size_bytes\": 65439, \"scan_status\": \"clean\", \"source_role\": \"agent-support\", \"target_role\": null, \"event_status\": \"qualifying\", \"attachment_id\": \"2\", \"request_status\": \"qualifying\", \"target_user_id\": null}', '2026-08-14 11:43:30', '2026-08-14 11:43:30', NULL),
-(6, NULL, 7, NULL, NULL, 'created', 'Demande créée par l\'utilisateur', 'Jams jamsatou1', NULL, 1, NULL, 24, '9942e907-6065-47b2-a967-ab12595e0d55', 1, '{\"reason\": null, \"actor_id\": \"7\", \"actor_role\": \"agent-support\", \"new_status\": \"new\", \"old_status\": null, \"source_role\": \"agent-support\", \"target_role\": null, \"event_status\": \"new\", \"target_user_id\": null}', '2026-08-14 13:28:44', '2026-08-14 13:28:44', NULL),
-(6, NULL, 7, NULL, 24, 'routed_to_support', 'Aucune règle de routage — envoi au support général', 'Jams jamsatou1', NULL, 1, NULL, 25, '28f6969b-0ea7-4433-8bf2-869229e0fb91', 1, '{\"reason\": null, \"actor_id\": \"7\", \"dest_role\": \"support\", \"actor_role\": \"agent-support\", \"new_status\": \"qualifying\", \"old_status\": \"new\", \"source_role\": \"agent-support\", \"target_role\": \"support\", \"event_status\": \"to_qualify\", \"target_user_id\": null}', '2026-08-14 13:28:44', '2026-08-14 13:28:44', NULL),
+(4, NULL, 7, NULL, NULL, 'created', 'Demande créée par l\'utilisateur', 'Jams jamsatou1', NULL, 1, NULL, 18, 'b5c300ba-456f-410b-8cec-7f06b210720f', 1, '{\"reason\": null, \"actor_id\": \"7\", \"actor_role\": \"chief-service\", \"new_status\": \"new\", \"old_status\": null, \"source_role\": \"chief-service\", \"target_role\": null, \"event_status\": \"new\", \"target_user_id\": null}', '2026-08-14 11:05:44', '2026-08-14 11:05:44', NULL),
+(4, NULL, 7, NULL, 18, 'routed_to_support', 'Aucune règle de routage — envoi au support général', 'Jams jamsatou1', NULL, 1, NULL, 19, '42cce473-8671-42f5-af09-0cefb92702a8', 1, '{\"reason\": null, \"actor_id\": \"7\", \"dest_role\": \"support\", \"actor_role\": \"chief-service\", \"new_status\": \"qualifying\", \"old_status\": \"new\", \"source_role\": \"chief-service\", \"target_role\": \"support\", \"event_status\": \"to_qualify\", \"target_user_id\": null}', '2026-08-14 11:05:45', '2026-08-14 11:05:45', NULL),
+(4, NULL, 7, NULL, 19, 'cancelled', 'Demande annulée — je suis deja satisfait', 'Jams jamsatou1', NULL, 1, 'je suis deja satisfait', 20, 'd16076f3-d275-4572-aa6a-9e9b74f83d4c', 1, '{\"reason\": \"je suis deja satisfait\", \"actor_id\": \"7\", \"actor_role\": \"chief-service\", \"new_status\": \"cancelled\", \"old_status\": \"cancelled\", \"source_role\": \"chief-service\", \"target_role\": null, \"event_status\": \"cancelled\", \"target_user_id\": null}', '2026-08-14 11:13:33', '2026-08-14 11:13:33', NULL),
+(5, NULL, 7, NULL, NULL, 'created', 'Demande créée par l\'utilisateur', 'Jams jamsatou1', NULL, 1, NULL, 21, 'f21ebec6-fe37-4f67-b9ec-c459ce419e4d', 1, '{\"reason\": null, \"actor_id\": \"7\", \"actor_role\": \"chief-service\", \"new_status\": \"new\", \"old_status\": null, \"source_role\": \"chief-service\", \"target_role\": null, \"event_status\": \"new\", \"target_user_id\": null}', '2026-08-14 11:43:26', '2026-08-14 11:43:26', NULL),
+(5, NULL, 7, NULL, 21, 'routed_to_support', 'Aucune règle de routage — envoi au support général', 'Jams jamsatou1', NULL, 1, NULL, 22, 'f356dac7-66f6-4a46-9fde-ccd3b3becdbf', 1, '{\"reason\": null, \"actor_id\": \"7\", \"dest_role\": \"support\", \"actor_role\": \"chief-service\", \"new_status\": \"qualifying\", \"old_status\": \"new\", \"source_role\": \"chief-service\", \"target_role\": \"support\", \"event_status\": \"to_qualify\", \"target_user_id\": null}', '2026-08-14 11:43:27', '2026-08-14 11:43:27', NULL),
+(5, NULL, 7, NULL, 22, 'attachment_added', 'Pièce jointe ajoutée — WhatsApp Image 2026-08-07 at 1.46.51 PM.jpeg', 'Jams jamsatou1', NULL, 1, NULL, 23, '01319b90-aab1-4402-ab6f-13e5837fed41', 1, '{\"reason\": null, \"actor_id\": \"7\", \"filename\": \"WhatsApp Image 2026-08-07 at 1.46.51 PM.jpeg\", \"mime_type\": \"image/jpeg\", \"actor_role\": \"chief-service\", \"new_status\": null, \"old_status\": null, \"size_bytes\": 65439, \"scan_status\": \"clean\", \"source_role\": \"chief-service\", \"target_role\": null, \"event_status\": \"qualifying\", \"attachment_id\": \"2\", \"request_status\": \"qualifying\", \"target_user_id\": null}', '2026-08-14 11:43:30', '2026-08-14 11:43:30', NULL),
+(6, NULL, 7, NULL, NULL, 'created', 'Demande créée par l\'utilisateur', 'Jams jamsatou1', NULL, 1, NULL, 24, '9942e907-6065-47b2-a967-ab12595e0d55', 1, '{\"reason\": null, \"actor_id\": \"7\", \"actor_role\": \"chief-service\", \"new_status\": \"new\", \"old_status\": null, \"source_role\": \"chief-service\", \"target_role\": null, \"event_status\": \"new\", \"target_user_id\": null}', '2026-08-14 13:28:44', '2026-08-14 13:28:44', NULL),
+(6, NULL, 7, NULL, 24, 'routed_to_support', 'Aucune règle de routage — envoi au support général', 'Jams jamsatou1', NULL, 1, NULL, 25, '28f6969b-0ea7-4433-8bf2-869229e0fb91', 1, '{\"reason\": null, \"actor_id\": \"7\", \"dest_role\": \"support\", \"actor_role\": \"chief-service\", \"new_status\": \"qualifying\", \"old_status\": \"new\", \"source_role\": \"chief-service\", \"target_role\": \"support\", \"event_status\": \"to_qualify\", \"target_user_id\": null}', '2026-08-14 13:28:44', '2026-08-14 13:28:44', NULL),
 (6, NULL, 2, NULL, 25, 'in_progress', 'Pris en charge par GASPARD GOEPOGUI — traitement démarré', 'GASPARD GOEPOGUI', NULL, 1, NULL, 26, '8cdf9a53-0a96-4c9b-80b1-ea5c51b8b10f', 1, '{\"reason\": null, \"actor_id\": \"2\", \"actor_role\": \"admin\", \"new_status\": \"in_progress\", \"old_status\": \"in_progress\", \"source_role\": \"admin\", \"target_role\": null, \"event_status\": \"in_progress\", \"changed_fields\": [\"assignee_id\", \"category\", \"in_triage\", \"infos\", \"priority\", \"request_status\", \"unity_id\"], \"target_user_id\": null, \"intervention_id\": \"req6-c1-i1\", \"intervention_order\": 1, \"actor_service_label\": \"Service Étude & Digitalisation\", \"actor_direction_label\": \"Direction des Systèmes d\'Information\", \"intervention_actor_id\": \"2\", \"actor_department_label\": \"Département Étude et Développement\", \"intervention_actor_name\": \"GASPARD GOEPOGUI\", \"intervention_actor_role\": \"admin\", \"intervention_cycle_number\": 1}', '2026-08-15 11:44:02', '2026-08-15 11:44:02', NULL),
-(7, NULL, 8, NULL, NULL, 'created', 'Demande créée par l\'utilisateur', 'PAULETTE ONIVOGUI', NULL, 1, NULL, 27, '79df5b95-4b22-41af-acfa-d08746a9f98b', 1, '{\"reason\": null, \"actor_id\": \"8\", \"actor_role\": \"agent-support\", \"new_status\": \"new\", \"old_status\": null, \"source_role\": \"agent-support\", \"target_role\": null, \"event_status\": \"new\", \"target_user_id\": null}', '2026-08-15 12:05:16', '2026-08-15 12:05:16', NULL),
-(7, NULL, 8, NULL, 27, 'routed_to_support', 'Aucune règle de routage — envoi au support général', 'PAULETTE ONIVOGUI', NULL, 1, NULL, 28, '5fed2095-dc2c-4f8c-895f-39964d6c1848', 1, '{\"reason\": null, \"actor_id\": \"8\", \"dest_role\": \"support\", \"actor_role\": \"agent-support\", \"new_status\": \"qualifying\", \"old_status\": \"new\", \"source_role\": \"agent-support\", \"target_role\": \"support\", \"event_status\": \"to_qualify\", \"target_user_id\": null}', '2026-08-15 12:05:16', '2026-08-15 12:05:16', NULL),
-(8, NULL, 8, NULL, NULL, 'created', 'Demande créée par l\'utilisateur', 'PAULETTE ONIVOGUI', NULL, 1, NULL, 29, '24fe427e-e2e9-42a8-95e8-b35cab72230e', 1, '{\"reason\": null, \"actor_id\": \"8\", \"actor_role\": \"agent-support\", \"new_status\": \"new\", \"old_status\": null, \"source_role\": \"agent-support\", \"target_role\": null, \"event_status\": \"new\", \"target_user_id\": null}', '2026-08-15 12:07:43', '2026-08-15 12:07:43', NULL),
-(8, NULL, 8, NULL, 29, 'routed_to_support', 'Aucune règle de routage — envoi au support général', 'PAULETTE ONIVOGUI', NULL, 1, NULL, 30, '83f7e48f-5b7e-4e36-812a-5212d27b0e74', 1, '{\"reason\": null, \"actor_id\": \"8\", \"dest_role\": \"support\", \"actor_role\": \"agent-support\", \"new_status\": \"qualifying\", \"old_status\": \"new\", \"source_role\": \"agent-support\", \"target_role\": \"support\", \"event_status\": \"to_qualify\", \"target_user_id\": null}', '2026-08-15 12:07:43', '2026-08-15 12:07:43', NULL),
-(8, NULL, 8, NULL, 30, 'cancelled', 'Demande annulée — merci, j\'ai deja trouvé solution à mon problème', 'PAULETTE ONIVOGUI', NULL, 1, 'merci, j\'ai deja trouvé solution à mon problème', 31, '52765659-678b-47e7-83e1-1c8636f4939e', 1, '{\"reason\": \"merci, j\'ai deja trouvé solution à mon problème\", \"actor_id\": \"8\", \"actor_role\": \"agent-support\", \"new_status\": \"cancelled\", \"old_status\": \"cancelled\", \"source_role\": \"agent-support\", \"target_role\": null, \"event_status\": \"cancelled\", \"target_user_id\": null}', '2026-08-15 12:10:39', '2026-08-15 12:10:39', NULL),
-(6, NULL, 7, NULL, 26, 'comment_added', 'Commentaire public ajouté', 'GASPARD KAMUS GOEPOGUI', NULL, 1, 'Bonjour', 32, '40da5c75-92b8-40e9-9551-c89960568e86', 1, '{\"reason\": null, \"peer_id\": \"2\", \"actor_id\": \"7\", \"is_public\": true, \"actor_role\": \"agent-support\", \"new_status\": null, \"old_status\": null, \"visibility\": \"public\", \"source_role\": \"agent-support\", \"target_role\": null, \"event_status\": \"in_progress\", \"request_status\": \"in_progress\", \"target_user_id\": null}', '2026-08-17 16:14:49', '2026-08-17 16:14:49', NULL),
-(9, NULL, 7, NULL, NULL, 'created', 'Demande créée par l\'utilisateur', 'GASPARD KAMUS GOEPOGUI', NULL, 1, NULL, 33, '1b223c61-a226-450e-8bfd-311abe5a92db', 1, '{\"reason\": null, \"actor_id\": \"7\", \"actor_role\": \"agent-support\", \"new_status\": \"new\", \"old_status\": null, \"source_role\": \"agent-support\", \"target_role\": null, \"event_status\": \"new\", \"target_user_id\": null}', '2026-08-19 09:41:10', '2026-08-19 09:41:10', NULL),
-(9, NULL, 7, NULL, 33, 'routed_to_support', 'Aucune règle de routage — envoi au support général', 'GASPARD KAMUS GOEPOGUI', NULL, 1, NULL, 34, '1818e114-8262-4cb5-9029-15abad3c04eb', 1, '{\"reason\": null, \"actor_id\": \"7\", \"dest_role\": \"support\", \"actor_role\": \"agent-support\", \"new_status\": \"qualifying\", \"old_status\": \"new\", \"source_role\": \"agent-support\", \"target_role\": \"support\", \"event_status\": \"to_qualify\", \"target_user_id\": null}', '2026-08-19 09:41:11', '2026-08-19 09:41:11', NULL),
-(9, NULL, 7, NULL, 34, 'attachment_added', 'Pièce jointe ajoutée — edg recrutement.jpg', 'GASPARD KAMUS GOEPOGUI', NULL, 1, NULL, 35, '1bea0aab-e486-4f50-8ac5-470842c39ed3', 1, '{\"reason\": null, \"actor_id\": \"7\", \"filename\": \"edg recrutement.jpg\", \"mime_type\": \"image/jpeg\", \"actor_role\": \"agent-support\", \"new_status\": null, \"old_status\": null, \"size_bytes\": 66482, \"scan_status\": \"clean\", \"source_role\": \"agent-support\", \"target_role\": null, \"event_status\": \"qualifying\", \"attachment_id\": \"3\", \"request_status\": \"qualifying\", \"target_user_id\": null}', '2026-08-19 09:41:14', '2026-08-19 09:41:14', NULL),
+(7, NULL, 8, NULL, NULL, 'created', 'Demande créée par l\'utilisateur', 'PAULETTE ONIVOGUI', NULL, 1, NULL, 27, '79df5b95-4b22-41af-acfa-d08746a9f98b', 1, '{\"reason\": null, \"actor_id\": \"8\", \"actor_role\": \"chief-service\", \"new_status\": \"new\", \"old_status\": null, \"source_role\": \"chief-service\", \"target_role\": null, \"event_status\": \"new\", \"target_user_id\": null}', '2026-08-15 12:05:16', '2026-08-15 12:05:16', NULL),
+(7, NULL, 8, NULL, 27, 'routed_to_support', 'Aucune règle de routage — envoi au support général', 'PAULETTE ONIVOGUI', NULL, 1, NULL, 28, '5fed2095-dc2c-4f8c-895f-39964d6c1848', 1, '{\"reason\": null, \"actor_id\": \"8\", \"dest_role\": \"support\", \"actor_role\": \"chief-service\", \"new_status\": \"qualifying\", \"old_status\": \"new\", \"source_role\": \"chief-service\", \"target_role\": \"support\", \"event_status\": \"to_qualify\", \"target_user_id\": null}', '2026-08-15 12:05:16', '2026-08-15 12:05:16', NULL),
+(8, NULL, 8, NULL, NULL, 'created', 'Demande créée par l\'utilisateur', 'PAULETTE ONIVOGUI', NULL, 1, NULL, 29, '24fe427e-e2e9-42a8-95e8-b35cab72230e', 1, '{\"reason\": null, \"actor_id\": \"8\", \"actor_role\": \"chief-service\", \"new_status\": \"new\", \"old_status\": null, \"source_role\": \"chief-service\", \"target_role\": null, \"event_status\": \"new\", \"target_user_id\": null}', '2026-08-15 12:07:43', '2026-08-15 12:07:43', NULL),
+(8, NULL, 8, NULL, 29, 'routed_to_support', 'Aucune règle de routage — envoi au support général', 'PAULETTE ONIVOGUI', NULL, 1, NULL, 30, '83f7e48f-5b7e-4e36-812a-5212d27b0e74', 1, '{\"reason\": null, \"actor_id\": \"8\", \"dest_role\": \"support\", \"actor_role\": \"chief-service\", \"new_status\": \"qualifying\", \"old_status\": \"new\", \"source_role\": \"chief-service\", \"target_role\": \"support\", \"event_status\": \"to_qualify\", \"target_user_id\": null}', '2026-08-15 12:07:43', '2026-08-15 12:07:43', NULL),
+(8, NULL, 8, NULL, 30, 'cancelled', 'Demande annulée — merci, j\'ai deja trouvé solution à mon problème', 'PAULETTE ONIVOGUI', NULL, 1, 'merci, j\'ai deja trouvé solution à mon problème', 31, '52765659-678b-47e7-83e1-1c8636f4939e', 1, '{\"reason\": \"merci, j\'ai deja trouvé solution à mon problème\", \"actor_id\": \"8\", \"actor_role\": \"chief-service\", \"new_status\": \"cancelled\", \"old_status\": \"cancelled\", \"source_role\": \"chief-service\", \"target_role\": null, \"event_status\": \"cancelled\", \"target_user_id\": null}', '2026-08-15 12:10:39', '2026-08-15 12:10:39', NULL),
+(6, NULL, 7, NULL, 26, 'comment_added', 'Commentaire public ajouté', 'GASPARD KAMUS GOEPOGUI', NULL, 1, 'Bonjour', 32, '40da5c75-92b8-40e9-9551-c89960568e86', 1, '{\"reason\": null, \"peer_id\": \"2\", \"actor_id\": \"7\", \"is_public\": true, \"actor_role\": \"chief-service\", \"new_status\": null, \"old_status\": null, \"visibility\": \"public\", \"source_role\": \"chief-service\", \"target_role\": null, \"event_status\": \"in_progress\", \"request_status\": \"in_progress\", \"target_user_id\": null}', '2026-08-17 16:14:49', '2026-08-17 16:14:49', NULL),
+(9, NULL, 7, NULL, NULL, 'created', 'Demande créée par l\'utilisateur', 'GASPARD KAMUS GOEPOGUI', NULL, 1, NULL, 33, '1b223c61-a226-450e-8bfd-311abe5a92db', 1, '{\"reason\": null, \"actor_id\": \"7\", \"actor_role\": \"chief-service\", \"new_status\": \"new\", \"old_status\": null, \"source_role\": \"chief-service\", \"target_role\": null, \"event_status\": \"new\", \"target_user_id\": null}', '2026-08-19 09:41:10', '2026-08-19 09:41:10', NULL),
+(9, NULL, 7, NULL, 33, 'routed_to_support', 'Aucune règle de routage — envoi au support général', 'GASPARD KAMUS GOEPOGUI', NULL, 1, NULL, 34, '1818e114-8262-4cb5-9029-15abad3c04eb', 1, '{\"reason\": null, \"actor_id\": \"7\", \"dest_role\": \"support\", \"actor_role\": \"chief-service\", \"new_status\": \"qualifying\", \"old_status\": \"new\", \"source_role\": \"chief-service\", \"target_role\": \"support\", \"event_status\": \"to_qualify\", \"target_user_id\": null}', '2026-08-19 09:41:11', '2026-08-19 09:41:11', NULL),
+(9, NULL, 7, NULL, 34, 'attachment_added', 'Pièce jointe ajoutée — edg recrutement.jpg', 'GASPARD KAMUS GOEPOGUI', NULL, 1, NULL, 35, '1bea0aab-e486-4f50-8ac5-470842c39ed3', 1, '{\"reason\": null, \"actor_id\": \"7\", \"filename\": \"edg recrutement.jpg\", \"mime_type\": \"image/jpeg\", \"actor_role\": \"chief-service\", \"new_status\": null, \"old_status\": null, \"size_bytes\": 66482, \"scan_status\": \"clean\", \"source_role\": \"chief-service\", \"target_role\": null, \"event_status\": \"qualifying\", \"attachment_id\": \"3\", \"request_status\": \"qualifying\", \"target_user_id\": null}', '2026-08-19 09:41:14', '2026-08-19 09:41:14', NULL),
 (9, NULL, 2, NULL, 35, 'in_progress', 'Pris en charge par GASPARD GOEPOGUI — traitement démarré', 'GASPARD GOEPOGUI', NULL, 1, NULL, 36, '5b8163d9-1151-404c-9fd1-5f1b8e5c133f', 1, '{\"reason\": null, \"actor_id\": \"2\", \"actor_role\": \"admin\", \"new_status\": \"in_progress\", \"old_status\": \"in_progress\", \"source_role\": \"admin\", \"target_role\": null, \"event_status\": \"in_progress\", \"changed_fields\": [\"assignee_id\", \"category\", \"in_triage\", \"infos\", \"priority\", \"request_status\", \"unity_id\"], \"target_user_id\": null, \"intervention_id\": \"req9-c1-i1\", \"intervention_order\": 1, \"actor_service_label\": \"Service Étude & Digitalisation\", \"actor_direction_label\": \"Direction des Systèmes d\'Information\", \"intervention_actor_id\": \"2\", \"actor_department_label\": \"Département Étude et Développement\", \"intervention_actor_name\": \"GASPARD GOEPOGUI\", \"intervention_actor_role\": \"admin\", \"intervention_cycle_number\": 1}', '2026-08-19 10:08:48', '2026-08-19 10:08:48', NULL),
-(9, NULL, 6, NULL, 36, 'treatment_transmitted', 'Traitement transmis à AMADOU TOURE', 'GASPARD GOEPOGUI', NULL, 1, 'on doit changer le système de charge', 37, 'f7cac8bd-a98c-459c-b792-40181746909c', 1, '{\"reason\": \"on doit changer le système de charge\", \"actor_id\": \"2\", \"ended_at\": \"2026-08-19T10:12:36.100633\", \"dest_role\": \"agent-support\", \"work_done\": \"J\'ai branché le chargeur mais ça n\'a pas marché\", \"actor_role\": \"admin\", \"new_status\": \"in_progress\", \"old_status\": \"in_progress\", \"started_at\": \"2026-08-19T09:41:10\", \"source_role\": \"admin\", \"target_role\": \"agent-support\", \"cycle_number\": 1, \"target_user_id\": \"6\", \"intervention_id\": \"req9-c1-i1\", \"new_assignee_id\": 6, \"duration_seconds\": 1886, \"target_user_name\": \"AMADOU TOURE\", \"next_intervention\": {\"started_at\": \"2026-08-19T10:12:36.100633\", \"intervention_id\": \"req9-c1-i2\", \"intervention_order\": 2, \"actor_service_label\": \"Service Étude & Digitalisation\", \"actor_direction_label\": \"Direction des Systèmes d\'Information\", \"intervention_actor_id\": \"6\", \"actor_department_label\": \"Département Étude et Développement\", \"intervention_actor_name\": \"AMADOU TOURE\", \"intervention_actor_role\": \"agent-support\", \"intervention_cycle_number\": 1}, \"intervention_order\": 1, \"actor_service_label\": \"Service Étude & Digitalisation\", \"previous_assignee_id\": 2, \"actor_direction_label\": \"Direction des Systèmes d\'Information\", \"intervention_actor_id\": \"2\", \"actor_department_label\": \"Département Étude et Développement\", \"intervention_actor_name\": \"GASPARD GOEPOGUI\", \"intervention_actor_role\": \"admin\", \"intervention_cycle_number\": 1}', '2026-08-19 10:12:36', '2026-08-19 10:12:36', NULL),
+(9, NULL, 6, NULL, 36, 'treatment_transmitted', 'Traitement transmis à AMADOU TOURE', 'GASPARD GOEPOGUI', NULL, 1, 'on doit changer le système de charge', 37, 'f7cac8bd-a98c-459c-b792-40181746909c', 1, '{\"reason\": \"on doit changer le système de charge\", \"actor_id\": \"2\", \"ended_at\": \"2026-08-19T10:12:36.100633\", \"dest_role\": \"chief-service\", \"work_done\": \"J\'ai branché le chargeur mais ça n\'a pas marché\", \"actor_role\": \"admin\", \"new_status\": \"in_progress\", \"old_status\": \"in_progress\", \"started_at\": \"2026-08-19T09:41:10\", \"source_role\": \"admin\", \"target_role\": \"chief-service\", \"cycle_number\": 1, \"target_user_id\": \"6\", \"intervention_id\": \"req9-c1-i1\", \"new_assignee_id\": 6, \"duration_seconds\": 1886, \"target_user_name\": \"AMADOU TOURE\", \"next_intervention\": {\"started_at\": \"2026-08-19T10:12:36.100633\", \"intervention_id\": \"req9-c1-i2\", \"intervention_order\": 2, \"actor_service_label\": \"Service Étude & Digitalisation\", \"actor_direction_label\": \"Direction des Systèmes d\'Information\", \"intervention_actor_id\": \"6\", \"actor_department_label\": \"Département Étude et Développement\", \"intervention_actor_name\": \"AMADOU TOURE\", \"intervention_actor_role\": \"chief-service\", \"intervention_cycle_number\": 1}, \"intervention_order\": 1, \"actor_service_label\": \"Service Étude & Digitalisation\", \"previous_assignee_id\": 2, \"actor_direction_label\": \"Direction des Systèmes d\'Information\", \"intervention_actor_id\": \"2\", \"actor_department_label\": \"Département Étude et Développement\", \"intervention_actor_name\": \"GASPARD GOEPOGUI\", \"intervention_actor_role\": \"admin\", \"intervention_cycle_number\": 1}', '2026-08-19 10:12:36', '2026-08-19 10:12:36', NULL),
 (10, NULL, 34, NULL, NULL, 'created', 'Demande créée par l\'utilisateur', 'Mohamed Tassilimy Diaby', NULL, 1, NULL, 38, 'ecc56f26-691d-4936-8f7b-d0429b066f5d', 1, '{\"reason\": null, \"actor_id\": \"34\", \"actor_role\": \"user\", \"new_status\": \"new\", \"old_status\": null, \"source_role\": \"user\", \"target_role\": null, \"event_status\": \"new\", \"target_user_id\": null}', '2026-08-27 12:05:16', '2026-08-27 12:05:16', NULL),
 (10, NULL, 34, NULL, 38, 'routed_to_support', 'Aucune règle de routage — envoi au support général', 'Mohamed Tassilimy Diaby', NULL, 1, NULL, 39, '11af1d3d-0b21-4060-b141-6767af9bcb63', 1, '{\"reason\": null, \"actor_id\": \"34\", \"dest_role\": \"support\", \"actor_role\": \"user\", \"new_status\": \"qualifying\", \"old_status\": \"new\", \"source_role\": \"user\", \"target_role\": \"support\", \"event_status\": \"to_qualify\", \"target_user_id\": null}', '2026-08-27 12:05:16', '2026-08-27 12:05:16', NULL),
 (10, NULL, 34, NULL, 39, 'attachment_added', 'Pièce jointe ajoutée — Facture Master BS.pdf', 'Mohamed Tassilimy Diaby', NULL, 1, NULL, 40, '2bbc2029-1da1-44b7-80d9-e5e9834d3cc3', 1, '{\"reason\": null, \"actor_id\": \"34\", \"filename\": \"Facture Master BS.pdf\", \"mime_type\": \"application/pdf\", \"actor_role\": \"user\", \"new_status\": null, \"old_status\": null, \"size_bytes\": 664407, \"scan_status\": \"clean\", \"source_role\": \"user\", \"target_role\": null, \"event_status\": \"qualifying\", \"attachment_id\": \"4\", \"request_status\": \"qualifying\", \"target_user_id\": null}', '2026-08-27 12:05:20', '2026-08-27 12:05:20', NULL),
@@ -1593,21 +1274,6 @@ ALTER TABLE `activity_log`
   ADD CONSTRAINT `activity_log_ibfk_1` FOREIGN KEY (`actor_id`) REFERENCES `account` (`id`);
 
 --
--- Contraintes pour la table `announcement`
---
-ALTER TABLE `announcement`
-  ADD CONSTRAINT `announcement_ibfk_1` FOREIGN KEY (`announcement_category_id`) REFERENCES `announcement_category` (`id`),
-  ADD CONSTRAINT `announcement_ibfk_2` FOREIGN KEY (`announcement_priority_id`) REFERENCES `announcement_priority` (`id`),
-  ADD CONSTRAINT `announcement_ibfk_3` FOREIGN KEY (`announcement_status_id`) REFERENCES `announcement_status` (`id`),
-  ADD CONSTRAINT `announcement_ibfk_4` FOREIGN KEY (`author_id`) REFERENCES `account` (`id`);
-
---
--- Contraintes pour la table `announcement_target_role`
---
-ALTER TABLE `announcement_target_role`
-  ADD CONSTRAINT `announcement_target_role_ibfk_1` FOREIGN KEY (`announcement_id`) REFERENCES `announcement` (`id`) ON DELETE CASCADE;
-
---
 -- Contraintes pour la table `appreciation`
 --
 ALTER TABLE `appreciation`
@@ -1619,18 +1285,6 @@ ALTER TABLE `appreciation`
 ALTER TABLE `attachment`
   ADD CONSTRAINT `attachment_ibfk_1` FOREIGN KEY (`request_id`) REFERENCES `request` (`id`) ON DELETE CASCADE,
   ADD CONSTRAINT `attachment_ibfk_2` FOREIGN KEY (`uploader_id`) REFERENCES `account` (`id`);
-
---
--- Contraintes pour la table `communication_setting`
---
-ALTER TABLE `communication_setting`
-  ADD CONSTRAINT `communication_setting_ibfk_1` FOREIGN KEY (`updated_by`) REFERENCES `account` (`id`);
-
---
--- Contraintes pour la table `knowledge_article`
---
-ALTER TABLE `knowledge_article`
-  ADD CONSTRAINT `knowledge_article_ibfk_1` FOREIGN KEY (`author_id`) REFERENCES `account` (`id`);
 
 --
 -- Contraintes pour la table `notification`

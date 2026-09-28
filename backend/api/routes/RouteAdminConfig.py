@@ -23,11 +23,6 @@ from api.services.ServiceRoutingRule import RoutingRuleService
 from api.services.ServiceReferences import (
     RequestStatusService,
     RequestCategoryService,
-    AccountStatusService,
-    KnowledgeCategoryService,
-    AnnouncementCategoryService,
-    AnnouncementPriorityService,
-    AnnouncementStatusService,
     PriorityDefinitionService,
 )
 from api.repositories import UnityRepository
@@ -56,15 +51,10 @@ def _routing_svc(db: AsyncSession = Depends(get_db)) -> RoutingRuleService:
     return RoutingRuleService(db)
 
 
-# Table name → service factory mapping (14 tables de référence)
+# Table name → service factory mapping (2 tables de référence)
 _REF_SERVICE_MAP = {
     "request_statuses":        lambda db: RequestStatusService(db),
     "request_categories":      lambda db: RequestCategoryService(db),
-    "account_statuses":        lambda db: AccountStatusService(db),
-    "knowledge_categories":    lambda db: KnowledgeCategoryService(db),
-    "announcement_categories": lambda db: AnnouncementCategoryService(db),
-    "announcement_priorities": lambda db: AnnouncementPriorityService(db),
-    "announcement_statuses":   lambda db: AnnouncementStatusService(db),
 }
 
 

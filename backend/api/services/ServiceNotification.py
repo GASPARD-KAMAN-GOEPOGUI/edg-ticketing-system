@@ -100,11 +100,6 @@ class NotificationService(BaseService):
             ))
         return count
 
-    async def delete(self, id: str) -> bool:
-        """Archive la notification — soft-delete uniquement (deleted_at), jamais de suppression physique."""
-        await self.get_by_id(id)
-        return await self.repo.delete(id)
-
     async def restore(self, id: str):
         """Restaure une notification archivée — visible à nouveau dans la vue active."""
         ok = await self.repo.restore(id)

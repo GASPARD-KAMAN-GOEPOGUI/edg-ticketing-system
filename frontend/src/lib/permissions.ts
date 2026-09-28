@@ -26,8 +26,6 @@ export type Permission =
   | "cancel_request"
   | "manage_requests"
   // Escalades
-  | "escalate_request"
-  | "manage_escalations"
   // Utilisateurs
   | "view_users"
   | "manage_users"
@@ -46,12 +44,6 @@ export type Permission =
   // Journaux
   | "view_logs"
   // Base de connaissance
-  | "view_knowledge"
-  | "manage_knowledge"
-  // Annonces
-  | "view_announcements"
-  | "manage_announcements"
-  | "manage_communication"
   // Workflows & tâches
   | "view_workflows"
   | "manage_workflows"
@@ -63,13 +55,7 @@ export type Permission =
 
 // ── Matrice Rôle → Permissions ────────────────────────────────────────────────
 
-const _PUBLIC: Permission[] = [
-  "view_knowledge",
-  "view_announcements",
-];
-
 const _USER: Permission[] = [
-  ..._PUBLIC,
   "view_own_profile",
   "edit_own_profile",
   "create_request",
@@ -84,27 +70,11 @@ const _AGENT: Permission[] = [
   "assign_request",
   "close_request",
   "reopen_request",
-  "escalate_request",
   "view_workflows",
   "view_tasks",
   "manage_tasks",
-  "manage_knowledge",
   "view_users",
   "view_references",
-];
-
-const _CHIEF: Permission[] = [
-  ..._AGENT,
-  "manage_requests",
-  "manage_escalations",
-  "view_reports",
-  "view_stats",
-  "manage_workflows",
-];
-
-const _DIRECTOR: Permission[] = [
-  ..._CHIEF,
-  "view_global_reports",
 ];
 
 const _ADMIN: Permission[] = [
@@ -112,14 +82,11 @@ const _ADMIN: Permission[] = [
   "view_own_profile", "edit_own_profile",
   "create_request", "view_own_requests", "view_all_requests",
   "assign_request", "close_request", "reopen_request", "cancel_request", "manage_requests",
-  "escalate_request", "manage_escalations",
   "view_users", "manage_users",
   "view_reports", "view_global_reports", "view_stats",
   "view_references", "manage_references",
   "manage_config", "manage_sla", "manage_routing", "manage_homepage",
   "view_logs",
-  "view_knowledge", "manage_knowledge",
-  "view_announcements", "manage_announcements", "manage_communication",
   "view_workflows", "manage_workflows",
   "view_tasks", "manage_tasks",
   "view_notifications",
@@ -127,12 +94,14 @@ const _ADMIN: Permission[] = [
 ];
 
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
-  public:              _PUBLIC,
+  // Le rôle public n'a aucune permission applicative : ses deux seules
+  // (view_knowledge, view_announcements) sont parties avec la base de
+  // connaissances et les annonces le 2026-09-24.
+  public:              [],
   user:                _USER,
-  "agent-support":     _AGENT,
-  "chief-service":     _CHIEF,
-  "chief-departement": _CHIEF,
-  director:            _DIRECTOR,
+  "chief-service":     _AGENT,
+  technicien:          _AGENT,
+  "chef-division-support": _AGENT,
   admin:               _ADMIN,
 };
 
@@ -141,10 +110,9 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
 const ROLE_HIERARCHY: Record<Role, number> = {
   public:              0,
   user:                1,
-  "agent-support":     2,
-  "chief-service":     3,
-  "chief-departement": 3,
-  director:            4,
+  "chief-service":     2,
+  technicien:          2,
+  "chef-division-support": 2,
   admin:               5,
 };
 

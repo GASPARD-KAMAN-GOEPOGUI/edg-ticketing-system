@@ -26,18 +26,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { priorityLabels, statusLabels } from "@/lib/mock-data";
 import { fetchDirections, fetchUnits } from "@/lib/api/directions-units";
 import type { Direction, Unit } from "@/lib/api/directions-units";
-import type { EscalationItem, RequestItem } from "@/lib/mock-data";
+import type { RequestItem } from "@/lib/mock-data";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
 import { useMemo, useState, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { usePagination, PaginationBar } from "@/components/pagination-bar";
 import { useUser, useRole } from "@/lib/session";
-import {
-  fetchEscalations,
-  reviewEscalation,
-  resolveEscalation,
-  escalateRequest as escalateToDirector,
-} from "@/lib/api/escalations";
 import { downloadReport } from "@/lib/api/reports";
 import {
   fetchRequests,
@@ -93,7 +87,7 @@ import { LayoutToggle } from "@/components/layout-toggle";
 import type { LayoutMode } from "@/components/layout-toggle";
 
 export const Route = createFileRoute("/app/supervision")({
-  beforeLoad: () => requireRole("chief-service", "chief-departement", "director", "admin"),
+  beforeLoad: () => requireRole("admin"),
   head: () => ({ meta: [{ title: "Supervision — EDG Support" }] }),
   component: SupervisionPage,
 });
@@ -120,20 +114,6 @@ const ACTIVE_STATUSES = new Set([
   "in_progress", "pending", "escalated", "reopened",
 ]);
 
-const levelTone: Record<EscalationItem["level"], string> = {
-  L1: "bg-info/15 text-info",
-  L2: "bg-warning/20 text-warning-foreground dark:text-warning",
-  L3: "bg-destructive/15 text-destructive",
-};
-
-const levelLabel: Record<EscalationItem["level"], string> = {
-  L1: "Agent N1",
-  L2: "Chef de service",
-  L3: "Directeur",
-};
-
-type EscalationFilter = "active" | "all" | EscalationItem["status"];
-
 // ── Composant principal ────────────────────────────────────────────────────────
 
 function SupervisionPage() {
@@ -141,18 +121,17 @@ function SupervisionPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const sessionUser = useUser();
-  const isChiefRole = role === "chief-service" || role === "chief-departement";
-  const isChiefService = role === "chief-service";
-  const isChiefDepartment = role === "chief-departement";
-  const unitId = isChiefRole ? sessionUser?.unit_id : undefined;
-  const directionId = role === "director"
-    ? (sessionUser?.direction_id ?? sessionUser?.unit_id)
-    : sessionUser?.direction_id;
+  // director et chief-departement ont ete retires le 2026-09-25 : la page est
+  // reservee a l'admin (garde de route), donc perimetre global sans restriction.
+  const isChiefRole = false;
+  const isChiefDepartment = false;
+  const unitId = undefined;
+  const directionId = sessionUser?.direction_id;
   const hasOperationalScope = isChiefRole ? !!unitId : !!directionId;
   const scopeLabel = isChiefDepartment ? "département" : "service";
   const scopeTitle = isChiefDepartment ? "Supervision du département" : "Supervision du service";
 
-  // Deep-link "Mon équipe" (menu "Pilotage", chief-service) — ?section=equipe
+  // Deep-link "Mon équipe" (menu "Pilotage") — ?section=equipe
   // fait défiler vers la section "Charge par agent" déjà existante.
   useEffect(() => {
     const section = new URLSearchParams(window.location.search).get("section");
@@ -160,45 +139,8 @@ function SupervisionPage() {
     document.getElementById(section)?.scrollIntoView({ behavior: "smooth", block: "start" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const [teamMsg, setTeamMsg] = useState("");
-  const teamMsgMut = useMutation({
-    mutationFn: () => apiFetch("/announcements/team-message", {
-      method: "POST",
-      body: JSON.stringify({
-        title: "Message d'équipe",
-        description: teamMsg.trim(),
-        announcement_category: "general",
-        announcement_priority: "medium",
-        announcement_status: "published",
-        audience: "unit",
-        author_id: sessionUser?.id ?? "",
-        channel_names: ["in_app"],
-        role_names: ["agent-support"],
-        direction_ids: [],
-      }),
-    }),
-    onSuccess: () => { toast.success("Message envoyé à votre équipe."); setTeamMsg(""); },
-    onError: () => toast.error("Erreur lors de l'envoi du message."),
-  });
-
   const [q, setQ] = useState("");
-  const [filter, setFilter] = useState<EscalationFilter>("active");
   const [agentLayout, setAgentLayout] = useState<LayoutMode>("grid");
-  const [escLayout, setEscLayout] = useState<LayoutMode>("grid");
-
-  // ── Dialogs ────────────────────────────────────────────────────────────────
-  const [reassignOpen, setReassignOpen] = useState(false);
-  const [reassignEsc, setReassignEsc] = useState<EscalationItem | null>(null);
-  const [reassignAgentId, setReassignAgentId] = useState("");
-  const [reassignNote, setReassignNote] = useState("");
-
-  const [transferOpen, setTransferOpen] = useState(false);
-  const [transferEsc, setTransferEsc] = useState<EscalationItem | null>(null);
-  const [transferReason, setTransferReason] = useState("");
-
-  const canReassignEscalation = isChiefRole || role === "admin";
-  const canTakeOverEscalation = role === "admin";
-  const canTransferToDirector = isChiefRole || role === "admin";
   const openSupervisionTicket = useCallback((id: string) => {
     navigate({ to: "/app/supervision/tickets/$id", params: { id } });
   }, [navigate]);
@@ -217,24 +159,13 @@ function SupervisionPage() {
     staleTime: 60_000,
   });
 
-  const { data: escData, isLoading: loadEsc, isError: escError } = useQuery({
-    queryKey: ["escalations"],
-    queryFn: () => fetchEscalations({ limit: 100 }),
-    staleTime: 30_000,
-    // Pas de refetchInterval : escalation.* (SSE) invalide déjà ["escalations"].
-  });
-  const esc: EscalationItem[] = escData?.items ?? [];
-
   const { data: agentsData, isLoading: loadAgents, isError: agentsError } = useQuery({
     queryKey: ["agents-supervision", role, unitId, directionId],
     queryFn: () => {
-      if (isChiefService) {
-        return fetchUsers({ role: "agent-support", unit_id: unitId, limit: 100 });
-      }
       if (isChiefDepartment) {
-        return fetchUsers({ role: "agent-support", direction_id: unitId, limit: 100 });
+        return fetchUsers({ role: "chief-service", direction_id: unitId, limit: 100 });
       }
-      return fetchUsers({ role: "agent-support", direction_id: directionId, limit: 100 });
+      return fetchUsers({ role: "chief-service", direction_id: directionId, limit: 100 });
     },
     enabled: hasOperationalScope,
     staleTime: 60_000,
@@ -242,18 +173,9 @@ function SupervisionPage() {
   });
   const agents: AccountUser[] = agentsData?.items ?? [];
 
-  const { data: chiefsData, isLoading: loadChiefs, isError: chiefsError } = useQuery({
-    queryKey: ["chiefs-supervision", directionId],
-    queryFn: () => fetchUsers({ role: "chief-service", direction_id: directionId, limit: 100 }),
-    enabled: role === "director" && !!directionId,
-    staleTime: 60_000,
-    // Pas de refetchInterval : user.* (SSE) invalide désormais ["chiefs-supervision"].
-  });
-  const chiefs: AccountUser[] = chiefsData?.items ?? [];
-
   const { data: unitsData = [], isLoading: loadUnits, isError: unitsError } = useQuery({
     queryKey: ["units-supervision"],
-    // Pas de filtre direction : les agents affichés (chef-service/département/director)
+    // Pas de filtre direction : les agents affichés (département/director)
     // peuvent appartenir à des unités hors du seul périmètre `directionId` du rôle
     // director — nécessaire pour résoudre le nom de l'unité de chaque agent ci-dessous.
     queryFn: () => fetchUnits(),
@@ -263,9 +185,6 @@ function SupervisionPage() {
   const { data: ticketsData, isLoading: loadTickets, isError: ticketsError } = useQuery({
     queryKey: ["tickets-supervision", role, unitId, directionId],
     queryFn: () => {
-      if (isChiefService) {
-        return fetchRequests({ unit_id: unitId, limit: 500 });
-      }
       if (isChiefDepartment) {
         return fetchRequests({ direction_id: unitId, limit: 500 });
       }
@@ -280,7 +199,6 @@ function SupervisionPage() {
   const loadingStats = loadAgents || loadTickets;
 
   const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ["escalations"] });
     qc.invalidateQueries({ queryKey: ["tickets-supervision"] });
     qc.invalidateQueries({ queryKey: ["requests"] });
     qc.invalidateQueries({ queryKey: ["queue"] });
@@ -324,22 +242,11 @@ function SupervisionPage() {
 
   // ── KPIs (données réelles) ─────────────────────────────────────────────────
   const kpis = useMemo(() => {
-    const escalationsOpen = esc.filter((e) => e.status !== "resolved").length;
     const totalOpen = agentStats.reduce((s, a) => s + a.open, 0);
     const slaBreachedTotal = agentStats.reduce((s, a) => s + a.slaBreached, 0);
     const overloadCount = agentStats.filter((a) => a.open >= 8).length;
-    return { escalationsOpen, totalOpen, slaBreachedTotal, overloadCount };
-  }, [esc, agentStats]);
-
-  // ── Escalades triées par urgence SLA (C12) ─────────────────────────────────
-  const visibleEsc = useMemo(() => {
-    const filtered = esc.filter((e) => {
-      if (filter === "active") return e.status !== "resolved";
-      if (filter === "all") return true;
-      return e.status === filter;
-    });
-    return [...filtered].sort((a, b) => b.slaOverHours - a.slaOverHours);
-  }, [esc, filter]);
+    return { totalOpen, slaBreachedTotal, overloadCount };
+  }, [agentStats]);
 
   // ── Chart (données réelles) ────────────────────────────────────────────────
   const chartData = agentStats.map((a) => ({
@@ -348,108 +255,9 @@ function SupervisionPage() {
     retards: a.slaBreached,
   }));
 
-  // ── Mutations escalades (C6) ───────────────────────────────────────────────
-  const reviewMut = useMutation({
-    mutationFn: (id: string) => reviewEscalation(id),
-    onSuccess: () => { toast.success("Escalade prise en revue"); invalidate(); },
-    onError: () => toast.error("Impossible de prendre en revue"),
-  });
-
-  const resolveMut = useMutation({
-    mutationFn: (id: string) => resolveEscalation(id),
-    onSuccess: () => { toast.success("Escalade clôturée"); invalidate(); },
-    onError: () => toast.error("Impossible de clôturer l'escalade"),
-  });
-
-  const reassignMut = useMutation({
-    mutationFn: async () => {
-      if (!reassignEsc?.requestId) throw new Error("requestId manquant");
-      await assignRequest(reassignEsc.requestId, reassignAgentId);
-      await resolveEscalation(reassignEsc.id);
-    },
-    onSuccess: () => {
-      toast.success("Ticket réaffecté — escalade clôturée");
-      setReassignOpen(false);
-      setReassignEsc(null);
-      setReassignAgentId("");
-      setReassignNote("");
-      invalidate();
-    },
-    onError: () => toast.error("Erreur lors de la réaffectation"),
-  });
-
-  const returnToAgentMut = useMutation({
-    mutationFn: async (e: EscalationItem) => {
-      if (!e.requestId) throw new Error("requestId manquant");
-      await updateRequest(e.requestId, { request_status: "in_progress" });
-      await resolveEscalation(e.id);
-    },
-    onSuccess: () => { toast.success("Retourné à l'agent — ticket en traitement"); invalidate(); },
-    onError: () => toast.error("Erreur lors du retour"),
-  });
-
-  const takeOverMut = useMutation({
-    mutationFn: async (e: EscalationItem) => {
-      if (!e.requestId) throw new Error("requestId manquant");
-      if (sessionUser?.id) await assignRequest(e.requestId, sessionUser.id);
-      await updateRequest(e.requestId, { request_status: "in_progress" });
-      await resolveEscalation(e.id);
-    },
-    onSuccess: () => { toast.success("Ticket pris en charge directement — en cours"); invalidate(); },
-    onError: () => toast.error("Erreur lors de la prise en charge"),
-  });
-
-  const transferMut = useMutation({
-    mutationFn: async () => {
-      if (!transferEsc?.requestId) throw new Error("requestId manquant");
-      await escalateToDirector(transferEsc.requestId, {
-        level: "L3",
-        reason: transferReason.trim() || "Escalade vers le Directeur",
-        from_agent_name: sessionUser?.name ?? "Chef de service",
-        to_agent_name: "Directeur",
-      });
-      await resolveEscalation(transferEsc.id);
-    },
-    onSuccess: () => {
-      toast.success("Escalade transmise au Directeur");
-      setTransferOpen(false);
-      setTransferEsc(null);
-      setTransferReason("");
-      invalidate();
-    },
-    onError: () => toast.error("Erreur lors du transfert"),
-  });
-
-  if (role === "director") {
-    if (!directionId) {
-      return (
-        <div className="mx-auto max-w-2xl py-16 text-center">
-          <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-warning/15">
-            <AlertTriangle className="h-7 w-7 text-warning" />
-          </div>
-          <h1 className="text-2xl font-bold tracking-tight">Aucune direction assignée</h1>
-          <p className="mx-auto mt-3 max-w-sm text-sm text-muted-foreground">
-            Votre compte directeur doit être rattaché à une direction avant d'accéder au centre de supervision.
-          </p>
-        </div>
-      );
-    }
-
-    return (
-      <DirectorSupervisionCenter
-        directionId={directionId}
-        tickets={allTickets}
-        agents={agents}
-        chiefs={chiefs}
-        units={unitsData}
-        directions={dirsData}
-        escalations={esc}
-        loading={loadTickets || loadAgents || loadChiefs || loadUnits || loadEsc}
-        error={ticketsError || agentsError || chiefsError || unitsError || escError}
-        onRefresh={invalidate}
-      />
-    );
-  }
+  // Mutations d'escalade (prise en revue, clôture, réaffectation, retour agent,
+  // prise en charge, transfert au directeur) retirées le 2026-09-26 avec le
+  // statut "escalated" : le backend n'expose plus ni /escalations ni /escalate.
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -463,7 +271,7 @@ function SupervisionPage() {
             {scopeTitle}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Charge, délai agent par agent et escalades en cours — mis à jour en continu.
+            Charge et délai agent par agent — mis à jour en continu.
           </p>
         </div>
         <Button
@@ -482,37 +290,8 @@ function SupervisionPage() {
         </Button>
       </header>
 
-      {/* ── Message d'équipe (chef uniquement) ── */}
-      {isChiefService && (
-        <GlassCard className="p-4">
-          <div className="mb-2 flex items-center gap-2">
-            <Megaphone className="h-4 w-4 text-primary" />
-            <span className="text-sm font-semibold">Message d'équipe</span>
-            <span className="text-xs text-muted-foreground">— visible uniquement par les agents de votre service</span>
-          </div>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Textarea
-              value={teamMsg}
-              onChange={(e) => setTeamMsg(e.target.value)}
-              placeholder="Ex. : Réunion de service lundi à 9h, tickets urgents uniquement ce matin…"
-              rows={2}
-              className="flex-1 resize-none text-sm"
-            />
-            <Button
-              className="gradient-primary shrink-0 self-end rounded-full sm:self-end"
-              disabled={!teamMsg.trim() || teamMsgMut.isPending}
-              onClick={() => teamMsgMut.mutate()}
-            >
-              {teamMsgMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              <span className="ml-1.5 sm:hidden">Envoyer</span>
-            </Button>
-          </div>
-        </GlassCard>
-      )}
-
       {/* ── KPI (données réelles) ── */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Kpi label="Escalades ouvertes"  value={kpis.escalationsOpen}  tone="destructive" icon={AlertTriangle} hint={`${esc.length} au total`}               loading={loadEsc} />
+      <div className="grid gap-4 sm:grid-cols-2">
         <Kpi label="Tickets en charge"  value={kpis.totalOpen}        tone="primary"     icon={Activity}     hint={`${agentStats.length} agents actifs`}     loading={loadingStats} />
         <Kpi label="Agents surchargés"   value={kpis.overloadCount}    tone="warning"     icon={Users2}       hint="≥ 8 tickets ouverts"                       loading={loadingStats} />
       </div>
@@ -555,260 +334,7 @@ function SupervisionPage() {
             </div>
           )}
         </GlassCard>
-
-        <GlassCard>
-          <h3 className="font-semibold">Distribution des escalades</h3>
-          <p className="mb-4 text-xs text-muted-foreground">Niveaux actuellement actifs</p>
-          <div className="space-y-3">
-            {(["L1", "L2", "L3"] as const).map((lvl) => {
-              const list = esc.filter((e) => e.level === lvl);
-              const pct = (list.length / Math.max(esc.length, 1)) * 100;
-              return (
-                <div key={lvl}>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold", levelTone[lvl])}>{levelLabel[lvl]}</span>
-                    <span className="text-muted-foreground">{list.length} escalades</span>
-                  </div>
-                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
-                    <div className="h-full rounded-full gradient-primary" style={{ width: `${pct}%` }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </GlassCard>
       </div>
-
-      {/* ── Escalades en cours (C1 : lien ticket, C6 : actions, C12 : tri SLA) ── */}
-      <GlassCard className="hidden">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="font-semibold">Escalades en cours</h3>
-            <p className="text-xs text-muted-foreground">
-              {visibleEsc.length} résultat(s) — triées par urgence délai décroissante
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Filter className="h-4 w-4 text-muted-foreground" />
-            <Select value={filter} onValueChange={(v) => setFilter(v as EscalationFilter)}>
-              <SelectTrigger className="h-9 w-full rounded-full sm:w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="active">En cours</SelectItem>
-                <SelectItem value="all">Tous statuts</SelectItem>
-                <SelectItem value="open">Ouvertes</SelectItem>
-                <SelectItem value="in_review">En revue</SelectItem>
-                <SelectItem value="resolved">Clôturées</SelectItem>
-              </SelectContent>
-            </Select>
-            <LayoutToggle layout={escLayout} onChange={setEscLayout} />
-          </div>
-        </div>
-
-        {loadEsc ? (
-          <div className="flex h-24 items-center justify-center">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground/40" />
-          </div>
-        ) : visibleEsc.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">Aucune escalade.</p>
-        ) : escLayout === "list" ? (
-          <ul className="space-y-2">
-            {visibleEsc.map((e) => (
-              <li
-                key={e.id}
-                className="flex flex-wrap items-start gap-3 rounded-2xl border border-border/40 bg-card/40 p-3 transition hover:border-primary/40"
-              >
-                <span className={cn("mt-0.5 rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wider", levelTone[e.level])}>
-                  {levelLabel[e.level] ?? e.level}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    {/* C1 — lien vers le ticket */}
-                    {e.requestId ? (
-                      <Link
-                        to="/app/supervision/tickets/$id"
-                        params={{ id: e.requestId }}
-                        className="font-mono text-[11px] text-primary hover:underline"
-                      >
-                        {e.requestRef}
-                      </Link>
-                    ) : (
-                      <span className="font-mono text-[11px] text-muted-foreground">{e.requestRef}</span>
-                    )}
-                    <Badge variant="outline" className="text-[10px]">
-                      {priorityLabels[e.priority]}
-                    </Badge>
-                    {e.status === "resolved" && (
-                      <Badge className="bg-success/15 text-success">Clôturée</Badge>
-                    )}
-                    {e.status === "in_review" && (
-                      <Badge className="bg-warning/20 text-warning-foreground dark:text-warning">En revue</Badge>
-                    )}
-                  </div>
-                  <div className="mt-0.5 text-sm font-medium">{e.title}</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">
-                    {e.fromAgent} → <span className="font-medium text-foreground/80">{e.toAgent}</span>
-                    {" · "}{e.reason}
-                  </div>
-                </div>
-                <div className="flex shrink-0 flex-col items-end gap-2">
-                  <div className="text-right">
-                    <div className="text-xs text-muted-foreground">Délai dépassé</div>
-                    <div className="text-sm font-semibold text-destructive">+{e.slaOverHours}h</div>
-                  </div>
-                  {e.status !== "resolved" && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {e.status === "open" && (
-                        <Button
-                          size="sm" variant="outline"
-                          className="h-7 rounded-full px-2.5 text-xs"
-                          disabled={reviewMut.isPending}
-                          onClick={() => reviewMut.mutate(e.id)}
-                        >
-                          En revue
-                        </Button>
-                      )}
-                      {/* C6 — Réaffecter */}
-                      {canReassignEscalation && e.requestId && (
-                        <Button
-                          size="sm" variant="outline"
-                          className="h-7 rounded-full px-2.5 text-xs"
-                          onClick={() => { setReassignEsc(e); setReassignAgentId(""); setReassignNote(""); setReassignOpen(true); }}
-                        >
-                          <UserPlus className="mr-1 h-3 w-3" /> Réaffecter
-                        </Button>
-                      )}
-                      {/* C6 — Retourner à l'agent */}
-                      {e.requestId && (
-                        <Button
-                          size="sm" variant="outline"
-                          className="h-7 rounded-full px-2.5 text-xs"
-                          disabled={returnToAgentMut.isPending}
-                          onClick={() => returnToAgentMut.mutate(e)}
-                        >
-                          <RotateCcw className="mr-1 h-3 w-3" /> Retourner
-                        </Button>
-                      )}
-                      {/* C6 — Traiter directement */}
-                      {canTakeOverEscalation && e.requestId && (
-                        <Button
-                          size="sm" variant="outline"
-                          className="h-7 rounded-full px-2.5 text-xs"
-                          disabled={takeOverMut.isPending}
-                          onClick={() => takeOverMut.mutate(e)}
-                        >
-                          <ArrowRight className="mr-1 h-3 w-3" /> Traiter
-                        </Button>
-                      )}
-                      {/* C6 — Transférer au Directeur */}
-                      {canTransferToDirector && e.requestId && (
-                        <Button
-                          size="sm"
-                          className="h-7 rounded-full px-2.5 text-xs gradient-primary text-background"
-                          onClick={() => { setTransferEsc(e); setTransferReason(""); setTransferOpen(true); }}
-                        >
-                          <ArrowUpRight className="mr-1 h-3 w-3" /> Directeur
-                        </Button>
-                      )}
-                      <Button
-                        size="sm"
-                        className="h-7 rounded-full px-2.5 text-xs gradient-primary text-background"
-                        disabled={resolveMut.isPending}
-                        onClick={() => resolveMut.mutate(e.id)}
-                      >
-                        Clôturer
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {visibleEsc.map((e) => (
-              <GlassCard
-                key={e.id}
-                className={cn(
-                  "flex flex-col gap-2 p-4 transition hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-                  e.requestId && "cursor-pointer",
-                )}
-                role={e.requestId ? "link" : undefined}
-                tabIndex={e.requestId ? 0 : undefined}
-                onClick={() => { if (e.requestId) openSupervisionTicket(e.requestId); }}
-                onKeyDown={(event) => openSupervisionTicketFromKeyboard(event, e.requestId)}
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className={cn("rounded-full px-2.5 py-0.5 text-[10px] font-bold tracking-wider", levelTone[e.level])}>
-                    {levelLabel[e.level] ?? e.level}
-                  </span>
-                  {e.requestId ? (
-                    <Link
-                      to="/app/supervision/tickets/$id"
-                      params={{ id: e.requestId }}
-                      className="font-mono text-[11px] text-primary hover:underline"
-                    >
-                      {e.requestRef}
-                    </Link>
-                  ) : (
-                    <span className="font-mono text-[11px] text-muted-foreground">{e.requestRef}</span>
-                  )}
-                  <Badge variant="outline" className="text-[10px]">{priorityLabels[e.priority]}</Badge>
-                </div>
-                <div className="font-semibold text-sm mt-1 leading-snug">{e.title}</div>
-                <div className="text-xs text-muted-foreground">{e.fromAgent} → {e.toAgent}</div>
-                <div className="text-xs text-muted-foreground line-clamp-2">{e.reason}</div>
-                <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-2">
-                  <span className="text-xs font-semibold text-destructive">+{e.slaOverHours}h</span>
-                  {e.status !== "resolved" && (
-                    <div className="flex flex-wrap gap-1">
-                      {e.status === "open" && (
-                        <Button size="sm" variant="outline" className="h-6 rounded-full px-2 text-[10px]"
-                          disabled={reviewMut.isPending} onClick={(event) => { event.stopPropagation(); reviewMut.mutate(e.id); }}>
-                          En revue
-                        </Button>
-                      )}
-                      {e.requestId && (
-                        <>
-                          {canReassignEscalation && (
-                            <Button size="sm" variant="outline" className="h-6 rounded-full px-2 text-[10px]"
-                              onClick={(event) => { event.stopPropagation(); setReassignEsc(e); setReassignAgentId(""); setReassignOpen(true); }}>
-                              <UserPlus className="h-2.5 w-2.5" />
-                            </Button>
-                          )}
-                          <Button size="sm" variant="outline" className="h-6 rounded-full px-2 text-[10px]"
-                            disabled={returnToAgentMut.isPending} onClick={(event) => { event.stopPropagation(); returnToAgentMut.mutate(e); }}>
-                            <RotateCcw className="h-2.5 w-2.5" />
-                          </Button>
-                          {canTakeOverEscalation && (
-                            <Button size="sm" variant="outline" className="h-6 rounded-full px-2 text-[10px]"
-                              disabled={takeOverMut.isPending} onClick={(event) => { event.stopPropagation(); takeOverMut.mutate(e); }}>
-                              <ArrowRight className="h-2.5 w-2.5" />
-                            </Button>
-                          )}
-                          {canTransferToDirector && (
-                            <Button size="sm"
-                              className="h-6 rounded-full px-2 text-[10px] gradient-primary text-background"
-                              onClick={(event) => { event.stopPropagation(); setTransferEsc(e); setTransferReason(""); setTransferOpen(true); }}>
-                              <ArrowUpRight className="h-2.5 w-2.5" />
-                            </Button>
-                          )}
-                        </>
-                      )}
-                      <Button size="sm"
-                        className="h-6 rounded-full px-2 text-[10px] gradient-primary text-background"
-                        disabled={resolveMut.isPending} onClick={(event) => { event.stopPropagation(); resolveMut.mutate(e.id); }}>
-                        Clôturer
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </GlassCard>
-            ))}
-          </div>
-        )}
-      </GlassCard>
 
       {/* ── Charge par agent (C3 : suppression mock, données réelles) ── */}
       <GlassCard id="equipe" className="overflow-hidden p-0">
@@ -944,86 +470,6 @@ function SupervisionPage() {
         />
       </GlassCard>
 
-      {/* ── Dialog : Réaffecter ── */}
-      <Dialog open={canReassignEscalation && reassignOpen} onOpenChange={setReassignOpen}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Réaffecter l'escalade</DialogTitle>
-            <DialogDescription>
-              Choisissez l'agent qui prendra en charge le ticket {reassignEsc?.requestRef}.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <Label>Agent <span className="text-destructive">*</span></Label>
-            <Select value={reassignAgentId} onValueChange={setReassignAgentId}>
-              <SelectTrigger className="h-11">
-                <SelectValue placeholder="Sélectionner un agent" />
-              </SelectTrigger>
-              <SelectContent>
-                {agents.map((a) => (
-                  <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Label>Note (optionnelle)</Label>
-            <Textarea
-              value={reassignNote}
-              onChange={(e) => setReassignNote(e.target.value)}
-              placeholder="Motif de la réaffectation…"
-              className="resize-none"
-              rows={2}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" className="rounded-full" onClick={() => setReassignOpen(false)}>
-              Annuler
-            </Button>
-            <Button
-              className="rounded-full gradient-primary"
-              disabled={!reassignAgentId || reassignMut.isPending}
-              onClick={() => reassignMut.mutate()}
-            >
-              {reassignMut.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-              Confirmer
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── Dialog : Transférer au Directeur ── */}
-      <Dialog open={canTransferToDirector && transferOpen} onOpenChange={setTransferOpen}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Transférer au Directeur</DialogTitle>
-            <DialogDescription>
-              Le ticket {transferEsc?.requestRef} sera escaladé au niveau Directeur (L3).
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <Label>Motif <span className="text-destructive">*</span></Label>
-            <Textarea
-              value={transferReason}
-              onChange={(e) => setTransferReason(e.target.value)}
-              placeholder="Justification du transfert au Directeur…"
-              className="resize-none"
-              rows={3}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" className="rounded-full" onClick={() => setTransferOpen(false)}>
-              Annuler
-            </Button>
-            <Button
-              className="rounded-full gradient-primary"
-              disabled={!transferReason.trim() || transferMut.isPending}
-              onClick={() => transferMut.mutate()}
-            >
-              {transferMut.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-              Confirmer le transfert
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
@@ -1032,10 +478,8 @@ type DirectorSupervisionCenterProps = {
   directionId: string;
   tickets: RequestItem[];
   agents: AccountUser[];
-  chiefs: AccountUser[];
   units: Unit[];
   directions: Direction[];
-  escalations: EscalationItem[];
   loading: boolean;
   error: boolean;
   onRefresh: () => void;
@@ -1047,11 +491,9 @@ const ALL_FILTER = "__all__";
 type DirectorQuickFilterKind =
   | "service"
   | "chief-service"
-  | "agent-support"
   | "status"
   | "priority"
   | "category"
-  | "escalation"
   | "sla"
   | "reopened"
   | "period";
@@ -1081,10 +523,8 @@ function DirectorSupervisionCenter({
   directionId,
   tickets,
   agents,
-  chiefs,
   units,
   directions,
-  escalations,
   loading,
   error,
   onRefresh,
@@ -1103,33 +543,7 @@ function DirectorSupervisionCenter({
     () => new Map(agents.map((a) => [String(a.id), a])),
     [agents],
   );
-  const chiefByUnit = useMemo(() => {
-    const map = new Map<string, AccountUser>();
-    chiefs.forEach((chief) => {
-      if (chief.unit_id) map.set(String(chief.unit_id), chief);
-    });
-    return map;
-  }, [chiefs]);
-
   const ticketIds = useMemo(() => new Set(tickets.map((t) => String(t.id))), [tickets]);
-  const scopedEscalations = useMemo(
-    () => escalations.filter((e) => e.requestId && ticketIds.has(String(e.requestId))),
-    [escalations, ticketIds],
-  );
-  const activeEscalations = useMemo(
-    () => scopedEscalations.filter((e) => !isEscalationClosed(e)),
-    [scopedEscalations],
-  );
-  const latestEscalationByTicket = useMemo(() => {
-    const map = new Map<string, EscalationItem>();
-    [...scopedEscalations]
-      .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
-      .forEach((e) => {
-        if (e.requestId && !map.has(String(e.requestId))) map.set(String(e.requestId), e);
-      });
-    return map;
-  }, [scopedEscalations]);
-
   const serviceIds = useMemo(() => {
     const ids = new Set<string>();
     units.forEach((u) => ids.add(String(u.id)));
@@ -1158,19 +572,14 @@ function DirectorSupervisionCenter({
 
     const filtered = tickets.filter((ticket) => {
       const serviceId = ticket.serviceId ?? "";
-      const chief = serviceId ? chiefByUnit.get(String(serviceId)) : undefined;
-      const escalation = latestEscalationByTicket.get(String(ticket.id));
       const createdTime = new Date(ticket.createdAt).getTime();
       const isReopened = ticket.status === "reopened" || ticket.timeline?.some((event) => event.type === "reopened");
 
       if (scope.kind === "service" && String(serviceId) !== scope.value) return false;
-      if (scope.kind === "chief-service" && String(chief?.id ?? "") !== scope.value) return false;
-      if (scope.kind === "agent-support" && String(ticket.assigneeId ?? "") !== scope.value) return false;
+      if (scope.kind === "chief-service" && String(ticket.assigneeId ?? "") !== scope.value) return false;
       if (scope.kind === "status" && ticket.status !== scope.value) return false;
       if (scope.kind === "priority" && ticket.priority !== scope.value) return false;
       if (scope.kind === "category" && ticket.category !== scope.value) return false;
-      if (scope.kind === "escalation" && scope.value === "none" && escalation) return false;
-      if (scope.kind === "escalation" && scope.value !== "none" && escalation?.level !== scope.value) return false;
       if (scope.kind === "sla" && scope.value === "late" && !isTicketLate(ticket)) return false;
       if (scope.kind === "sla" && scope.value === "ok" && isTicketLate(ticket)) return false;
       if (scope.kind === "reopened" && scope.value === "yes" && !isReopened) return false;
@@ -1187,11 +596,8 @@ function DirectorSupervisionCenter({
         ticket.priority,
         getServiceName(serviceId, unitMap),
         directionName,
-        chief?.name,
         ticket.assigneeName ?? agentMap.get(String(ticket.assigneeId ?? ""))?.name,
         ticket.requesterName,
-        escalation?.level,
-        escalation?.reason,
       ].filter(Boolean).join(" ").toLowerCase();
       return haystack.includes(q);
     });
@@ -1199,9 +605,7 @@ function DirectorSupervisionCenter({
     return [...filtered].sort((a, b) => sortTickets(a, b, sortKey));
   }, [
     agentMap,
-    chiefByUnit,
     directionName,
-    latestEscalationByTicket,
     quickFilter,
     search,
     tickets,
@@ -1239,12 +643,10 @@ function DirectorSupervisionCenter({
       const late = serviceTickets.filter(isTicketLate).length;
       const critical = serviceTickets.filter((t) => t.priority === "critical").length;
       const serviceAgents = agents.filter((a) => String(a.unit_id ?? "") === id);
-      const chief = chiefByUnit.get(id);
       const avg = averageResolutionHours(serviceTickets);
       return {
         id,
         name: getServiceName(id, unitMap),
-        chief: chief?.name ?? "—",
         total: serviceTickets.length,
         opened,
         closed,
@@ -1257,7 +659,7 @@ function DirectorSupervisionCenter({
         workload: serviceAgents.length ? Math.round((opened / serviceAgents.length) * 10) / 10 : opened,
       };
     }).sort((a, b) => b.opened - a.opened || b.total - a.total);
-  }, [agents, chiefByUnit, serviceIds, tickets, unitMap]);
+  }, [agents, serviceIds, tickets, unitMap]);
 
   const priorityDistribution = useMemo(
     () => distribution(tickets, (t) => priorityLabels[t.priority] ?? t.priority),
@@ -1303,7 +705,7 @@ function DirectorSupervisionCenter({
             Centre de supervision de la direction
           </h1>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            Vue consolidée des services rattachés, des charges, délais, escalades et tickets critiques. Les données restent limitées au périmètre de votre direction.
+            Vue consolidée des services rattachés, des charges, délais et tickets critiques. Les données restent limitées au périmètre de votre direction.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -1354,7 +756,6 @@ function DirectorSupervisionCenter({
         <DirectorMetricCard label="Résolus" value={statusCount.resolved ?? 0} icon={ClipboardList} tone="success" loading={loading} />
         <DirectorMetricCard label="Fermés" value={statusCount.closed ?? 0} icon={Flag} tone="success" loading={loading} />
         <DirectorMetricCard label="Réouverts" value={reopenedTickets} icon={RefreshCw} tone="warning" loading={loading} />
-        <DirectorMetricCard label="Escaladés" value={activeEscalations.length || (statusCount.escalated ?? 0)} icon={ArrowUpRight} tone="destructive" loading={loading} />
         <DirectorMetricCard label="En retard délai" value={lateTickets} icon={Clock} tone="destructive" loading={loading} />
         <DirectorMetricCard label="Critiques" value={criticalTickets} icon={AlertTriangle} tone="destructive" loading={loading} />
         <DirectorMetricCard label="Moy. résolution" value={avgResolution == null ? "—" : `${avgResolution}h`} icon={Gauge} tone="primary" loading={loading} />
@@ -1429,7 +830,6 @@ function DirectorSupervisionCenter({
               <thead className="text-xs uppercase tracking-wider text-muted-foreground">
                 <tr>
                   <th className="pb-3 text-left font-semibold">Service</th>
-                  <th className="pb-3 text-left font-semibold">Chef</th>
                   <th className="pb-3 text-right font-semibold">Total</th>
                   <th className="pb-3 text-right font-semibold">Ouverts</th>
                   <th className="pb-3 text-right font-semibold">Fermés</th>
@@ -1444,7 +844,6 @@ function DirectorSupervisionCenter({
                 {serviceStats.map((service) => (
                   <tr key={service.id} className="border-t border-border/40">
                     <td className="py-3 pr-4 font-medium">{service.name}</td>
-                    <td className="py-3 pr-4 text-muted-foreground">{service.chief}</td>
                     <td className="py-3 text-right font-semibold">{service.total}</td>
                     <td className="py-3 text-right">{service.opened}</td>
                     <td className="py-3 text-right">{service.closed}</td>
@@ -1504,17 +903,9 @@ function DirectorSupervisionCenter({
                 ))}
 
                 <SelectSeparator />
-                <QuickFilterGroupLabel>Chefs</QuickFilterGroupLabel>
-                {chiefs.map((chief) => (
-                  <SelectItem key={chief.id} value={quickFilterValue("chief-service", chief.id)}>
-                    {chief.name}
-                  </SelectItem>
-                ))}
-
-                <SelectSeparator />
                 <QuickFilterGroupLabel>Agents</QuickFilterGroupLabel>
                 {agents.map((agent) => (
-                  <SelectItem key={agent.id} value={quickFilterValue("agent-support", agent.id)}>
+                  <SelectItem key={agent.id} value={quickFilterValue("chief-service", agent.id)}>
                     {agent.name}
                   </SelectItem>
                 ))}
@@ -1549,15 +940,6 @@ function DirectorSupervisionCenter({
                 <SelectItem value={quickFilterValue("sla", "ok")}>Dans le délai</SelectItem>
 
                 <SelectSeparator />
-                <QuickFilterGroupLabel>Escalades</QuickFilterGroupLabel>
-                <SelectItem value={quickFilterValue("escalation", "none")}>Sans escalade</SelectItem>
-                {(["L1", "L2", "L3"] as const).map((level) => (
-                  <SelectItem key={level} value={quickFilterValue("escalation", level)}>
-                    {levelLabel[level]}
-                  </SelectItem>
-                ))}
-
-                <SelectSeparator />
                 <QuickFilterGroupLabel>Réouverture</QuickFilterGroupLabel>
                 <SelectItem value={quickFilterValue("reopened", "yes")}>Réouverts</SelectItem>
                 <SelectItem value={quickFilterValue("reopened", "no")}>Non réouverts</SelectItem>
@@ -1586,13 +968,11 @@ function DirectorSupervisionCenter({
                   <th className="px-4 py-3 text-left font-semibold">Statut</th>
                   <th className="px-4 py-3 text-left font-semibold">Service</th>
                   <th className="px-4 py-3 text-left font-semibold">Direction</th>
-                  <th className="px-4 py-3 text-left font-semibold">Chef responsable</th>
                   <th className="px-4 py-3 text-left font-semibold">Agent affecté</th>
                   <th className="px-4 py-3 text-left font-semibold">Demandeur</th>
                   <th className="px-4 py-3 text-left font-semibold">Création</th>
                   <th className="px-4 py-3 text-left font-semibold">Mise à jour</th>
                   <th className="px-4 py-3 text-left font-semibold">Échéance délai</th>
-                  <th className="px-4 py-3 text-left font-semibold">Escalade</th>
                   <th className="px-4 py-3 text-left font-semibold">Retard</th>
                   <th className="px-4 py-3 text-right font-semibold">Action</th>
                 </tr>
@@ -1600,8 +980,6 @@ function DirectorSupervisionCenter({
               <tbody>
                 {pagedTickets.map((ticket) => {
                   const serviceId = ticket.serviceId ?? "";
-                  const chief = chiefByUnit.get(String(serviceId));
-                  const escalation = latestEscalationByTicket.get(String(ticket.id));
                   const late = isTicketLate(ticket);
                   return (
                     <tr key={ticket.id} className="border-t border-border/40 transition hover:bg-card/40">
@@ -1618,21 +996,11 @@ function DirectorSupervisionCenter({
                       <td className="px-4 py-3"><StatusBadge status={ticket.status} /></td>
                       <td className="px-4 py-3">{getServiceName(serviceId, unitMap)}</td>
                       <td className="px-4 py-3 text-muted-foreground">{directionName}</td>
-                      <td className="px-4 py-3">{chief?.name ?? "—"}</td>
                       <td className="px-4 py-3">{ticket.assigneeName ?? agentMap.get(String(ticket.assigneeId ?? ""))?.name ?? "—"}</td>
                       <td className="px-4 py-3">{ticket.requesterName || "—"}</td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">{formatDateTime(ticket.createdAt)}</td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">{formatDateTime(ticket.updatedAt)}</td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">{formatDateTime(slaDeadline(ticket))}</td>
-                      <td className="px-4 py-3">
-                        {escalation ? (
-                          <Badge className={cn("rounded-full", levelTone[escalation.level])}>
-                            {levelLabel[escalation.level] ?? escalation.level}
-                          </Badge>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </td>
                       <td className="px-4 py-3">
                         {late ? (
                           <Badge className="rounded-full bg-destructive/15 text-destructive">Délai dépassé</Badge>
@@ -1670,10 +1038,6 @@ function DirectorSupervisionCenter({
 }
 
 // ── Sous-composants ────────────────────────────────────────────────────────────
-
-function isEscalationClosed(escalation: EscalationItem) {
-  return escalation.status === "resolved" || escalation.status === "rejected";
-}
 
 function QuickFilterGroupLabel({ children }: { children: string }) {
   return (

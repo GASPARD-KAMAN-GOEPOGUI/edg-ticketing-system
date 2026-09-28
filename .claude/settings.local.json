@@ -18,7 +18,26 @@
       "Bash(curl -s http://localhost:8001/health)",
       "Bash(python -c \"from api.main import app; print\\('Startup OK — routes:', len\\(app.routes\\)\\)\")",
       "Bash(Start-Process -NoNewWindow -FilePath \"python\" -ArgumentList \"-m uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload\" -RedirectStandardOutput \"uvicorn_out.txt\" -RedirectStandardError \"uvicorn_err.txt\")",
-      "Bash(Start-Sleep -Seconds 5)"
+      "Bash(Start-Sleep -Seconds 5)",
+      "Bash(python -c ' *)",
+      "Bash(curl -s -m 10 -o /dev/null -w \"health: %{http_code}\\\\n\" http://127.0.0.1:8000/health)",
+      "Bash(curl -s -m 10 -w \"\\\\nstatus: %{http_code}\\\\n\" -X POST http://127.0.0.1:8000/api/v1/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"test@test.com\",\"password\":\"wrong\"}')",
+      "Bash(curl -s -m 30 -w \"\\\\n[status %{http_code}]\\\\n\" -X POST http://127.0.0.1:8001/api/v1/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"admin@gmail.com\",\"password\":\"mauvais-mdp-test\"}')",
+      "Bash(curl -s -m 60 -w \"\\\\n[status %{http_code}]\\\\n\" -X POST http://127.0.0.1:8001/api/v1/auth/login -H \"Content-Type: application/json\" -d '{\"identifier\":\"admin@gmail.com\",\"password\":\"mauvais-mdp-test\"}')",
+      "Bash(curl -s -m 20 \"http://127.0.0.1:8002/api/v1/public/directions/count\")",
+      "Bash(curl -s -m 20 \"http://127.0.0.1:8002/openapi.json\")",
+      "Bash(curl -s -m 15 -w \"\\\\n[health %{http_code} en %{time_total}s]\\\\n\" http://127.0.0.1:8000/health)",
+      "Bash(python -c \"import api.main; print\\('import api.main OK'\\)\")",
+      "Bash(\"C:/Users/HP/.virtualenvs/backend-vyqcM7r1/Scripts/python.exe\" -m pytest --version)",
+      "Bash(\"C:/Users/HP/.virtualenvs/backend-vyqcM7r1/Scripts/python.exe\" -m pytest tests/ -q --no-header -p no:cacheprovider)",
+      "Bash(\"C:/Users/HP/.virtualenvs/backend-vyqcM7r1/Scripts/python.exe\" -m pytest backend/tests/ -q --no-header -p no:cacheprovider)",
+      "Bash(\"C:/Users/HP/.virtualenvs/backend-vyqcM7r1/Scripts/python.exe\" -m pytest backend/tests/ -q --no-header -p no:cacheprovider --ignore=backend/tests/schema_validation)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(CENTRAL_AUTH_CACHE_TTL=0 \"C:/Users/HP/.virtualenvs/backend-vyqcM7r1/Scripts/python.exe\" -m pytest backend/tests/ -q --no-header -p no:cacheprovider --ignore=backend/tests/schema_validation)",
+      "Bash(CENTRAL_AUTH_CACHE_TTL=0 \"C:/Users/HP/.virtualenvs/backend-vyqcM7r1/Scripts/python.exe\" -m pytest backend/tests/ -q --no-header -p no:cacheprovider --assert=plain --ignore=backend/tests/schema_validation)",
+      "Bash(\"C:/Users/HP/.virtualenvs/backend-vyqcM7r1/Scripts/python.exe\" -m pytest backend/tests/api/test_user_org_assignment.py -q --no-header -p no:cacheprovider)",
+      "Bash(\"C:/Users/HP/.virtualenvs/backend-vyqcM7r1/Scripts/python.exe\" -m pytest backend/tests/api/test_reference_edition.py backend/tests/api/test_seed_references_org.py backend/tests/api/test_auth.py -q --no-header -p no:cacheprovider)",
+      "Bash(curl -s -m 8 -o /dev/null -w \"ton backend \\(8000\\): %{http_code}\\\\n\" http://127.0.0.1:8000/health)"
     ]
   }
 }

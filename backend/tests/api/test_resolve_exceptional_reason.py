@@ -72,12 +72,12 @@ async def test_chief_service_resolve_succeeds_with_all_fields(auth_client, unity
 
 async def test_agent_support_resolve_now_also_requires_fields(auth_client, unity_id):
     """BR-TRANSMIT-001 : contrairement à l'ancienne règle (narrowing limité à
-    chief-service), agent-support doit désormais lui aussi fournir résumé/solution/
+    chief-service), chief-service doit désormais lui aussi fournir résumé/solution/
     travail réalisé — l'obligation n'est plus réservée à un seul rôle."""
     request_id = await _create_assigned_ticket(auth_client, unity_id, "agent-missing-fields", 703)
 
     def _agent_dep():
-        return SimpleNamespace(id=703, role="agent-support", unity_id=unity_id, direction_id=None)
+        return SimpleNamespace(id=703, role="chief-service", unity_id=unity_id, direction_id=None)
 
     resp = await _resolve_as(_agent_dep, request_id, {})
     assert resp.status_code == 422, resp.text
@@ -87,7 +87,7 @@ async def test_agent_support_resolve_succeeds_with_all_fields(auth_client, unity
     request_id = await _create_assigned_ticket(auth_client, unity_id, "agent-with-fields", 704)
 
     def _agent_dep():
-        return SimpleNamespace(id=704, role="agent-support", unity_id=unity_id, direction_id=None)
+        return SimpleNamespace(id=704, role="chief-service", unity_id=unity_id, direction_id=None)
 
     resp = await _resolve_as(_agent_dep, request_id, _FULL_BODY)
     assert resp.status_code == 200, resp.text
@@ -100,7 +100,7 @@ async def test_resolve_without_body_now_rejected(auth_client, unity_id):
     request_id = await _create_assigned_ticket(auth_client, unity_id, "agent-no-body", 705)
 
     def _agent_dep():
-        return SimpleNamespace(id=705, role="agent-support", unity_id=unity_id, direction_id=None)
+        return SimpleNamespace(id=705, role="chief-service", unity_id=unity_id, direction_id=None)
 
     resp = await _resolve_as(_agent_dep, request_id, None)
     assert resp.status_code == 422, resp.text

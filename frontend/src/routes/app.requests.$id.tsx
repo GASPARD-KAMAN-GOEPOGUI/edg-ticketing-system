@@ -1,19 +1,19 @@
 import { createFileRoute, Link, useSearch } from "@tanstack/react-router";
 import { requireAuth } from "@/lib/auth-guard";
-import { WorkflowTimeline } from "@/components/workflow-timeline";
-import { InterventionJournal } from "@/components/intervention-journal";
+import { prefetch } from "@/lib/prefetch";
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { GlassCard } from "@/components/glass-card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
 import type { RequestItem, Appreciation } from "@/lib/mock-data";
-import { roleLabels } from "@/lib/mock-data";
+import { roleLabels, priorityLabels } from "@/lib/mock-data";
 import { AppreciationForm } from "@/components/appreciation-form";
 import { cn, formatElapsedHours } from "@/lib/utils";
 import { useRole, useUser } from "@/lib/session";
@@ -33,19 +33,23 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   fetchRequest,
   resolveRequest,
   transmitTreatment,
+  fetchTransmitTargets,
   assignRequest,
-  createComment,
-  deleteComment,
   reopenRequest,
   closeRequest,
   updateRequest,
   changeRequestPriority,
   cancelRequest,
-  escalateRequest,
-  escalateToDirectorRequest,
   uploadAttachment,
   fetchAttachments,
   fetchAttachmentFile,
@@ -54,9 +58,15 @@ import {
   transferDirection,
   requesterEditRequest,
   exportRequestDossier,
+  downloadPvIntervention,
+  submitPvIntervention,
+  archivePvIntervention,
+  fetchProposedSolution,
+  submitFieldCheck,
+  startTreatment,
   type RawAttachment,
 } from "@/lib/api/requests";
-import { fetchRefTable } from "@/lib/api/admin-config";
+import { fetchRequestCategories } from "@/lib/api/admin-config";
 import { buildAvatarUrl, fetchUser, fetchUsers, fetchUsersByIds, type AccountUser } from "@/lib/api/accounts";
 import { fetchDirections, fetchDepartments, fetchUnits, fetchUnit } from "@/lib/api/directions-units";
 import type { Direction, Unit } from "@/lib/api/directions-units";
@@ -81,7 +91,11 @@ import {
   Paperclip,
   Download,
   ExternalLink,
+  Archive,
+  ClipboardCheck,
+  PlayCircle,
   FileText,
+  Lightbulb,
   User,
   AlertTriangle,
   CheckCircle2,
@@ -96,7 +110,6 @@ import {
   ChevronDown,
   Lock,
   Loader2,
-  GitBranch,
   Plus,
   XCircle,
   RotateCcw,
@@ -120,6 +133,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+import { copyWithToast } from "@/lib/clipboard";
 import { formatDistanceToNow, format, differenceInDays } from "date-fns";
 import { fr } from "date-fns/locale";
 import { canTicketAction, isRequester } from "@/lib/capabilities";
@@ -131,16 +145,16 @@ export const Route = createFileRoute("/app/requests/$id")({
   // mêmes queryKeys que les useQuery du composant (context="requests" ici).
   loader: ({ context: { queryClient }, params: { id } }) =>
     Promise.all([
-      queryClient.ensureQueryData({
+      prefetch(queryClient.ensureQueryData({
         queryKey: ["request", id, "active"],
         queryFn: () => fetchRequest(id, { includeDeleted: false }),
         staleTime: 15_000,
-      }),
-      queryClient.ensureQueryData({
+      })),
+      prefetch(queryClient.ensureQueryData({
         queryKey: ["request", id, "active", "attachments"],
         queryFn: () => fetchAttachments(id),
         staleTime: 30_000,
-      }),
+      })),
     ]),
   component: RequestDetail,
   notFoundComponent: () => (
@@ -190,23 +204,11 @@ const DETAIL_CONTEXTS = {
     notFoundBackLabel: "Retour à mes tickets",
     backTo: "/app/my-tickets",
   },
-  chiefInbox: {
-    eyebrow: "Centre de répartition",
-    backLabel: "Retour au centre de répartition",
-    notFoundBackLabel: "Retour au centre de répartition",
-    backTo: "/app/chief-inbox",
-  },
-  departmentInbox: {
-    eyebrow: "Centre de pilotage",
-    backLabel: "Retour au centre de pilotage",
-    notFoundBackLabel: "Retour au centre de pilotage",
-    backTo: "/app/department-inbox",
-  },
-  direction: {
-    eyebrow: "Vue direction",
-    backLabel: "Retour à la vue direction",
-    notFoundBackLabel: "Retour à la vue direction",
-    backTo: "/app/direction",
+  distribution: {
+    eyebrow: "Distribution",
+    backLabel: "Retour à la distribution",
+    notFoundBackLabel: "Retour à la distribution",
+    backTo: "/app/distribution",
   },
   dg: {
     eyebrow: "Vue globale",
@@ -226,10 +228,23 @@ const DETAIL_CONTEXTS = {
     notFoundBackLabel: "Retour à l'administration",
     backTo: "/app/admin/users",
   },
+  resolved: {
+    eyebrow: "Tickets résolus",
+    backLabel: "Retour aux tickets résolus",
+    notFoundBackLabel: "Retour aux tickets résolus",
+    backTo: "/app/resolved",
+  },
 } as const;
 
+/** Contextes en LECTURE SEULE du traitement : le travail y est terminé, le
+ *  panneau Traitement n'expose donc qu'une consultation du PV d'intervention
+ *  et aucune action mutante. Les gardes serveur restent la vraie protection ;
+ *  ceci évite seulement de proposer des gestes qui n'ont plus lieu d'être. */
+const READ_ONLY_TREATMENT_CONTEXTS = new Set<RequestDetailContext>(["resolved"]);
+
 export type RequestDetailContext = keyof typeof DETAIL_CONTEXTS;
-type DetailTab = "description" | "journal" | "comments" | "files" | "sla" | "treatment";
+// Messagerie retiree le 2026-09-25 : plus d'onglet "comments".
+type DetailTab = "description" | "files" | "sla" | "treatment";
 type DirectTreatmentAction =
   | "selfAssign"
   | "resume"
@@ -238,7 +253,7 @@ type DirectTreatmentAction =
 // BR-TRANSMIT-001 — rôles pouvant devenir/rester "intervenant actuel" d'un ticket
 // (cible valide pour une transmission). Doit rester aligné avec TREATING_ROLES
 // côté backend (ticket_actions.py).
-const TREATING_ROLES = new Set(["agent-support", "chief-service", "chief-departement", "director"]);
+const TREATING_ROLES = new Set(["chief-service", "technicien", "chef-division-support", "chief-departement", "director"]);
 
 type RequestDetailPageProps = {
   id: string;
@@ -250,6 +265,9 @@ type Participant = {
   name: string;
   role?: string;
   detail: string;
+  /** Première action de cet acteur — détermine sa position dans la chaîne. */
+  firstAt?: string;
+  /** Dernière action connue — c'est elle qui est décrite par `detail`. */
   lastAt?: string;
   avatar?: string;
 };
@@ -264,8 +282,9 @@ const COMMENT_EMOJIS = [
 
 const PARTICIPANT_ROLE_LABELS: Record<string, string> = {
   user: "Demandeur",
-  "agent-support": "Agent Support",
   "chief-service": "Chef de Service",
+  technicien: "Technicien",
+  "chef-division-support": "Chef de Division Support",
   "chief-departement": "Chef de Département",
   director: "Directeur",
   admin: "Admin",
@@ -318,9 +337,31 @@ function ParticipantRow({ participant }: { participant: Participant }) {
   );
 }
 
+/**
+ * Chaîne des intervenants d'un ticket, dans l'ordre où ils sont intervenus.
+ *
+ * Règle métier : **est intervenant quiconque a posé une ACTION sur le ticket**,
+ * et rien d'autre. Créer la demande est une action, la qualifier en est une,
+ * l'envoyer au chef de division ou la prendre pour soi en est une, la traiter
+ * en est une. Recevoir un ticket dans sa file n'en est PAS une : tant qu'un
+ * acteur n'a rien fait, il n'apparaît pas — on ne dévoile jamais quelqu'un dont
+ * le tour d'intervention n'est pas encore venu.
+ *
+ * La timeline est la source : chaque action y laisse un événement horodaté
+ * portant son auteur (`actor_id`/`actor_name`/`actor_role`, cf.
+ * `ServiceRequest.py`). Elle couvre donc toute la chaîne, y compris la création
+ * et la qualification — contrairement aux `interventions` (BR-TRACE-001), qui
+ * ne tracent que le traitement et ignorent ces deux étapes.
+ *
+ * Un acteur qui intervient plusieurs fois reste UNE entrée, placée à sa
+ * première action ; `detail` décrit alors sa dernière action connue.
+ *
+ * Le rôle affiché vient de l'action elle-même, jamais d'une supposition : un
+ * chef de service ou un chef de division qui prend le ticket pour le traiter
+ * apparaît à sa place dans la chaîne, avec son vrai rôle.
+ */
 function buildParticipants(
   request: RequestItem,
-  visibleComments: RequestItem["comments"],
   assigneeName?: string,
 ): Participant[] {
   const avatars = request.participantAvatars ?? {};
@@ -329,113 +370,76 @@ function buildParticipants(
     const normalized = candidate.key || `${candidate.name}-${candidate.role ?? ""}`;
     const existing = participants.get(normalized);
     if (!existing) {
-      participants.set(normalized, candidate);
+      participants.set(normalized, { ...candidate, firstAt: candidate.firstAt ?? candidate.lastAt });
       return;
     }
-    const shouldReplaceDate = candidate.lastAt && (!existing.lastAt || candidate.lastAt > existing.lastAt);
+    const isMoreRecent = candidate.lastAt && (!existing.lastAt || candidate.lastAt > existing.lastAt);
+    const isEarlier = candidate.lastAt && (!existing.firstAt || candidate.lastAt < existing.firstAt);
     participants.set(normalized, {
       ...existing,
+      // Le rôle le plus précis l'emporte : celui porté par l'action réelle.
       role: existing.role ?? candidate.role,
-      detail: shouldReplaceDate ? candidate.detail : existing.detail,
-      lastAt: shouldReplaceDate ? candidate.lastAt : existing.lastAt,
+      detail: isMoreRecent ? candidate.detail : existing.detail,
+      lastAt: isMoreRecent ? candidate.lastAt : existing.lastAt,
+      firstAt: isEarlier ? candidate.lastAt : existing.firstAt,
       avatar: existing.avatar ?? candidate.avatar,
     });
   };
 
+  // Création : première action de la chaîne, toujours celle du demandeur.
+  // Volontairement sans rôle : l'événement `created` de la timeline porte le
+  // vrai `actor_role` du demandeur et viendra le renseigner. Le figer à "user"
+  // afficherait un rôle faux dès qu'un chef de service ou un technicien crée
+  // une demande pour lui-même.
   if (request.requesterName) {
     add({
       key: request.requesterId || `requester-${request.requesterName}`,
       name: request.requesterName,
-      role: "user",
       detail: "Créateur",
       lastAt: request.createdAt,
       avatar: request.requesterId ? avatars[request.requesterId] : undefined,
     });
   }
 
-  if (request.assigneeId || request.assigneeName || assigneeName) {
-    const name = assigneeName ?? request.assigneeName ?? request.assigneeId ?? "Agent assigné";
-    add({
-      key: request.assigneeId || `assignee-${name}`,
-      name,
-      role: "agent-support",
-      detail: "Assigné",
-      lastAt: request.updatedAt,
-      avatar: request.assigneeId ? avatars[request.assigneeId] : undefined,
-    });
-  }
-
+  // Chaque événement de timeline est une action : son auteur est un intervenant.
+  // L'ancienne branche `event.targetUserName` ("Destinataire") est retirée —
+  // elle affichait le prochain acteur AVANT qu'il n'ait agi.
   for (const event of request.timeline) {
-    if (event.by) {
-      add({
-        key: event.actorId || `actor-${event.by}`,
-        name: event.by,
-        role: event.actorRole,
-        detail: event.label,
-        lastAt: event.at,
-        avatar: event.actorId ? avatars[event.actorId] : undefined,
-      });
-    }
-    if (event.targetUserName) {
-      add({
-        key: event.targetUserId || `target-${event.targetUserName}`,
-        name: event.targetUserName,
-        role: event.targetRole,
-        detail: "Destinataire",
-        lastAt: event.at,
-        avatar: event.targetUserId ? avatars[event.targetUserId] : undefined,
-      });
-    }
-  }
-
-  for (const comment of visibleComments) {
+    if (!event.by) continue;
     add({
-      key: comment.authorId || `comment-${comment.author}`,
-      name: comment.author,
-      detail: "Message",
-      lastAt: comment.createdAt,
-      avatar: comment.authorId ? avatars[comment.authorId] : undefined,
+      key: event.actorId || `actor-${event.by}`,
+      name: event.by,
+      role: event.actorRole,
+      detail: event.label,
+      lastAt: event.at,
+      avatar: event.actorId ? avatars[event.actorId] : undefined,
     });
   }
 
-  return Array.from(participants.values()).sort((a, b) => {
-    const aTime = a.lastAt ? new Date(a.lastAt).getTime() : 0;
-    const bTime = b.lastAt ? new Date(b.lastAt).getTime() : 0;
-    return bTime - aTime;
-  });
-}
-
-type ConversationSummary = { peerId: string; lastAt?: string; lastBody?: string };
-
-/**
- * BR-MESSAGING-PAIR-001 — regroupe les commentaires (non-directive) par
- * conversation privée. `peerId` est toujours le côté intervenant de la paire
- * {demandeur, intervenant} (résolu côté backend, stable quel que soit qui a
- * écrit), donc un simple groupBy suffit — pas besoin de recalculer côté client
- * qui est "l'autre" participant.
- */
-function buildConversations(
-  comments: RequestItem["comments"],
-  currentAssigneeId: string | undefined,
-  includeCurrentEvenEmpty: boolean,
-): ConversationSummary[] {
-  const map = new Map<string, ConversationSummary>();
-  for (const c of comments) {
-    if (!c.peerId || c.isDirective) continue;
-    const existing = map.get(c.peerId);
-    if (!existing || (c.createdAt && (!existing.lastAt || c.createdAt > existing.lastAt))) {
-      map.set(c.peerId, { peerId: c.peerId, lastAt: c.createdAt, lastBody: c.body });
+  // Intervenant courant : ajouté seulement s'il a déjà agi (donc déjà présent
+  // via la timeline). On enrichit alors son libellé, sans jamais créer une
+  // entrée pour un assigné qui n'aurait encore rien fait.
+  const currentHandlerKey = request.assigneeId
+    || (assigneeName ?? request.assigneeName ? `actor-${assigneeName ?? request.assigneeName}` : undefined);
+  if (currentHandlerKey) {
+    const current = participants.get(currentHandlerKey);
+    if (current) {
+      participants.set(currentHandlerKey, {
+        ...current,
+        name: assigneeName ?? current.name,
+        detail: `${current.detail} · en charge`,
+      });
     }
   }
-  if (includeCurrentEvenEmpty && currentAssigneeId && !map.has(currentAssigneeId)) {
-    map.set(currentAssigneeId, { peerId: currentAssigneeId });
-  }
-  return Array.from(map.values()).sort((a, b) => {
-    const aTime = a.lastAt ? new Date(a.lastAt).getTime() : 0;
-    const bTime = b.lastAt ? new Date(b.lastAt).getTime() : 0;
-    return bTime - aTime;
+
+  // Ordre d'intervention : première action croissante.
+  return Array.from(participants.values()).sort((a, b) => {
+    const aTime = a.firstAt ? new Date(a.firstAt).getTime() : 0;
+    const bTime = b.firstAt ? new Date(b.firstAt).getTime() : 0;
+    return aTime - bTime;
   });
 }
+
 
 type TimelineItem = RequestItem["timeline"][number];
 
@@ -525,12 +529,6 @@ function initialsFor(value?: string): string {
     .toUpperCase();
 }
 
-function formatCommentDate(value?: string): string {
-  if (!value) return "Date inconnue";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Date inconnue";
-  return format(date, "d MMM yyyy 'à' HH:mm", { locale: fr });
-}
 
 function formatTicketDateTime(value?: string): string {
   if (!value) return "—";
@@ -688,7 +686,12 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const detailContext = DETAIL_CONTEXTS[context];
   const isPersonalContext = context === "requests";
   const deepLinkSearch = useSearch({ strict: false }) as { tab?: string };
-  const wantsCommentsDeepLink = deepLinkSearch.tab === "comments";
+  // Lien profond depuis une notification : ouvrir la fiche sur le panneau
+  // d'actions plutot que sur la description. Indispensable pour le demandeur,
+  // dont le contexte personnel ouvre normalement sur la description : une
+  // notification "votre validation est attendue" doit montrer l'action, pas
+  // le descriptif du ticket.
+  const wantsTreatmentDeepLink = deepLinkSearch.tab === "treatment";
   const qc = useQueryClient();
   const sessionUser = useUser();
   const authorId = Number(sessionUser?.id ?? 0);
@@ -722,7 +725,23 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   // métier, le contexte fonctionnel prime sur la propriété personnelle du ticket.
   const iAmRequester = isRequester(r?.requesterId, sessionUser?.id);
   const isRequesterView = role === "user" || (isPersonalContext && iAmRequester);
-  const isAgentOnly = role === "agent-support" && !iAmRequester;
+  const isAgentOnly = (role === "chief-service" || role === "technicien" || role === "chef-division-support") && !iAmRequester;
+  // Procédure EDG/PS-GSI/Pro-02 tâche 1.3 — descriptif de solution proposée,
+  // servi par un endpoint dédié et gardé (il n'est pas dans la fiche du ticket,
+  // que le demandeur peut lire). On ne l'interroge que pour un intervenant du
+  // support qui n'est pas le demandeur de CE ticket : sinon le backend répond
+  // 403, et il n'y a aucune raison de déclencher l'appel.
+  const canSeeProposedSolution = Boolean(
+    r && !iAmRequester &&
+    ["chief-service", "technicien", "chef-division-support", "chief-departement", "director", "admin"]
+      .includes(role ?? ""),
+  );
+  const { data: proposedSolution } = useQuery({
+    queryKey: [...requestQueryKey, "proposed-solution"],
+    queryFn: () => fetchProposedSolution(id),
+    enabled: canSeeProposedSolution,
+    staleTime: 60_000,
+  });
   const [localAppreciation, setLocalAppreciation] = useState<Appreciation | undefined>(undefined);
   const [showReassign, setShowReassign] = useState(false);
   const [reopenReason, setReopenReason] = useState("");
@@ -737,6 +756,20 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   // BR-TRANSMIT-001 — "Terminer le traitement" : résumé/solution/travail réalisé
   // obligatoires pour tout intervenant actuel (remplace l'ancienne note optionnelle).
   const [showResolveForm, setShowResolveForm] = useState(false);
+  // Procédure tâche 2.1 — constat d'intervention (technicien uniquement).
+  const [showFieldCheckForm, setShowFieldCheckForm] = useState(false);
+  const [fieldCheckConformity, setFieldCheckConformity] = useState<"conforme" | "ecart">("conforme");
+  const [fieldCheckFindings, setFieldCheckFindings] = useState("");
+  // Catégorie et priorité observées sont choisies dans une liste, jamais tapées :
+  // le constat sert à confronter le terrain à la qualification du chef de service,
+  // ce qui suppose le même vocabulaire de part et d'autre. On stocke le libellé
+  // lisible (« Incident », « Haute »), car ces valeurs sont destinées à être lues.
+  const [observedCategory, setObservedCategory] = useState("");
+  const [observedPriority, setObservedPriority] = useState("");
+  // BR-TRAITEMENT-PROGRESSIF-001 — « Démarrer le traitement ». Seul le lieu est
+  // saisi : date et heure de début sont horodatées par le serveur.
+  const [showStartForm, setShowStartForm] = useState(false);
+  const [startLocation, setStartLocation] = useState("");
   const [resolveSummary, setResolveSummary] = useState("");
   const [resolveSolution, setResolveSolution] = useState("");
   const [resolveWorkDone, setResolveWorkDone] = useState("");
@@ -762,11 +795,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     setTransmitReason("");
     setTransmitInstruction("");
   };
-  const [showEscalateForm, setShowEscalateForm] = useState(false);
-  const [escalateReason, setEscalateReason] = useState("");
-  // Lot 3.3 — "Escalade exceptionnelle" (chief-departement uniquement).
-  const [showEscalateToDirectorForm, setShowEscalateToDirectorForm] = useState(false);
-  const [escalateToDirectorReason, setEscalateToDirectorReason] = useState("");
   const attachRef = useRef<HTMLInputElement>(null);
   const commentRef = useRef<HTMLTextAreaElement>(null);
   const commentsPanelRef = useRef<HTMLElement>(null);
@@ -798,15 +826,10 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   // désormais les actions (déplacées depuis les boutons de la card liste).
   // Le contexte personnel ("Mes demandes") reste sur la description.
   const [activeDetailTab, setActiveDetailTab] = useState<DetailTab>(
-    wantsCommentsDeepLink
-      ? "comments"
-      : isPersonalContext ? "journal" : "treatment",
+    wantsTreatmentDeepLink || !isPersonalContext ? "treatment" : "description",
   );
   const [showAllParticipants, setShowAllParticipants] = useState(false);
   const [showAllDetails, setShowAllDetails] = useState(false);
-  // BR-TRACE-001 — journal hiérarchique (Cycle -> Intervention) par défaut,
-  // avec bascule vers la vue chronologique événement par événement existante.
-  const [journalView, setJournalView] = useState<"interventions" | "events">("interventions");
   const [attachmentAction, setAttachmentAction] = useState<{
     id: string;
     mode: "open" | "download";
@@ -818,6 +841,10 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   } | null>(null);
   const [previewZoom, setPreviewZoom] = useState(1);
   const [exportPending, setExportPending] = useState(false);
+  const [pvPending, setPvPending] = useState(false);
+  // Aperçu du PV : URL d'objet créée à la volée depuis le blob, révoquée à la
+  // fermeture pour ne pas retenir le document en mémoire.
+  const [pvPreviewUrl, setPvPreviewUrl] = useState<string | null>(null);
 
   useEffect(() => {
     return () => {
@@ -826,16 +853,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (!wantsCommentsDeepLink || !r) return;
-    setActiveDetailTab("comments");
-    const frame = requestAnimationFrame(() => {
-      commentsPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      commentRef.current?.focus();
-    });
-    return () => cancelAnimationFrame(frame);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wantsCommentsDeepLink, r]);
 
   const closePreview = () => {
     setPreviewFile((current) => {
@@ -917,24 +934,144 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     }
   };
 
-  const handleTimelineAttachmentOpen = (attachmentRef: { id?: string; filename?: string }) => {
-    setActiveDetailTab("files");
-
-    const attachment =
-      attachments.find((item) => item.id === attachmentRef.id) ??
-      attachments.find((item) => item.filename === attachmentRef.filename);
-
-    if (!attachment) {
-      toast.error(
-        attachmentsLoading
-          ? "Les pièces jointes sont encore en cours de chargement."
-          : "Pièce jointe introuvable dans l'onglet Fichiers.",
-      );
-      return;
+  /** Procédure tâche 3.1 — PV d'intervention au format officiel
+   *  EDG/PS-GSI/PV-01. Depuis le 2026-09-27, les validations faites dans
+   *  l'application (traitement terminé, dépannage validé par le demandeur) sont
+   *  portées sur le document sous forme d'émargement électronique : il n'y a
+   *  plus de signature manuscrite à recueillir. */
+  const handleDownloadPv = async () => {
+    setPvPending(true);
+    try {
+      const { blob, filename } = await downloadPvIntervention(id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename.toLowerCase().endsWith(".pdf") ? filename : `${filename}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1_000);
+      toast.success("PV d'intervention généré.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : undefined;
+      toast.error(message ? `Impossible de générer le PV : ${message}` : "Impossible de générer le PV.");
+    } finally {
+      setPvPending(false);
     }
-
-    void handleAttachmentFile(attachment, "open");
   };
+
+  /** Onglet « Tickets résolus » — consultation seule : le PV s'ouvre dans un
+   *  visualiseur intégré, sans jamais être enregistré sur le poste. Même
+   *  source que le téléchargement (`GET /requests/{id}/pv`), qui est en
+   *  lecture seule côté serveur : aucun statut, aucune notification. */
+  const handlePreviewPv = async () => {
+    setPvPending(true);
+    try {
+      const { blob } = await downloadPvIntervention(id);
+      setPvPreviewUrl((previous) => {
+        if (previous) URL.revokeObjectURL(previous);
+        return URL.createObjectURL(blob);
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : undefined;
+      toast.error(message ? `Impossible d'ouvrir le PV : ${message}` : "Impossible d'ouvrir le PV.");
+    } finally {
+      setPvPending(false);
+    }
+  };
+
+  const closePvPreview = () => {
+    setPvPreviewUrl((previous) => {
+      if (previous) URL.revokeObjectURL(previous);
+      return null;
+    });
+  };
+
+  // Même référentiel que la qualification du chef de service (File d'attente) :
+  // les deux bouts de la comparaison doivent parler la même langue.
+  const { data: observedCategoryItems = [] } = useQuery({
+    queryKey: ["admin-ref", "request_categories"],
+    queryFn: fetchRequestCategories,
+    staleTime: 300_000,
+  });
+  const observedCategories = observedCategoryItems
+    .filter((c) => c.status)
+    .map((c) => c.label);
+
+  // Un écart remet en cause la qualification du chef de service : le caractériser
+  // est obligatoire, au même titre que les observations. Un constat conforme n'a
+  // rien à caractériser — les deux champs ne lui sont d'ailleurs pas présentés.
+  const canSubmitFieldCheck = Boolean(
+    fieldCheckFindings.trim()
+    && (fieldCheckConformity !== "ecart" || (observedCategory && observedPriority)),
+  );
+
+  const startMut = useMutation({
+    mutationFn: () => startTreatment(id, startLocation.trim()),
+    onSuccess: () => {
+      toast.success("Traitement démarré.");
+      setShowStartForm(false);
+      setStartLocation("");
+      qc.invalidateQueries({ queryKey: requestQueryKey });
+      qc.invalidateQueries({ queryKey: ["requests"] });
+      qc.invalidateQueries({ queryKey: ["my-tickets"] });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Impossible de démarrer le traitement.");
+    },
+  });
+
+  // Procédure EDG/PS-GSI/Pro-02 tâche 2.1 — « Qualifier la demande », point de
+  // contrôle « vérification de l'état réel de la requête ». Précède la tâche 2.2
+  // (résolution), que le backend refuse tant que le constat manque.
+  const fieldCheckMut = useMutation({
+    mutationFn: () => submitFieldCheck(id, {
+      conformity: fieldCheckConformity,
+      findings: fieldCheckFindings.trim(),
+      // Bornés à l'écart : sinon des valeurs saisies puis masquées par un retour
+      // à « conforme » partiraient quand même, contredisant le constat envoyé.
+      observed_category: fieldCheckConformity === "ecart" ? observedCategory : undefined,
+      observed_priority: fieldCheckConformity === "ecart" ? observedPriority : undefined,
+    }),
+    onSuccess: () => {
+      toast.success(
+        fieldCheckConformity === "ecart"
+          ? "Constat enregistré — le chef de service a été prévenu de l'écart."
+          : "Constat enregistré.",
+      );
+      setShowFieldCheckForm(false);
+      setFieldCheckFindings("");
+      setObservedCategory("");
+      setObservedPriority("");
+      setFieldCheckConformity("conforme");
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Impossible d'enregistrer le constat.");
+    },
+    onSettled: () => invalidate(),
+  });
+
+  // Procédure tâche 3.3 — « Soumettre le PV d'intervention au Chef de division ».
+  // Le destinataire n'est pas choisi : c'est le chef de division qui a réparti
+  // le ticket (tâche 1.4).
+  const pvSubmitMut = useMutation({
+    mutationFn: () => submitPvIntervention(id),
+    onSuccess: () => toast.success("PV soumis au chef de division."),
+    onError: (err) => toast.error(
+      err instanceof Error ? err.message : "Impossible de soumettre le PV.",
+    ),
+    onSettled: () => invalidate(),
+  });
+
+  // Procédure tâche 3.4 — « Enregistrer et archiver le PV d'intervention ».
+  const pvArchiveMut = useMutation({
+    mutationFn: () => archivePvIntervention(id),
+    onSuccess: () => toast.success("PV enregistré et archivé."),
+    onError: (err) => toast.error(
+      err instanceof Error ? err.message : "Impossible d'archiver le PV.",
+    ),
+    onSettled: () => invalidate(),
+  });
 
   const resolveMut = useMutation({
     // BR-TRANSMIT-001 — "Terminer le traitement" : résumé/solution/travail réalisé
@@ -961,9 +1098,9 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       setResolveWorkDone("");
       setResolveRecommendations("");
     },
-    onError: (_err, _vars, context) => {
+    onError: (err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible de terminer le traitement.");
+      toast.error(err instanceof Error ? err.message : "Impossible de terminer le traitement.");
     },
     onSettled: () => invalidate(),
   });
@@ -987,9 +1124,9 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       setShowTransmitForm(false);
       resetTransmitForm();
     },
-    onError: (_err, _vars, context) => {
+    onError: (err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible de transmettre le traitement.");
+      toast.error(err instanceof Error ? err.message : "Impossible de transmettre le traitement.");
     },
     onSettled: () => invalidate(),
   });
@@ -1011,9 +1148,9 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       toast.success(`Réassigné à ${agent?.name ?? assigneeId} — traitement démarré.`);
       setShowReassign(false);
     },
-    onError: (_err, _vars, context) => {
+    onError: (err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible de réassigner le ticket.");
+      toast.error(err instanceof Error ? err.message : "Impossible de réassigner le ticket.");
     },
     onSettled: () => invalidate(),
   });
@@ -1041,9 +1178,14 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       toast.success("Ticket pris en charge — traitement démarré.");
       setDirectTreatmentAction(null);
     },
-    onError: (_err, _vars, context) => {
+    onError: (err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible de vous assigner ce ticket.");
+      // Le backend explique precisement le refus (ticket en cours de
+      // repartition, hors perimetre, transition invalide...). Ecraser ce
+      // message par un libelle generique laissait l'utilisateur sans la
+      // moindre raison — on remonte donc le message reel, avec un repli
+      // uniquement si l'erreur n'en porte pas (panne reseau, par exemple).
+      toast.error(err instanceof Error ? err.message : "Impossible de vous assigner ce ticket.");
     },
     onSettled: () => invalidate(),
   });
@@ -1098,9 +1240,9 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       toast.success("Ticket clôturé — merci pour votre retour.");
       setDirectTreatmentAction(null);
     },
-    onError: (_err, _vars, context) => {
+    onError: (err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible de clôturer le ticket.");
+      toast.error(err instanceof Error ? err.message : "Impossible de clôturer le ticket.");
     },
     onSettled: () => invalidate(),
   });
@@ -1136,36 +1278,9 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       setShowCancelConfirm(false);
       setCancelReason("");
     },
-    onError: (_err, _vars, context) => {
+    onError: (err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible d'annuler le ticket.");
-    },
-    onSettled: () => invalidate(),
-  });
-
-  const requestInfoMut = useMutation({
-    // Le ticket reste "En cours" — on ne bascule plus vers "En attente" pour
-    // cette action (sur demande explicite : plus de bouton "Reprendre le
-    // traitement" à faire réapparaître). Le demandeur est notifié in-app +
-    // email via la notification standard "nouveau message" déclenchée par la
-    // création d'un commentaire public de l'intervenant assigné (RouteRequest.py
-    // create_comment). `peer_id` est obligatoire côté backend pour un commentaire
-    // normal (BR-MESSAGING-PAIR-001) — sans lui la requête échoue en 422.
-    mutationFn: () =>
-      createComment(id, {
-        author_id: authorId,
-        author_name: authorName,
-        body: infoQuestion.trim(),
-        is_public: true,
-        peer_id: r?.assigneeId,
-      }),
-    onSuccess: () => {
-      toast.success("Le demandeur a été notifié.");
-      setShowRequestInfoForm(false);
-      setInfoQuestion("");
-    },
-    onError: () => {
-      toast.error("Impossible d'envoyer la demande d'informations.");
+      toast.error(err instanceof Error ? err.message : "Impossible d'annuler le ticket.");
     },
     onSettled: () => invalidate(),
   });
@@ -1184,9 +1299,9 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       toast.success("Traitement repris.");
       setDirectTreatmentAction(null);
     },
-    onError: (_err, _vars, context) => {
+    onError: (err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible de reprendre le traitement.");
+      toast.error(err instanceof Error ? err.message : "Impossible de reprendre le traitement.");
     },
     onSettled: () => invalidate(),
   });
@@ -1202,9 +1317,9 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       return { previous };
     },
     onSuccess: (_, p) => { toast.success(`Priorité changée → ${p}.`); setShowPriorityPicker(false); },
-    onError: (_err, _vars, context) => {
+    onError: (err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible de changer la priorité.");
+      toast.error(err instanceof Error ? err.message : "Impossible de changer la priorité.");
     },
     onSettled: () => invalidate(),
   });
@@ -1220,9 +1335,9 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       return { previous };
     },
     onSuccess: () => { toast.success("Ticket rejeté."); setShowRejectConfirm(false); setRejectNote(""); },
-    onError: (_err, _vars, context) => {
+    onError: (err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible de rejeter le ticket.");
+      toast.error(err instanceof Error ? err.message : "Impossible de rejeter le ticket.");
     },
     onSettled: () => invalidate(),
   });
@@ -1230,7 +1345,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const changeServiceMut = useMutation({
     mutationFn: (unit_id: string) => reassignService(id, unit_id, "Réaffectation depuis le détail ticket"),
     onSuccess: (_, s) => { toast.success(`Service changé → ${s}.`); setShowServicePicker(false); invalidate(); },
-    onError: () => toast.error("Impossible de changer le service."),
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Impossible de changer le service."),
   });
 
   const transferDirectionMut = useMutation({
@@ -1259,141 +1374,9 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       setTransferDirectionId("");
       setTransferReason("");
     },
-    onError: (_err, _vars, context) => {
+    onError: (err, _vars, context) => {
       if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible de transférer le ticket.");
-    },
-    onSettled: () => invalidate(),
-  });
-
-  const escalateMut = useMutation({
-    mutationFn: () => escalateRequest(id, {
-      reason: escalateReason.trim() || "Escalade manuelle",
-    }),
-    onMutate: async () => {
-      await qc.cancelQueries({ queryKey: requestQueryKey });
-      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
-      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
-        old ? { ...old, status: "escalated" } : old,
-      );
-      return { previous };
-    },
-    onSuccess: () => {
-      toast.success("Ticket escaladé au chef hiérarchique.");
-      setShowEscalateForm(false);
-      setEscalateReason("");
-    },
-    onError: (_err, _vars, context) => {
-      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible d'escalader le ticket.");
-    },
-    onSettled: () => invalidate(),
-  });
-
-  const escalateToDirectorMut = useMutation({
-    mutationFn: () => escalateToDirectorRequest(id, {
-      reason: escalateToDirectorReason.trim(),
-    }),
-    onMutate: async () => {
-      await qc.cancelQueries({ queryKey: requestQueryKey });
-      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
-      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
-        old ? { ...old, status: "escalated" } : old,
-      );
-      return { previous };
-    },
-    onSuccess: () => {
-      toast.success("Ticket escaladé directement au directeur.");
-      setShowEscalateToDirectorForm(false);
-      setEscalateToDirectorReason("");
-    },
-    onError: (_err, _vars, context) => {
-      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible d'escalader le ticket au directeur.");
-    },
-    onSettled: () => invalidate(),
-  });
-
-  const commentMut = useMutation({
-    mutationFn: async () => {
-      // Envoi combine — le fichier joint (si present) est uploade d'abord, puis
-      // le commentaire est cree en referencant son attachment_id, en un seul
-      // geste utilisateur (comme une pièce jointe + legende sur WhatsApp).
-      let attachmentId: string | undefined;
-      if (stagedFile) {
-        const uploaded = await uploadAttachment(
-          id,
-          stagedFile,
-          sessionUser?.id ? String(sessionUser.id) : undefined,
-          true, // skip l'événement "Pièce jointe ajoutée" — le commentaire portera déjà l'info de la pièce jointe
-        );
-        attachmentId = uploaded.id;
-      }
-      // BR-MESSAGING-PAIR-001 — peer_id = toujours l'intervenant actuel du
-      // ticket (clé stable de la conversation), non pertinent pour une
-      // directive (le backend résout son propre destinataire).
-      const isDirectiveSend = canSendDirective && isDirective;
-      return createComment(id, {
-        author_id: authorId,
-        author_name: authorName,
-        body: comment.trim(),
-        is_public: true,
-        attachment_id: attachmentId,
-        is_directive: isDirectiveSend,
-        peer_id: isDirectiveSend ? undefined : r?.assigneeId,
-      });
-    },
-    onMutate: async () => {
-      await qc.cancelQueries({ queryKey: requestQueryKey });
-      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
-      const optimisticComment = {
-        id: `temp-${Date.now()}`,
-        authorId: String(authorId),
-        author: authorName,
-        body: comment.trim(),
-        isPublic: true,
-        isEdited: false,
-        createdAt: new Date().toISOString(),
-        attachmentName: stagedFile?.name,
-        peerId: canSendDirective && isDirective ? undefined : r?.assigneeId,
-      };
-      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
-        old ? { ...old, comments: [...(old.comments ?? []), optimisticComment] } : old,
-      );
-      return { previous };
-    },
-    onSuccess: () => {
-      toast.success(
-        canSendDirective && isDirective
-          ? "Directive envoyée à l'agent"
-          : stagedFile ? "Message et pièce jointe envoyés" : "Message envoyé",
-      );
-      setComment("");
-      setStagedFile(null);
-      setIsDirective(false);
-      if (attachRef.current) attachRef.current.value = "";
-    },
-    onError: (_err, _vars, context) => {
-      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible d'envoyer le message.");
-    },
-    onSettled: () => invalidate(),
-  });
-
-  const deleteCommentMut = useMutation({
-    mutationFn: (commentId: string) => deleteComment(id, commentId),
-    onMutate: async (commentId: string) => {
-      await qc.cancelQueries({ queryKey: requestQueryKey });
-      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
-      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
-        old ? { ...old, comments: old.comments.filter((c) => c.id !== commentId) } : old,
-      );
-      return { previous };
-    },
-    onSuccess: () => toast.success("Message supprimé."),
-    onError: (_err, _vars, context) => {
-      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error("Impossible de supprimer le message.");
+      toast.error(err instanceof Error ? err.message : "Impossible de transférer le ticket.");
     },
     onSettled: () => invalidate(),
   });
@@ -1407,26 +1390,9 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
 
   const { data: agentsData } = useQuery({
     queryKey: ["agents"],
-    queryFn: () => fetchUsers({ role: "agent-support", limit: 100 }),
+    queryFn: () => fetchUsers({ role: "chief-service", limit: 100 }),
     enabled: !isRequesterView,
     staleTime: 120_000,
-  });
-
-  const commentAuthorIds = useMemo(() => {
-    const ids = new Set<string>();
-    if (r?.requesterId) ids.add(String(r.requesterId));
-    if (r?.assigneeId) ids.add(String(r.assigneeId));
-    for (const item of r?.comments ?? []) {
-      if (item.authorId) ids.add(String(item.authorId));
-    }
-    return Array.from(ids).slice(0, 20);
-  }, [r?.requesterId, r?.assigneeId, r?.comments]);
-
-  const { data: commentAuthorsData } = useQuery({
-    queryKey: ["users", "batch", commentAuthorIds],
-    queryFn: () => fetchUsersByIds(commentAuthorIds),
-    enabled: !!r?.id && commentAuthorIds.length > 0,
-    staleTime: 300_000,
   });
 
   const { data: directions = [] } = useQuery({
@@ -1446,22 +1412,38 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   // Direction -> Département -> Service (facultative, pour affiner) + recherche
   // libre dans toute l'organisation, restreinte aux rôles traitants côté client
   // (le backend revérifie de toute façon existence/statut actif/rôle habilité).
+  // BR-TRANSMIT-SCOPE-TECH-001 — le serveur décide qui un acteur peut viser.
+  // Pour un technicien il renvoie `restricted: true` et la liste fermée de ses
+  // cibles (collègues techniciens de son service + le responsable qui lui a
+  // confié le ticket) : on masque alors les filtres direction/département/service
+  // et la recherche libre, remplacés par une simple sélection. Le backend refuse
+  // de toute façon une cible hors périmètre — l'interface ne fait que refléter
+  // la règle, elle ne la porte pas.
+  const { data: transmitScope } = useQuery({
+    queryKey: ["transmit-targets", id],
+    queryFn: () => fetchTransmitTargets(id),
+    enabled: showTransmitForm,
+    staleTime: 30_000,
+  });
+  const transmitRestricted = transmitScope?.restricted === true;
+  const transmitTargets = useMemo(() => transmitScope?.items ?? [], [transmitScope]);
+
   const { data: transmitDirections = [] } = useQuery({
     queryKey: ["directions", "active"],
     queryFn: () => fetchDirections({ status: "active" }),
-    enabled: showTransmitForm,
+    enabled: showTransmitForm && !transmitRestricted,
     staleTime: 5 * 60_000,
   });
   const { data: transmitDepartments = [] } = useQuery({
     queryKey: ["departments", transmitDirectionId, "active"],
     queryFn: () => fetchDepartments({ directionId: transmitDirectionId, status: "active" }),
-    enabled: showTransmitForm && !!transmitDirectionId,
+    enabled: showTransmitForm && !transmitRestricted && !!transmitDirectionId,
     staleTime: 5 * 60_000,
   });
   const { data: transmitUnits = [] } = useQuery({
     queryKey: ["units", transmitDepartmentId, "active"],
     queryFn: () => fetchUnits({ departmentId: transmitDepartmentId, status: "active" }),
-    enabled: showTransmitForm && !!transmitDepartmentId,
+    enabled: showTransmitForm && !transmitRestricted && !!transmitDepartmentId,
     staleTime: 5 * 60_000,
   });
   const currentUserId = String(sessionUser?.id ?? "");
@@ -1495,12 +1477,8 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
         return filterCurrentUser(res.items.filter((u) => TREATING_ROLES.has(u.role)));
       }
       if (transmitUnitId) {
-        const [agents, chiefs] = await Promise.all([
-          fetchUsers({ role: "agent-support", unit_id: transmitUnitId, limit: 100 }),
-          fetchUsers({ role: "chief-service", unit_id: transmitUnitId, limit: 100 }),
-        ]);
-        const byId = new Map([...agents.items, ...chiefs.items].map((p) => [p.id, p]));
-        return filterCurrentUser(Array.from(byId.values()));
+        const res = await fetchUsers({ role: "chief-service", unit_id: transmitUnitId, limit: 100 });
+        return filterCurrentUser(res.items);
       }
       if (transmitDepartmentId) {
         const res = await fetchUsers({ role: "chief-departement", unit_id: transmitDepartmentId, limit: 50 });
@@ -1512,7 +1490,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       }
       return [];
     },
-    enabled: showTransmitForm,
+    enabled: showTransmitForm && !transmitRestricted,
     staleTime: 30_000,
   });
   const selectedTransmitPerson = useMemo(
@@ -1566,25 +1544,37 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
 
   const localStatus = localAppreciation ? r.status : r.status;
   const authorType = (r.requesterType === "external" || r.isExternal) ? "external" : "internal";
+  // Organisation TRAITANTE — les libellés figés à la qualification priment sur
+  // ceux résolus depuis l'organigramme courant : un service renommé ou rattaché
+  // à une autre direction ne doit pas réécrire l'historique des anciens tickets.
   const assignedUnit = units.find((u) => String(u.id) === String(r.serviceId));
-  const unitName = assignedUnit?.name ?? "—";
-  const departmentName = assignedUnit?.department_name ?? "—";
+  const unitName = r.handlerServiceLabel ?? assignedUnit?.name ?? "—";
+  const departmentName = r.handlerDepartmentLabel ?? assignedUnit?.department_name ?? "—";
   const currentDirectionId = assignedUnit?.direction_id ?? r.directionId ?? r.serviceId;
-  const directionName = directions.find(
+  const directionName = r.handlerDirectionLabel ?? directions.find(
     (d) => String(d.id) === currentDirectionId,
   )?.name ?? "—";
   const transferDirectionOptions = directions.filter(
     (d) => String(d.id) !== String(currentDirectionId),
   );
+  // Organisation DU DEMANDEUR — même règle : les libellés figés à la création
+  // priment, pour qu'un changement de service du demandeur ne réécrive pas
+  // l'origine de ses anciennes demandes.
   const requesterUnit = units.find((u) => String(u.id) === String(r.requesterServiceId));
-  const requesterUnitName = requesterUnit?.name ?? "—";
-  const requesterDepartmentName = requesterUnit?.department_name ?? "—";
-  const requesterDirectionId = requesterUnit?.direction_id ?? r.requesterDirectionId;
-  const requesterDirectionName = directions.find(
+  const requesterUnitName = r.requesterServiceLabel ?? requesterUnit?.name ?? "—";
+  const requesterDepartmentName = r.requesterDepartmentLabel ?? requesterUnit?.department_name ?? "—";
+  const requesterDirectionId = r.requesterDirectionId ?? requesterUnit?.direction_id;
+  const requesterDirectionName = r.requesterDirectionLabel ?? directions.find(
     (d) => String(d.id) === String(requesterDirectionId),
   )?.name ?? "—";
 
-  const isArchived = Boolean(r.deletedAt || r.isArchived);
+  const isArchivedTicket = Boolean(r.deletedAt || r.isArchived);
+  // Onglet "Tickets résolus" : le traitement est terminé, on ne propose plus
+  // que la consultation du PV. `isArchived` porte déjà exactement cette
+  // sémantique — « plus aucune action mutante » — et neutralise d'un coup les
+  // quinze capacités calculées plus bas, sans avoir à en amender chacune.
+  const isReadOnlyTreatment = READ_ONLY_TREATMENT_CONTEXTS.has(context);
+  const isArchived = isArchivedTicket || isReadOnlyTreatment;
   const isFinal = isArchived || (["resolved", "closed", "rejected", "cancelled"] as const).includes(
     r.status as "resolved" | "closed" | "rejected" | "cancelled",
   );
@@ -1594,115 +1584,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
 
   const isAssignedToMe = isRequester(r.assigneeId, sessionUser?.id);
   const hasAssignee = Boolean(r.assigneeId);
-  // BR-MESSAGING-PAIR-001 — la messagerie n'est plus un fil unique par ticket :
-  // chaque conversation est une paire privée {demandeur, intervenant}. Le
-  // backend ne renvoie déjà que les événements que ce viewer est autorisé à
-  // voir (_visible_comment_responses côté API) ; ici on se contente de les
-  // répartir en fils distincts et de choisir lequel afficher.
-  const isAdminSupervision = role === "admin" && !isRequesterView;
-  const conversations = buildConversations(
-    r.comments,
-    r.assigneeId,
-    isRequesterView || isAssignedToMe,
-  );
-  const effectiveSelectedPeerId = selectedPeerId
-    ?? (isRequesterView || isAdminSupervision
-      ? (conversations.find((c) => c.peerId === r.assigneeId)?.peerId ?? conversations[0]?.peerId)
-      : (isAssignedToMe ? r.assigneeId : undefined));
-  const showConversationSwitcher = (isRequesterView || isAdminSupervision) && conversations.length > 1;
-  // Écrire n'est possible que dans la conversation COURANTE (demandeur <->
-  // assigné actuel) — si le demandeur consulte un fil archivé (ancien
-  // intervenant), la composition reste désactivée pour ce fil précis même si
-  // le ticket a par ailleurs un intervenant actuel.
-  const isViewingCurrentConversation = !effectiveSelectedPeerId || effectiveSelectedPeerId === r.assigneeId;
-  const visibleComments = r.comments.filter((c) => {
-    if (!effectiveSelectedPeerId) return true;
-    if (c.isDirective) {
-      // Une directive chef->agent reste rattachée au fil de l'agent visé (déjà
-      // scopée côté backend à ce chef/cet agent — jamais visible au demandeur
-      // ni à un tiers), jamais à un fil archivé d'un ancien intervenant.
-      return effectiveSelectedPeerId === r.assigneeId;
-    }
-    return c.peerId === effectiveSelectedPeerId;
-  });
-  const participants = buildParticipants(r, r.comments, assigneeUser?.name);
-  // La messagerie (Discussions) doit rester distincte du Journal — un message
-  // n'y apparaît plus comme entrée générique de la chronologie complète.
-  const journalEvents = r.timeline.filter((e) => e.type !== "comment_added");
-  // Historique consultable dès qu'il existe au moins un commentaire visible
-  // pour ce viewer (le backend a déjà filtré par participant) — distinct du
-  // droit d'écrire, qui dépend en plus de l'ouverture de la conversation
-  // courante ci-dessous. Ne jamais supprimer l'historique à la transmission :
-  // ce booléen reste vrai tant qu'un seul message existe, peu importe qui est
-  // l'intervenant actuel maintenant.
-  const hasVisibleComments = r.comments.length > 0;
-  // BR-MESSAGING-OPEN-001 — la conversation courante {demandeur, intervenant
-  // actuel} n'est "ouverte" que si CET intervenant y a lui-même posté au moins
-  // un message public — jamais déduit de la simple présence d'un assignee_id,
-  // ni d'un message public ailleurs sur le ticket (ancien intervenant,
-  // directive). Miroir exact du contrôle serveur (RouteRequest.py,
-  // _current_conversation_opened_by_assignee) — le backend reste l'autorité
-  // finale, ceci ne sert qu'à l'affichage.
-  const currentConversationOpenedByAssignee = Boolean(
-    r.assigneeId
-    && r.comments.some((c) =>
-      !c.isDirective && c.isPublic && c.peerId === r.assigneeId && c.authorId === r.assigneeId,
-    ),
-  );
-  // BR-MESSAGING-PAIR-001 — seuls le demandeur et l'intervenant COURANT du
-  // ticket peuvent écrire, et seulement dans la conversation courante ; un
-  // ancien intervenant garde la lecture de sa conversation (archivée) mais
-  // plus l'écriture ; l'admin est en lecture seule (supervision).
-  // BR-MESSAGING-OPEN-001 — le demandeur, en plus, ne peut écrire que si
-  // l'intervenant actuel a lui-même déjà ouvert la conversation ; l'intervenant
-  // actuel, lui, n'est jamais soumis à cette condition (c'est justement lui qui
-  // doit pouvoir l'ouvrir en premier).
-  const canWriteConversation = hasAssignee
-    && !isAdminSupervision
-    && isViewingCurrentConversation
-    && (isAssignedToMe || (isRequesterView && currentConversationOpenedByAssignee));
-  const commentAuthorProfiles = new Map<string, AccountUser>();
-  for (const account of commentAuthorsData ?? []) {
-    commentAuthorProfiles.set(String(account.id), account);
-  }
-  for (const account of agentPool) {
-    commentAuthorProfiles.set(String(account.id), account);
-  }
-  if (assigneeUser) {
-    commentAuthorProfiles.set(String(assigneeUser.id), assigneeUser);
-  }
-
-  const profileForComment = (item: RequestItem["comments"][number]) =>
-    item.authorId ? commentAuthorProfiles.get(String(item.authorId)) : undefined;
-  const avatarForComment = (item: RequestItem["comments"][number]) => {
-    const profile = profileForComment(item);
-    const sessionAvatar =
-      item.authorId && isRequester(item.authorId, sessionUser?.id)
-        ? sessionUser?.avatar
-        : undefined;
-    return buildAvatarUrl(profile?.avatar ?? sessionAvatar);
-  };
-  const roleForComment = (item: RequestItem["comments"][number]) => {
-    if (item.authorId && r.requesterId && String(item.authorId) === String(r.requesterId)) {
-      return "Demandeur";
-    }
-    const profile = profileForComment(item);
-    return (
-      participantRoleLabel(profile?.role) ??
-      participantRoleLabel(item.authorRole) ??
-      "Intervenant"
-    );
-  };
-  // BR-MESSAGING-PAIR-001 — suppression réservée à l'auteur du message (+ admin
-  // en supervision) ; un intervenant d'une autre conversation sur ce ticket ne
-  // doit plus pouvoir supprimer un message qu'il ne peut même plus lire.
-  const canDeleteComment = (item: RequestItem["comments"][number]) => {
-    if (isArchived || r.status === "closed" || r.status === "rejected" || r.status === "cancelled") return false;
-    if (!sessionUser?.id || !item.authorId) return false;
-    if (String(item.authorId) === String(sessionUser.id)) return true;
-    return role === "admin";
-  };
-  const isDiscussionLocked = isArchived || r.status === "closed" || r.status === "rejected" || r.status === "cancelled";
+  const participants = buildParticipants(r, assigneeUser?.name);
 
   // Fenêtre réouverture ticket fermé (7 jours après fermeture)
   const canReopenClosed = r.closedAt
@@ -1723,20 +1605,14 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   });
   // "Ouvrir une discussion" doit être visible pour quiconque possède réellement
   // le ticket au moment présent (l'a pris depuis la file d'attente OU se l'est
-  // vu assigner par quelqu'un d'autre) — pas seulement agent-support : admin
+  // vu assigner par quelqu'un d'autre) — pas seulement chief-service : admin
   // traite aussi des tickets et doit avoir le même accès une fois assigné.
-  const ownsTicket = !iAmRequester && isAssignedToMe && (role === "agent-support" || role === "admin");
+  const ownsTicket = !iAmRequester && isAssignedToMe && (role === "chief-service" || role === "technicien" || role === "chef-division-support" || role === "admin");
   const canRequestInfo = !isArchived && ownsTicket && canTicketAction(role, "request_info", r.status, ownershipOptions);
   const canResumeTreatment = !isArchived && isAgentOnly && canTicketAction(role, "resume", r.status, ownershipOptions);
-  const canEscalateTicket = !isArchived
-    && !iAmRequester
-    && canTicketAction(role, "escalate", r.status, ownershipOptions)
-    && (role !== "agent-support" || isAssignedToMe);
-  // Lot 3.3 — "Escalade exceptionnelle" : distincte de l'escalade générique ci-dessus,
-  // réservée à chief-departement, cible directement le directeur.
-  const canEscalateToDirector = !isArchived
-    && !iAmRequester
-    && canTicketAction(role, "escalate_to_director", r.status, ownershipOptions);
+  // Escalade retirée le 2026-09-26 avec le statut "escalated" : l'endpoint
+  // backend, le service et les modales n'existent plus. Les drapeaux
+  // `canEscalateTicket` / `canEscalateToDirector` ont disparu avec eux.
   const canAssignTicket = !isArchived && !iAmRequester && canTicketAction(role, "assign", r.status, ownershipOptions);
   // BR-TRANSMIT-001 : "Terminer le traitement" et "Transmettre le traitement" sont
   // réservés à l'intervenant actuel (assignee_id == moi), quel que soit le rôle parmi
@@ -1745,11 +1621,50 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     && canTicketAction(role, "resolve", r.status, { ...ownershipOptions, isAssignedToMe });
   const canTransmitTreatment = !isArchived && !iAmRequester && isAssignedToMe
     && canTicketAction(role, "transmit_treatment", r.status, { ...ownershipOptions, isAssignedToMe });
-  // Lot 2.7 — "Directive" : commentaire dédié chef -> agent assigné, réservé aux chefs
-  // et impossible tant que le ticket n'a pas d'agent assigné (rien à cibler sinon).
-  const canSendDirective = !isRequesterView
-    && (role === "chief-service" || role === "chief-departement")
-    && !!r.assigneeId;
+  // Procédure tâche 2.1 — le constat est l'affaire du TECHNICIEN : le document
+  // place les tâches 2.1 et 2.2 sous sa seule responsabilité. Un chef de
+  // service, un chef de division ou un chef de département qui termine un
+  // traitement ne réalise pas une intervention de terrain. Aligné sur la règle
+  // backend, qui ne pose `field_check_required` que pour un technicien.
+  const canFieldCheck = !isArchived && !isFinal && !iAmRequester
+    && isAssignedToMe && role === "technicien";
+  // Le constat est rattaché à une INTERVENTION, pas au ticket : après une
+  // transmission, l'intervenant suivant doit refaire le sien. On cible donc
+  // celui de l'intervention en cours — sinon le bouton resterait masqué pour le
+  // suivant, que le backend empêcherait ensuite de résoudre.
+  const fieldChecks = r.timeline.filter((t) => t.type === "field_check");
+  const currentInterventionId = r.interventions?.find((i) => !i.endedAt)?.interventionId;
+  const lastFieldCheck = currentInterventionId
+    ? fieldChecks
+        .filter((t) => {
+          const infos = (t.infos ?? {}) as Record<string, unknown>;
+          return String(infos.intervention_id ?? "") === String(currentInterventionId);
+        })
+        .slice(-1)[0]
+    // Repli — le backend laisse `intervention_id` à null sur les tickets
+    // antérieurs au suivi par intervention : le dernier constat fait alors foi.
+    : fieldChecks.slice(-1)[0];
+  const fieldCheckInfos = (lastFieldCheck?.infos ?? {}) as Record<string, unknown>;
+
+  // BR-TRAITEMENT-PROGRESSIF-001 — une seule action progressive à la fois. L'étape
+  // est DÉRIVÉE du statut renvoyé par le backend, jamais d'un état local : le
+  // serveur reste la source de vérité et refuse de toute façon les séquences
+  // invalides. `pending` et `escalated` valent « démarré » : un ticket mis en
+  // attente puis repris reste terminable, comme avant ce lot.
+  // `canFieldCheck` vaut le rôle technicien : pour les autres traitants le
+  // constat n'est pas exigé (règle backend `field_check_required`), ils passent
+  // donc directement au démarrage — sans quoi ils resteraient bloqués.
+  const fieldCheckPending = canFieldCheck && !lastFieldCheck;
+  const treatmentStep: "field_check" | "start" | "finish" | "done" =
+    r.status === "assigned"
+      ? (fieldCheckPending ? "field_check" : "start")
+      : ["in_progress", "pending", "escalated"].includes(r.status)
+        ? "finish"
+        : "done";
+  const canStartTreatment = !isArchived && !iAmRequester && isAssignedToMe
+    && treatmentStep === "start";
+  // Lot 2.7 — la "Directive" (message dédié chef -> agent assigné) transitait par
+  // la messagerie, retirée le 2026-09-25 : elle disparaît avec elle.
   const canChangePriority = !isArchived && !iAmRequester && canTicketAction(role, "change_priority", r.status, ownershipOptions);
   const canChangeService = !isArchived && !iAmRequester && canTicketAction(role, "change_service", r.status, ownershipOptions);
   const canTransferDirection = !isArchived && !iAmRequester && canTicketAction(role, "transfer_direction", r.status, ownershipOptions);
@@ -1763,24 +1678,18 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const hasTreatmentActions = !isRequesterView && (
     (r.status === "reopened" && !r.assigneeId) ||
     canSelfAssign ||
-    canRequestInfo ||
     canResumeTreatment ||
-    canEscalateTicket ||
-    canEscalateToDirector ||
     canAssignTicket ||
     canChangePriority ||
     canRejectTicket ||
     canChangeService ||
     canTransferDirection ||
     canTransmitTreatment ||
+    canFieldCheck ||
     canResolveTicket
   );
   const detailTabs: Array<{ key: DetailTab; label: string; count?: number; icon: LucideIcon }> = [
     { key: "description", label: "Description", icon: FileText },
-    { key: "journal", label: "Journals", count: journalEvents.length, icon: GitBranch },
-    ...(hasVisibleComments
-      ? [{ key: "comments" as DetailTab, label: "Discussions", count: visibleComments.length, icon: MessageSquare }]
-      : []),
     { key: "files", label: "Fichiers", count: attachments.length, icon: Paperclip },
     { key: "treatment", label: "Traitement", icon: Wrench },
   ];
@@ -1820,13 +1729,119 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     }
   };
 
+  // Procédure tâche 3.1 — bouton PV. Toujours disponible à un intervenant, y
+  // compris sur un ticket terminé : c'est justement APRÈS la résolution que le
+  // PV s'imprime et s'archive. Le demandeur y a droit dès que le ticket est
+  // résolu, puisque c'est lui qui valide le dépannage (tâche 3.2).
+  const pvButton = (
+    <button
+      type="button"
+      className="flex items-start gap-3 rounded-xl border border-border/60 bg-muted/30 p-3 text-left transition hover:bg-muted/50 disabled:opacity-60"
+      onClick={isReadOnlyTreatment ? handlePreviewPv : handleDownloadPv}
+      disabled={pvPending}
+    >
+      {pvPending
+        ? <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
+        : <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />}
+      <span>
+        <span className="block text-sm font-semibold">PV d'intervention</span>
+        <span className="text-xs text-muted-foreground">
+          {/* Plus de signature manuscrite à obtenir : depuis l'émargement
+              électronique (2026-09-27), les validations faites dans
+              l'application sont portées sur le document lui-même. */}
+          {isReadOnlyTreatment
+            ? "Consulter le PV en aperçu"
+            : "Générer le PV à imprimer et archiver"}
+        </span>
+      </span>
+    </button>
+  );
+  const canDownloadPv = !isRequesterView || isFinal;
+  // Tâche 3.3 — l'intervenant qui a traité soumet le PV, une fois le traitement
+  // terminé. Tâche 3.4 — le chef de division qui a réparti le ticket l'archive,
+  // et seulement après soumission. Les deux gardes sont aussi appliquées côté
+  // serveur ; ici on évite simplement de proposer une action vouée au refus.
+  const pvValidated = Boolean(r.pvValidatedAt);
+  const pvSubmitted = Boolean(r.pvSubmittedAt);
+  const pvArchived = Boolean(r.pvArchivedAt);
+  // Tâche 3.2 avant 3.3 : le demandeur valide le dépannage (via son
+  // appréciation) avant que le PV puisse partir au chef de division.
+  const pvAwaitingValidation = !isReadOnlyTreatment && !isRequesterView && isAssignedToMe && !pvValidated
+    && (r.status === "resolved" || r.status === "closed");
+  // BR-TRAITEMENT-PROGRESSIF-001 — la soumission est désormais AUTOMATIQUE dès
+  // que le demandeur valide le dépannage. Dans le cas nominal `pvSubmitted` est
+  // donc déjà vrai et ce bouton ne s'affiche jamais. Il subsiste comme filet de
+  // sécurité : si la soumission automatique avait échoué, le traitant garde un
+  // moyen de la relancer plutôt que de rester bloqué.
+  const canSubmitPv = !isReadOnlyTreatment && !isRequesterView && isAssignedToMe && pvValidated && !pvSubmitted
+    && (r.status === "resolved" || r.status === "closed");
+  const canArchivePv = !isReadOnlyTreatment && !isRequesterView && pvSubmitted && !pvArchived
+    && role === "chef-division-support";
+
+  const pvCircuitButtons = (
+    <>
+      {pvAwaitingValidation && (
+        <div className="col-span-full flex items-center gap-2 rounded-xl border border-border/50 bg-muted/30 px-4 py-2.5 text-sm text-muted-foreground">
+          <Clock className="h-4 w-4 shrink-0" />
+          En attente de la validation du dépannage par le demandeur — le PV
+          pourra ensuite être soumis au chef de division.
+        </div>
+      )}
+      {canSubmitPv && (
+        <button
+          type="button"
+          className="flex items-start gap-3 rounded-xl border border-primary/40 bg-primary/10 p-3 text-left transition hover:bg-primary/15 disabled:opacity-60"
+          onClick={() => pvSubmitMut.mutate()}
+          disabled={pvSubmitMut.isPending}
+        >
+          {pvSubmitMut.isPending
+            ? <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary" />
+            : <Send className="mt-0.5 h-4 w-4 shrink-0 text-primary" />}
+          <span>
+            <span className="block text-sm font-semibold text-primary">Soumettre le PV</span>
+            <span className="text-xs text-muted-foreground">
+              Transmettre au chef de division pour archivage
+            </span>
+          </span>
+        </button>
+      )}
+      {canArchivePv && (
+        <button
+          type="button"
+          className="flex items-start gap-3 rounded-xl border border-success/40 bg-success/10 p-3 text-left transition hover:bg-success/15 disabled:opacity-60"
+          onClick={() => pvArchiveMut.mutate()}
+          disabled={pvArchiveMut.isPending}
+        >
+          {pvArchiveMut.isPending
+            ? <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-success" />
+            : <Archive className="mt-0.5 h-4 w-4 shrink-0 text-success" />}
+          <span>
+            <span className="block text-sm font-semibold text-success">Archiver le PV</span>
+            <span className="text-xs text-muted-foreground">
+              Enregistrer le PV d'intervention reçu
+            </span>
+          </span>
+        </button>
+      )}
+      {pvArchived && !isRequesterView && (
+        <div className="col-span-full flex items-center gap-2 rounded-xl border border-success/30 bg-success/8 px-4 py-2.5 text-sm">
+          <Archive className="h-4 w-4 shrink-0 text-success" />
+          PV d'intervention enregistré et archivé.
+        </div>
+      )}
+    </>
+  );
+
   const treatmentActionsPanel = (
     !isRequesterView && isFinal ? (
-      <div className="flex w-full flex-wrap items-center gap-2 rounded-full border border-border/40 bg-muted/30 px-4 py-2 text-sm text-muted-foreground">
-        <Lock className="h-3.5 w-3.5" />
-        Ticket {isArchived ? "archivé" : r.status === "closed" ? "clôturé" : r.status === "rejected" ? "rejeté" : "résolu"} — aucune action disponible
+      <div className="space-y-3">
+        <div className="flex w-full flex-wrap items-center gap-2 rounded-full border border-border/40 bg-muted/30 px-4 py-2 text-sm text-muted-foreground">
+          <Lock className="h-3.5 w-3.5" />
+          Ticket {isArchived ? "archivé" : r.status === "closed" ? "clôturé" : r.status === "rejected" ? "rejeté" : "résolu"} — aucune action de traitement disponible
+        </div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">{pvButton}{pvCircuitButtons}</div>
       </div>
-    ) : (hasTreatmentActions || hasRequestActions) ? (
+    ) : (hasTreatmentActions || hasRequestActions || canDownloadPv) ? (
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3" role="group" aria-label="Actions de traitement">
         {/* BR-REOPEN-QUEUE-001 — assignee_id=null tant que personne n'a repris le
             ticket depuis la File d'attente : le rappeler explicitement. */}
@@ -1835,6 +1850,64 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             <RotateCcw className="h-3.5 w-3.5 shrink-0" />
             Ce ticket réouvert attend une nouvelle prise en charge.
           </div>
+        )}
+        {/* Procédure tâche 2.1 — seule l'INVITE subsiste ici : elle est
+            actionnable et se tient auprès des boutons, alors que le backend
+            refuse la résolution tant que le constat manque. Le récapitulatif du
+            constat déjà consigné a été retiré de cet onglet (2026-09-27) : il
+            faisait doublon avec le bloc « Constat d'intervention » de l'onglet
+            Description, plus complet (catégorie et priorité constatées). */}
+        {canFieldCheck && !lastFieldCheck && (
+          <div className="col-span-full flex items-center gap-2 rounded-xl border border-info/40 bg-info/8 px-4 py-2.5 text-sm">
+            <ClipboardCheck className="h-4 w-4 shrink-0 text-info" />
+            <span>
+              Vérifiez l'état réel de la requête et consignez votre constat avant
+              de résoudre ce ticket.
+            </span>
+          </div>
+        )}
+        {canDownloadPv && pvButton}
+        {pvCircuitButtons}
+        {/* Étape 1 du workflow progressif. Une fois le constat consigné, le
+            bouton cède la place à « Démarrer le traitement » : le constat reste
+            consultable dans l'onglet Description. Il réapparaît pour
+            l'intervenant suivant, dont l'intervention n'a pas encore le sien. */}
+        {canFieldCheck && treatmentStep === "field_check" && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-info/40 bg-info/8 p-3 text-left transition hover:bg-info/12"
+            onClick={() => setShowFieldCheckForm(true)}
+          >
+            <ClipboardCheck className="mt-0.5 h-4 w-4 shrink-0 text-info" />
+            <span>
+              <span className="block text-sm font-semibold text-info">
+                Consigner mon constat
+              </span>
+              <span className="text-xs text-muted-foreground">
+                Vérifier l'état réel de la requête
+              </span>
+            </span>
+          </button>
+        )}
+        {/* Étape 2 du workflow progressif — le constat est fait, le traitement
+            n'a pas encore commencé. Le lieu est saisi ici, la date et l'heure
+            de début sont horodatées par le serveur. */}
+        {canStartTreatment && (
+          <button
+            type="button"
+            className="flex items-start gap-3 rounded-xl border border-primary/40 bg-primary/8 p-3 text-left transition hover:bg-primary/12"
+            onClick={() => setShowStartForm(true)}
+          >
+            <PlayCircle className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            <span>
+              <span className="block text-sm font-semibold text-primary">
+                Démarrer le traitement
+              </span>
+              <span className="text-xs text-muted-foreground">
+                Indiquer le lieu de l'intervention
+              </span>
+            </span>
+          </button>
         )}
         {/* Agent — auto-assignation d'un ticket libre de son périmètre */}
         {canSelfAssign && (
@@ -1856,19 +1929,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
         {/* C2 — Demander des informations : IN_PROGRESS, agent seulement.
             Volontairement indépendant de hasVisibleComments — c'est justement
             l'action qui crée le tout premier message de la conversation. */}
-        {canRequestInfo && (
-          <button
-            type="button"
-            className="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-left transition hover:bg-amber-500/10"
-            onClick={() => setShowRequestInfoForm(true)}
-          >
-            <MessageSquareWarning className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-            <span>
-              <span className="block text-sm font-semibold text-amber-500">Ouvrir une discussion</span>
-              <span className="text-xs text-muted-foreground">Demander une précision au demandeur</span>
-            </span>
-          </button>
-        )}
         {/* C3 — Reprendre le traitement : PENDING, agent seulement */}
         {canResumeTreatment && (
           <button
@@ -1883,36 +1943,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             <span>
               <span className="block text-sm font-semibold text-info">Reprendre le traitement</span>
               <span className="text-xs text-muted-foreground">Sortir de l'attente</span>
-            </span>
-          </button>
-        )}
-        {/* C5 — Escalader : agent, chef, directeur, admin seulement */}
-        {/* Masqué temporairement à la demande du métier (2026-08-13) — repasser à `canEscalateTicket` pour réactiver. */}
-        {false && canEscalateTicket && (
-          <button
-            type="button"
-            className="flex items-start gap-3 rounded-xl border border-orange-600/40 bg-orange-600/10 p-3 text-left transition hover:bg-orange-600/15"
-            onClick={() => setShowEscalateForm(true)}
-          >
-            <ArrowUpRight className="mt-0.5 h-4 w-4 shrink-0 text-orange-600" />
-            <span>
-              <span className="block text-sm font-semibold text-orange-600">Escalader</span>
-              <span className="text-xs text-muted-foreground">Transmettre à un niveau supérieur</span>
-            </span>
-          </button>
-        )}
-        {/* Lot 3.3 — Escalade exceptionnelle : court-circuite la hiérarchie, cible le directeur */}
-        {/* Masqué temporairement à la demande du métier (2026-08-14) — repasser à `canEscalateToDirector` pour réactiver. */}
-        {false && canEscalateToDirector && (
-          <button
-            type="button"
-            className="flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-left transition hover:bg-destructive/15"
-            onClick={() => setShowEscalateToDirectorForm(true)}
-          >
-            <ArrowUpRight className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-            <span>
-              <span className="block text-sm font-semibold text-destructive">Escalader au Directeur</span>
-              <span className="text-xs text-muted-foreground">Escalade exceptionnelle — court-circuite la hiérarchie</span>
             </span>
           </button>
         )}
@@ -2009,7 +2039,9 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
         )}
         {/* BR-TRANSMIT-001 — Terminer le traitement : réservé à l'intervenant actuel,
             résumé/solution/travail réalisé obligatoires. */}
-        {canResolveTicket && (
+        {/* Étape 3 du workflow progressif — visible seulement une fois le
+            traitement démarré, jamais en même temps que les étapes 1 et 2. */}
+        {canResolveTicket && treatmentStep === "finish" && (
           <button
             type="button"
             className="flex items-start gap-3 rounded-xl border border-success/40 bg-success/10 p-3 text-left transition hover:bg-success/15 disabled:opacity-60"
@@ -2106,255 +2138,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     ?? participants.find((p) => p.key === peerId)?.name
     ?? "Intervenant";
 
-  const commentsPanel = (
-    <section ref={commentsPanelRef} className="min-w-0">
-      <div>
-        {showConversationSwitcher && (
-          <div className="mb-4 flex gap-2 overflow-x-auto pb-1">
-            {conversations.map((conv) => {
-              const isSelected = conv.peerId === effectiveSelectedPeerId;
-              const isCurrent = conv.peerId === r.assigneeId;
-              return (
-                <button
-                  key={conv.peerId}
-                  type="button"
-                  onClick={() => setSelectedPeerId(conv.peerId)}
-                  className={cn(
-                    "flex shrink-0 flex-col items-start gap-0.5 rounded-xl border px-3 py-2 text-left transition",
-                    isSelected
-                      ? "border-primary/50 bg-primary/10"
-                      : "border-border/40 bg-background/45 hover:bg-background/70",
-                  )}
-                >
-                  <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                    {nameForPeer(conv.peerId)}
-                    {isCurrent ? (
-                      <span className="rounded-full bg-success/15 px-1.5 py-0.5 text-[9px] font-bold text-success">
-                        Actuel
-                      </span>
-                    ) : (
-                      <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">
-                        Archivé
-                      </span>
-                    )}
-                  </span>
-                  {conv.lastBody && (
-                    <span className="max-w-[160px] truncate text-[11px] text-muted-foreground">
-                      {conv.lastBody}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        )}
-        {visibleComments.length === 0 ? (
-          <p className="rounded-2xl border border-dashed border-border/50 bg-background/35 px-4 py-5 text-sm text-muted-foreground">
-            Aucun message pour l'instant.
-          </p>
-        ) : (
-          <ul className="relative space-y-4 pb-1">
-            {visibleComments.map((c) => {
-              const fullAttachment = c.attachmentName
-                ? attachments.find((a) => a.id === c.attachmentId)
-                : undefined;
-              const authorAvatar = avatarForComment(c);
-              // Style messagerie viewer-relatif : mes propres messages a droite,
-              // ceux des autres a gauche, quel que soit mon role (demandeur ou personnel).
-              const isMine = isRequester(c.authorId, sessionUser?.id);
-              const attachmentSize = c.attachmentSize ?? fullAttachment?.size_bytes;
-              const attachmentMime = c.attachmentMime ?? fullAttachment?.mime_type ?? "";
-
-              return (
-                <li key={c.id} className={cn("relative flex min-w-0 gap-3", isMine && "flex-row-reverse")}>
-                  <Avatar className="h-10 w-10 shrink-0 border border-border/60 bg-background shadow-sm">
-                    <AvatarImage src={authorAvatar} alt={c.author} />
-                    <AvatarFallback className="bg-primary/10 text-xs font-bold text-primary">
-                      {initialsFor(c.author)}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className={cn("flex min-w-0 flex-1 flex-col", isMine ? "items-end" : "items-start")}>
-                    <div className={cn(
-                      "relative inline-block max-w-full rounded-2xl px-3.5 py-2.5 shadow-sm",
-                      c.isDirective
-                        ? "border border-warning/40 bg-warning/10"
-                        : "bg-muted/45",
-                    )}>
-                      <div className="flex min-w-0 flex-wrap items-center gap-2">
-                        <span className="truncate text-sm font-semibold text-foreground">{c.author}</span>
-                        <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
-                          {roleForComment(c)}
-                        </span>
-                        {c.isDirective && (
-                          <span className="flex shrink-0 items-center gap-1 rounded-full bg-warning/20 px-2 py-0.5 text-[10px] font-bold text-warning-foreground dark:text-warning">
-                            <AlertTriangle className="h-2.5 w-2.5" /> Directive
-                          </span>
-                        )}
-                      </div>
-                      <p className="mt-1 whitespace-pre-wrap text-sm leading-5 text-foreground">{c.body}</p>
-                      {c.attachmentName && (
-                        <button
-                          type="button"
-                          className="mt-2 flex w-full max-w-sm items-center gap-3 rounded-xl border border-border/40 bg-background/75 px-2.5 py-2 text-left text-xs transition hover:bg-background disabled:cursor-default"
-                          onClick={() => fullAttachment && void handleAttachmentFile(fullAttachment, "download")}
-                          disabled={!fullAttachment}
-                        >
-                          <span className="grid h-10 w-14 shrink-0 place-items-center rounded-lg border border-border/40 bg-background/80">
-                            <FileText className="h-5 w-5 text-primary" />
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate font-semibold text-foreground">{c.attachmentName}</span>
-                            <span className="block text-muted-foreground">
-                              {attachmentSize ? formatAttachmentSize(attachmentSize) : attachmentTypeLabel(attachmentMime)}
-                            </span>
-                          </span>
-                          <Download className="h-4 w-4 shrink-0 text-muted-foreground" />
-                        </button>
-                      )}
-                    </div>
-                    <div className={cn(
-                      "mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground",
-                      isMine ? "pr-1" : "pl-1",
-                    )}>
-                      <span>{formatCommentDate(c.createdAt)}</span>
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-
-        {isDiscussionLocked ? (
-          <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/30 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
-            <Lock className="h-3.5 w-3.5 shrink-0" />
-            La messagerie est desactivee - ticket {isArchived ? "archive" : r.status === "closed" ? "cloture" : r.status === "cancelled" ? "annule" : "rejete"}.
-          </div>
-        ) : !hasAssignee ? (
-          <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/30 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
-            <Lock className="h-3.5 w-3.5 shrink-0" />
-            La messagerie sera disponible une fois qu'un intervenant prendra en charge le ticket.
-          </div>
-        ) : isAdminSupervision ? (
-          <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/30 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
-            <Lock className="h-3.5 w-3.5 shrink-0" />
-            Vue de supervision admin — lecture seule, ces conversations sont privées entre leurs participants.
-          </div>
-        ) : !isRequesterView && !isAssignedToMe ? (
-          <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/30 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
-            <Lock className="h-3.5 w-3.5 shrink-0" />
-            Messagerie réservée au demandeur et à l'intervenant actuel de ce ticket — lecture seule pour vous.
-          </div>
-        ) : !isViewingCurrentConversation ? (
-          <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/30 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
-            <Lock className="h-3.5 w-3.5 shrink-0" />
-            Conversation archivée avec un ancien intervenant — lecture seule. Sélectionnez la conversation "Actuel" pour écrire.
-          </div>
-        ) : isRequesterView && !currentConversationOpenedByAssignee ? (
-          <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/30 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
-            <Lock className="h-3.5 w-3.5 shrink-0" />
-            En attente que {assigneeDisplayName} ouvre la discussion. Vous serez notifié dès que ce sera possible.
-          </div>
-        ) : (
-          <div className="mt-5 rounded-2xl border border-border/40 bg-background/45 p-2 shadow-sm">
-            {stagedFile && (
-              <div className="mb-2 ml-0 flex items-center gap-2 rounded-xl border border-border/40 bg-background/70 px-3 py-2 text-xs sm:ml-12">
-                <FileText className="h-3.5 w-3.5 shrink-0 text-primary" />
-                <span className="min-w-0 flex-1 truncate">{stagedFile.name}</span>
-                <button
-                  type="button"
-                  className="grid h-5 w-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-                  title="Retirer la piece jointe"
-                  onClick={() => {
-                    setStagedFile(null);
-                    if (attachRef.current) attachRef.current.value = "";
-                  }}
-                >
-                  <XCircle className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            )}
-            <div className="flex items-end gap-2">
-              <div className="flex min-w-0 flex-1 items-end gap-1 rounded-xl border border-border/35 bg-background/70 px-3 py-1.5">
-                <Textarea
-                  ref={commentRef}
-                  placeholder="Écrire un message..."
-                  value={comment}
-                  onChange={(e) => setComment(e.target.value)}
-                  className="max-h-28 min-h-10 resize-none border-0 bg-transparent px-0 py-2 text-sm shadow-none focus-visible:ring-0"
-                />
-                <input
-                  ref={attachRef}
-                  type="file"
-                  accept=".jpg,.jpeg,.png,.webp,.heic,.pdf"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) setStagedFile(f);
-                  }}
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className={cn("h-9 w-9 shrink-0 rounded-full", stagedFile && "text-primary")}
-                  title="Joindre un fichier"
-                  onClick={() => attachRef.current?.click()}
-                >
-                  <Paperclip className="h-4 w-4" />
-                </Button>
-                <Popover open={emojiPickerOpen} onOpenChange={setEmojiPickerOpen}>
-                  <PopoverTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9 shrink-0 rounded-full"
-                      title="Ajouter un emoji"
-                    >
-                      <Smile className="h-4 w-4" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent align="end" className="w-64 p-2">
-                    <div className="grid grid-cols-8 gap-1">
-                      {COMMENT_EMOJIS.map((emoji) => (
-                        <button
-                          key={emoji}
-                          type="button"
-                          className="grid h-7 w-7 place-items-center rounded-md text-lg transition hover:bg-muted"
-                          onClick={() => insertEmoji(emoji)}
-                        >
-                          {emoji}
-                        </button>
-                      ))}
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              </div>
-              <Button
-                size="sm"
-                className="h-10 rounded-xl gradient-primary px-5"
-                disabled={!comment.trim() || commentMut.isPending}
-                onClick={() => commentMut.mutate()}
-              >
-                {commentMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Envoyer"}
-              </Button>
-            </div>
-            {!isRequesterView && canSendDirective && (
-              <div className="mt-2 flex flex-wrap items-center gap-4 pl-0 sm:pl-12">
-                <div className="flex items-center gap-2">
-                  <Switch id="directive" checked={isDirective} onCheckedChange={setIsDirective} />
-                  <Label htmlFor="directive" className="text-sm font-medium text-warning-foreground dark:text-warning">
-                    Marquer comme directive
-                  </Label>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </section>
-  );
-
   return (
     <div className="mx-auto w-full max-w-[1700px] space-y-5 px-3 pb-24 sm:px-5 lg:px-8">
       <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -2384,10 +2167,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                 type="button"
                 title="Copier l'identifiant"
                 className="grid h-6 w-6 place-items-center rounded-lg border border-border/50 bg-background/60 hover:bg-muted"
-                onClick={() => {
-                  void navigator.clipboard.writeText(r.ref);
-                  toast.success("Identifiant copié");
-                }}
+                onClick={() => void copyWithToast(r.ref, "Identifiant copié")}
               >
                 <Copy className="h-3.5 w-3.5" />
               </button>
@@ -2618,176 +2398,201 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             </Dialog>
           )}
 
-          {/* C2 — Modal demande d'informations */}
-          {!isRequesterView && (
-            <Dialog
-              open={showRequestInfoForm}
-              onOpenChange={(open) => {
-                setShowRequestInfoForm(open);
-                if (!open) setInfoQuestion("");
-              }}
-            >
-              <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
-                <DialogHeader>
-                  <DialogTitle className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
-                    <MessageSquareWarning className="h-5 w-5" />
-                    Ouvrir une discussion
-                  </DialogTitle>
-                  <DialogDescription>
-                    Le demandeur recevra une notification (email + app). Le ticket reste en cours de traitement.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-2 py-2">
-                  <Label htmlFor="request-info-question">
-                    Question <span className="text-destructive">*</span>
+
+
+          {/* Procédure EDG/PS-GSI/Pro-02 tâche 2.1 — « Qualifier la demande »,
+              point de contrôle « vérification de l'état réel de la requête ».
+              Le constat est visible du demandeur (il porte sur son matériel),
+              contrairement à la solution proposée par le chef de service. */}
+          <Dialog
+            open={showFieldCheckForm}
+            onOpenChange={(open) => {
+              setShowFieldCheckForm(open);
+              if (!open) {
+                setFieldCheckFindings("");
+                setObservedCategory("");
+                setObservedPriority("");
+                setFieldCheckConformity("conforme");
+              }
+            }}
+          >
+            <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <ClipboardCheck className="h-5 w-5 text-info" />
+                  Constat d'intervention
+                </DialogTitle>
+                <DialogDescription>
+                  Comparez l'état réel de la requête à ce qui a été décrit, avant
+                  d'intervenir. Votre constat est visible du demandeur.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3 py-2">
+                <div className="space-y-1.5">
+                  <Label className="text-sm font-medium">
+                    État réel <span className="text-destructive">*</span>
+                  </Label>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {([
+                      { value: "conforme", label: "Conforme à la demande" },
+                      { value: "ecart", label: "Écart avec la demande" },
+                    ] as const).map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setFieldCheckConformity(option.value)}
+                        className={cn(
+                          "rounded-xl border px-3 py-2.5 text-left text-sm transition",
+                          fieldCheckConformity === option.value
+                            ? "border-primary bg-primary/10 font-semibold text-primary"
+                            : "border-border/50 hover:bg-foreground/5",
+                        )}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="field-check-findings" className="text-sm font-medium">
+                    Ce que vous avez constaté <span className="text-destructive">*</span>
                   </Label>
                   <Textarea
-                    id="request-info-question"
-                    value={infoQuestion}
-                    onChange={(e) => setInfoQuestion(e.target.value)}
-                    placeholder="Posez votre question ou décrivez les informations manquantes…"
-                    rows={3}
-                    className="min-h-24 bg-background"
+                    id="field-check-findings"
+                    value={fieldCheckFindings}
+                    onChange={(e) => setFieldCheckFindings(e.target.value)}
+                    placeholder="Décrivez l'état réel trouvé sur place…"
+                    className="min-h-24"
                   />
                 </div>
-                <DialogFooter className="gap-2">
-                  <Button variant="ghost" className="rounded-full"
-                    onClick={() => { setShowRequestInfoForm(false); setInfoQuestion(""); }}>
-                    Annuler
-                  </Button>
-                  <Button
-                    className="rounded-full bg-amber-500 text-white hover:bg-amber-600"
-                    disabled={!infoQuestion.trim() || requestInfoMut.isPending}
-                    onClick={() => requestInfoMut.mutate()}
-                  >
-                    {requestInfoMut.isPending
-                      ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                      : <MessageSquareWarning className="mr-1.5 h-4 w-4" />}
-                    Envoyer la demande
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          )}
+                {fieldCheckConformity === "ecart" && (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="observed-category" className="text-sm font-medium">
+                        Catégorie observée <span className="text-destructive">*</span>
+                      </Label>
+                      <Select value={observedCategory} onValueChange={setObservedCategory}>
+                        <SelectTrigger id="observed-category">
+                          <SelectValue placeholder="Choisir" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {observedCategories.map((c) => (
+                            <SelectItem key={c} value={c}>{c}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="observed-priority" className="text-sm font-medium">
+                        Priorité observée <span className="text-destructive">*</span>
+                      </Label>
+                      <Select value={observedPriority} onValueChange={setObservedPriority}>
+                        <SelectTrigger id="observed-priority">
+                          <SelectValue placeholder="Choisir" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(["low", "medium", "high", "critical"] as const).map((p) => (
+                            <SelectItem key={p} value={priorityLabels[p]}>
+                              {priorityLabels[p]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <p className="sm:col-span-2 text-xs text-muted-foreground">
+                      Le chef de service sera prévenu de l'écart : la qualification
+                      lui appartient.
+                    </p>
+                  </div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button
+                  variant="ghost"
+                  className="rounded-full"
+                  onClick={() => setShowFieldCheckForm(false)}
+                >
+                  Annuler
+                </Button>
+                <Button
+                  className="rounded-full"
+                  disabled={!canSubmitFieldCheck || fieldCheckMut.isPending}
+                  onClick={() => fieldCheckMut.mutate()}
+                >
+                  {fieldCheckMut.isPending
+                    ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                    : <ClipboardCheck className="mr-1.5 h-4 w-4" />}
+                  Enregistrer le constat
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
-          {/* C5 — Modal escalade */}
-          {!isRequesterView && (
-            <Dialog
-              open={showEscalateForm}
-              onOpenChange={(open) => {
-                if (!open) { setShowEscalateForm(false); setEscalateReason(""); }
-              }}
-            >
-              <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
-                <DialogHeader>
-                  <DialogTitle className="flex items-center gap-2 text-destructive">
-                    <ArrowUpRight className="h-5 w-5" />
-                    Escalader le ticket
-                  </DialogTitle>
-                  <DialogDescription>
-                    Ce ticket sera transmis au chef hiérarchique de la personne en charge
-                    du traitement. Le motif sera enregistré dans l'historique.
-                  </DialogDescription>
-                </DialogHeader>
-
-                <div className="space-y-4 py-2">
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium">
-                      Motif <span className="text-destructive">*</span>
-                    </label>
-                    <textarea
-                      value={escalateReason}
-                      onChange={(e) => setEscalateReason(e.target.value)}
-                      placeholder="Décrivez la raison de l'escalade…"
-                      rows={3}
-                      className="w-full resize-none rounded-xl border border-border/50 bg-background/60 px-3 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-destructive/40"
-                    />
+          {/* BR-TRAITEMENT-PROGRESSIF-001 — Modal « Démarrer le traitement ».
+              Date et heure sont affichées à titre indicatif seulement : c'est le
+              serveur qui les horodate au moment de la confirmation, ce qui évite
+              de dépendre de l'horloge du poste. Seul le lieu est saisi. */}
+          <Dialog
+            open={showStartForm}
+            onOpenChange={(open) => {
+              setShowStartForm(open);
+              if (!open) setStartLocation("");
+            }}
+          >
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Démarrer le traitement</DialogTitle>
+                <DialogDescription>
+                  La date et l'heure de début sont enregistrées automatiquement par
+                  le système au moment de la confirmation.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3 rounded-xl border border-border/50 bg-muted/30 p-3 text-sm">
+                  <div>
+                    <div className="text-xs text-muted-foreground">Date de début</div>
+                    <div className="font-medium">{new Date().toLocaleDateString("fr-FR")}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Heure de début</div>
+                    <div className="font-medium">
+                      {new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                    </div>
                   </div>
                 </div>
-
-                <DialogFooter className="gap-2">
-                  <Button
-                    variant="ghost"
-                    className="rounded-full"
-                    onClick={() => { setShowEscalateForm(false); setEscalateReason(""); }}
-                  >
-                    Annuler
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    className="rounded-full"
-                    disabled={!escalateReason.trim() || escalateMut.isPending}
-                    onClick={() => escalateMut.mutate()}
-                  >
-                    {escalateMut.isPending
-                      ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                      : <ArrowUpRight className="mr-1.5 h-4 w-4" />}
-                    Confirmer l'escalade
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          )}
-
-          {/* Lot 3.3 — Modal escalade exceptionnelle au directeur */}
-          {!isRequesterView && (
-            <Dialog
-              open={showEscalateToDirectorForm}
-              onOpenChange={(open) => {
-                if (!open) { setShowEscalateToDirectorForm(false); setEscalateToDirectorReason(""); }
-              }}
-            >
-              <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
-                <DialogHeader>
-                  <DialogTitle className="flex items-center gap-2 text-destructive">
-                    <ArrowUpRight className="h-5 w-5" />
-                    Escalade exceptionnelle au Directeur
-                  </DialogTitle>
-                  <DialogDescription>
-                    Ce ticket sera transmis directement au directeur de votre direction,
-                    sans passer par le chef hiérarchique le plus proche. Le motif sera enregistré
-                    dans l'historique.
-                  </DialogDescription>
-                </DialogHeader>
-
-                <div className="space-y-4 py-2">
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium">
-                      Motif <span className="text-destructive">*</span>
-                    </label>
-                    <textarea
-                      value={escalateToDirectorReason}
-                      onChange={(e) => setEscalateToDirectorReason(e.target.value)}
-                      placeholder="Décrivez la raison de cette escalade exceptionnelle…"
-                      rows={3}
-                      className="w-full resize-none rounded-xl border border-border/50 bg-background/60 px-3 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-destructive/40"
-                    />
-                  </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="start-location" className="text-sm font-medium">
+                    Lieu de l'intervention <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    id="start-location"
+                    value={startLocation}
+                    onChange={(e) => setStartLocation(e.target.value)}
+                    placeholder="Ex. Siège EDG — 3e étage, bureau 312"
+                  />
                 </div>
-
-                <DialogFooter className="gap-2">
-                  <Button
-                    variant="ghost"
-                    className="rounded-full"
-                    onClick={() => { setShowEscalateToDirectorForm(false); setEscalateToDirectorReason(""); }}
-                  >
-                    Annuler
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    className="rounded-full"
-                    disabled={!escalateToDirectorReason.trim() || escalateToDirectorMut.isPending}
-                    onClick={() => escalateToDirectorMut.mutate()}
-                  >
-                    {escalateToDirectorMut.isPending
-                      ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                      : <ArrowUpRight className="mr-1.5 h-4 w-4" />}
-                    Confirmer l'escalade au directeur
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          )}
+              </div>
+              <DialogFooter>
+                <Button
+                  variant="ghost"
+                  className="rounded-full"
+                  onClick={() => setShowStartForm(false)}
+                >
+                  Annuler
+                </Button>
+                <Button
+                  className="rounded-full"
+                  disabled={!startLocation.trim() || startMut.isPending}
+                  onClick={() => startMut.mutate()}
+                >
+                  {startMut.isPending
+                    ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                    : <PlayCircle className="mr-1.5 h-4 w-4" />}
+                  Démarrer le traitement
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           {/* BR-TRANSMIT-001 — Modal "Terminer le traitement" : résumé/solution/travail
               réalisé obligatoires, recommandations et pièces jointes facultatives. */}
@@ -2920,24 +2725,61 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                   }
                 }}
               >
-                <div className="space-y-1.5">
-                  <Label htmlFor="transmit-search" className="text-sm font-medium">
-                    Recherche
-                  </Label>
-                  <div className="rounded-xl border border-border/50 bg-background/60 focus-within:ring-2 focus-within:ring-primary/40">
-                    <CommandInput
-                      id="transmit-search"
-                      value={transmitSearch}
-                      onValueChange={(value) => {
-                        setTransmitSearch(value);
-                        setTransmitTargetId("");
-                      }}
-                      placeholder="@Nom, matricule ou téléphone…"
-                      className="h-9 border-b-0"
-                    />
+                {/* BR-TRANSMIT-SCOPE-TECH-001 — périmètre restreint (technicien) :
+                    une sélection fermée remplace la recherche libre, et les filtres
+                    direction/département/service disparaissent : ils n'ont plus
+                    d'objet puisque les cibles se limitent à son propre service et
+                    au responsable qui lui a confié le ticket. */}
+                {transmitRestricted ? (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="transmit-target" className="text-sm font-medium">
+                      Destinataire <span className="text-destructive">*</span>
+                    </Label>
+                    <select
+                      id="transmit-target"
+                      value={transmitTargetId}
+                      onChange={(e) => setTransmitTargetId(e.target.value)}
+                      className="w-full rounded-xl border border-border/50 bg-background/60 px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    >
+                      <option value="">Sélectionner un destinataire</option>
+                      {transmitTargets.map((person) => (
+                        <option key={person.id} value={person.id}>
+                          {[
+                            person.name,
+                            person.matricule,
+                            roleLabels[person.role as keyof typeof roleLabels] ?? person.role,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-muted-foreground">
+                      {transmitTargets.length === 0
+                        ? "Aucun destinataire disponible : ni collègue technicien dans votre service, ni responsable ayant confié ce ticket."
+                        : "Vos collègues techniciens de ce service, et le responsable qui vous a confié ce ticket."}
+                    </p>
                   </div>
-                </div>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                ) : (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="transmit-search" className="text-sm font-medium">
+                      Recherche
+                    </Label>
+                    <div className="rounded-xl border border-border/50 bg-background/60 focus-within:ring-2 focus-within:ring-primary/40">
+                      <CommandInput
+                        id="transmit-search"
+                        value={transmitSearch}
+                        onValueChange={(value) => {
+                          setTransmitSearch(value);
+                          setTransmitTargetId("");
+                        }}
+                        placeholder="@Nom, badge ou téléphone…"
+                        className="h-9 border-b-0"
+                      />
+                    </div>
+                  </div>
+                )}
+                <div className={cn("grid grid-cols-1 gap-2 sm:grid-cols-3", transmitRestricted && "hidden")}>
                   <div className="space-y-1.5">
                     <Label className="text-xs font-medium text-muted-foreground">Direction</Label>
                     <select
@@ -2992,7 +2834,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                     </select>
                   </div>
                 </div>
-                <div className="space-y-1.5">
+                <div className={cn("space-y-1.5", transmitRestricted && "hidden")}>
                   <Label className="text-sm font-medium">
                     Personne cible <span className="text-destructive">*</span>
                   </Label>
@@ -3031,7 +2873,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                         <CommandEmpty className="px-2 py-3 text-center text-xs text-muted-foreground">
                           {transmitSearchTerm || transmitUnitId || transmitDepartmentId || transmitDirectionId
                             ? "Aucun intervenant actif trouvé pour ces critères."
-                            : "Recherchez @Prénom Nom, un matricule ou un téléphone, ou affinez par direction/département/service."}
+                            : "Recherchez @Prénom Nom, un badge ou un téléphone, ou affinez par direction/département/service."}
                         </CommandEmpty>
                       ) : (
                         <CommandGroup>
@@ -3296,7 +3138,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                 {detailTabs.map((tab) => {
                   const Icon = tab.icon;
                   const isActive = activeDetailTab === tab.key;
-                  const startsVisualGroup = tab.key === "comments" || tab.key === "sla";
+                  const startsVisualGroup = tab.key === "sla";
 
                   return (
                     <button
@@ -3337,6 +3179,77 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                   {r.description}
                 </p>
               </div>
+
+              {/* Procédure EDG/PS-GSI/Pro-02 tâche 1.3 — piste de résolution
+                  décrite par le chef de service à l'imputation. Réservée aux
+                  intervenants du support : jamais rendue pour le demandeur
+                  (la requête n'est même pas émise — voir canSeeProposedSolution). */}
+              {proposedSolution && (
+                <div className="mt-3 rounded-2xl border border-info/25 bg-info/8 p-4">
+                  <h3 className="mb-2 flex items-center gap-2 font-semibold text-info">
+                    <Lightbulb className="h-4 w-4" />
+                    Solution proposée par le chef de service
+                  </h3>
+                  <p className="whitespace-pre-wrap text-sm leading-7">
+                    {proposedSolution}
+                  </p>
+                </div>
+              )}
+
+              {/* Procédure EDG/PS-GSI/Pro-02 tâche 2.1 — constat du traitant
+                  actuel. Contrairement à la solution proposée ci-dessus, il est
+                  rendu pour tout le monde, demandeur inclus : il dit ce qui a
+                  réellement été trouvé sur place. */}
+              {lastFieldCheck && (
+                <div className={cn(
+                  "mt-3 rounded-2xl border p-4",
+                  fieldCheckInfos.conformity === "ecart"
+                    ? "border-amber-500/40 bg-amber-500/8"
+                    : "border-success/30 bg-success/8",
+                )}>
+                  <h3 className={cn(
+                    "mb-2 flex items-center gap-2 font-semibold",
+                    fieldCheckInfos.conformity === "ecart" ? "text-amber-600 dark:text-amber-400" : "text-success",
+                  )}>
+                    <ClipboardCheck className="h-4 w-4" />
+                    Constat d'intervention
+                    {lastFieldCheck.by && (
+                      <span className="text-xs font-normal text-muted-foreground">
+                        — {lastFieldCheck.by}
+                      </span>
+                    )}
+                  </h3>
+                  <p className="mb-2 text-sm font-medium">
+                    {fieldCheckInfos.conformity === "ecart"
+                      ? "Écart entre la demande et l'état réel constaté"
+                      : "État réel conforme à la demande"}
+                  </p>
+                  <p className="whitespace-pre-wrap text-sm leading-7">
+                    {String(fieldCheckInfos.findings ?? "")}
+                  </p>
+                  {Boolean(fieldCheckInfos.observed_category || fieldCheckInfos.observed_priority) && (
+                    <dl className="mt-3 grid grid-cols-1 gap-2 border-t border-border/40 pt-3 text-sm sm:grid-cols-2">
+                      {Boolean(fieldCheckInfos.observed_category) && (
+                        <div>
+                          <dt className="text-xs text-muted-foreground">Catégorie observée</dt>
+                          <dd className="font-medium">{String(fieldCheckInfos.observed_category)}</dd>
+                        </div>
+                      )}
+                      {Boolean(fieldCheckInfos.observed_priority) && (
+                        <div>
+                          <dt className="text-xs text-muted-foreground">Priorité observée</dt>
+                          <dd className="font-medium">{String(fieldCheckInfos.observed_priority)}</dd>
+                        </div>
+                      )}
+                    </dl>
+                  )}
+                  {lastFieldCheck.at && (
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      {formatTicketDateTime(lastFieldCheck.at)}
+                    </p>
+                  )}
+                </div>
+              )}
             </section>
 
             <section className={cn("order-4 border-t border-border/40 p-3 sm:p-4", activeDetailTab !== "files" && "hidden")}>
@@ -3429,65 +3342,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
               )}
             </section>
 
-            <section className={cn("order-1 p-3 sm:p-4", activeDetailTab !== "journal" && "hidden")}>
-              {/* BR-TRACE-001 — journal d'interventions hiérarchique (Cycle ->
-                  Intervention) par défaut ; bascule possible vers la timeline
-                  événement par événement déjà existante (audit fin). */}
-              {(r.interventions?.length ?? 0) > 0 && (
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-1 rounded-full border border-border/50 bg-background/50 p-1 text-xs">
-                    <button
-                      type="button"
-                      className={cn(
-                        "rounded-full px-3 py-1 font-medium transition-colors",
-                        journalView === "interventions" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
-                      )}
-                      onClick={() => setJournalView("interventions")}
-                    >
-                      Journal des interventions
-                    </button>
-                    <button
-                      type="button"
-                      className={cn(
-                        "rounded-full px-3 py-1 font-medium transition-colors",
-                        journalView === "events" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
-                      )}
-                      onClick={() => setJournalView("events")}
-                    >
-                      Chronologie complète
-                    </button>
-                  </div>
-                  {journalView === "interventions" && (
-                    <button
-                      type="button"
-                      disabled
-                      title="Export du journal — bientôt disponible"
-                      className="cursor-not-allowed rounded-full border border-border/50 px-3 py-1 text-xs font-medium text-muted-foreground opacity-60"
-                    >
-                      Exporter le journal
-                    </button>
-                  )}
-                </div>
-              )}
-              <div className="max-h-[520px] overflow-y-auto pr-1">
-                {journalView === "interventions" && (r.interventions?.length ?? 0) > 0 ? (
-                  <InterventionJournal
-                    interventions={r.interventions!}
-                    events={r.timeline}
-                    currentAssigneeId={r.assigneeId}
-                    requestRef={r.ref}
-                    onOpenAttachment={handleTimelineAttachmentOpen}
-                  />
-                ) : (
-                  <WorkflowTimeline events={journalEvents} onOpenAttachment={handleTimelineAttachmentOpen} />
-                )}
-              </div>
-            </section>
-
-            <section className={cn("order-1 border-t border-border/40 p-3 sm:p-4", activeDetailTab !== "comments" && "hidden")}>
-              {commentsPanel}
-            </section>
-
             <section className={cn("order-2 border-t border-border/40 p-3 sm:p-4", activeDetailTab !== "sla" && "hidden")}>
               <div className="mb-4">
                 <h3 className="font-semibold">Durée de traitement</h3>
@@ -3510,17 +3364,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                   </div>
                   <p className="mt-2 truncate text-sm font-medium text-muted-foreground">
                     {formatElapsedHours(r.slaElapsed)}
-                  </p>
-                </div>
-                <div className="min-w-0 rounded-2xl border border-border/50 bg-background/55 p-3">
-                  <div className="flex items-center gap-2 text-sm font-semibold">
-                    <ArrowUpRight className="h-4 w-4 text-amber-500" />
-                    <span className="truncate">Escalade</span>
-                  </div>
-                  <p className="mt-2 truncate text-sm text-muted-foreground">
-                    {r.timeline.some((event) => event.type.includes("escalat"))
-                      ? "Escalade tracée dans le journal."
-                      : "Aucune escalade tracée."}
                   </p>
                 </div>
                 <div className="min-w-0 rounded-2xl border border-border/50 bg-background/55 p-3">
@@ -3877,7 +3720,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
 
           {/* Dialog — Prévisualisation piece jointe (image zoomable / PDF) */}
           <Dialog open={!!previewFile} onOpenChange={(open) => { if (!open) closePreview(); }}>
-            <DialogContent className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-4xl">
+            <DialogContent className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden overflow-y-hidden p-0 sm:max-w-4xl">
               <DialogHeader className="border-b border-border/40 px-5 py-4">
                 <DialogTitle className="truncate pr-8 text-base">{previewFile?.filename}</DialogTitle>
               </DialogHeader>
@@ -3980,7 +3823,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
           </section>
 
           <Dialog open={showAllParticipants} onOpenChange={setShowAllParticipants}>
-            <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-md">
+            <DialogContent className="max-h-[80dvh] overflow-y-auto sm:max-w-md">
               <DialogHeader>
                 <DialogTitle>Intervenants ({participants.length})</DialogTitle>
                 <DialogDescription>Toutes les personnes liées à ce ticket.</DialogDescription>
@@ -4046,10 +3889,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                     type="button"
                     className="grid h-5 w-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
                     title="Copier l'identifiant"
-                    onClick={() => {
-                      void navigator.clipboard.writeText(r.ref);
-                      toast.success("Identifiant copié");
-                    }}
+                    onClick={() => void copyWithToast(r.ref, "Identifiant copié")}
                   >
                     <Copy className="h-3 w-3" />
                   </button>
@@ -4059,7 +3899,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
           </section>
 
           <Dialog open={showAllDetails} onOpenChange={setShowAllDetails}>
-            <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-lg">
+            <DialogContent className="max-h-[80dvh] overflow-y-auto sm:max-w-lg">
               <DialogHeader>
                 <DialogTitle>Détails du ticket</DialogTitle>
                 <DialogDescription>Demandeur, traitement et délai de ce ticket.</DialogDescription>
@@ -4143,6 +3983,26 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
           </div>
         </aside>
       </div>
+
+      {/* Aperçu du PV d'intervention — consultation seule, aucun enregistrement
+          sur le poste. Le document est révoqué de la mémoire à la fermeture. */}
+      <Dialog open={Boolean(pvPreviewUrl)} onOpenChange={(open) => { if (!open) closePvPreview(); }}>
+        <DialogContent className="h-[90dvh] max-w-5xl p-0 sm:max-w-5xl">
+          <DialogHeader className="border-b border-border/40 px-5 py-3">
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <FileText className="h-4 w-4 text-primary" />
+              PV d'intervention — {r.ref}
+            </DialogTitle>
+          </DialogHeader>
+          {pvPreviewUrl && (
+            <iframe
+              src={pvPreviewUrl}
+              title={`PV d'intervention ${r.ref}`}
+              className="h-full w-full flex-1 rounded-b-lg border-0 bg-muted"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
 
     </div>
   );

@@ -98,8 +98,8 @@ async def emit(
     - channel='in_app' (défaut) : enregistrement en base + SSE
     - channel='sms' : envoi via ServiceSMS (nécessite sms_to)
     - channel='both' : in_app + SMS
-    - send_email=False : désactive l'envoi email pour cet appel précis, même si
-      channel='in_app' et CommunicationSetting.email_on est actif (App only).
+    - send_email=False : désactive l'envoi email pour cet appel précis
+      (App only), sans toucher aux autres canaux.
     Silencieux si recipient_id est None/vide (sauf pour canal SMS seul).
     """
     send_inapp = channel in ("in_app", "both")
@@ -138,51 +138,48 @@ async def emit(
                     target={"user_ids": [recipient_id_int]},
                 ))
 
-                # Email automatique si email_on=True dans CommunicationSetting, sauf
-                # opt-out explicite de l'appelant (send_email=False, BR-NOTIFICATION-
-                # WORKFLOW-001 §22 — App-only pour les confirmations légères/internes).
+                # Email automatique, sauf opt-out explicite de l'appelant
+                # (send_email=False, BR-NOTIFICATION-WORKFLOW-001 §22 — App-only
+                # pour les confirmations légères/internes). Le coupe-circuit
+                # CommunicationSetting.email_on a été retiré le 2026-09-24 :
+                # l'envoi se coupe désormais en vidant SMTP_HOST dans .env.
                 if send_email:
                     try:
                         from sqlalchemy import select as _select
-                        from api.models.ModelCommunicationSetting import CommunicationSetting
                         from api.models.ModelAccount import Account
                         from api.models.ModelRequest import Request
                         from api.core.mailer import send_notification_email
-
-                        cs_row = await session.execute(_select(CommunicationSetting).limit(1))
-                        cs = cs_row.scalar_one_or_none()
-                        if cs is None or cs.email_on:
-                            acc_row = await session.execute(
-                                _select(Account.email, Account.name, Account.firstname)
-                                .where(Account.id == recipient_id_int)
-                            )
-                            acc = acc_row.first()
-                            if acc and acc.email:
-                                name = f"{acc.firstname or ''} {acc.name or ''}".strip() or acc.name or ""
-                                request_details = None
-                                if request_id:
-                                    try:
-                                        req_row = await session.execute(
-                                            _select(Request).where(Request.id == int(request_id))
-                                        )
-                                        req = req_row.scalar_one_or_none()
-                                        if req:
-                                            request_details = _request_email_details(req)
-                                    except Exception as detail_exc:
-                                        logger.debug(
-                                            "NotificationEmitter : details email indisponibles : %s",
-                                            detail_exc,
-                                        )
-                                _send_email_fire_and_forget(send_notification_email(
-                                    to_email=acc.email,
-                                    recipient_name=name,
-                                    title=title,
-                                    body=body,
-                                    action_url=action_url,
-                                    action_label=action_label or "Voir le ticket",
-                                    notification_type=type,
-                                    request_details=request_details,
-                                ))
+                        acc_row = await session.execute(
+                            _select(Account.email, Account.name, Account.firstname)
+                            .where(Account.id == recipient_id_int)
+                        )
+                        acc = acc_row.first()
+                        if acc and acc.email:
+                            name = f"{acc.firstname or ''} {acc.name or ''}".strip() or acc.name or ""
+                            request_details = None
+                            if request_id:
+                                try:
+                                    req_row = await session.execute(
+                                        _select(Request).where(Request.id == int(request_id))
+                                    )
+                                    req = req_row.scalar_one_or_none()
+                                    if req:
+                                        request_details = _request_email_details(req)
+                                except Exception as detail_exc:
+                                    logger.debug(
+                                        "NotificationEmitter : details email indisponibles : %s",
+                                        detail_exc,
+                                    )
+                            _send_email_fire_and_forget(send_notification_email(
+                                to_email=acc.email,
+                                recipient_name=name,
+                                title=title,
+                                body=body,
+                                action_url=action_url,
+                                action_label=action_label or "Voir le ticket",
+                                notification_type=type,
+                                request_details=request_details,
+                            ))
                     except Exception as _exc:
                         logger.warning("NotificationEmitter : email auto échoué : %s", _exc)
 
@@ -203,7 +200,7 @@ async def emit(
         if sms_to:
             try:
                 from api.services.ServiceSMS import send_sms
-                await send_sms(session, to=sms_to, message=f"{title}\n{body}")
+                await send_sms(to=sms_to, message=f"{title}\n{body}")
             except Exception as exc:
                 logger.warning("NotificationEmitter : SMS échoué : %s", exc)
         else:
@@ -222,14 +219,16 @@ async def emit_bulk(
     action_url: str | None = None,
     visibility: str = "public",
     send_email: bool = True,
+    # Perf — flush au lieu de commit quand l'appelant orchestre lui-même un
+    # commit unique en fin de transaction (ex. ServiceRequest.create()).
+    commit: bool = True,
 ) -> None:
     """Fan-out in-app vers plusieurs destinataires en une seule transaction.
 
-    `emit()` appelé en boucle (ex. `ServiceAnnouncement.publish()` vers tous
-    les comptes actifs) fait un COMMIT + jusqu'à 2 SELECT (CommunicationSetting,
-    Account) par destinataire — N commits séquentiels qui bloquent la requête
-    HTTP. Ici : un seul `bulk_create` (un commit), un seul SELECT
-    CommunicationSetting, un seul SELECT Account (IN), et un seul événement SSE
+    `emit()` appelé en boucle (ex. une diffusion vers tous les comptes actifs)
+    fait un COMMIT + un SELECT Account par destinataire — N commits séquentiels
+    qui bloquent la requête HTTP. Ici : un seul `bulk_create` (un commit), un
+    seul SELECT Account (IN), et un seul événement SSE
     ciblant tous les destinataires (le client invalide juste `["notifications"]`,
     peu importe le payload — cf. `invalidation-map.ts`).
     """
@@ -256,7 +255,7 @@ async def emit_bulk(
             "visibility": visibility,
         }
         for rid in ids
-    ])
+    ], commit=commit)
 
     await emit_event(AppEvent(
         type="notification.created",
@@ -267,29 +266,24 @@ async def emit_bulk(
     if send_email:
         try:
             from sqlalchemy import select as _select
-            from api.models.ModelCommunicationSetting import CommunicationSetting
             from api.models.ModelAccount import Account
             from api.core.mailer import send_notification_email
-
-            cs_row = await session.execute(_select(CommunicationSetting).limit(1))
-            cs = cs_row.scalar_one_or_none()
-            if cs is None or cs.email_on:
-                acc_rows = await session.execute(
-                    _select(Account.email, Account.name, Account.firstname)
-                    .where(Account.id.in_(ids))
-                    .where(Account.email.isnot(None))
-                )
-                for acc in acc_rows.all():
-                    name = f"{acc.firstname or ''} {acc.name or ''}".strip() or acc.name or ""
-                    _send_email_fire_and_forget(send_notification_email(
-                        to_email=acc.email,
-                        recipient_name=name,
-                        title=title,
-                        body=body,
-                        action_url=action_url,
-                        action_label=action_label or "Voir le ticket",
-                        notification_type=type,
-                        request_details=None,
-                    ))
+            acc_rows = await session.execute(
+                _select(Account.email, Account.name, Account.firstname)
+                .where(Account.id.in_(ids))
+                .where(Account.email.isnot(None))
+            )
+            for acc in acc_rows.all():
+                name = f"{acc.firstname or ''} {acc.name or ''}".strip() or acc.name or ""
+                _send_email_fire_and_forget(send_notification_email(
+                    to_email=acc.email,
+                    recipient_name=name,
+                    title=title,
+                    body=body,
+                    action_url=action_url,
+                    action_label=action_label or "Voir le ticket",
+                    notification_type=type,
+                    request_details=None,
+                ))
         except Exception as _exc:
             logger.warning("NotificationEmitter : email fan-out bulk échoué : %s", _exc)

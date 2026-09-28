@@ -9,7 +9,7 @@ Ce document sert de mémoire de travail pour la suite des interventions Codex su
 Le projet EDG Connect est une application de gestion des demandes et tickets EDG, structurée autour des rôles métier suivants :
 
 - `user`
-- `agent-support`
+- `chief-service`
 - `chief-service`
 - `chief-departement`
 - `director`
@@ -36,7 +36,7 @@ Fichiers clés concernés :
 
 Résultat :
 
-- le rôle `agent-support` est désormais le nom canonique de l’assistance métier ;
+- le rôle `chief-service` est désormais le nom canonique de l’assistance métier ;
 - le rôle `chief-service` désigne bien le chef de service ;
 - le rôle `chief-departement` est utilisé pour le niveau départemental ;
 - la compatibilité historique sur les anciens libellés est gardée au niveau d’adaptation technique, mais la logique métier est désormais standardisée.
@@ -47,7 +47,7 @@ La couche de décision sur les actions tickets a été alignée sur le nouveau m
 
 Résultat constaté :
 
-- `agent-support` peut accomplir les actions autorisées à ce niveau ;
+- `chief-service` peut accomplir les actions autorisées à ce niveau ;
 - les rejections et refus de certaines actions sont correctement bloqués selon le périmètre métier ;
 - les permissions ne reposent plus sur des labels anciens non canonisés.
 
@@ -156,7 +156,7 @@ L’application est actuellement dans un état de cohérence fonctionnelle sur l
 Les valeurs maîtrisées à ce stade sont les suivantes :
 
 - `user`
-- `agent-support`
+- `chief-service`
 - `chief-service`
 - `chief-departement`
 - `director`

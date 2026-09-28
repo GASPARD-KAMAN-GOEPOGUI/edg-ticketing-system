@@ -12,24 +12,6 @@ from .SchemaRequestStatus import (
 from .SchemaRequestCategory import (
     RequestCategoryBase, RequestCategoryCreate, RequestCategoryUpdate, RequestCategoryResponse,
 )
-from .SchemaAccountStatus import (
-    AccountStatusBase, AccountStatusCreate, AccountStatusUpdate, AccountStatusResponse,
-)
-from .SchemaKnowledgeCategory import (
-    KnowledgeCategoryBase, KnowledgeCategoryCreate, KnowledgeCategoryUpdate, KnowledgeCategoryResponse,
-)
-from .SchemaAnnouncementCategory import (
-    AnnouncementCategoryBase, AnnouncementCategoryCreate,
-    AnnouncementCategoryUpdate, AnnouncementCategoryResponse,
-)
-from .SchemaAnnouncementPriority import (
-    AnnouncementPriorityBase, AnnouncementPriorityCreate,
-    AnnouncementPriorityUpdate, AnnouncementPriorityResponse,
-)
-from .SchemaAnnouncementStatus import (
-    AnnouncementStatusBase, AnnouncementStatusCreate,
-    AnnouncementStatusUpdate, AnnouncementStatusResponse,
-)
 from .SchemaPriorityDefinition import (
     PriorityDefinitionBase, PriorityDefinitionCreate,
     PriorityDefinitionUpdate, PriorityDefinitionResponse,
@@ -77,26 +59,11 @@ from .SchemaTask import (
 from .SchemaNotification import (
     NotificationBase, NotificationCreate, NotificationUpdate, NotificationResponse,
 )
-from .SchemaKnowledgeArticle import (
-    KnowledgeArticleBase, KnowledgeArticleCreate,
-    KnowledgeArticleUpdate, KnowledgeArticleResponse,
-)
 from .SchemaActivityLog import (
     ActivityLogCreate, ActivityLogResponse,
 )
 
 # ── Communication & CSAT ──────────────────────────────────────────────────────
-from .SchemaAnnouncement import (
-    AnnouncementBase, AnnouncementCreate, AnnouncementUpdate, AnnouncementResponse,
-)
-from .SchemaAnnouncementTargetRole import (
-    AnnouncementTargetRoleBase, AnnouncementTargetRoleCreate,
-    AnnouncementTargetRoleUpdate, AnnouncementTargetRoleResponse,
-)
-from .SchemaCommunicationSetting import (
-    CommunicationSettingBase, CommunicationSettingCreate,
-    CommunicationSettingUpdate, CommunicationSettingResponse,
-)
 from .SchemaAppreciation import (
     AppreciationBase, AppreciationCreate, AppreciationUpdate, AppreciationResponse,
 )

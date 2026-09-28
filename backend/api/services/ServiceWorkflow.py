@@ -88,19 +88,9 @@ class WorkflowService(BaseService):
         if self._same_id(getattr(detail, "agent_id", None), actor_id):
             return
 
-        actor_unity_id = getattr(actor, "unity_id", None)
-        detail_unity_id = self._to_int(getattr(detail, "unity_id", None))
-        request_unity_id = await self._workflow_request_unity_id(getattr(detail, "workflow_id", None))
-
-        if role in {"chief-service", "chief-departement"}:
-            if self._same_id(detail_unity_id, actor_unity_id) or self._same_id(request_unity_id, actor_unity_id):
-                return
-
-        if role == "director":
-            allowed_ids = await self._direction_unity_ids(actor_unity_id)
-            if detail_unity_id in allowed_ids or request_unity_id in allowed_ids:
-                return
-
+        # Les deux roles qui disposaient ici d'un perimetre elargi
+        # (chief-departement sur son unite, director sur sa direction) ont ete
+        # retires le 2026-09-25 : seul l'intervenant de l'etape passe encore.
         raise self.forbidden("Vous ne pouvez décider que les étapes workflow dans votre périmètre.")
 
     async def _timeline(

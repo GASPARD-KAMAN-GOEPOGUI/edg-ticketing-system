@@ -16,8 +16,10 @@ export type RawAccount = {
   phone?: string | null;
   role: string;
   account_status: string;
-  matricule?: string | null;
+  matricule?: string | null;   // libellé métier : « Badge »
   job?: string | null;
+  /** PV EDG/PS-GSI/PV-01 — titulaire | prestataire | stagiaire. */
+  intervenant_status?: string | null;
   direction_id?: string | number | null;
   department_id?: string | number | null;
   unit_id?: string | number | null;
@@ -46,8 +48,10 @@ export type AccountUser = {
   direction?: string;
   service?: string;
   avatar?: string;
-  matricule?: string;
+  matricule?: string;   // libellé métier : « Badge »
   job?: string;
+  /** PV EDG/PS-GSI/PV-01 — titulaire | prestataire | stagiaire. */
+  intervenant_status?: string;
   availability?: string;
   notif_sla_alerts: boolean;
   notif_escalations: boolean;
@@ -87,11 +91,9 @@ export function mapAccount(raw: RawAccount): AccountUser {
     : raw.unity_id != null
       ? String(raw.unity_id)
       : undefined;
-  const directionId = raw.direction_id != null
-    ? String(raw.direction_id)
-    : role === "director"
-      ? unitId
-      : undefined;
+  // `direction_id` n'etait derive de l'unite que pour le role `director`,
+  // retire le 2026-09-25 : seule la valeur fournie par l'API compte desormais.
+  const directionId = raw.direction_id != null ? String(raw.direction_id) : undefined;
 
   return {
     id: raw.id,
@@ -103,6 +105,7 @@ export function mapAccount(raw: RawAccount): AccountUser {
     avatar: raw.avatar_url ?? undefined,
     matricule: raw.matricule ?? undefined,
     job: raw.job ?? undefined,
+    intervenant_status: raw.intervenant_status ?? undefined,
     availability: raw.availability ?? undefined,
     notif_sla_alerts: raw.notif_sla_alerts,
     notif_escalations: raw.notif_escalations,
@@ -215,6 +218,7 @@ export async function updateUser(
     email: string;
     job: string;
     matricule: string;
+    intervenant_status: string;
     role: string;
     direction_id: string;
     department_id: string;
@@ -249,6 +253,7 @@ export async function createUser(data: {
   role?: string;
   matricule?: string;
   job?: string;
+  intervenant_status?: string;
   direction_id?: string;
   department_id?: string;
   unit_id?: string;

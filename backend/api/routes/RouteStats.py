@@ -16,7 +16,7 @@ from api.services.ServiceStats import StatsService
 router = APIRouter(
     prefix="/stats",
     tags=["stats"],
-    dependencies=[Depends(require_roles("chief", "director", "admin"))],
+    dependencies=[Depends(require_roles("admin"))],
 )
 
 # Router séparé sans guard de rôle restrictif — pour les agents
@@ -38,7 +38,7 @@ async def my_stats(
 ):
     """Stats personnelles de l'agent connecté (assigné, résolu, SLA, temps moyen)."""
     role = normalize_role(actor.role)
-    if role not in {"agent-support", "chief-service", "chief-departement", "director", "admin"}:
+    if role not in {"chief-service", "technicien", "chef-division-support", "admin"}:
         from fastapi import HTTPException
         raise HTTPException(status_code=403, detail="Accès non autorisé.")
     return await svc.my_stats(int(actor.id))
@@ -66,16 +66,10 @@ async def dashboard_summary(
 ):
     """
     Résumé dashboard filtré selon le périmètre de l'utilisateur connecté.
-    chief → périmètre unité; director → périmètre direction; admin → global.
+    Seul l'admin atteint cet endpoint depuis le retrait des rôles chef de
+    département et directeur (2026-09-25) : périmètre global, sans filtrage.
     """
     # Forçage RBAC — le paramètre client est ignoré (même correction que C-N°3)
-    role = normalize_role(actor.role)
-    if role in {"chief-service", "chief-departement"}:
-        unit_id = int(actor.unit_id) if actor.unit_id else None
-        direction_id = None
-    elif role == "director":
-        direction_id = int(actor.direction_id) if actor.direction_id else None
-        unit_id = None
     # admin voit tout sans restriction
     return await svc.dashboard_summary(direction_id=direction_id, unit_id=unit_id)
 
@@ -133,26 +127,15 @@ async def stats_by_agent(
 ):
     """
     Performance par agent : assignées, résolues, temps moyen de résolution.
-    Scope RBAC forcé : chief → son unité, director → sa direction, admin → global.
+    Scope RBAC : admin → global (seul rôle atteignant cet endpoint depuis le
+    retrait des rôles chef de département et directeur, 2026-09-25).
     """
-    role = normalize_role(actor.role)
-    if role in {"chief-service", "chief-departement"}:
-        unit_id = int(actor.unit_id) if actor.unit_id else None
-        direction_id = None
-    elif role == "director":
-        direction_id = int(actor.direction_id) if actor.direction_id else None
-        unit_id = None
     # admin voit tout
     return await svc.agent_performance(direction_id=direction_id, unit_id=unit_id, limit=limit)
 
 
-# ── Escalades ─────────────────────────────────────────────────────────────────
-
-@router.get("/escalations")
-async def stats_escalations(svc: StatsService = Depends(_svc)):
-    """Stats escalades : par statut, par niveau (L1/L2/L3), créées aujourd'hui."""
-    return await svc.escalation_stats()
-
+# Endpoint GET /stats/escalations retiré le 2026-09-26 avec le statut
+# "escalated" : aucun appelant, et l'escalade n'existe plus.
 
 # ── SLA ───────────────────────────────────────────────────────────────────────
 

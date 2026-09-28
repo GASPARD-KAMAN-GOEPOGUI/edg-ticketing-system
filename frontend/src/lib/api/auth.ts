@@ -174,3 +174,20 @@ export async function getMe(): Promise<AccountUser> {
   const raw = await apiFetch<RawAccount>("/auth/me");
   return mapAccount(raw);
 }
+
+/** Changement de mot de passe depuis l'espace connecté (page Profil).
+ *  Aucun email ni code de vérification : l'utilisateur est déjà authentifié.
+ *  Le mot de passe n'existe que sur la plateforme centrale, la mise à jour y est
+ *  donc immédiatement valable partout. */
+export async function changeMyPassword(
+  newPassword: string,
+  confirmPassword: string,
+): Promise<void> {
+  await apiFetch<{ changed: boolean }>("/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify({
+      new_password: newPassword,
+      confirm_password: confirmPassword,
+    }),
+  });
+}

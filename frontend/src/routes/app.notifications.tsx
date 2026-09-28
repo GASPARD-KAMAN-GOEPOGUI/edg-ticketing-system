@@ -5,7 +5,6 @@ import {
   CheckCircle2,
   AlertTriangle,
   MessageSquare,
-  X,
   Mail,
   MailOpen,
   ArrowRight,
@@ -14,7 +13,6 @@ import {
   MessageCircleReply,
   ShieldAlert,
   BellOff,
-  Megaphone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
@@ -23,20 +21,13 @@ import {
   fetchNotifications,
   markNotificationRead,
   markAllNotificationsRead,
-  deleteNotification,
-  restoreNotification,
 } from "@/lib/api/notifications";
 import { closeRequest, reopenRequest } from "@/lib/api/requests";
 import { cn } from "@/lib/utils";
 import { PaginationBar, usePagination } from "@/components/pagination-bar";
 import { LayoutToggle, type LayoutMode } from "@/components/layout-toggle";
 import { toast } from "sonner";
-import { announcementCategoryLabels } from "@/lib/mock-data";
 import type { Role } from "@/lib/mock-data";
-import {
-  fetchPublishedAnnouncements,
-  roleToAnnounceAudience,
-} from "@/lib/api/communication";
 import { useRole, useUser } from "@/lib/session";
 import { ticketDetailRouteForNotification } from "@/lib/ticket-navigation";
 
@@ -56,8 +47,7 @@ type Notif = {
   read: boolean;
   requestId?: string;
   actionUrl?: string;
-  source: "request" | "announcement";
-  announcementId?: string;
+  source: "request" | "system";
 };
 
 
@@ -72,8 +62,8 @@ const toneFor = (t: NotifType) =>
       ? "bg-warning/20 text-warning-foreground dark:text-warning"
       : "bg-info/15 text-info";
 
-const labelFor = (t: NotifType, source?: "request" | "announcement") =>
-  source === "announcement" ? "Annonce" : t === "success" ? "Résolution" : t === "warning" ? "Alerte" : "Info";
+const labelFor = (t: NotifType, source?: "request" | "system") =>
+  source === "system" ? "Système" : t === "success" ? "Résolution" : t === "warning" ? "Alerte" : "Info";
 
 const labelToneFor = (t: NotifType) =>
   t === "success"
@@ -106,11 +96,6 @@ function getActions(n: Notif): ActionDef[] {
       { label: "Voir le ticket", icon: ArrowRight, variant: "outline", action: "navigate" },
       { label: "Prendre en charge", icon: Zap, variant: "default", action: "navigate" },
     ];
-  if (t.includes("escalade"))
-    return [
-      { label: "Voir", icon: ArrowRight, variant: "outline", action: "navigate" },
-      { label: "Traiter", icon: ShieldAlert, variant: "default", action: "navigate" },
-    ];
   if (t.includes("commentaire") || t.includes("réponse reçue"))
     return [
       { label: "Répondre", icon: MessageCircleReply, variant: "outline", action: "navigate" },
@@ -140,13 +125,29 @@ function isQualificationNotification(n: Notif): boolean {
   );
 }
 
+/** Une notification designe TOUJOURS un ticket precis : on ouvre sa fiche, sur
+ *  le panneau d'actions.
+ *
+ *  Les notifications de qualification renvoyaient auparavant vers la file
+ *  d'attente entiere (`/app/queue`) : il fallait y retrouver le bon ticket,
+ *  le deplier, puis chercher l'action — alors que la notification portait deja
+ *  son `request_id`. Le repli sur la liste ne subsiste que si ce dernier
+ *  manque, ce qui ne devrait pas arriver.
+ *
+ *  `actionUrl` continue de choisir l'ESPACE de destination (file d'attente,
+ *  Distribution, Ma boite...) pour que le fil d'Ariane et le bouton Retour
+ *  restent coherents avec l'endroit d'ou vient le ticket. */
 function navigateNotification(n: Notif, navigate: ReturnType<typeof useNavigate>, role: Role): boolean {
-  if (isQualificationNotification(n)) {
-    navigate({ to: "/app/queue", search: { tab: "qualify" } });
+  if (n.requestId) {
+    navigate({
+      to: ticketDetailRouteForNotification(n.actionUrl, role),
+      params: { id: n.requestId },
+      search: { tab: "treatment" },
+    });
     return true;
   }
-  if (n.requestId) {
-    navigate({ to: ticketDetailRouteForNotification(n.actionUrl, role), params: { id: n.requestId } });
+  if (isQualificationNotification(n)) {
+    navigate({ to: "/app/queue", search: { tab: "qualify" } });
     return true;
   }
   return false;
@@ -157,8 +158,6 @@ function NotifListCard({
   n,
   onCardClick,
   onToggleRead,
-  onRemove,
-  onRestore,
   archived,
   navigate,
   role,
@@ -169,8 +168,6 @@ function NotifListCard({
   n: Notif;
   onCardClick: (n: Notif) => void;
   onToggleRead: (id: string) => void;
-  onRemove: (id: string, title: string) => void;
-  onRestore: (id: string, title: string) => void;
   archived: boolean;
   navigate: ReturnType<typeof useNavigate>;
   role: Role;
@@ -266,23 +263,6 @@ function NotifListCard({
         >
           {n.read ? <Mail className="h-3.5 w-3.5" /> : <MailOpen className="h-3.5 w-3.5" />}
         </button>
-        {archived ? (
-          <button
-            onClick={() => onRestore(n.id, n.title)}
-            className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-success/10 hover:text-success"
-            title="Restaurer"
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-          </button>
-        ) : (
-          <button
-            onClick={() => onRemove(n.id, n.title)}
-            className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-            title="Archiver"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        )}
       </div>
     </GlassCard>
   );
@@ -293,8 +273,6 @@ function NotifGridCard({
   n,
   onCardClick,
   onToggleRead,
-  onRemove,
-  onRestore,
   archived,
   navigate,
   role,
@@ -305,8 +283,6 @@ function NotifGridCard({
   n: Notif;
   onCardClick: (n: Notif) => void;
   onToggleRead: (id: string) => void;
-  onRemove: (id: string, title: string) => void;
-  onRestore: (id: string, title: string) => void;
   archived: boolean;
   navigate: ReturnType<typeof useNavigate>;
   role: Role;
@@ -344,23 +320,6 @@ function NotifGridCard({
           >
             {n.read ? <Mail className="h-3 w-3" /> : <MailOpen className="h-3 w-3" />}
           </button>
-          {archived ? (
-            <button
-              onClick={(e) => { e.stopPropagation(); onRestore(n.id, n.title); }}
-              className="rounded-md p-1 text-muted-foreground transition hover:bg-success/10 hover:text-success"
-              title="Restaurer"
-            >
-              <RotateCcw className="h-3 w-3" />
-            </button>
-          ) : (
-            <button
-              onClick={(e) => { e.stopPropagation(); onRemove(n.id, n.title); }}
-              className="rounded-md p-1 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
-              title="Archiver"
-            >
-              <X className="h-3 w-3" />
-            </button>
-          )}
         </div>
       </div>
 
@@ -447,24 +406,25 @@ function Notifications() {
 
   const [reqNotifs, setReqNotifs] = useState<Notif[]>([]);
   useEffect(() => {
-    if (!apiData?.items) return;
-    setReqNotifs(apiData.items as Notif[]);
+    // Pas de `if (!apiData) return` : au changement d'onglet la queryKey change
+    // et `apiData` repasse à `undefined` le temps du chargement. Sortir ici
+    // laissait afficher la liste de l'onglet PRÉCÉDENT — on montrait
+    // l'historique sous l'onglet "Non lues", et inversement. Une liste vide le
+    // temps du chargement est le comportement juste.
+    setReqNotifs((apiData?.items as Notif[]) ?? []);
   }, [apiData]);
 
   /* ── Mutations ── */
   const markReadMut = useMutation({
     mutationFn: markNotificationRead,
     onError: () => toast.error("Impossible de marquer comme lue"),
-  });
-
-  const deleteNotifMut = useMutation({
-    mutationFn: deleteNotification,
-    onError: () => toast.error("Impossible d'archiver la notification"),
-  });
-
-  const restoreNotifMut = useMutation({
-    mutationFn: restoreNotification,
-    onError: () => toast.error("Impossible de restaurer la notification"),
+    // Sans cette invalidation, le cache React Query gardait l'état d'AVANT la
+    // lecture : `markRead`/`toggleRead` ne mettaient à jour que l'état local du
+    // composant. En quittant puis revenant sur la page, l'effet ci-dessous
+    // réécrasait cet état avec le cache périmé — les notifications
+    // réapparaissaient non lues et l'onglet "Archivées" restait vide. Seul un
+    // rechargement complet de la page, qui vide le cache mémoire, remettait
+    // l'affichage d'aplomb. `markAllReadMut` invalidait déjà, d'où l'asymétrie.
     onSettled: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
   });
 
@@ -474,98 +434,37 @@ function Notifications() {
     onError: () => toast.error("Erreur lors du marquage"),
   });
 
-  /* ── État lu/masqué pour les annonces (IDs sans préfixe "ann_") ── */
-  const [readAnnIds, setReadAnnIds]     = useState<string[]>([]);
-  const [hiddenAnnIds, setHiddenAnnIds] = useState<string[]>([]);
+  const notifs: Notif[] = reqNotifs;
 
-  /* ── Annonces publiées depuis le backend ── */
-  const { data: annData } = useQuery({
-    queryKey: ["announcements-active", role],
-    queryFn: () => fetchPublishedAnnouncements({ audience: roleToAnnounceAudience(role), limit: 50 }),
-    staleTime: 60_000,
-    // Pas de refetchInterval : announcement.* (SSE) invalide déjà ["announcements-active"].
-  });
-
-  const annNotifs: Notif[] = (annData?.items ?? [])
-    .filter((a) => !hiddenAnnIds.includes(a.id))
-    .map((a) => ({
-      id: `ann_${a.id}`,
-      type: (a.priority === "critical" || a.priority === "absolute_emergency"
-        ? "warning" : "info") as NotifType,
-      title: a.title,
-      body: `${announcementCategoryLabels[a.category] ?? a.category} — ${a.description.slice(0, 130)}${a.description.length > 130 ? "…" : ""}`,
-      at: new Date(a.publishedAt).toLocaleDateString("fr-FR", {
-        day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
-      }),
-      read: readAnnIds.includes(a.id),
-      source: "announcement" as const,
-      announcementId: a.id,
-    }));
-
-  /* ── Liste combinée pour l'affichage ──
-     Les annonces n'ont pas d'équivalent "archivé" côté backend (masquage
-     purement client, hors périmètre MOD-NOTIF) — exclues de la vue Archivées. */
-  const notifs: Notif[] = isArchivedView ? reqNotifs : [...reqNotifs, ...annNotifs];
-
-  const [sourceFilter, setSourceFilter] = useState<"all" | "request" | "announcement">("all");
   const [layout, setLayout] = useState<LayoutMode>("list");
   const navigate = useNavigate();
 
   const unread   = notifs.filter((n) => !n.read).length;
   const slaCount = reqNotifs.filter((n) => n.type === "warning" && n.title.toLowerCase().includes("sla")).length;
-  const escCount = reqNotifs.filter((n) => n.title.toLowerCase().includes("escalade")).length;
   const resCount = reqNotifs.filter((n) => n.title.toLowerCase().includes("résolue")).length;
-  const annCount = annNotifs.length;
 
   const visible = notifs
-    .filter((n) => (filter === "unread" ? !n.read : true))
-    .filter((n) => (sourceFilter === "all" ? true : n.source === sourceFilter));
+    .filter((n) => (filter === "unread" ? !n.read : true));
 
   const pageSize = layout === "grid" ? 9 : 6;
   const { paged, page, setPage, totalPages, total, setPageSize } =
     usePagination(visible, pageSize);
 
   const markRead = (id: string) => {
-    if (id.startsWith("ann_")) {
-      const aid = id.slice(4);
-      setReadAnnIds((p) => (p.includes(aid) ? p : [...p, aid]));
-    } else {
-      setReqNotifs((p) => p.map((n) => (n.id === id ? { ...n, read: true } : n)));
-      markReadMut.mutate(id);
-    }
+    setReqNotifs((p) => p.map((n) => (n.id === id ? { ...n, read: true } : n)));
+    markReadMut.mutate(id);
   };
 
   const toggleRead = (id: string) => {
-    if (id.startsWith("ann_")) {
-      const aid = id.slice(4);
-      setReadAnnIds((p) => (p.includes(aid) ? p.filter((x) => x !== aid) : [...p, aid]));
-    } else {
-      const current = reqNotifs.find((n) => n.id === id);
-      setReqNotifs((p) => p.map((n) => (n.id === id ? { ...n, read: !n.read } : n)));
-      // API only supports mark-as-read (one-way); call only when transitioning unread→read
-      if (current && !current.read) markReadMut.mutate(id);
-    }
+    const current = reqNotifs.find((n) => n.id === id);
+    setReqNotifs((p) => p.map((n) => (n.id === id ? { ...n, read: !n.read } : n)));
+    // API only supports mark-as-read (one-way); call only when transitioning unread→read
+    if (current && !current.read) markReadMut.mutate(id);
   };
 
-  const remove = (id: string, title: string) => {
-    if (id.startsWith("ann_")) {
-      setHiddenAnnIds((p) => [...p, id.slice(4)]);
-    } else {
-      setReqNotifs((p) => p.filter((n) => n.id !== id));
-      deleteNotifMut.mutate(id);
-    }
-    toast.success("Notification archivée", { description: title });
-  };
-
-  const restore = (id: string, title: string) => {
-    setReqNotifs((p) => p.filter((n) => n.id !== id));
-    restoreNotifMut.mutate(id);
-    toast.success("Notification restaurée", { description: title });
-  };
 
   const markAllRead = () => {
     setReqNotifs((p) => p.map((n) => ({ ...n, read: true })));
-    setReadAnnIds((annData?.items ?? []).filter((a) => !hiddenAnnIds.includes(a.id)).map((a) => a.id));
     markAllReadMut.mutate();
   };
 
@@ -604,8 +503,6 @@ function Notifications() {
   const cardProps = {
     onCardClick: handleCardClick,
     onToggleRead: toggleRead,
-    onRemove: remove,
-    onRestore: restore,
     archived: isArchivedView,
     navigate,
     role,
@@ -644,9 +541,7 @@ function Notifications() {
         {[
           { label: "Non lues", value: unread, icon: Bell, tone: "text-primary bg-primary/10" },
           { label: "Alertes délais", value: slaCount, icon: AlertTriangle, tone: "text-warning-foreground dark:text-warning bg-warning/15" },
-          { label: "Escalades", value: escCount, icon: ShieldAlert, tone: "text-destructive bg-destructive/10" },
           { label: "Résolues", value: resCount, icon: CheckCircle2, tone: "text-success bg-success/12" },
-          { label: "Annonces", value: annCount, icon: Megaphone, tone: "text-primary bg-primary/10" },
         ].map(({ label, value, icon: Ic, tone }) => (
           <GlassCard key={label} className="flex items-center gap-3 py-3">
             <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl", tone)}>
@@ -681,26 +576,6 @@ function Notifications() {
                   : "Archivées"}
             </button>
           ))}
-        </div>
-        <div className="flex gap-1 rounded-2xl border border-border/40 bg-card/40 p-1">
-          {(["all", "request", "announcement"] as const).map((s) => {
-            const labels = { all: "Tout", request: "Tickets", announcement: "Annonces" };
-            return (
-              <button
-                key={s}
-                onClick={() => { setSourceFilter(s); setPage(1); }}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-medium transition-colors",
-                  sourceFilter === s
-                    ? "bg-primary text-white shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {s === "announcement" && <Megaphone className="h-3.5 w-3.5" />}
-                {labels[s]}
-              </button>
-            );
-          })}
         </div>
       </div>
 

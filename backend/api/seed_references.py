@@ -9,14 +9,11 @@ import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.configs.Environment import get_environment
+
 from api.repositories import (
     RequestStatusRepository,
     RequestCategoryRepository,
-    AccountStatusRepository,
-    KnowledgeCategoryRepository,
-    AnnouncementCategoryRepository,
-    AnnouncementPriorityRepository,
-    AnnouncementStatusRepository,
     PriorityDefinitionRepository,
     SlaPolicyRepository,
     UnityRepository,
@@ -28,13 +25,14 @@ logger = logging.getLogger(__name__)
 # ── Données builtin par table ─────────────────────────────────────────────────
 
 _REQUEST_STATUSES = [
+    # "pending", "qualified" et "escalated" retires du workflow le 2026-09-26 :
+    # plus aucune transition ne les cible. Les bases existantes conservent leurs
+    # lignes (archivables depuis l'ecran Referentiels, qui refuse l'archivage
+    # tant qu'un ticket les porte) ; une installation neuve ne les cree plus.
     {"code": "new",          "label": "Nouvelle",              "sort_order": 0,  "is_builtin": True},
-    {"code": "pending",      "label": "En attente",            "sort_order": 1,  "is_builtin": True},
     {"code": "qualifying",   "label": "En qualification",      "sort_order": 2,  "is_builtin": True},
-    {"code": "qualified",    "label": "Qualifiée",             "sort_order": 3,  "is_builtin": True},
     {"code": "assigned",     "label": "Assignée",              "sort_order": 4,  "is_builtin": True},
     {"code": "in_progress",  "label": "En cours",              "sort_order": 5,  "is_builtin": True},
-    {"code": "escalated",    "label": "Escaladée",             "sort_order": 7,  "is_builtin": True},
     {"code": "resolved",     "label": "Résolue",               "sort_order": 8,  "is_builtin": True},
     {"code": "closed",       "label": "Clôturée",              "sort_order": 9,  "is_builtin": True},
     {"code": "cancelled",    "label": "Annulée",               "sort_order": 10, "is_builtin": True},
@@ -70,44 +68,10 @@ _REQUEST_CATEGORIES = [
     {"code": "autre",                 "label": "Autre",                    "sort_order": 99, "is_builtin": True},
 ]
 
-_KNOWLEDGE_CATEGORIES = [
-    {"code": "faq",            "label": "FAQ",                     "sort_order": 1, "is_builtin": True},
-    {"code": "procedure",      "label": "Procédures internes",     "sort_order": 2, "is_builtin": True},
-    {"code": "technique",      "label": "Documentation technique", "sort_order": 3, "is_builtin": True},
-    {"code": "reglementation", "label": "Réglementation",          "sort_order": 4, "is_builtin": True},
-    {"code": "formation",      "label": "Formation",               "sort_order": 5, "is_builtin": True},
-]
 
-_ACCOUNT_STATUSES = [
-    {"code": "active",    "label": "Actif",     "sort_order": 1, "is_builtin": True},
-    {"code": "inactive",  "label": "Inactif",   "sort_order": 2, "is_builtin": True},
-    {"code": "suspended", "label": "Suspendu",  "sort_order": 3, "is_builtin": True},
-    {"code": "locked",    "label": "Verrouillé","sort_order": 4, "is_builtin": True},
-]
 
-_ANNOUNCEMENT_CATEGORIES = [
-    {"code": "general",      "label": "Général",       "sort_order": 1, "is_builtin": True},
-    {"code": "maintenance",  "label": "Maintenance",   "sort_order": 2, "is_builtin": True},
-    {"code": "incident",     "label": "Incident",      "sort_order": 3, "is_builtin": True},
-    {"code": "information",  "label": "Information",   "sort_order": 4, "is_builtin": True},
-    {"code": "urgence",      "label": "Urgence",       "sort_order": 5, "is_builtin": True},
-]
 
-_ANNOUNCEMENT_PRIORITIES = [
-    {"code": "low",      "label": "Basse",    "sort_order": 1, "is_builtin": True},
-    {"code": "medium",   "label": "Moyenne",  "sort_order": 2, "is_builtin": True},
-    {"code": "high",     "label": "Haute",    "sort_order": 3, "is_builtin": True},
-    {"code": "critical", "label": "Critique", "sort_order": 4, "is_builtin": True},
-]
 
-_ANNOUNCEMENT_STATUSES = [
-    {"code": "draft",     "label": "Brouillon",  "sort_order": 1, "is_builtin": True},
-    {"code": "scheduled", "label": "Planifiée",  "sort_order": 2, "is_builtin": True},
-    {"code": "published", "label": "Publiée",    "sort_order": 3, "is_builtin": True},
-    {"code": "expired",   "label": "Expirée",    "sort_order": 4, "is_builtin": True},
-    {"code": "closed",    "label": "Clôturée",   "sort_order": 5, "is_builtin": True},
-    {"code": "cancelled", "label": "Annulée",    "sort_order": 6, "is_builtin": True},
-]
 
 _PRIORITY_DEFINITIONS = [
     {"slug": "low",      "label": "Basse",    "description": "Demandes non urgentes, traitement dans les délais standards.", "color": "slate",  "sort_order": 1, "is_builtin": True, "status": True},
@@ -230,9 +194,14 @@ async def seed_references(session: AsyncSession) -> None:
         nonlocal seeded
         count = 0
         for item in items:
+            # include_deleted=True : une référence archivée par l'admin occupe
+            # toujours sa valeur dans l'index unique (code/slug). Sans ça le seed
+            # tenterait un INSERT et planterait le démarrage en doublon (1062).
+            # On ne la ressuscite pas — l'archivage reste une décision admin.
             _, created = await repo.get_or_create(
                 filters={key: item[key]},
                 defaults=item,
+                include_deleted=True,
             )
             if created:
                 count += 1
@@ -241,25 +210,36 @@ async def seed_references(session: AsyncSession) -> None:
 
     await _seed(RequestStatusRepository(session),       _REQUEST_STATUSES)
     await _seed(RequestCategoryRepository(session),     _REQUEST_CATEGORIES)
-    await _seed(AccountStatusRepository(session),       _ACCOUNT_STATUSES)
-    await _seed(KnowledgeCategoryRepository(session),   _KNOWLEDGE_CATEGORIES)
-    await _seed(AnnouncementCategoryRepository(session),_ANNOUNCEMENT_CATEGORIES)
-    await _seed(AnnouncementPriorityRepository(session),_ANNOUNCEMENT_PRIORITIES)
-    await _seed(AnnouncementStatusRepository(session),  _ANNOUNCEMENT_STATUSES)
     await _seed(PriorityDefinitionRepository(session),  _PRIORITY_DEFINITIONS, key="slug")
 
     # ── Politiques SLA (catégorie × priorité) ────────────────────────────────
     sla_repo = SlaPolicyRepository(session)
     for cat in _REQUEST_CATEGORIES:
         for prio_slug, hours in _SLA_HOURS_BY_PRIORITY.items():
+            # Même raison que dans _seed : uk_sla_cat_prio ignore deleted_at.
             _, created = await sla_repo.get_or_create(
                 filters={"category": cat["code"], "priority": prio_slug},
                 defaults={"category": cat["code"], "priority": prio_slug, **hours},
+                include_deleted=True,
             )
             if created:
                 seeded += 1
 
     # ── Unity + Organigram (dépendance : organigram.unity_id = unity.id) ────
+    # SEED_ORG_STRUCTURE=False : la structure organisationnelle est laissée
+    # entièrement à la main de l'admin (créations depuis le back-office). On
+    # sort avant d'y toucher — les références au-dessus (statuts, priorités,
+    # catégories, SLA) restent semées, ce sont des enums techniques dont les
+    # clés étrangères conditionnent le fonctionnement de l'application.
+    if not get_environment().SEED_ORG_STRUCTURE:
+        logger.info(
+            "seed_references: structure organisationnelle ignorée "
+            "(SEED_ORG_STRUCTURE=False) — unity/organigram laissés à l'admin."
+        )
+        if seeded:
+            logger.info("seed_references: %d enregistrements insérés", seeded)
+        return
+
     unity_repo = UnityRepository(session)
     org_repo   = OrganigramRepository(session)
 

@@ -2,7 +2,7 @@
 RBAC — Rôles et permissions EDG Support.
 
 Hiérarchie des rôles (du moins au plus privilégié) :
-  public < user < agent < chief < director < admin
+  public < user < chief-service/technicien/chef-division-support < admin
 
 Chaque rôle hérite des permissions des rôles inférieurs.
 Les permissions sont cumulatives : un chief a toutes les permissions d'un agent.
@@ -61,15 +61,6 @@ class Permission(str, Enum):
     # Journaux
     VIEW_LOGS               = "view_logs"
 
-    # Base de connaissance
-    VIEW_KNOWLEDGE          = "view_knowledge"
-    MANAGE_KNOWLEDGE        = "manage_knowledge"
-
-    # Annonces & communication
-    VIEW_ANNOUNCEMENTS      = "view_announcements"
-    MANAGE_ANNOUNCEMENTS    = "manage_announcements"
-    MANAGE_COMMUNICATION    = "manage_communication"
-
     # Workflows & tâches
     VIEW_WORKFLOWS          = "view_workflows"
     MANAGE_WORKFLOWS        = "manage_workflows"
@@ -87,12 +78,7 @@ class Permission(str, Enum):
 
 _P = Permission
 
-_PUBLIC: set[Permission] = {
-    _P.VIEW_KNOWLEDGE,
-    _P.VIEW_ANNOUNCEMENTS,
-}
-
-_USER: set[Permission] = _PUBLIC | {
+_USER: set[Permission] = {
     _P.VIEW_OWN_PROFILE,
     _P.EDIT_OWN_PROFILE,
     _P.CREATE_REQUEST,
@@ -110,41 +96,24 @@ _AGENT: set[Permission] = _USER | {
     _P.VIEW_WORKFLOWS,
     _P.VIEW_TASKS,
     _P.MANAGE_TASKS,
-    _P.MANAGE_KNOWLEDGE,
     _P.VIEW_USERS,
     _P.VIEW_REFERENCES,
 }
 
-_CHIEF: set[Permission] = _AGENT | {
-    _P.MANAGE_REQUESTS,
-    _P.MANAGE_ESCALATIONS,
-    _P.VIEW_REPORTS,
-    _P.VIEW_STATS,
-    _P.MANAGE_WORKFLOWS,
-}
-
-_DIRECTOR: set[Permission] = _CHIEF | {
-    _P.VIEW_GLOBAL_REPORTS,
-}
-
 _ADMIN: set[Permission] = {p for p in _P}  # toutes les permissions
 
+# `dg`, `chief`, `chief-department(ement)` et `chief-dept` ont ete retires le
+# 2026-09-25 avec les roles `director` et `chief-departement` : un alias qui
+# resout vers un role inexistant ferait silencieusement refuser l'acces.
 LEGACY_ROLE_ALIASES: dict[str, str] = {
-    "dg": "director",
-    "agent": "agent-support",
-    "chief": "chief-service",
-    "chief-service": "chief-service",
-    "chief-departement": "chief-departement",
-    "chief-department": "chief-departement",
-    "chief-dept": "chief-departement",
+    "agent": "chief-service",
 }
 
 ROLE_GROUP_ALIASES: dict[str, set[str]] = {
-    "agent": {"agent-support"},
-    "agent-support": {"agent-support"},
-    "chief": {"chief-service", "chief-departement"},
-    "chief-service": {"chief-service"},
-    "chief-departement": {"chief-departement"},
+    "agent": {"chief-service", "technicien", "chef-division-support"},
+    "chief-service": {"chief-service", "technicien", "chef-division-support"},
+    "technicien": {"chief-service", "technicien", "chef-division-support"},
+    "chef-division-support": {"chief-service", "technicien", "chef-division-support"},
 }
 
 
@@ -155,12 +124,14 @@ def normalize_role(role: str | None) -> str:
 
 
 ROLE_PERMISSIONS: dict[str, set[Permission]] = {
-    "public":           _PUBLIC,
+    # Le rôle public n'a aucune permission applicative : ses deux seules
+    # (view_knowledge, view_announcements) sont parties avec la base de
+    # connaissances et les annonces le 2026-09-24.
+    "public":           set(),
     "user":             _USER,
-    "agent-support":    _AGENT,
-    "chief-service":    _CHIEF,
-    "chief-departement": _CHIEF,
-    "director":         _DIRECTOR,
+    "chief-service":    _AGENT,
+    "technicien":       _AGENT,
+    "chef-division-support": _AGENT,
     "admin":            _ADMIN,
 }
 
@@ -168,10 +139,9 @@ ROLE_PERMISSIONS: dict[str, set[Permission]] = {
 ROLE_HIERARCHY: dict[str, int] = {
     "public":           0,
     "user":             1,
-    "agent-support":    2,
-    "chief-service":    3,
-    "chief-departement": 3,
-    "director":         4,
+    "chief-service":    2,
+    "technicien":       2,
+    "chef-division-support": 2,
     "admin":            5,
 }
 

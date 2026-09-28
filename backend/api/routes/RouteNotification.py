@@ -40,8 +40,8 @@ def _check_recipient_access(actor, recipient_id: str) -> None:
 @router.get("/", response_model=PaginatedResponse)
 async def list_notifications(
     unread: bool = Query(False, alias="unread"),
-    nature: Optional[str] = Query(None, description="annonce | demande"),
-    archived: bool = Query(False, description="Notifications archivées (masquées, jamais supprimées)"),
+    nature: Optional[str] = Query(None, description="systeme | demande"),
+    archived: bool = Query(False, description="Notifications archivées, c'est-à-dire déjà lues"),
     page: int = Query(1, ge=1),
     limit: int = Query(30, ge=1, le=100),
     actor=Depends(get_current_user),
@@ -80,16 +80,10 @@ async def mark_all_read(
     return {"updated": count}
 
 
-@router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_notification(
-    id: str,
-    actor=Depends(get_current_user),
-    svc: NotificationService = Depends(_svc),
-):
-    """Archive la notification (deleted_at) — jamais de suppression physique, récupérable via /restore."""
-    notif = await svc.get_by_id(id)
-    _check_recipient_access(actor, str(notif.recipient_id))
-    await svc.delete(id)
+# Pas d'endpoint d'archivage (DELETE /{id}) : l'historique des notifications
+# d'un compte n'est jamais réductible — la notification de création de ticket en
+# particulier doit rester visible en permanence. Seul /restore subsiste, pour
+# récupérer les notifications archivées avant cette décision (2026-09-26).
 
 
 @router.post("/{id}/restore", response_model=NotificationResponse)
@@ -153,7 +147,7 @@ async def list_by_request(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Accès refusé aux notifications de cette demande.",
             )
-    elif role not in ("agent-support", "chief-service", "chief-departement", "director", "admin"):
+    elif role not in ("chief-service", "technicien", "chef-division-support", "admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Accès refusé.")
     return await svc.list_by_request(request_id, page=page, limit=limit)
 

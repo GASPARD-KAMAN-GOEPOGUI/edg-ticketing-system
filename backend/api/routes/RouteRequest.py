@@ -11,17 +11,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_db, get_current_user, require_roles
 from api.models.ModelAccount import Account
-from api.schemas.SchemaRequest import RequestCreate, RequestWorkflowCreate, RequestUpdate, RequestResponse, RequestListItemResponse, RequestSearch
+from api.schemas.SchemaRequest import RequestCreate, RequestWorkflowCreate, RequestUpdate, RequestResponse, RequestListItemResponse, DistributionListItemResponse, PvTrackingItemResponse, RequestSearch
 from api.schemas.SchemaWorkflowDetail import WorkflowDetailResponse
-from api.schemas.SchemaEscalation import EscalationResponse
 from api.schemas.SchemaAttachment import AttachmentResponse
 from pydantic import BaseModel
 from api.schemas.base import PaginatedResponse
-from api.services import RequestService, AttachmentService, RequestExportService
+from api.services import RequestService, AttachmentService, RequestExportService, PvInterventionService
 from api.services.ServiceExport import build_response
 from api.repositories import WorkflowDetailRepository, WorkflowRepository
 from api.services.ServiceClamAV import scan_bytes as clamav_scan
 from api.core.ticket_actions import (
+    TREATING_ROLES,
     assert_escalation_allowed,
     assert_exceptional_escalation_reason,
     assert_requester_is_not_handler,
@@ -84,9 +84,8 @@ def _check_request_access(actor, req, allowed_dir_unity_ids: set[int] | None = N
       tout rôle        → les demandes qui lui sont personnellement assignées (assignee_id),
                          même hors de son unité courante (BR-ROLE-AGENT-001, routage direct)
       user             → uniquement ses propres demandes
-      agent-support/chief-service → demandes de leur unité (service) uniquement
-      chief-departement → demandes de leur département ET tous ses services (allowed_dir_unity_ids)
-      director         → demandes de leur direction ET tous ses services (allowed_dir_unity_ids)
+      chief-service / technicien / chef-division-support
+                       → demandes de leur unité (service) uniquement
       admin            → accès global
     """
     actor_id = getattr(actor, "id", None)
@@ -110,7 +109,7 @@ def _check_request_access(actor, req, allowed_dir_unity_ids: set[int] | None = N
             )
         return
 
-    if role in {"agent-support", "chief-service", "chief-departement"}:
+    if role in {"chief-service", "technicien", "chef-division-support"}:
         allowed_ids = set(allowed_dir_unity_ids or set())
         if actor.unity_id is not None:
             allowed_ids.add(int(actor.unity_id))
@@ -122,26 +121,13 @@ def _check_request_access(actor, req, allowed_dir_unity_ids: set[int] | None = N
             detail="Accès refusé : cette demande n'est pas dans votre périmètre.",
         )
 
-    if role == "director":
-        if actor.unity_id and req.unity_id:
-            ids = allowed_dir_unity_ids if allowed_dir_unity_ids else {actor.unity_id}
-            if req.unity_id in ids:
-                return
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Accès refusé : cette demande n'est pas dans votre direction.",
-        )
-
 
 async def _resolve_access(actor, req, db: AsyncSession) -> None:
     """Wrapper async : pré-calcule les unity_ids autorisés puis vérifie l'accès."""
-    dir_ids = None
-    # Seuls chief-departement (departement + services rattaches) et director
-    # (direction + services rattaches) beneficient d'un perimetre elargi ;
-    # agent-support/chief-service restent bornes a leur propre unite.
-    if normalize_role(actor.role) in {"chief-departement", "director"} and actor.unity_id:
-        dir_ids = await _get_dir_unity_ids(db, actor.unity_id)
-    _check_request_access(actor, req, dir_ids)
+    # Les deux seuls roles qui beneficiaient d'un perimetre elargi
+    # (chief-departement, director) ont ete retires le 2026-09-25 : les roles
+    # operationnels restants sont bornes a leur propre unite.
+    _check_request_access(actor, req, None)
 
 
 async def _check_unity_access(actor, unity_id: str, db: AsyncSession) -> None:
@@ -157,7 +143,7 @@ async def _check_unity_access(actor, unity_id: str, db: AsyncSession) -> None:
             detail="Identifiant d'unité invalide.",
         )
 
-    if role in {"agent-support", "chief-service"}:
+    if role in {"chief-service", "technicien", "chef-division-support"}:
         if actor.unity_id and int(actor.unity_id) == requested_unity_id:
             return
         raise HTTPException(
@@ -165,15 +151,6 @@ async def _check_unity_access(actor, unity_id: str, db: AsyncSession) -> None:
             detail="Accès refusé : cette unité n'est pas dans votre périmètre.",
         )
 
-    if role in {"chief-departement", "director"}:
-        if actor.unity_id:
-            allowed_ids = await _get_dir_unity_ids(db, int(actor.unity_id))
-            if requested_unity_id in allowed_ids:
-                return
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Accès refusé : cette unité n'est pas dans votre direction.",
-        )
 
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Accès refusé.")
 
@@ -206,6 +183,10 @@ def _export_svc(db: AsyncSession = Depends(get_db)) -> RequestExportService:
     return RequestExportService(db)
 
 
+def _pv_svc(db: AsyncSession = Depends(get_db)) -> PvInterventionService:
+    return PvInterventionService(db)
+
+
 def _actor_display_name(actor) -> str | None:
     parts = [getattr(actor, "firstname", None), getattr(actor, "name", None)]
     return " ".join(part for part in parts if part) or None
@@ -234,120 +215,6 @@ async def _validate_attachment_ids(
             "size_bytes": att.size_bytes,
         })
     return validated
-
-
-def _resolve_comment_peer(event, req) -> Optional[str]:
-    """
-    BR-MESSAGING-PAIR-001 — résout la clé de conversation (`peer_id`) d'un
-    événement `comment_added` : toujours le côté "intervenant" de la paire
-    {demandeur, peer}, jamais le demandeur lui-même et jamais inversé selon
-    qui a écrit — un message du demandeur et la réponse de l'intervenant
-    portent le même `peer_id`, pour rester dans le même fil.
-
-    Priorité à `infos.peer_id`, écrit explicitement à la création depuis cette
-    évolution. Fallback pour les événements historiques (créés avant
-    l'introduction de `peer_id`, jamais migrés en base) :
-      - directive (`infos.is_directive`) -> `infos.target_user_id` (déjà résolu,
-        inchangé) ;
-      - auteur = demandeur -> assigné courant du ticket au moment de la lecture
-        (meilleure estimation : le front n'envoyait jusqu'ici que des messages
-        destinés à l'intervenant en charge) ;
-      - auteur = staff -> lui-même (chaque intervenant historique garde son
-        propre fil avec le demandeur, jamais mélangé avec celui d'un autre).
-    """
-    infos = event.infos if isinstance(event.infos, dict) else {}
-    peer_id = infos.get("peer_id")
-    if peer_id:
-        return str(peer_id)
-    if infos.get("is_directive"):
-        target = infos.get("target_user_id")
-        return str(target) if target else None
-    author_id = infos.get("actor_id") or (str(event.agent_id) if getattr(event, "agent_id", None) else None)
-    requester_id = getattr(req, "requester_id", None)
-    if author_id and requester_id and str(author_id) == str(requester_id):
-        assignee_id = getattr(req, "assignee_id", None)
-        return str(assignee_id) if assignee_id else None
-    return str(author_id) if author_id else None
-
-
-def _visible_comment_responses(
-    events: list[WorkflowDetailResponse], req, actor, *, public_only: bool = False
-) -> list[WorkflowDetailResponse]:
-    """
-    BR-MESSAGING-PAIR-001 — filtre les événements `comment_added` pour ne
-    garder que les conversations dont `actor` fait réellement partie. Le
-    Journal d'audit (tout événement non `comment_added`) n'est jamais touché
-    ici, sa visibilité reste régie par le RBAC ticket standard (`_resolve_access`).
-
-      - admin -> supervision : tout est visible (lecture seule côté frontend) ;
-      - demandeur (ou `public_only`, cf. suivi public par ref+email/téléphone,
-        qui agit pour son propre compte) -> toute conversation normale, puisque
-        chacune l'inclut par construction (BR-MESSAGING-PAIR-001 §1) ; les
-        directives chef->agent restent masquées (jamais destinées au demandeur) ;
-      - staff non-admin -> uniquement sa propre conversation avec le demandeur
-        (peer résolu == lui, ou il en est l'auteur) ; pour une directive,
-        uniquement s'il en est l'auteur (chef) ou la cible (agent).
-    """
-    role = normalize_role(getattr(actor, "role", None)) if actor is not None else None
-    viewer_id = getattr(actor, "id", None)
-    requester_id = getattr(req, "requester_id", None)
-    is_owner = (
-        public_only
-        or role == "user"
-        or (viewer_id is not None and requester_id is not None and str(requester_id) == str(viewer_id))
-    )
-    visible: list[WorkflowDetailResponse] = []
-    for event in events:
-        if event.event_type != "comment_added":
-            visible.append(event)
-            continue
-        infos = event.infos if isinstance(event.infos, dict) else {}
-        is_directive = bool(infos.get("is_directive"))
-        peer_id = _resolve_comment_peer(event, req)
-        enriched = event.copy(update={"infos": {**infos, "peer_id": peer_id}}) if peer_id else event
-
-        if role == "admin":
-            visible.append(enriched)
-            continue
-        if is_owner:
-            if not is_directive:
-                visible.append(enriched)
-            continue
-        if viewer_id is None:
-            continue
-        author_id = infos.get("actor_id") or (str(event.agent_id) if event.agent_id else None)
-        if is_directive:
-            target = infos.get("target_user_id")
-            if (author_id and str(author_id) == str(viewer_id)) or (target and str(target) == str(viewer_id)):
-                visible.append(enriched)
-            continue
-        if (peer_id and str(peer_id) == str(viewer_id)) or (author_id and str(author_id) == str(viewer_id)):
-            visible.append(enriched)
-    return visible
-
-
-def _current_conversation_opened_by_assignee(comments: list, assignee_id) -> bool:
-    """
-    BR-MESSAGING-OPEN-001 — la conversation privée {demandeur, intervenant actuel}
-    n'est considérée "ouverte" que si CET intervenant y a lui-même posté au moins
-    un commentaire public dans CETTE conversation précise (peer_id == son propre
-    id) — jamais déduit de la simple présence d'un assignee_id sur le ticket, ni
-    d'un commentaire public quelconque ailleurs sur le ticket (ex. une directive,
-    ou un ancien intervenant avant réaffectation).
-    """
-    assignee_str = str(assignee_id)
-    for event in comments:
-        infos = event.infos if isinstance(event.infos, dict) else {}
-        if infos.get("is_directive"):
-            continue
-        if str(infos.get("peer_id")) != assignee_str:
-            continue
-        if infos.get("is_public") is not True:
-            continue
-        author_id = infos.get("actor_id") or (str(event.agent_id) if getattr(event, "agent_id", None) else None)
-        if author_id and str(author_id) == assignee_str:
-            return True
-    return False
 
 
 async def _attach_participant_avatars(schema: RequestResponse, svc: RequestService) -> RequestResponse:
@@ -392,13 +259,16 @@ async def _attach_participant_avatars(schema: RequestResponse, svc: RequestServi
 
 async def _request_response_for_actor(req, svc: RequestService, actor=None, *, public_only: bool = False) -> RequestResponse:
     schema = svc._decrypt_schema(RequestResponse.from_orm(req))
+    # La messagerie a ete retiree de l'application (2026-09-25). Les evenements
+    # `comment_added` deja enregistres RESTENT en base — c'est de l'historique,
+    # on ne detruit pas des donnees — mais ils ne sortent plus par l'API : le
+    # filtrage par paire ayant disparu avec la fonctionnalite, les laisser
+    # passer rendrait d'anciennes conversations privees visibles de tout le staff.
     schema = schema.copy(update={
-        "timelines": _visible_comment_responses(schema.timelines, req, actor, public_only=public_only),
+        "timelines": [e for e in schema.timelines if e.event_type != "comment_added"],
     })
     return await _attach_participant_avatars(schema, svc)
 
-
-# ── Listes ────────────────────────────────────────────────────────────────────
 
 @router.get("/", response_model=PaginatedResponse[RequestListItemResponse])
 async def list_requests(
@@ -431,36 +301,26 @@ async def list_requests(
 
     # Filtrage RBAC — forcé, le client ne peut pas étendre son périmètre (C-N°3)
     actor_role = normalize_role(actor.role)
+    scope_actor_id: Optional[str] = None
     if is_own_view or is_own_assignee_view:
         pass  # requester_id/assignee_id = actor.id suffit ; unit/direction non forcés
     elif actor_role == "user":
         requester_id = str(actor.id)           # toujours ses propres demandes
-    elif actor_role in {"agent-support", "chief-service"}:
+    elif actor_role in {"chief-service", "technicien", "chef-division-support"}:
         if actor.unity_id:
             unit_id = str(actor.unity_id)       # forcé, ignore le paramètre client
             direction_id = None
+            # BR-REQUESTER-NEVER-LOSES-001 — le périmètre devient « mon unité OU
+            # je suis demandeur OU je suis assigné ». Sans ce OU, un membre du
+            # staff qui dépose une demande la perdait dès qu'elle était traitée
+            # hors de son unité, ou que l'unité traitante du ticket n'était pas
+            # renseignée : absente de l'historique (scopé unité) comme de Ma
+            # boîte (qui exclut les tickets dont on est le demandeur).
+            scope_actor_id = str(actor.id)
         else:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Compte non rattaché à une unité. Contactez un administrateur.",
-            )
-    elif actor_role == "chief-departement":
-        if actor.unity_id:
-            direction_id = str(actor.unity_id)  # forcé : departement + services rattaches
-            unit_id = None
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Compte non rattaché à une unité. Contactez un administrateur.",
-            )
-    elif actor_role == "director":
-        if actor.unity_id:
-            direction_id = str(actor.unity_id)  # forcé
-            unit_id = None
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Compte non rattaché à une direction. Contactez un administrateur.",
             )
     # admin : visibilité globale — filtres client acceptés
 
@@ -482,6 +342,7 @@ async def list_requests(
             # de traitement" (assignee_id == soi-meme) n'affiche jamais un ticket dont
             # l'acteur est aussi le demandeur, meme en cas d'anomalie amont.
             exclude_requester_id=str(actor.id) if is_own_assignee_view else None,
+            scope_actor_id=scope_actor_id,
             sla_breached=sla_breached,
             in_triage=in_triage,
             search=search,
@@ -493,16 +354,164 @@ async def list_requests(
     return await svc.list_all(page=page, limit=limit)
 
 
-_staff = Depends(require_roles("agent-support", "chief-service", "chief-departement", "director", "admin"))
+_staff = Depends(require_roles("chief-service", "admin"))
+
+
+async def _queue_manage_guard(actor=Depends(get_current_user)):
+    """Garde stricte (sans expansion d'alias RBAC) — la gestion de la File d'attente
+    (liste de triage + qualification) est reservee au chef de service (CSSHF) et a
+    l'admin uniquement. Volontairement plus etroite que require_roles("chief-service", ...),
+    qui via ROLE_GROUP_ALIASES donnerait aussi acces a technicien/chef-division-support."""
+    if normalize_role(actor.role) not in {"chief-service", "admin"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Accès réservé au chef de service et à l'administrateur.",
+        )
+    return actor
+
+
+async def _distribution_guard(actor=Depends(get_current_user)):
+    """BR-DISTRIBUTION-001 — garde stricte (sans expansion d'alias RBAC) : la file
+    "Distribution" est l'espace propre du chef de division support. L'admin y accede
+    aussi (role bypass habituel). Tout autre role est refuse — y compris chief-service
+    et technicien, que l'alias RBAC laisserait passer avec require_roles()."""
+    if normalize_role(actor.role) not in {"chef-division-support", "admin"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Accès réservé au chef de division support.",
+        )
+    return actor
+
+
+async def _treating_roles_guard(actor=Depends(get_current_user)):
+    """Garde stricte (sans expansion d'alias RBAC) des espaces de traitement.
+
+    Reserve aux roles qui prennent effectivement un ticket en charge — les
+    `TREATING_ROLES` — plus l'admin, qui traite aussi des tickets. Le demandeur
+    en est exclu : il suit ses propres demandes depuis son espace personnel."""
+    if normalize_role(actor.role) not in TREATING_ROLES | {"admin"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Accès réservé aux intervenants du support.",
+        )
+    return actor
+
+
+@router.get("/resolved-by-me", response_model=PaginatedResponse[RequestListItemResponse])
+async def list_resolved_by_me(
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    actor=Depends(_treating_roles_guard),
+    svc: RequestService = Depends(_svc),
+):
+    """Onglet « Tickets résolus » — les tickets dont l'intervenant connecté est
+    l'intervenant courant et dont le traitement est terminé (`resolved` ou
+    `closed`).
+
+    Le périmètre est forcé depuis l'acteur authentifié : aucun paramètre client
+    ne permet de consulter les tickets résolus par quelqu'un d'autre."""
+    return await svc.list_resolved_by(str(actor.id), page=page, limit=limit)
+
+
+@router.get("/distribution", response_model=PaginatedResponse[DistributionListItemResponse])
+async def list_distribution(
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    actor=Depends(_distribution_guard),
+    svc: RequestService = Depends(_svc),
+):
+    """File "Distribution" — uniquement les tickets orientes vers CE chef de division
+    et pas encore repartis. Le perimetre est force depuis l'acteur authentifie : aucun
+    parametre client ne permet de consulter la distribution d'un autre CDS."""
+    return await svc.list_distribution(str(actor.id), page=page, limit=limit)
+
+
+@router.get("/pv-tracking", response_model=PaginatedResponse[PvTrackingItemResponse])
+async def list_pv_tracking(
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    actor=Depends(_distribution_guard),
+    svc: RequestService = Depends(_svc),
+):
+    """TSI — Tableau de Suivi des Interventions, livrable de la tâche 3.4.
+
+    Le chef de division y suit les tickets qu'il a répartis jusqu'à l'archivage
+    de leur PV. Le périmètre est déduit de son identité (`distributor_id`),
+    jamais d'un paramètre client. À ne pas confondre avec
+    `GET /reports/interventions`, qui agrège des statistiques."""
+    return await svc.list_pv_tracking(str(actor.id), page=page, limit=limit)
+
+
+@router.post("/{id}/distribution/take", response_model=RequestResponse)
+async def distribution_take(
+    id: str,
+    actor=Depends(_distribution_guard),
+    svc: RequestService = Depends(_svc),
+):
+    """Le chef de division prend lui-meme le ticket : il devient responsable
+    operationnel et le ticket rejoint sa boite de traitement."""
+    return await svc.distribution_take(
+        id, actor=actor, actor_name=_actor_display_name(actor),
+    )
+
+
+class DistributionAssignBody(BaseModel):
+    technician_id: str
+
+
+@router.post("/{id}/distribution/assign", response_model=RequestResponse)
+async def distribution_assign(
+    id: str,
+    body: DistributionAssignBody,
+    actor=Depends(_distribution_guard),
+    svc: RequestService = Depends(_svc),
+):
+    """Le chef de division assigne le ticket a un technicien de SA division."""
+    return await svc.distribution_assign(
+        id, body.technician_id, actor=actor, actor_name=_actor_display_name(actor),
+    )
+
+
+@router.get("/distribution/technicians")
+async def list_distribution_technicians(
+    actor=Depends(_distribution_guard),
+    db: AsyncSession = Depends(get_db),
+):
+    """Techniciens actifs de la division du chef de division — destinataires valides.
+
+    Endpoint metier dedie : le frontend n'a jamais a charger tous les utilisateurs
+    puis filtrer. Le filtre sur le role est STRICT (pas d'expansion de groupe RBAC,
+    contrairement a RepositoryAccount._role_filter)."""
+    if normalize_role(actor.role) != "admin" and not actor.unity_id:
+        return []
+    stmt = (
+        select(Account.id, Account.name, Account.firstname, Account.email, Account.avatar_url)
+        .where(Account.role == "technicien")
+        .where(Account.account_status == "active")
+        .where(Account.deleted_at.is_(None))
+    )
+    if actor.unity_id:
+        stmt = stmt.where(Account.unity_id == int(actor.unity_id))
+    rows = await db.execute(stmt.order_by(Account.name))
+    return [
+        {
+            "id": str(r.id),
+            "name": " ".join(p for p in [r.firstname, r.name] if p) or r.name,
+            "email": r.email,
+            "avatar": r.avatar_url,
+        }
+        for r in rows.all()
+    ]
 
 
 @router.get("/triage", response_model=PaginatedResponse[RequestListItemResponse])
 async def list_triage(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    _=_staff,
+    _=Depends(_queue_manage_guard),
     svc: RequestService = Depends(_svc),
 ):
+    """Liste de triage (File d'attente) — reservee au chef de service et a l'admin."""
     return await svc.list_pending_triage(page=page, limit=limit)
 
 
@@ -542,44 +551,31 @@ async def stats_by_status(_=_staff, svc: RequestService = Depends(_svc)):
     return await svc.count_by_status()
 
 
-_workload_staff = Depends(require_roles("chief-service", "chief-departement", "admin"))
+_workload_staff = Depends(require_roles("admin"))
 
 
 @router.get("/workload-by-unit")
 async def workload_by_unit(
-    unit_id: Optional[str] = Query(None, description="Admin uniquement — ignoré pour chief-service/chief-departement"),
+    unit_id: Optional[str] = Query(None, description="Admin uniquement"),
     direction_id: Optional[str] = Query(None, description="Admin uniquement — expanse departement+services"),
-    actor=Depends(get_current_user),
     _staff_guard=_workload_staff,
     db: AsyncSession = Depends(get_db),
     svc: RequestService = Depends(_svc),
 ):
-    """Charge actuelle (tickets non terminaux) par agent assigné — Centre de répartition (Lot 2/3)."""
-    actor_role = normalize_role(actor.role)
-    if actor_role == "chief-service":
-        if not actor.unity_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Compte non rattaché à une unité. Contactez un administrateur.",
-            )
-        unity_ids = {int(actor.unity_id)}
-    elif actor_role == "chief-departement":
-        if not actor.unity_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Compte non rattaché à une unité. Contactez un administrateur.",
-            )
-        unity_ids = await _get_dir_unity_ids(db, int(actor.unity_id))
-    else:  # admin — filtres client acceptés
-        if unit_id:
-            unity_ids = {int(unit_id)}
-        elif direction_id:
-            unity_ids = await _get_dir_unity_ids(db, int(direction_id))
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="unit_id ou direction_id requis pour le rôle admin.",
-            )
+    """Charge actuelle (tickets non terminaux) par agent assigné — Centre de répartition (Lot 2/3).
+
+    Seul l'admin atteint cet endpoint depuis le retrait du role chef de
+    departement (2026-09-25) : les filtres client sont donc toujours acceptes.
+    """
+    if unit_id:
+        unity_ids = {int(unit_id)}
+    elif direction_id:
+        unity_ids = await _get_dir_unity_ids(db, int(direction_id))
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="unit_id ou direction_id requis pour le rôle admin.",
+        )
     return await svc.workload_by_unit(list(unity_ids))
 
 
@@ -621,13 +617,13 @@ async def list_queue(
     priority: Optional[str] = Query(None),
     request_status: Optional[str] = Query(None),
     search: Optional[str] = Query(None, min_length=1),
-    actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "director", "admin")),
+    actor=Depends(require_roles("chief-service", "admin")),
     svc: RequestService = Depends(_svc),
 ):
     """File d'attente active — réservée aux agents et supérieurs, filtrée par périmètre."""
     # Forçage RBAC — le paramètre client direction_id est ignoré (C-N°3)
     actor_role = normalize_role(actor.role)
-    if actor_role in {"agent-support", "chief-service", "chief-departement", "director"}:
+    if actor_role in {"chief-service", "technicien", "chef-division-support"}:
         direction_id = str(actor.unity_id) if actor.unity_id else None
     return await svc.list_queue(
         direction_id=direction_id,
@@ -647,16 +643,83 @@ class QualifyTriageBody(BaseModel):
     direction_id: Optional[str] = None
     unit_id: Optional[str] = None
     assignee_id: Optional[str] = None
+    # Procédure EDG/PS-GSI/Pro-02, tâche 1.3 — point de contrôle « descriptif de
+    # la solution proposée ». Exigé uniquement à l'imputation vers un chef de
+    # division support : c'est cette imputation que le point de contrôle encadre.
+    # Quand le CSSHF prend le ticket pour lui-même, il n'y a pas d'imputation.
+    proposed_solution: Optional[str] = None
+
+
+async def _assert_queue_target_allowed(actor, assignee_id: Optional[str], db: AsyncSession) -> bool:
+    """Module 2 — depuis la File d'attente, le chef de service n'a que deux issues :
+    prendre le ticket pour lui-meme, ou l'envoyer a un chef de division support (CDS)
+    de SON service. L'admin n'est pas contraint (role bypass habituel).
+
+    Ne concerne QUE ce point d'entree : la chaine de transmission dynamique qui suit
+    (transmit_treatment, A -> An) reste libre et n'est pas touchee.
+
+    Retourne True si la cible est un chef de division support, c'est-a-dire si on
+    est bien dans le cas d'une IMPUTATION au sens de la tache 1.3 de la procedure
+    (le descriptif de solution proposee y devient alors obligatoire)."""
+    if assignee_id is None:
+        return False
+    if str(assignee_id) == str(actor.id):
+        return False  # prise pour son propre traitement : pas une imputation
+    if normalize_role(actor.role) == "admin":
+        # L'admin n'est pas contraint sur la cible, mais on determine quand meme
+        # s'il s'agit d'une imputation a un CDS.
+        row = await db.execute(
+            select(Account.role).where(Account.id == int(assignee_id))
+        )
+        return normalize_role(str(row.scalar_one_or_none() or "")) == "chef-division-support"
+
+    row = await db.execute(
+        select(Account.role, Account.unity_id).where(Account.id == int(assignee_id))
+    )
+    target = row.first()
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Cet intervenant n'existe pas.",
+        )
+    target_role, target_unity_id = target
+    if normalize_role(target_role) != "chef-division-support":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Depuis la file d'attente, un ticket ne peut être envoyé qu'à un chef "
+                "de division support de votre service, ou pris pour votre propre traitement."
+            ),
+        )
+    if not actor.unity_id or str(target_unity_id) != str(actor.unity_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Ce chef de division support n'appartient pas à votre service.",
+        )
+    return True
 
 
 @router.post("/{id}/qualify", response_model=RequestResponse)
 async def qualify_triage(
     id: str,
     body: QualifyTriageBody,
-    actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "director", "admin")),
+    actor=Depends(_queue_manage_guard),
+    db: AsyncSession = Depends(get_db),
     svc: RequestService = Depends(_svc),
 ):
-    """Qualifie une demande de triage — reserve aux roles operationnels."""
+    """Qualifie une demande de triage — reservee a la File d'attente (chief-service/admin)."""
+    is_imputation = await _assert_queue_target_allowed(actor, body.assignee_id, db)
+    # Procedure tache 1.3 — le descriptif de solution proposee est le point de
+    # controle de l'imputation a un chef de division support. Exige uniquement
+    # dans ce cas : une prise pour son propre traitement n'est pas une imputation.
+    if is_imputation and not (body.proposed_solution or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Décrivez la solution proposée avant d'orienter ce ticket vers un "
+                "chef de division support."
+            ),
+        )
     return await svc.qualify_triage(
         id,
         body.dict(exclude_none=True),
@@ -710,7 +773,7 @@ async def list_by_direction(
     direction_id: str,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "director", "admin")),
+    actor=Depends(require_roles("chief-service", "admin")),
     svc: RequestService = Depends(_svc),
     db: AsyncSession = Depends(get_db),
 ):
@@ -723,7 +786,7 @@ async def list_by_unity(
     unity_id: str,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "director", "admin")),
+    actor=Depends(require_roles("chief-service", "admin")),
     svc: RequestService = Depends(_svc),
     db: AsyncSession = Depends(get_db),
 ):
@@ -757,6 +820,131 @@ async def get_request(
     req = await svc.get_by_id(id, include_deleted=include_deleted and actor.role == "admin")
     await _resolve_access(actor, req, db)
     return await _request_response_for_actor(req, svc, actor)
+
+
+class ProposedSolutionResponse(BaseModel):
+    proposed_solution: Optional[str] = None
+
+
+# Procédure EDG/PS-GSI/Pro-02, tâche 1.3 — rôles autorisés à LIRE le descriptif
+# de solution proposée. Liste explicite plutôt que `require_roles()`, dont
+# l'expansion d'alias RBAC rendrait le périmètre implicite.
+_PROPOSED_SOLUTION_READERS = {
+    "chief-service", "technicien", "chef-division-support", "admin",
+}
+
+
+@router.get("/{id}/proposed-solution", response_model=ProposedSolutionResponse)
+async def get_proposed_solution(
+    id: str,
+    actor=Depends(get_current_user),
+    svc: RequestService = Depends(_svc),
+    db: AsyncSession = Depends(get_db),
+):
+    """Descriptif de la solution proposée par le chef de service à l'imputation.
+
+    Endpoint séparé, et non un champ de `RequestResponse` : le demandeur ne doit
+    jamais voir ce descriptif (piste de travail interne, qui peut se révéler
+    fausse au diagnostic terrain), or une vingtaine d'endpoints renvoient un
+    `RequestResponse` dont sept lui sont accessibles. Isoler la donnée derrière
+    sa propre garde rend la fuite structurellement impossible plutôt que de
+    dépendre d'un effacement répété à chaque endpoint.
+    """
+    if normalize_role(actor.role) not in _PROPOSED_SOLUTION_READERS:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Accès réservé aux intervenants du support.",
+        )
+    req = await svc.get_by_id(id)
+    await _resolve_access(actor, req, db)
+    # Un intervenant peut être par ailleurs le demandeur d'un autre ticket ; sur
+    # CE ticket-ci, s'il est le demandeur, il n'y a pas accès. L'admin, lui,
+    # garde sa visibilité globale de supervision.
+    if (
+        normalize_role(actor.role) != "admin"
+        and str(getattr(req, "requester_id", "") or "") == str(actor.id)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Le descriptif de solution proposée n'est pas accessible au demandeur.",
+        )
+    return ProposedSolutionResponse(proposed_solution=getattr(req, "proposed_solution", None))
+
+
+class PvSubmitBody(BaseModel):
+    """Pièces jointes facultatives — typiquement le PV signé et scanné, la
+    signature étant manuscrite (aucune signature électronique au projet)."""
+    attachment_ids: Optional[list[str]] = None
+
+
+@router.post("/{id}/pv/submit", response_model=RequestResponse)
+async def submit_pv_intervention(
+    id: str,
+    body: PvSubmitBody,
+    actor=Depends(require_roles("chief-service", "admin")),
+    svc: RequestService = Depends(_svc),
+    att_svc: AttachmentService = Depends(_att_svc),
+):
+    """Tâche 3.3 — « Soumettre le PV d'intervention au Chef de division ».
+
+    Le destinataire n'est pas choisi : c'est le chef de division qui a réparti
+    le ticket (`distributor_id`, posé à la tâche 1.4). La liste de rôles n'est
+    qu'un filtre général — élargi au technicien par ROLE_GROUP_ALIASES, comme
+    `/resolve` ; la vraie garde est « être l'intervenant qui a traité », côté
+    service."""
+    attachments = await _validate_attachment_ids(att_svc, id, body.attachment_ids)
+    return await svc.pv_submit(
+        id,
+        attachments=attachments,
+        actor=actor,
+        actor_id=str(actor.id),
+        actor_name=_actor_display_name(actor),
+        actor_role=actor.role,
+    )
+
+
+@router.post("/{id}/pv/archive", response_model=RequestResponse)
+async def archive_pv_intervention(
+    id: str,
+    actor=Depends(_distribution_guard),
+    svc: RequestService = Depends(_svc),
+):
+    """Tâche 3.4 — « Enregistrer et archiver le PV d'intervention ».
+
+    Réservé au chef de division qui a réparti le ticket (l'admin garde son
+    bypass). La tâche 3.3 doit avoir eu lieu : on n'archive pas un PV qui n'a
+    pas été soumis."""
+    return await svc.pv_archive(
+        id,
+        actor=actor,
+        actor_id=str(actor.id),
+        actor_name=_actor_display_name(actor),
+        actor_role=actor.role,
+    )
+
+
+@router.get("/{id}/pv")
+async def download_pv_intervention(
+    id: str,
+    actor=Depends(get_current_user),
+    svc: RequestService = Depends(_svc),
+    pv_svc: PvInterventionService = Depends(_pv_svc),
+    db: AsyncSession = Depends(get_db),
+):
+    """Procédure EDG/PS-GSI/Pro-02, tâche 3.1 — « Établir le PV d'Intervention »,
+    au format officiel EDG/PS-GSI/PV-01.
+
+    Accessible au **demandeur** aussi : c'est lui qui valide le dépannage et
+    signe le PV (tâche 3.2). La visibilité est celle du ticket
+    (`_resolve_access`), et le PV n'expose pas `proposed_solution` — la seule
+    donnée que le demandeur ne doit pas voir.
+
+    Lecture seule : aucun changement de statut, aucune notification, aucun
+    événement métier."""
+    req = await svc.get_by_id(id)
+    await _resolve_access(actor, req, db)
+    content, filename = await pv_svc.build(id)
+    return build_response(content, "pdf", filename)
 
 
 @router.get("/{id}/export")
@@ -828,7 +1016,7 @@ _STAFF_UPDATE_FIELDS = {"request_status", "status_reason"}
 async def update_request(
     id: str,
     body: RequestUpdate,
-    actor=Depends(require_roles("user", "agent-support", "chief-service", "chief-departement", "director", "admin")),
+    actor=Depends(require_roles("user", "chief-service", "admin")),
     svc: RequestService = Depends(_svc),
     db: AsyncSession = Depends(get_db),
 ):
@@ -899,7 +1087,7 @@ async def requester_edit(
 async def assign_request(
     id: str,
     assignee_id: str = Query(...),
-    actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "director", "admin")),
+    actor=Depends(require_roles("chief-service", "admin")),
     svc: RequestService = Depends(_svc),
 ):
     """Assignation d'une demande — roles operationnels, perimetre controle par le service."""
@@ -925,15 +1113,13 @@ class ResolveBody(BaseModel):
 async def resolve_request(
     id: str,
     body: ResolveBody,
-    actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "director", "admin")),
+    actor=Depends(require_roles("chief-service", "admin")),
     svc: RequestService = Depends(_svc),
     att_svc: AttachmentService = Depends(_att_svc),
 ):
     """BR-TRANSMIT-001 — "Terminer le traitement". Autorisé à l'intervenant actuel
-    (request.assignee_id == actor.id) parmi les rôles traitants : agent-support,
-    chief-service, chief-departement (rouvert — remplace Lot 3.2), director (n'est
-    plus limité aux tickets escaladés — remplace BR-DIRECTOR-RESOLVE-001). Résumé,
-    solution et travail réalisé désormais obligatoires pour tous les rôles."""
+    (request.assignee_id == actor.id) parmi les rôles traitants. Résumé, solution
+    et travail réalisé désormais obligatoires pour tous les rôles."""
     attachments = await _validate_attachment_ids(att_svc, id, body.attachment_ids)
     return await svc.resolve(
         id,
@@ -949,6 +1135,75 @@ async def resolve_request(
     )
 
 
+class FieldCheckBody(BaseModel):
+    """Tâche 2.1 — constat d'intervention."""
+    conformity: str            # "conforme" | "ecart"
+    findings: str
+    observed_category: Optional[str] = None
+    observed_priority: Optional[str] = None
+
+
+@router.post("/{id}/field-check", response_model=RequestResponse)
+async def field_check_request(
+    id: str,
+    body: FieldCheckBody,
+    actor=Depends(require_roles("chief-service", "admin")),
+    svc: RequestService = Depends(_svc),
+):
+    """Procédure EDG/PS-GSI/Pro-02, tâche 2.1 — « Qualifier la demande »,
+    point de contrôle « vérification de l'état réel de la requête ».
+
+    Rien à voir avec `POST /{id}/qualify`, qui est la qualification du chef de
+    service depuis la File d'attente (garde stricte `_queue_manage_guard`, dont
+    le technicien est volontairement exclu) : ici l'intervenant constate sur le
+    terrain avant d'intervenir. La vraie garde n'est donc pas le rôle mais
+    `assert_is_current_handler` côté service — la liste de rôles ci-dessus n'est
+    qu'un filtre général, élargi au technicien et au chef de division par
+    ROLE_GROUP_ALIASES, exactement comme `/resolve` et `/transmit`."""
+    return await svc.field_check(
+        id,
+        conformity=body.conformity,
+        findings=body.findings,
+        observed_category=body.observed_category,
+        observed_priority=body.observed_priority,
+        actor=actor,
+        actor_id=str(actor.id),
+        actor_name=_actor_display_name(actor),
+        actor_role=actor.role,
+    )
+
+
+class StartTreatmentBody(BaseModel):
+    """BR-TRAITEMENT-PROGRESSIF-001 — « Démarrer le traitement ».
+
+    Le corps ne porte QUE le lieu : la date et l'heure de début sont prises côté
+    serveur, jamais reçues du navigateur."""
+    location: str
+
+
+@router.post("/{id}/start-treatment", response_model=RequestResponse)
+async def start_treatment_request(
+    id: str,
+    body: StartTreatmentBody,
+    actor=Depends(require_roles("chief-service", "admin")),
+    svc: RequestService = Depends(_svc),
+):
+    """Deuxième geste du workflow progressif, entre le constat et la résolution.
+
+    Même garde que `/field-check`, `/resolve` et `/transmit` : la liste de rôles
+    n'est qu'un filtre général (élargi au technicien et au chef de division par
+    ROLE_GROUP_ALIASES), la vraie garde étant `assert_is_current_handler` côté
+    service, complétée par le refus d'un démarrage sans constat ou déjà fait."""
+    return await svc.start_treatment(
+        id,
+        location=body.location,
+        actor=actor,
+        actor_id=str(actor.id),
+        actor_name=_actor_display_name(actor),
+        actor_role=actor.role,
+    )
+
+
 class TransmitTreatmentBody(BaseModel):
     to_user_id: str
     work_done: str
@@ -957,11 +1212,30 @@ class TransmitTreatmentBody(BaseModel):
     attachment_ids: Optional[list[str]] = None
 
 
+@router.get("/{id}/transmit-targets")
+async def list_transmit_targets(
+    id: str,
+    actor=Depends(require_roles("chief-service", "admin")),
+    svc: RequestService = Depends(_svc),
+):
+    """BR-TRANSMIT-SCOPE-TECH-001 — destinataires possibles pour « Transmettre le
+    traitement », calculés par le SERVEUR selon le rôle de l'acteur et le ticket.
+
+    `restricted=true` (technicien) : `items` est la liste fermée de ses cibles —
+    ses collègues techniciens du même service, et le responsable qui lui a
+    distribué le ticket. Le client affiche alors une sélection au lieu de
+    l'annuaire, et masque les filtres direction/département/service.
+
+    `restricted=false` (autres rôles traitants) : annuaire libre, `items` vide.
+    """
+    return await svc.list_transmit_targets(id, actor=actor)
+
+
 @router.post("/{id}/transmit", response_model=RequestResponse)
 async def transmit_treatment_request(
     id: str,
     body: TransmitTreatmentBody,
-    actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "director", "admin")),
+    actor=Depends(require_roles("chief-service", "admin")),
     svc: RequestService = Depends(_svc),
     att_svc: AttachmentService = Depends(_att_svc),
 ):
@@ -991,7 +1265,7 @@ async def close_request(
     actor=Depends(get_current_user),
     svc: RequestService = Depends(_svc),
 ):
-    """Cloture — demandeur (ses propres tickets resolus) ou agent-support/chief-service/chief-departement/directeur/admin."""
+    """Cloture — demandeur (ses propres tickets resolus) ou role operationnel/admin."""
     if actor.role == "user":
         req = await svc.get_by_id(id)
         if str(req.requester_id) != str(actor.id):
@@ -1004,7 +1278,7 @@ async def close_request(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Vous pouvez clôturer uniquement une demande à l'état 'resolved'.",
             )
-    elif normalize_role(actor.role) not in {"agent-support", "chief-service", "chief-departement", "director", "admin"}:
+    elif normalize_role(actor.role) not in {"chief-service", "technicien", "chef-division-support", "admin"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Accès refusé.")
     return await svc.close(
         id,
@@ -1056,7 +1330,7 @@ async def cancel_request(
     actor=Depends(get_current_user),
     svc: RequestService = Depends(_svc),
 ):
-    """Annulation — demandeur (ses propres tickets) ou agent-support/chief-service/chief-departement/admin."""
+    """Annulation — demandeur (ses propres tickets) ou role operationnel/admin."""
     if actor.role == "user":
         req = await svc.get_by_id(id)
         if req.requester_id != actor.id:
@@ -1064,7 +1338,7 @@ async def cancel_request(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Vous ne pouvez annuler que vos propres demandes.",
             )
-    elif normalize_role(actor.role) not in {"agent-support", "chief-service", "chief-departement", "director", "admin"}:
+    elif normalize_role(actor.role) not in {"chief-service", "technicien", "chef-division-support", "admin"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Accès refusé.")
     return await svc.cancel(
         id,
@@ -1084,7 +1358,7 @@ class RejectBody(BaseModel):
 async def reject_request(
     id: str,
     body: RejectBody,
-    actor=Depends(require_roles("chief-service", "chief-departement", "admin")),
+    actor=Depends(require_roles("admin")),
     svc: RequestService = Depends(_svc),
 ):
     """Rejet d'un ticket par le chef de service — motif obligatoire."""
@@ -1106,7 +1380,7 @@ class PriorityBody(BaseModel):
 async def change_request_priority(
     id: str,
     body: PriorityBody,
-    actor=Depends(require_roles("chief-service", "chief-departement", "director", "admin")),
+    actor=Depends(require_roles("admin")),
     svc: RequestService = Depends(_svc),
 ):
     """Changement de priorité — autorisé à tous les chefs dans leur périmètre."""
@@ -1129,11 +1403,11 @@ class ReassignBody(BaseModel):
 async def reassign_request(
     id: str,
     body: ReassignBody,
-    actor=Depends(require_roles("chief-departement", "director", "admin")),
+    actor=Depends(require_roles("admin")),
     svc: RequestService = Depends(_svc),
 ):
-    """Réaffectation d'un ticket à un autre service — chief-departement, director, admin
-    (Lot 2.5 : chief-service n'a plus accès à cette action, cf. ticket_actions.py)."""
+    """Réaffectation d'un ticket à un autre service — admin uniquement depuis le
+    retrait des rôles chef de département et directeur (2026-09-25)."""
     return await svc.reassign_service(
         id,
         body.target_unity_id,
@@ -1154,7 +1428,7 @@ class TransferDirectionBody(BaseModel):
 async def transfer_direction_request(
     id: str,
     body: TransferDirectionBody,
-    actor=Depends(require_roles("director", "admin")),
+    actor=Depends(require_roles("admin")),
     svc: RequestService = Depends(_svc),
 ):
     """Transfert inter-direction — réservé au directeur source et à l'admin."""
@@ -1178,537 +1452,7 @@ async def delete_request(
     await svc.delete(id)
 
 
-# ── Escalade ──────────────────────────────────────────────────────────────────
-
-class EscalateBody(BaseModel):
-    reason: str
-
-
-@router.post("/{id}/escalate", response_model=EscalationResponse, status_code=status.HTTP_201_CREATED)
-async def escalate_request(
-    id: str,
-    body: EscalateBody,
-    actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "director", "admin")),
-    svc: RequestService = Depends(_svc),
-    detail_repo: WorkflowDetailRepository = Depends(_detail_repo),
-    wf_repo: WorkflowRepository = Depends(_wf_repo),
-    db: AsyncSession = Depends(get_db),
-):
-    """Escalade d'une demande — enregistrée comme événement workflow_detail (event_type='escalation_manual').
-
-    Le niveau cible n'est plus choisi manuellement : le système détermine seul le
-    chef hiérarchique de la personne qui traite le ticket (assignee, ou l'acteur
-    lui-même si le ticket n'est pas encore assigné) et lui réassigne le ticket.
-    """
-    # Escalade mise de côté (harmonisation statuts/notifications, 2026-08) —
-    # fonctionnalité désactivée en attente de réintroduction ultérieure (cf.
-    # CLAUDE.md §12). Ne pas réactiver sans consigne explicite.
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="La fonctionnalité d'escalade est actuellement désactivée.",
-    )
-
-    from sqlalchemy import select as sa_select
-    from api.models.ModelAccount import Account
-    from api.services.ServiceEscalade import find_hierarchical_chief
-    from api.services.NotificationEmitter import emit as emit_notif
-
-    actor_id = str(actor.id)
-    req = await svc.get_by_id(id)
-    await _resolve_access(actor, req, db)
-    if not body.reason.strip():
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Le motif d'escalade est obligatoire.",
-        )
-    assert_ticket_action(actor, req, "escalate", target_status="escalated")
-    assert_escalation_allowed(actor, req)
-    wf = await wf_repo.find_active_workflow(id)
-    if wf is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Aucun workflow actif pour cette demande — impossible d'escalader.",
-        )
-
-    handler_id = int(req.assignee_id) if req.assignee_id else int(actor.id)
-    if req.assignee_id and str(req.assignee_id) != str(actor.id):
-        handler_row = await db.execute(
-            sa_select(Account.unity_id).where(Account.id == handler_id)
-        )
-        handler_unity_id = handler_row.scalar_one_or_none()
-    else:
-        handler_unity_id = actor.unity_id
-
-    chief_id = await find_hierarchical_chief(
-        db, handler_unity_id, exclude_account_id=handler_id,
-        exclude_requester_id=req.requester_id,
-    )
-    if chief_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Aucun chef hiérarchique trouvé pour escalader cette demande automatiquement.",
-        )
-
-    chief_row = await db.execute(
-        sa_select(Account.name, Account.firstname, Account.role).where(Account.id == chief_id)
-    )
-    chief_name_raw, chief_firstname, chief_role = chief_row.first()
-    chief_name = f"{chief_firstname} {chief_name_raw}".strip() if chief_firstname else chief_name_raw
-
-    event = await detail_repo.create_event({
-        "workflow_id": str(wf.id),
-        "event_type": "escalation_manual",
-        "label": f"Escalade vers {chief_name} — {req.ref}",
-        "actor_id": actor_id,
-        "actor_name": actor.name,
-        "comment": body.reason.strip(),
-        "activated": True,
-        "infos": {
-            "to_user_id": str(chief_id),
-            "to_agent_name": chief_name,
-            "priority": req.priority,
-            "status": "open",
-            "event_status": "escalated",
-            "source_role": actor.role,
-            "actor_role": actor.role,
-            "target_user_id": str(chief_id),
-            "target_user_name": chief_name,
-            "target_role": chief_role,
-            "old_status": req.request_status,
-            "new_status": "escalated",
-        },
-    })
-    await svc.update(
-        id,
-        {"request_status": "escalated", "assignee_id": str(chief_id)},
-        actor_id=actor_id,
-        actor_name=_actor_display_name(actor),
-        actor_role=actor.role,
-    )
-
-    await emit_notif(
-        svc.session,
-        recipient_id=str(chief_id),
-        title=f"Ticket escaladé — {req.ref}",
-        body=f"Le ticket {req.ref} vous a été escaladé par {actor.name} : {body.reason.strip()[:100]}",
-        type="warning",
-        request_id=str(req.id),
-        action_label="Voir le ticket",
-        action_url=f"/app/requests/{req.id}",
-    )
-
-    return EscalationResponse.from_detail(event, int(req.id), req.ref)
-
-
-class EscalateToDirectorBody(BaseModel):
-    reason: str
-
-
-@router.post(
-    "/{id}/escalate-to-director",
-    response_model=EscalationResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def escalate_to_director_request(
-    id: str,
-    body: EscalateToDirectorBody,
-    actor=Depends(require_roles("chief-departement")),
-    svc: RequestService = Depends(_svc),
-    detail_repo: WorkflowDetailRepository = Depends(_detail_repo),
-    wf_repo: WorkflowRepository = Depends(_wf_repo),
-    db: AsyncSession = Depends(get_db),
-):
-    """Escalade exceptionnelle (Lot 3.3) — reservee au chef de departement. Contrairement
-    a /escalate (qui cible le chef hierarchique le plus proche via find_hierarchical_chief),
-    cette action court-circuite volontairement la hierarchie normale et cible directement
-    le directeur de la direction du chef de departement. Motif obligatoire.
-    """
-    # Escalade mise de côté (harmonisation statuts/notifications, 2026-08) —
-    # fonctionnalité désactivée en attente de réintroduction ultérieure (cf.
-    # CLAUDE.md §12). Ne pas réactiver sans consigne explicite.
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="La fonctionnalité d'escalade est actuellement désactivée.",
-    )
-
-    from sqlalchemy import select as sa_select
-    from api.models.ModelAccount import Account
-    from api.services.ServiceEscalade import find_director_for_department
-    from api.services.NotificationEmitter import emit as emit_notif
-
-    actor_id = str(actor.id)
-    req = await svc.get_by_id(id)
-    await _resolve_access(actor, req, db)
-    assert_exceptional_escalation_reason(body.reason)
-    assert_ticket_action(actor, req, "escalate_to_director", target_status="escalated")
-    wf = await wf_repo.find_active_workflow(id)
-    if wf is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Aucun workflow actif pour cette demande — impossible d'escalader.",
-        )
-
-    director_id = await find_director_for_department(db, actor.unity_id)
-    if director_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Aucun directeur trouvé pour la direction de ce département.",
-        )
-
-    director_row = await db.execute(
-        sa_select(Account.name, Account.firstname, Account.role).where(Account.id == director_id)
-    )
-    director_name_raw, director_firstname, director_role = director_row.first()
-    director_name = f"{director_firstname} {director_name_raw}".strip() if director_firstname else director_name_raw
-
-    event = await detail_repo.create_event({
-        "workflow_id": str(wf.id),
-        "event_type": "escalation_exceptional",
-        "label": f"Escalade exceptionnelle vers {director_name} — {req.ref}",
-        "actor_id": actor_id,
-        "actor_name": actor.name,
-        "comment": body.reason.strip(),
-        "activated": True,
-        "infos": {
-            "escalation_type": "exceptional",
-            "to_user_id": str(director_id),
-            "to_agent_name": director_name,
-            "priority": req.priority,
-            "status": "open",
-            "event_status": "escalated",
-            "source_role": actor.role,
-            "actor_role": actor.role,
-            "target_user_id": str(director_id),
-            "target_user_name": director_name,
-            "target_role": director_role,
-            "old_status": req.request_status,
-            "new_status": "escalated",
-        },
-    })
-    await svc.update(
-        id,
-        {"request_status": "escalated", "assignee_id": str(director_id)},
-        actor_id=actor_id,
-        actor_name=_actor_display_name(actor),
-        actor_role=actor.role,
-    )
-
-    await emit_notif(
-        svc.session,
-        recipient_id=str(director_id),
-        title=f"Escalade exceptionnelle — {req.ref}",
-        body=f"Le ticket {req.ref} vous a été escaladé directement par {actor.name} (chef de département) : {body.reason.strip()[:100]}",
-        type="warning",
-        request_id=str(req.id),
-        action_label="Voir le ticket",
-        action_url=f"/app/requests/{req.id}",
-    )
-
-    return EscalationResponse.from_detail(event, int(req.id), req.ref)
-
-
 # ── Comments (nested — stockés dans workflow_detail, event_type='comment') ───
-
-class _CommentBody(BaseModel):
-    body: str
-    is_public: bool = False
-    attachment_id: Optional[str] = None
-    is_directive: bool = False
-    reply_to_id: Optional[str] = None
-    peer_id: Optional[str] = None
-
-
-@router.get("/{request_id}/comments", response_model=list[WorkflowDetailResponse])
-async def list_comments(
-    request_id: str,
-    peer_id: Optional[str] = Query(None, description="Filtre sur une conversation précise (peer_id)."),
-    actor=Depends(get_current_user),
-    repo: WorkflowDetailRepository = Depends(_detail_repo),
-    req_svc: RequestService = Depends(_svc),
-    db: AsyncSession = Depends(get_db),
-):
-    """C-05 / BR-MESSAGING-PAIR-001 — liste les conversations privées par paire du
-    ticket dont `actor` fait partie (demandeur, ou intervenant courant/passé sur
-    sa propre conversation) ; admin garde une vue de supervision lecture seule
-    sur toutes les conversations. `peer_id` restreint à une conversation précise."""
-    req = await req_svc.get_by_id(request_id)
-    await _resolve_access(actor, req, db)
-    events = await repo.list_comments_by_request(request_id)
-    responses = [WorkflowDetailResponse.from_orm(e) for e in events]
-    visible = _visible_comment_responses(responses, req, actor)
-    if peer_id:
-        visible = [ev for ev in visible if str((ev.infos or {}).get("peer_id")) == str(peer_id)]
-    return visible
-
-
-@router.post("/{request_id}/comments", response_model=WorkflowDetailResponse, status_code=status.HTTP_201_CREATED)
-async def create_comment(
-    request_id: str,
-    body: _CommentBody,
-    actor=Depends(get_current_user),
-    req_svc: RequestService = Depends(_svc),
-    detail_repo: WorkflowDetailRepository = Depends(_detail_repo),
-    wf_repo: WorkflowRepository = Depends(_wf_repo),
-    att_svc: AttachmentService = Depends(_att_svc),
-    db: AsyncSession = Depends(get_db),
-):
-    """C-05 — author_id et author_name forcés depuis le JWT.
-    Crée un événement event_type='comment' dans le workflow_detail de la demande.
-    Un attachment_id optionnel (déjà uploadé sur cette demande) rattache une pièce
-    jointe au commentaire — envoyés en un seul geste comme sur WhatsApp."""
-    req = await req_svc.get_by_id(request_id)
-    await _resolve_access(actor, req, db)
-    if req.deleted_at is not None or req.request_status in {"closed", "rejected", "cancelled"}:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Impossible d'écrire un message : la demande est clôturée, rejetée, annulée ou archivée.",
-        )
-    wf = await wf_repo.find_active_workflow(request_id)
-    if wf is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Aucun workflow actif pour cette demande.",
-        )
-
-    # Lot 2.7 — "Directive" : commentaire dedie chef -> agent assigne, cible et
-    # notifie precisement (BR-NOTIF-001 : jamais tout un service par defaut).
-    if body.is_directive:
-        if normalize_role(actor.role) not in {"chief-service", "chief-departement"}:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Seul un chef de service ou de département peut envoyer une directive.",
-            )
-        if not getattr(req, "assignee_id", None):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Impossible d'envoyer une directive : ce ticket n'a pas encore d'agent assigné.",
-            )
-        peer_id = str(req.assignee_id)
-    else:
-        # BR-MESSAGING-PAIR-001 — la messagerie normale est une conversation
-        # strictement privée entre le demandeur et l'INTERVENANT COURANT du
-        # ticket (assignee_id). Un ancien intervenant (réaffectation) garde la
-        # lecture de sa conversation mais ne peut plus y écrire ; personne
-        # d'autre, même avec un accès RBAC large au ticket (`_resolve_access`),
-        # ne peut écrire ici.
-        requester_id = getattr(req, "requester_id", None)
-        assignee_id = getattr(req, "assignee_id", None)
-        if not assignee_id:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Impossible d'écrire : ce ticket n'a pas encore d'intervenant assigné.",
-            )
-        actor_id_str = str(actor.id)
-        if actor_id_str not in {str(requester_id), str(assignee_id)}:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Seuls le demandeur et l'intervenant actuel de ce ticket peuvent écrire dans cette conversation.",
-            )
-        # `peer_id` est la clé stable de la conversation — toujours le côté
-        # "intervenant" de la paire {demandeur, assigné}, quel que soit lequel
-        # des deux écrit. Ne PAS l'inverser selon l'auteur : un message du
-        # demandeur et la réponse de l'assigné doivent porter le même peer_id
-        # pour rester dans le même fil (sinon ils se retrouvent dans deux
-        # conversations distinctes côté lecture/regroupement).
-        if not body.peer_id:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="peer_id requis : indiquez la conversation cible.",
-            )
-        if str(body.peer_id) != str(assignee_id):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Conversation invalide : peer_id doit être l'intervenant actuel du ticket.",
-            )
-        peer_id = str(assignee_id)
-
-        # BR-MESSAGING-OPEN-001 — le demandeur ne peut écrire dans la conversation
-        # courante que si l'intervenant actuel l'a lui-même déjà ouverte (≥1
-        # commentaire public de sa part, dans CETTE conversation). L'intervenant
-        # actuel, lui, n'est jamais soumis à ce verrou — c'est justement lui qui
-        # doit pouvoir l'ouvrir en premier (§2/§15 de la règle métier).
-        if actor_id_str == str(requester_id):
-            existing_comments = await detail_repo.list_comments_by_request(request_id)
-            if not _current_conversation_opened_by_assignee(existing_comments, assignee_id):
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="L'intervenant actuel n'a pas encore ouvert de discussion sur ce ticket.",
-                )
-
-    attachment_infos: dict = {}
-    if body.attachment_id is not None:
-        att = await att_svc.get_by_id(body.attachment_id)
-        if str(att.request_id) != str(request_id):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Cette pièce jointe n'appartient pas à cette demande.",
-            )
-        attachment_infos = {
-            "attachment_id": str(att.id),
-            "filename": att.filename,
-            "mime_type": att.mime_type,
-            "size_bytes": att.size_bytes,
-        }
-
-    # C-05.1 — reply_to_id : lien reel vers le commentaire cible (fil de discussion),
-    # distinct de workflow_detail.parent_id qui reste reserve au chainage d'audit du
-    # workflow et a la hierarchie des etapes de traitement.
-    reply_infos: dict = {}
-    if body.reply_to_id is not None:
-        try:
-            target_comment = await detail_repo.get_comment_by_id_for_request(
-                body.reply_to_id, request_id
-            )
-        except (ValueError, TypeError):
-            target_comment = None
-        if target_comment is None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Commentaire cible introuvable pour cette demande.",
-            )
-        reply_infos = {"reply_to_id": str(target_comment.id)}
-
-    directive_target_id = str(req.assignee_id) if body.is_directive else None
-    # BR-TRACE-001 — rattache le commentaire à l'intervention ouverte de son auteur,
-    # s'il est l'intervenant courant du ticket (sinon reste hors conteneur — ex.
-    # message du demandeur).
-    intervention_infos = RequestService._intervention_meta_for_actor(
-        req.infos, req.assignee_id, actor.id
-    )
-    event = await detail_repo.create_event({
-        "workflow_id": str(wf.id),
-        "event_type": "comment_added",
-        "label": "Directive envoyée à l'agent" if body.is_directive
-            else ("Commentaire public ajouté" if body.is_public else "Commentaire interne ajouté"),
-        "actor_id": actor.id,
-        "actor_name": _actor_display_name(actor) or actor.name,
-        "comment": body.body,
-        "activated": True,
-        "infos": {
-            "is_public": body.is_public,
-            "visibility": "public" if body.is_public else "internal",
-            "event_status": req.request_status,
-            "request_status": req.request_status,
-            "source_role": actor.role,
-            "actor_role": actor.role,
-            "peer_id": peer_id,
-            **({"is_directive": True, "target_user_id": directive_target_id} if body.is_directive else {}),
-            **attachment_infos,
-            **reply_infos,
-            **intervention_infos,
-        },
-    })
-
-    # BR-NOTIFICATION-WORKFLOW-001 §11 — commentaire du demandeur → informe
-    # principalement l'intervenant actuel (généralisé au-delà du seul statut
-    # `pending` : la règle est "le demandeur écrit", pas "le ticket est en
-    # attente"). Ne jamais notifier l'auteur de sa propre action.
-    if (
-        actor.role == "user"
-        and str(getattr(req, "requester_id", "")) == str(actor.id)
-        and not body.is_directive
-    ):
-        assignee_id = getattr(req, "assignee_id", None)
-        if assignee_id and str(assignee_id) != str(actor.id):
-            from api.services.NotificationEmitter import emit as emit_notif
-            await emit_notif(
-                db,
-                recipient_id=str(assignee_id),
-                title="Réponse du demandeur",
-                body=f"Le demandeur a répondu sur le ticket {req.ref}.",
-                type="info",
-                request_id=request_id,
-                action_label="Voir le ticket",
-                action_url=f"/app/requests/{request_id}",
-            )
-
-    # BR-NOTIFICATION-WORKFLOW-001 §11 — commentaire de l'intervenant actuel
-    # destiné au demandeur : réutilise le marqueur existant `is_public` (visible
-    # citoyen) comme signal explicite d'intention, plutôt que de deviner.
-    # App + email (le demandeur doit être notifié même hors ligne).
-    elif (
-        body.is_public
-        and not body.is_directive
-        and getattr(req, "assignee_id", None)
-        and str(req.assignee_id) == str(actor.id)
-        and getattr(req, "requester_id", None)
-        and str(req.requester_id) != str(actor.id)
-    ):
-        from api.services.NotificationEmitter import emit as emit_notif
-        await emit_notif(
-            db,
-            recipient_id=str(req.requester_id),
-            title="Nouveau message sur votre ticket",
-            body=f"L'intervenant a ajouté un message sur votre ticket {req.ref}.",
-            type="info",
-            request_id=request_id,
-            action_label="Voir le ticket",
-            action_url=f"/app/requests/{request_id}",
-        )
-
-    # Directive : notification nominative a l'agent assigne uniquement (BR-NOTIF-001).
-    if directive_target_id:
-        from api.services.NotificationEmitter import emit as emit_notif
-        await emit_notif(
-            db,
-            recipient_id=directive_target_id,
-            title="Directive reçue",
-            body=f"{_actor_display_name(actor) or actor.name} vous a envoyé une directive sur le ticket {req.ref}.",
-            type="warning",
-            request_id=request_id,
-            action_label="Voir le ticket",
-            action_url=f"/app/requests/{request_id}",
-        )
-
-    # Temps réel — aucun événement SSE n'existait jusqu'ici sur la création d'un
-    # commentaire (seul le AppEvent générique "notification.created" partait, non
-    # mappé à ["request", id] côté frontend). Nécessaire pour que l'ouverture
-    # d'une discussion (ou la transmission déjà couverte par request.transmitted)
-    # rafraîchisse la fiche ticket déjà ouverte chez l'autre participant sans
-    # rechargement manuel — même pattern que le reste de l'app (AppEvent + roles: all,
-    # RBAC de lecture déjà géré par _visible_comment_responses côté GET).
-    from api.core.event_bus import AppEvent, emit as emit_event
-    await emit_event(AppEvent(
-        type="request.comment_added",
-        payload={"id": request_id, "peer_id": peer_id},
-        target={"roles": "all"},
-    ))
-
-    return event
-
-
-@router.delete("/{request_id}/comments/{comment_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_comment(
-    request_id: str,
-    comment_id: str,
-    actor=Depends(get_current_user),
-    req_svc: RequestService = Depends(_svc),
-    detail_repo: WorkflowDetailRepository = Depends(_detail_repo),
-    db: AsyncSession = Depends(get_db),
-):
-    """C-05 / BR-MESSAGING-PAIR-001 — ownership stricte : seul l'auteur (ou
-    l'admin, en supervision) peut supprimer un message. Un intervenant d'une
-    autre conversation sur ce ticket ne doit plus pouvoir en supprimer les
-    messages, cohérent avec le fait qu'il ne peut même plus les lire."""
-    req = await req_svc.get_by_id(request_id)
-    await _resolve_access(actor, req, db)
-    if req.deleted_at is not None or req.request_status in {"closed", "rejected", "cancelled"}:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Impossible de supprimer un commentaire : la demande est clôturée, rejetée, annulée ou archivée.",
-        )
-    entry = await detail_repo.get_by_id(comment_id)
-    if entry is None or entry.event_type != "comment_added":
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Commentaire introuvable.")
-    if normalize_role(actor.role) != "admin" and str(entry.agent_id) != str(actor.id):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Vous ne pouvez supprimer que vos propres messages.",
-        )
-    await detail_repo.delete(comment_id)
-
-
-# ── Timeline (nested) ─────────────────────────────────────────────────────────
 
 @router.get("/{request_id}/timeline", response_model=list[WorkflowDetailResponse])
 async def list_timeline(
@@ -1734,7 +1478,7 @@ class _TimelineEventBody(BaseModel):
 async def add_timeline_event(
     request_id: str,
     body: _TimelineEventBody,
-    actor=Depends(require_roles("agent-support", "chief-service", "chief-departement", "director", "admin")),
+    actor=Depends(require_roles("chief-service", "admin")),
     repo: WorkflowDetailRepository = Depends(_detail_repo),
     wf_repo: WorkflowRepository = Depends(_wf_repo),
 ):

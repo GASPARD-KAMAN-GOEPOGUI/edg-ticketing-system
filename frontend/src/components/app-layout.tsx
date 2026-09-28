@@ -15,8 +15,8 @@ import {
   Users2,
   Users,
   BookOpen,
+  ClipboardList,
   ListChecks,
-  Building2,
   Sun,
   Moon,
   X,
@@ -38,12 +38,15 @@ import {
   Compass,
   AlertTriangle,
   Send,
+  FileCheck2,
   Search,
+  Share2,
 } from "lucide-react";
 import { useState, useRef, useCallback, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchNotifications } from "@/lib/api/notifications";
 import { Logo } from "./logo";
+import { mobileShortcutsFor } from "./mobile-shortcuts";
 import { NotificationPanel } from "./notification-panel";
 import { cn } from "@/lib/utils";
 import { useRole, useUser, getRefreshToken, clearSession, getInitials, roleLabels, AUTH_DISABLED } from "@/lib/session";
@@ -82,10 +85,9 @@ type NavItem = {
 const HEADER_ROLE_LABEL: Record<Role, string> = {
   public:              "PUBLIC",
   user:                "EMPLOYÉ",
-  "agent-support":     "AGENT SUPPORT",
   "chief-service":     "CHEF DE SERVICE",
-  "chief-departement": "CHEF DE DÉPARTEMENT",
-  director:            "DIRECTION",
+  technicien:          "TECHNICIEN",
+  "chef-division-support": "CHEF DE DIVISION SUPPORT",
   admin:               "ADMINISTRATION",
 };
 
@@ -93,11 +95,10 @@ function resolveBackFallback(pathname: string, role: Role): string {
   if (pathname.startsWith("/app/supervision/tickets/")) return "/app/supervision";
   if (pathname.startsWith("/app/queue/tickets/")) return "/app/queue";
   if (pathname.startsWith("/app/transmitted/tickets/")) return "/app/transmitted";
+  if (pathname.startsWith("/app/resolved/tickets/")) return "/app/resolved";
   if (pathname.startsWith("/app/history/tickets/")) return "/app/history";
   if (pathname.startsWith("/app/my-tickets/tickets/")) return "/app/my-tickets";
-  if (pathname.startsWith("/app/chief-inbox/tickets/")) return "/app/chief-inbox";
-  if (pathname.startsWith("/app/department-inbox/tickets/")) return "/app/department-inbox";
-  if (pathname.startsWith("/app/direction/tickets/")) return "/app/direction";
+  if (pathname.startsWith("/app/distribution/tickets/")) return "/app/distribution";
   if (pathname.startsWith("/app/dg/tickets/")) return "/app/dg";
   if (pathname.startsWith("/app/sla-center/tickets/")) return "/app/sla-center";
   if (pathname.startsWith("/app/admin/tickets/")) return role === "admin" ? "/app/admin/users" : "/app";
@@ -107,9 +108,8 @@ function resolveBackFallback(pathname: string, role: Role): string {
   if (pathname.startsWith("/app/my-tickets")) return "/app";
   if (pathname.startsWith("/app/queue")) return "/app";
   if (pathname.startsWith("/app/transmitted")) return "/app";
-  if (pathname.startsWith("/app/chief-inbox")) return "/app";
-  if (pathname.startsWith("/app/department-inbox")) return "/app";
-  if (pathname.startsWith("/app/direction")) return "/app";
+  if (pathname.startsWith("/app/resolved")) return "/app";
+  if (pathname.startsWith("/app/distribution")) return "/app";
   if (pathname.startsWith("/app/supervision")) return "/app";
   if (pathname.startsWith("/app/reports")) return "/app";
   if (pathname.startsWith("/app/dg")) return "/app";
@@ -119,32 +119,49 @@ function resolveBackFallback(pathname: string, role: Role): string {
 
 const navItems: NavItem[] = [
   // ── Mon espace personnel (tous les rôles — chaque acteur garde son espace propre) ──
-  { to: "/app",                  label: "Accueil",          icon: LayoutDashboard, roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Mon espace" },
-  { to: "/app/requests",         label: "Mes tickets",      icon: Inbox,   roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Mon espace" },
-  { to: "/app/history", label: "Historique",        icon: History, roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Mon espace" },
+  { to: "/app",                  label: "Accueil",          icon: LayoutDashboard, roles: ["user", "chief-service", "technicien", "chef-division-support", "admin"], group: "Mon espace" },
+  { to: "/app/requests",         label: "Mes tickets",      icon: Inbox,   roles: ["user", "chief-service", "technicien", "chef-division-support", "admin"], group: "Mon espace" },
+  { to: "/app/history", label: "Historique",        icon: History, roles: ["user", "chief-service", "technicien", "chef-division-support", "admin"], group: "Mon espace" },
 
   // ── Mon travail — socle commun de traitement, identique pour tous les rôles
   //    opérationnels (le traitement n'est plus différenciateur, cf. philosophie
   //    du workflow collaboratif dynamique). "Ma boîte de traitement" pointe vers
   //    la page où CE rôle traite concrètement des tickets aujourd'hui — pour le
-  //    directeur c'est déjà /app/direction (arbitrage/résolution), pas my-tickets.
-  { to: "/app/my-tickets",  label: "Ma boîte de traitement", icon: Ticket,       roles: ["agent-support", "chief-service", "chief-departement", "admin"], group: "Mon travail" },
-  { to: "/app/direction",   label: "Ma boîte de traitement", icon: Ticket,       roles: ["director"],                                                     group: "Mon travail" },
-  { to: "/app/queue",       label: "File d'attente",         icon: ListChecks,   roles: ["agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Mon travail" },
-  { to: "/app/transmitted", label: "Tickets transmis", icon: Send, roles: ["agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Mon travail" },
+  { to: "/app/my-tickets",  label: "Ma boîte de traitement", icon: Ticket,       roles: ["chief-service", "technicien", "chef-division-support", "admin"], group: "Mon travail" },
+  { to: "/app/queue",       label: "File d'attente",         icon: ListChecks,   roles: ["chief-service", "admin"], group: "Mon travail" },
+  // BR-DISTRIBUTION-001 — espace de répartition du chef de division support.
+  // Retiré de l'espace ADMIN à la demande (2026-09-28) : la répartition est le
+  // métier du chef de division, pas de l'administrateur. L'entrée reste donc
+  // visible pour `chef-division-support`. La route et la page sont intactes, et
+  // l'admin y accède toujours par URL — seule l'entrée de menu disparaît pour
+  // lui. Réversible : rajouter "admin" dans `roles` ci-dessous.
+  { to: "/app/distribution", label: "Distribution",          icon: Share2,       roles: ["chef-division-support"], group: "Mon travail" },
+  // TSI — Tableau de Suivi des Interventions (procedure tache 3.4) : suivi des
+  // tickets repartis jusqu'a l'archivage de leur PV. Distinct de la file
+  // "Distribution", qui ne montre que ce qui reste a repartir.
+  // Masqué du menu à la demande (2026-09-27). La route `/app/pv-tracking` et sa
+  // page restent en place et accessibles par URL : seule l'entrée de navigation
+  // est retirée. Décommenter cette ligne suffit à la rétablir.
+  // { to: "/app/pv-tracking", label: "Suivi des interventions", icon: ClipboardList, roles: ["chef-division-support", "admin"], group: "Mon travail" },
+  { to: "/app/transmitted", label: "Tickets transmis", icon: Send, roles: ["chief-service", "technicien", "chef-division-support", "admin"], group: "Mon travail" },
+  { to: "/app/resolved", label: "Tickets résolus", icon: FileCheck2, roles: ["chief-service", "technicien", "chef-division-support", "admin"], group: "Mon travail" },
 
   // ── Pilotage — supervision/répartition, distinct du traitement personnel ──
-  { to: "/app/supervision", label: "Supervision", icon: ShieldAlert, roles: ["chief-service", "chief-departement", "director"], group: "Pilotage" },
-  { to: "/app/direction",        label: "Escalades", icon: AlertTriangle, roles: ["director"],          group: "Pilotage", search: { section: "escalades-l3" } },
-  { to: "/app/strategic-dashboard", label: "Tableau de bord DSI", icon: Compass, roles: ["director"],   group: "Pilotage" },
+  // Onglet "Supervision" masqué sur demande (2026-09-27) pour TOUS les espaces.
+  // Même traitement que "Rapports" ci-dessous : la route /app/supervision et son
+  // composant restent intacts, l'entrée est seulement retirée de la navigation.
+  // Changement réversible — décommenter la ligne suivante pour la réactiver.
+  // L'import de l'icône ShieldAlert est conservé exprès pour cette réactivation.
+  // { to: "/app/supervision", label: "Supervision", icon: ShieldAlert, roles: ["admin"], group: "Pilotage" },
 
   // ── Analyse — rapports/statistiques, séparé du pilotage opérationnel ──────
   // Onglet "Rapports" masqué sur demande (2026-08-16) pour les 3 rôles
   // (chief-departement, director, admin) — la route /app/reports et son
   // composant restent intacts, uniquement retirés de la navigation. Changement
   // réversible : réajouter les 3 entrées ci-dessous pour réactiver.
-  // { to: "/app/reports", label: "Rapports Département", icon: BarChart3, roles: ["chief-departement"],  group: "Analyse" },
-  // { to: "/app/reports", label: "Rapports Direction",   icon: BarChart3, roles: ["director"],           group: "Analyse" },
+  // L'import de l'icône BarChart3 est conservé exprès pour cette réactivation.
+  // Le raccourci mobile "Rapports" du directeur, qui avait survécu à ce masquage
+  // et contredisait donc la décision, a été retiré (2026-09-22).
   // { to: "/app/reports", label: "Rapports",             icon: BarChart3, roles: ["admin"],               group: "Analyse" },
 
   // ── Admin — Utilisateurs ──────────────────────────────────────────────────
@@ -159,20 +176,22 @@ const navItems: NavItem[] = [
   // ── Admin — Gestion tickets ───────────────────────────────────────────────
   { to: "/app/admin/references", label: "Types de tickets", icon: Database,  roles: ["admin"], group: "Gestion tickets" },
 
-  // ── Admin — SLA & Escalades ───────────────────────────────────────────────
-  { to: "/app/admin/sla",        label: "SLA & Politiques",    icon: Timer, roles: ["admin"], group: "SLA & Escalades" },
-  { to: "/app/admin/priorities", label: "Niveaux de priorité", icon: Flag,  roles: ["admin"], group: "SLA & Escalades" },
+  // ── Admin — Priorités ─────────────────────────────────────────────────────
+  // Entrée "SLA & Politiques" masquée sur demande (2026-09-28) : la route
+  // /app/admin/sla et son composant restent intacts, uniquement retirés de la
+  // navigation. Changement réversible : décommenter la ligne ci-dessous.
+  // L'import de l'icône Timer est conservé exprès pour cette réactivation.
+  // { to: "/app/admin/sla",        label: "SLA & Politiques",    icon: Timer, roles: ["admin"], group: "SLA & Priorités" },
+  { to: "/app/admin/priorities", label: "Niveaux de priorité", icon: Flag,  roles: ["admin"], group: "Priorités" },
 
   // ── Admin — Audit & Traçabilité ───────────────────────────────────────────
   { to: "/app/admin/ticket-trace", label: "Traçabilité ticket", icon: Search, roles: ["admin"], group: "Audit & Traçabilité" },
 
   // ── Admin — Système ───────────────────────────────────────────────────────
-  { to: "/app/admin/knowledge",     label: "Base de connaissances", icon: Library,   roles: ["admin"], group: "Système" },
 
   // ── Ressources (tous) ─────────────────────────────────────────────────────
-  { to: "/app/knowledge",    label: "Base de connaissance", icon: BookOpen, roles: ["user", "agent-support", "chief-service", "chief-departement", "director"], group: "Ressources" },
-  { to: "/app/notifications", label: "Notifications",       icon: Bell,     roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Ressources" },
-  { to: "/app/profile",       label: "Profil",              icon: Settings, roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], group: "Ressources" },
+  { to: "/app/notifications", label: "Notifications",       icon: Bell,     roles: ["user", "chief-service", "technicien", "chef-division-support", "admin"], group: "Ressources" },
+  { to: "/app/profile",       label: "Profil",              icon: Settings, roles: ["user", "chief-service", "technicien", "chef-division-support", "admin"], group: "Ressources" },
 ];
 
 export function AppLayout({ children }: { children: ReactNode }) {
@@ -200,7 +219,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const [notifPanelOpen, setNotifPanelOpen] = useState(false);
 
   const { data: notifData } = useQuery({
-    queryKey: ["notifications", sessionUser?.id],
+    queryKey: ["notifications", sessionUser?.id, "badge"],
     queryFn: () => fetchNotifications({ meId: sessionUser!.id, unread: true, limit: 1 }),
     enabled: !!sessionUser?.id,
     staleTime: 30_000,
@@ -677,52 +696,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           {/* ── Mobile bottom nav (< md only) ── */}
           <nav className="fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom))] left-3 right-3 z-30 md:hidden">
             <div className="glass-strong flex items-center justify-around rounded-2xl px-2 py-2">
-              {(role === "director"
-                  ? [
-                      { to: "/app",              icon: LayoutDashboard, label: "Accueil" },
-                      { to: "/app/direction",    icon: Building2,       label: "Direction", primary: true },
-                      { to: "/app/reports",      icon: BarChart3,       label: "Rapports" },
-                      { to: "/app/notifications", icon: Bell,           label: "Alertes" },
-                      { to: "/app/profile",      icon: Settings,        label: "Profil" },
-                    ]
-                  : role === "chief-service"
-                    ? [
-                        { to: "/app/queue",         icon: ListChecks,      label: "Tickets" },
-                        { to: "/app/my-tickets",    icon: Ticket,          label: "Ma boîte", primary: true },
-                        { to: "/app/notifications", icon: Bell,            label: "Alertes" },
-                        { to: "/app/profile",       icon: Settings,        label: "Profil" },
-                      ]
-                    : role === "chief-departement"
-                      ? [
-                          { to: "/app/queue",              icon: ListChecks,      label: "File att." },
-                          { to: "/app/supervision",       icon: ShieldAlert,     label: "Superviser" },
-                          { to: "/app/my-tickets",        icon: Ticket,          label: "Ma boîte", primary: true },
-                          { to: "/app/notifications",     icon: Bell,            label: "Alertes" },
-                          { to: "/app/profile",           icon: Settings,        label: "Profil" },
-                        ]
-                    : role === "agent-support"
-                      ? [
-                          { to: "/app/queue",         icon: ListChecks,        label: "File att." },
-                          { to: "/app/my-tickets",    icon: Ticket,            label: "Mes tickets", primary: true },
-                          { to: "/app/notifications", icon: Bell,              label: "Alertes" },
-                          { to: "/app/profile",       icon: Settings,          label: "Profil" },
-                        ]
-                      : role === "admin"
-                        ? [
-                            { to: "/app",                icon: LayoutDashboard, label: "Accueil" },
-                            { to: "/app/admin/users",    icon: Users2,          label: "Utilisateurs", primary: true },
-                            { to: "/app/admin/logs",     icon: Activity,        label: "Journaux" },
-                            { to: "/app/notifications",  icon: Bell,            label: "Alertes" },
-                            { to: "/app/profile",        icon: Settings,        label: "Profil" },
-                          ]
-                        : [
-                            { to: "/app",              icon: LayoutDashboard, label: "Accueil" },
-                            { to: "/app/requests",     icon: Inbox,           label: "Tickets" },
-                            { to: "/app/new",          icon: Plus,            label: "Créer", primary: true },
-                            { to: "/app/notifications", icon: Bell,           label: "Alertes" },
-                            { to: "/app/profile",      icon: Settings,        label: "Profil" },
-                          ]
-              ).map((i) => {
+              {mobileShortcutsFor(role).map((i) => {
                 const active =
                   i.to === "/app" ? pathname === i.to : pathname.startsWith(i.to);
                 return (
@@ -785,7 +759,7 @@ function RoleSwitcher({
   userAvatar?: string;
 }) {
   const router = useRouter();
-  const roles: Role[] = ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"];
+  const roles: Role[] = ["user", "chief-service", "technicien", "chef-division-support", "admin"];
   const initials = userName ? getInitials(userName) : role.slice(0, 2).toUpperCase();
 
   const handleLogout = async () => {

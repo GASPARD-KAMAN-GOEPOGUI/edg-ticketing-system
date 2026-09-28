@@ -17,7 +17,9 @@ class AccountRepository(BaseRepository[Account]):
     @staticmethod
     def _role_filter(role: str) -> str | list[str]:
         normalized = normalize_role(role)
-        return ["director", "dg"] if normalized == "director" else normalized
+        if normalized in ("chief-service", "technicien", "chef-division-support"):
+            return ["chief-service", "technicien", "chef-division-support"]
+        return normalized
 
     async def find_by_email(self, email: str) -> Account | None:
         return await self.get_one({"email": email})
@@ -42,6 +44,23 @@ class AccountRepository(BaseRepository[Account]):
             limit=limit,
         )
 
+    async def list_by_role_strict(self, role: str, *, limit: int = 500) -> list[Account]:
+        """Comptes actifs portant EXACTEMENT ce rôle, sans expansion de groupe.
+
+        `list_by_role()` passe par `_role_filter()`, qui élargit `chief-service`,
+        `technicien` et `chef-division-support` à l'ensemble des trois. Pour tout
+        ce qui touche la File d'attente — réservée à `chief-service` et `admin`
+        par `_queue_manage_guard` — cette expansion désigne des comptes qui n'ont
+        même pas accès à la file.
+        """
+        items, _ = await self.list(
+            filters={"role": normalize_role(role)},
+            only_active=True,
+            order_by="name",
+            limit=limit,
+        )
+        return items
+
     async def list_agents(
         self,
         *,
@@ -50,7 +69,7 @@ class AccountRepository(BaseRepository[Account]):
         page: int = 1,
         limit: int = 20,
     ) -> tuple[list[Account], int]:
-        filters: dict = {"role": ["agent-support", "chief-service", "chief-departement"]}
+        filters: dict = {"role": ["chief-service", "technicien", "chef-division-support"]}
         if unity_id:
             filters["unity_id"] = unity_id
         if availability:
@@ -221,24 +240,21 @@ class AccountRepository(BaseRepository[Account]):
     # ── Hiérarchie : chefs par unité/direction (pattern edgrh chiefs_by_units) ─
 
     async def find_chiefs_by_unit(self, unit_id: int) -> list[Account]:
-        """Retourne les comptes avec role='chief-service' dans une unité donnée."""
-        items, _ = await self.list(
-            filters={"unity_id": unit_id, "role": self._role_filter("chief")},
-            only_active=True,
-            order_by="name",
-            limit=50,
-        )
-        return items
+        """Chefs d'unite d'un service.
+
+        Reposait sur le role `chief-departement`, retire le 2026-09-25 : renvoie
+        desormais toujours une liste vide. Conservee parce que
+        `find_approvers_for_request` l'appelle encore et traite deja ce cas.
+        """
+        return []
 
     async def find_directors_by_direction(self, direction_id: int) -> list[Account]:
-        """Retourne les directeurs (role='director') d'une direction."""
-        items, _ = await self.list(
-            filters={"unity_id": direction_id, "role": ["director", "dg"]},
-            only_active=True,
-            order_by="name",
-            limit=20,
-        )
-        return items
+        """Directeurs d'une direction.
+
+        Reposait sur le role `director`, retire le 2026-09-25 : renvoie
+        desormais toujours une liste vide (meme raison que ci-dessus).
+        """
+        return []
 
     async def find_chief_for_unity(self, unity_id: int) -> Account | None:
         """Retourne le premier chef actif (role='chief') d'une unité, ou None."""
@@ -246,22 +262,27 @@ class AccountRepository(BaseRepository[Account]):
         return chiefs[0] if chiefs else None
 
     async def find_support_agent(self) -> Account | None:
-        """Retourne le premier agent actif disponible (fallback support général)."""
-        items, _ = await self.list(
-            filters={"role": "agent-support"},
-            only_active=True,
-            order_by="name",
-            limit=1,
-        )
+        """Chef de service (CSSHF) qui prend le ticket en triage, support général.
+
+        Strictement `chief-service` : la File d'attente est réservée à ce rôle et
+        à l'admin. La sélection portait avant le 2026-09-26 sur les trois rôles
+        du groupe, triés par nom — elle pouvait donc imputer le ticket à un
+        technicien ou à un chef de division, qui n'a pas accès à la file et ne
+        peut donc pas le qualifier : le ticket restait bloqué.
+        """
+        items = await self.list_by_role_strict("chief-service", limit=1)
         return items[0] if items else None
 
     async def find_approvers_for_request(
         self, *, unit_id: int | None = None, direction_id: int | None = None
     ) -> list[Account]:
         """
-        Retourne les approbateurs potentiels d'une demande dans l'ordre :
-        1. Chefs d'unité (role=chief, unity_id=unit_id)
-        2. Directeurs (role=director, unity_id=direction_id)
+        Retourne les approbateurs potentiels d'une demande.
+
+        Les deux niveaux hierarchiques sur lesquels reposait ce circuit
+        (chef de departement, directeur) ont ete retires le 2026-09-25 : la
+        liste revient donc vide, et le workflow est cree sans etape de
+        validation automatique.
         """
         approvers: list[Account] = []
         if unit_id:

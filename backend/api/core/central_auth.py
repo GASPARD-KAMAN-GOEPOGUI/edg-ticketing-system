@@ -9,8 +9,10 @@ utilise httpx.Client synchrone dans son exemple, ce backend est 100% async).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import Any, Optional
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Optional
 
 import httpx
 
@@ -23,9 +25,20 @@ _MASKED_FIELDS = {
     "source_token", "bearer_token", "refresh_token", "authorization",
 }
 
+# Correspondance groupe central <-> role EDG Connect, lue DANS LES DEUX SENS :
+#   - role_from_groups()  : groupes centraux -> role local (a la connexion)
+#   - group_for_role()    : role local -> groupe central (creation/modification
+#                           de compte depuis le backoffice EDG Connect)
+# Une seule table pour les deux sens : toute correspondance manquante ici ferait
+# retomber le role sur `collaborateur-support`, ce qui annulerait silencieusement
+# un changement de role fait dans le backoffice a la connexion suivante.
+# L'ordre compte : premier groupe trouve gagne si un compte appartient a plusieurs
+# groupes (du plus privilegie au moins privilegie).
 GROUP_ROLE_PRIORITY: list[tuple[str, str]] = [
     ("admin-support", "admin"),
-    ("qualify-support", "agent-support"),
+    ("qualify-support", "chief-service"),
+    ("chef-division-support", "chef-division-support"),
+    ("technicien-support", "technicien"),
     ("collaborateur-support", "user"),
 ]
 
@@ -87,6 +100,58 @@ def _client_kwargs() -> dict[str, Any]:
     }
 
 
+# ── Client HTTP partagé ───────────────────────────────────────────────────────
+#
+# Chaque appel ouvrait son propre AsyncClient, donc sa propre connexion TLS vers
+# le central. Une connexion se paie ici jusqu'à 5 s de poignée de main, et un
+# simple login en enchaîne quatre (source-token, login, scopes, groupes) : la
+# somme frôlait HTTP_TIMEOUT_MS et retombait par intermittence en
+# « Service d'authentification central indisponible » (503) — alors que le
+# central, lui, répondait très bien.
+#
+# Un client unique garde ses connexions ouvertes (keep-alive) : la poignée de
+# main TLS est payée une fois, puis réutilisée par tous les appels suivants.
+_shared: Optional[httpx.AsyncClient] = None
+_shared_lock = asyncio.Lock()
+
+
+async def _get_shared_client() -> httpx.AsyncClient:
+    global _shared
+    if _shared is not None and not _shared.is_closed:
+        return _shared
+    async with _shared_lock:
+        if _shared is None or _shared.is_closed:
+            _shared = httpx.AsyncClient(
+                **_client_kwargs(),
+                limits=httpx.Limits(
+                    max_keepalive_connections=10,
+                    max_connections=20,
+                    # Le central reste joignable entre deux requêtes d'un même
+                    # écran ; 60 s couvrent largement un parcours utilisateur.
+                    keepalive_expiry=60.0,
+                ),
+            )
+    return _shared
+
+
+@asynccontextmanager
+async def _client() -> AsyncIterator[httpx.AsyncClient]:
+    """Prête le client partagé SANS le fermer en sortie de bloc.
+
+    Garde la forme `async with ... as client:` des appels existants, pour que la
+    seule différence soit la réutilisation de la connexion.
+    """
+    yield await _get_shared_client()
+
+
+async def close_central_client() -> None:
+    """Ferme le client partagé — appelé à l'arrêt de l'application (lifespan)."""
+    global _shared
+    if _shared is not None and not _shared.is_closed:
+        await _shared.aclose()
+    _shared = None
+
+
 def _mask(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         key: ("***" if key.lower() in _MASKED_FIELDS else value)
@@ -99,7 +164,7 @@ async def get_source_token() -> str:
     if not env.CLIENT_APP_CODE or not env.CLIENT_APP_SECRET:
         raise CentralUnavailableError("CLIENT_APP_CODE/CLIENT_APP_SECRET non configurés.")
     try:
-        async with httpx.AsyncClient(**_client_kwargs()) as client:
+        async with _client() as client:
             response = await client.post(
                 "/v1/client-app-auth/source-token",
                 json={"client_code": env.CLIENT_APP_CODE, "client_secret": env.CLIENT_APP_SECRET},
@@ -131,7 +196,7 @@ async def debug_source_token_exchange(
             "error": "CLIENT_APP_CODE/CLIENT_APP_SECRET non configurés (et non fournis en paramètre).",
         }
     try:
-        async with httpx.AsyncClient(**_client_kwargs()) as client:
+        async with _client() as client:
             response = await client.post(
                 "/v1/client-app-auth/source-token",
                 json={"client_code": code, "client_secret": secret},
@@ -166,7 +231,7 @@ async def get_machine_token() -> str:
     if not env.CLIENT_APP_CODE or not env.CLIENT_APP_SECRET:
         raise CentralUnavailableError("CLIENT_APP_CODE/CLIENT_APP_SECRET non configurés.")
     try:
-        async with httpx.AsyncClient(**_client_kwargs()) as client:
+        async with _client() as client:
             response = await client.post(
                 "/v1/client-app-auth/token",
                 json={"client_app_code": env.CLIENT_APP_CODE, "client_app_secret": env.CLIENT_APP_SECRET},
@@ -210,7 +275,7 @@ async def central_login(email: str, password: str) -> dict[str, Any]:
     payload = {"email": email, "password": password, "source_token": source_token}
 
     async def _attempt(token: str) -> httpx.Response:
-        async with httpx.AsyncClient(**_client_kwargs()) as client:
+        async with _client() as client:
             return await client.post("/v1/auth/login", json={**payload, "source_token": token})
 
     try:
@@ -237,7 +302,7 @@ async def central_login(email: str, password: str) -> dict[str, Any]:
 
 async def central_refresh(refresh_token: str) -> dict[str, Any]:
     try:
-        async with httpx.AsyncClient(**_client_kwargs()) as client:
+        async with _client() as client:
             response = await client.post("/v1/auth/refresh", json={"refresh_token": refresh_token})
     except httpx.HTTPError as exc:
         raise CentralUnavailableError(f"Service d'authentification central indisponible : {exc}") from exc
@@ -252,7 +317,7 @@ async def central_refresh(refresh_token: str) -> dict[str, Any]:
 
 async def get_scopes(bearer_token: str) -> dict[str, Any]:
     try:
-        async with httpx.AsyncClient(**_client_kwargs()) as client:
+        async with _client() as client:
             response = await client.get(
                 "/v1/auth/me/scopes",
                 headers={"Authorization": f"Bearer {bearer_token}"},
@@ -270,7 +335,7 @@ async def get_scopes(bearer_token: str) -> dict[str, Any]:
 
 async def get_groups(bearer_token: str) -> list[dict[str, Any]]:
     try:
-        async with httpx.AsyncClient(**_client_kwargs()) as client:
+        async with _client() as client:
             response = await client.get(
                 "/api/me/groups",
                 headers={"Authorization": f"Bearer {bearer_token}"},
@@ -287,7 +352,7 @@ async def get_groups(bearer_token: str) -> list[dict[str, Any]]:
 
 
 def role_from_groups(groups: list[dict[str, Any]]) -> Optional[str]:
-    """Mappe les groupes centraux actifs vers un rôle EDG Support (priorité admin > agent-support > user)."""
+    """Mappe les groupes centraux actifs vers un rôle EDG Support (priorité admin > chief-service > user)."""
     active = {
         (group.get("codename") or "").strip().lower()
         for group in groups
@@ -302,7 +367,7 @@ def role_from_groups(groups: list[dict[str, Any]]) -> Optional[str]:
 def group_for_role(role: str) -> str:
     """
     Inverse de GROUP_ROLE_PRIORITY : rôle local EDG Support -> groupe central.
-    Rôles sans groupe central dédié (chief-service, chief-departement, director,
+    Rôles sans groupe central dédié (chief-departement, director,
     public) retombent sur "collaborateur-support" — établit une identité centrale
     et une capacité d'authentification de base, sans jamais influencer le rôle
     LOCAL stocké (voir dependencies.py _ROLE_SYNC_SPACE, qui ignore ces rôles).
@@ -322,7 +387,7 @@ async def get_profile(bearer_token: str) -> dict[str, Any]:
     user_id/email/codenames, jamais assez pour matérialiser un compte local
     (nom NOT NULL) lors d'un rattachement (auto-provisioning ou consentement)."""
     try:
-        async with httpx.AsyncClient(**_client_kwargs()) as client:
+        async with _client() as client:
             response = await client.get(
                 "/api/me",
                 headers={"Authorization": f"Bearer {bearer_token}"},
@@ -400,7 +465,7 @@ async def create_central_account(
     }
 
     async def _attempt(token: str) -> httpx.Response:
-        async with httpx.AsyncClient(**_client_kwargs()) as client:
+        async with _client() as client:
             return await client.post(
                 "/v1/client-app-users/group-membership",
                 json={**payload, "source_token": token},
@@ -452,7 +517,7 @@ async def update_central_account(
     """PUT /v1/client-app-users/{user_uuid} — token machine."""
     payload = {"email": email, "phone": phone, "name": firstname, "last_name": last_name}
     try:
-        async with httpx.AsyncClient(**_client_kwargs()) as client:
+        async with _client() as client:
             response = await client.put(
                 f"/v1/client-app-users/{user_uuid}",
                 json=payload,
@@ -467,7 +532,7 @@ async def update_central_account(
 async def add_group_membership(user_uuid: str, group_codename: str, machine_token: str) -> None:
     """PUT /v1/client-app-users/group-membership — token machine."""
     try:
-        async with httpx.AsyncClient(**_client_kwargs()) as client:
+        async with _client() as client:
             response = await client.put(
                 "/v1/client-app-users/group-membership",
                 json={"user_uuid": user_uuid, "group_codename": group_codename},
@@ -481,7 +546,7 @@ async def add_group_membership(user_uuid: str, group_codename: str, machine_toke
 async def remove_group_membership(user_uuid: str, group_codename: str, machine_token: str) -> None:
     """DELETE /v1/client-app-users/group-membership — token machine, corps JSON."""
     try:
-        async with httpx.AsyncClient(**_client_kwargs()) as client:
+        async with _client() as client:
             response = await client.request(
                 "DELETE",
                 "/v1/client-app-users/group-membership",
@@ -496,7 +561,7 @@ async def remove_group_membership(user_uuid: str, group_codename: str, machine_t
 async def activate_central_account(user_uuid: str, machine_token: str) -> None:
     """POST /v1/client-app-users/{user_uuid}/activate — token machine, corps {}."""
     try:
-        async with httpx.AsyncClient(**_client_kwargs()) as client:
+        async with _client() as client:
             response = await client.post(
                 f"/v1/client-app-users/{user_uuid}/activate",
                 json={},
@@ -510,7 +575,7 @@ async def activate_central_account(user_uuid: str, machine_token: str) -> None:
 async def deactivate_central_account(user_uuid: str, machine_token: str) -> None:
     """POST /v1/client-app-users/{user_uuid}/deactivate — token machine, corps {}."""
     try:
-        async with httpx.AsyncClient(**_client_kwargs()) as client:
+        async with _client() as client:
             response = await client.post(
                 f"/v1/client-app-users/{user_uuid}/deactivate",
                 json={},
@@ -532,7 +597,7 @@ async def reset_central_password(
     que déverrouiller ce même appel machine-token avec le mot de passe choisi."""
     password = new_password or _DEFAULT_RESET_PASSWORD
     try:
-        async with httpx.AsyncClient(**_client_kwargs()) as client:
+        async with _client() as client:
             response = await client.post(
                 f"/v1/client-app-users/{user_uuid}/reset-password",
                 json={"password": password},
@@ -551,7 +616,7 @@ async def delete_central_account(user_id: int, user_bearer: str) -> None:
     masque le cas réel observé en prod — un 403 "missing_scope" du central quand le
     groupe de l'acteur n'a pas le scope "user.delete"."""
     try:
-        async with httpx.AsyncClient(**_client_kwargs()) as client:
+        async with _client() as client:
             response = await client.delete(
                 f"/v1/users/{user_id}",
                 headers={"Authorization": f"Bearer {user_bearer}"},
@@ -599,7 +664,7 @@ async def log_central_event(
 ) -> None:
     """Audit centralisé non bloquant (POST /v1/logs/) — n'exceptionne jamais."""
     try:
-        async with httpx.AsyncClient(**_client_kwargs()) as client:
+        async with _client() as client:
             await client.post(
                 "/v1/logs/",
                 headers={"Authorization": f"Bearer {bearer_token}"},

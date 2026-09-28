@@ -27,10 +27,10 @@
 | `/app/requests` | mes demandes | personal | user+ | `requests.ts` | `/requests` | `app.requests.index.tsx` |
 | `/app/requests/$id` | detail personnel | personal | user+ | `requests.ts`, `workflow.ts` | `/requests/{id}` | `app.requests.$id.tsx` |
 | `/app/requests/history` | historique personnel | personal | user+ | `requests.ts` | `/requests` | `app.requests.history.tsx` |
-| `/app/my-tickets` | tickets agent | agent | agent-support | `requests.ts` | `/requests/by-assignee/*` | `app.my-tickets.tsx` |
-| `/app/my-tickets/tickets/$id` | detail agent | agent | agent-support | `requests.ts` | `/requests/{id}` | `app.my-tickets_.tickets.$id.tsx` |
-| `/app/queue` | file/qualification | queue | agent-support, chief-service, chief-departement, director | `requests.ts` | `/requests/queue`, `/requests/triage` | `app.queue.tsx` |
-| `/app/queue/tickets/$id` | detail queue | queue | agent-support, chief-service, chief-departement, director | `requests.ts` | `/requests/{id}` | `app.queue_.tickets.$id.tsx` |
+| `/app/my-tickets` | tickets agent | agent | chief-service | `requests.ts` | `/requests/by-assignee/*` | `app.my-tickets.tsx` |
+| `/app/my-tickets/tickets/$id` | detail agent | agent | chief-service | `requests.ts` | `/requests/{id}` | `app.my-tickets_.tickets.$id.tsx` |
+| `/app/queue` | file/qualification | queue | chief-service, chief-service, chief-departement, director | `requests.ts` | `/requests/queue`, `/requests/triage` | `app.queue.tsx` |
+| `/app/queue/tickets/$id` | detail queue | queue | chief-service, chief-service, chief-departement, director | `requests.ts` | `/requests/{id}` | `app.queue_.tickets.$id.tsx` |
 | `/app/chief-inbox` | boite chef de service | chief | chief-service | `requests.ts`, `accounts.ts` | `/requests/queue`, `/users` | `app.chief-inbox.tsx` |
 | `/app/chief-inbox/tickets/$id` | detail chef de service | chief | chief-service | `requests.ts` | `/requests/{id}` | `app.chief-inbox_.tickets.$id.tsx` |
 | `/app/department-inbox` | boite chef de departement | chief | chief-departement | `requests.ts`, `accounts.ts` | `/requests/queue`, `/users` | `app.department-inbox.tsx` (reutilise le composant `ChiefInbox` de `app.chief-inbox.tsx`) |

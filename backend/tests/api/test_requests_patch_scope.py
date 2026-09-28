@@ -47,14 +47,14 @@ async def _create_assigned_ticket(auth_client, unity_id: int, title_suffix: str,
 
 
 async def test_patch_blocks_staff_outside_perimeter(auth_client, unity_id):
-    """Lot 2.1 : PATCH /requests/{id} verifiait uniquement require_roles — un agent-support
+    """Lot 2.1 : PATCH /requests/{id} verifiait uniquement require_roles — un chief-service
     hors perimetre pouvait modifier n'importe quel ticket. _resolve_access doit maintenant
     bloquer cet acces (meme garde que les autres routes d'action)."""
     async with auth_client("user") as user_client:
         request_id = await _create_ticket(user_client, unity_id, "outsider")
 
     def _outsider_dep():
-        return SimpleNamespace(id=555, role="agent-support", unity_id=unity_id + 999999, direction_id=None)
+        return SimpleNamespace(id=555, role="chief-service", unity_id=unity_id + 999999, direction_id=None)
 
     app.dependency_overrides[get_current_user] = _outsider_dep
     try:
@@ -74,7 +74,7 @@ async def test_patch_allows_in_scope_staff_to_transition_status(auth_client, uni
     request_id = await _create_assigned_ticket(auth_client, unity_id, "in-scope-status", 556)
 
     def _agent_dep():
-        return SimpleNamespace(id=556, role="agent-support", unity_id=unity_id, direction_id=None)
+        return SimpleNamespace(id=556, role="chief-service", unity_id=unity_id, direction_id=None)
 
     app.dependency_overrides[get_current_user] = _agent_dep
     try:
@@ -95,7 +95,7 @@ async def test_patch_silently_drops_non_status_fields_for_non_admin_staff(auth_c
         request_id = await _create_ticket(user_client, unity_id, "field-restriction")
 
     def _agent_dep():
-        return SimpleNamespace(id=557, role="agent-support", unity_id=unity_id, direction_id=None)
+        return SimpleNamespace(id=557, role="chief-service", unity_id=unity_id, direction_id=None)
 
     app.dependency_overrides[get_current_user] = _agent_dep
     try:
@@ -121,7 +121,7 @@ async def test_patch_director_status_transition_unaffected(auth_client, unity_id
     request_id = await _create_assigned_ticket(auth_client, unity_id, "director-status", 559)
 
     def _director_dep():
-        return SimpleNamespace(id=558, role="director", unity_id=unity_id, direction_id=None)
+        return SimpleNamespace(id=558, role="chief-service", unity_id=unity_id, direction_id=None)
 
     app.dependency_overrides[get_current_user] = _director_dep
     try:

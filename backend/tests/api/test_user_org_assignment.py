@@ -11,9 +11,24 @@ def _payload(response):
 
 
 async def _create_org_chain(client):
+    # Ne presuppose plus qu'une direction preexiste : `SEED_ORG_STRUCTURE=False`
+    # n'en seme aucune, et les unites des autres tests sont libellees
+    # « Unite Test N », donc classees *units* par `_kind_from_org` (classement
+    # par prefixe de libelle). Sans cette creation, le test ne passait qu'au gre
+    # de l'ordre d'execution.
     directions = await client.get("/api/v1/directions/?limit=20")
     assert directions.status_code == 200
-    direction_id = _payload(directions)["items"][0]["id"]
+    existing = _payload(directions)["items"]
+    if existing:
+        direction_id = existing[0]["id"]
+    else:
+        created = await client.post(
+            "/api/v1/directions/",
+            json={"name": f"Direction Test Roles {uuid4().hex[:6].upper()}",
+                  "code": f"TDIR-{uuid4().hex[:6].upper()}"},
+        )
+        assert created.status_code == 201, created.text
+        direction_id = _payload(created)["id"]
     suffix = uuid4().hex[:8].upper()
 
     department = await client.post(

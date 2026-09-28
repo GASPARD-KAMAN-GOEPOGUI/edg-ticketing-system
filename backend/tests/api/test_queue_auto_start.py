@@ -1,13 +1,19 @@
 """
-BR-QUEUE-AUTO-START-001 — Prise/assignation effective depuis la File d'attente
-constitue le démarrage effectif du traitement.
+Prise / assignation depuis la File d'attente — ce que produit ce geste.
 
-Couvre : prise directe (qualify_triage avec assignee_id=soi-même), assignation
-à un tiers (qualify_triage + assign() dédié), statut résultant `in_progress`
-direct (jamais `assigned` intermédiaire), sortie de la File d'attente, entrée
+BR-TRAITEMENT-PROGRESSIF-001 (2026-09-27) a REMPLACÉ BR-QUEUE-AUTO-START-001 :
+une prise ou une assignation depuis la File d'attente ne démarre plus le
+traitement, elle désigne un intervenant et le ticket s'arrête à `assigned`. Le
+démarrage est devenu un geste explicite (`POST /{id}/start-treatment`), seul
+capable d'horodater le vrai début et d'enregistrer le lieu.
+
+Couvre : prise directe (qualify_triage avec assignee_id=soi-même), assignation à
+un tiers (qualify_triage + assign() dédié), sortie de la File d'attente, entrée
 dans "Ma boîte de traitement", notifications, continuité de la transmission
-dynamique (pas de redémarrage), réouverture (nouveau cycle démarré
-immédiatement), non-régression BR-REQUESTER-NO-SELF-TREATMENT-001.
+dynamique, réouverture, non-régression BR-REQUESTER-NO-SELF-TREATMENT-001.
+
+Le parcours complet du workflow progressif est couvert par
+`test_treatment_progressive.py`.
 """
 from __future__ import annotations
 
@@ -41,19 +47,19 @@ async def _in_queue(request_id: str) -> bool:
 
 # ── CAS A — Prise directe (qualify_triage, assignee_id = soi-même) ────────────
 
-async def test_take_from_queue_starts_treatment_immediately(auth_client, unity_id):
-    await _ensure_test_account(901, unity_id=unity_id, role="agent-support")
+async def test_take_from_queue_assigns_without_starting(auth_client, unity_id):
+    await _ensure_test_account(901, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "take-direct")
 
     resp = await _call_as(
-        _dep(901, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/qualify",
+        _dep(901, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/qualify",
         {"category": "panne", "priority": "medium", "unit_id": str(unity_id), "assignee_id": "901"},
     )
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
     assert str(data["assignee_id"]) == "901"
     # BR-QUEUE-AUTO-START-001 — statut résultant direct, pas d'étape "assigned".
-    assert data["request_status"] == "in_progress"
+    assert data["request_status"] == "assigned"
     assert data["in_triage"] is False
 
     assert not await _in_queue(request_id)
@@ -68,7 +74,7 @@ async def test_take_from_queue_starts_treatment_immediately(auth_client, unity_i
     # Plus besoin d'un second appel "Démarrer traitement" : la transition
     # in_progress -> in_progress n'est plus une transition valide (déjà démarré).
     already_started = await _call_as(
-        _dep(901, "agent-support", unity_id), "PATCH", f"/api/v1/requests/{request_id}",
+        _dep(901, "chief-service", unity_id), "PATCH", f"/api/v1/requests/{request_id}",
         {"request_status": "in_progress"},
     )
     assert already_started.status_code == 400, already_started.text
@@ -76,19 +82,25 @@ async def test_take_from_queue_starts_treatment_immediately(auth_client, unity_i
 
 # ── CAS B — Assignation à un tiers depuis la File (qualify_triage) ────────────
 
-async def test_assign_from_queue_starts_treatment_immediately(auth_client, unity_id):
+async def test_assign_from_queue_assigns_without_starting(auth_client, unity_id):
     await _ensure_test_account(902, unity_id=unity_id, role="chief-service")
-    await _ensure_test_account(903, unity_id=unity_id, role="agent-support")
+    # BR-DISTRIBUTION-001 — cibler un chef de division support depuis la File
+    # d'attente n'en fait plus un traitant (le ticket entre dans sa Distribution, cf.
+    # test_distribution.py). Ce test porte sur BR-QUEUE-AUTO-START-001 : une
+    # assignation EFFECTIVE a un traitant demarre immediatement le traitement. On
+    # cible donc un technicien, via l'admin (le chef de service, lui, ne peut cibler
+    # que lui-meme ou un CDS — cf. test_queue_target_restriction.py).
+    await _ensure_test_account(903, unity_id=unity_id, role="technicien")
     request_id = await _create_ticket(auth_client, unity_id, "assign-direct")
 
     resp = await _call_as(
-        _dep(902, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/qualify",
+        _dep(6, "admin", unity_id), "POST", f"/api/v1/requests/{request_id}/qualify",
         {"category": "panne", "priority": "medium", "unit_id": str(unity_id), "assignee_id": "903"},
     )
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
     assert str(data["assignee_id"]) == "903"
-    assert data["request_status"] == "in_progress"
+    assert data["request_status"] == "assigned"
     assert data["in_triage"] is False
     assert not await _in_queue(request_id)
 
@@ -99,14 +111,17 @@ async def test_assign_from_queue_starts_treatment_immediately(auth_client, unity
     # assign() dédié ("Ticket pris en charge") — même fait métier, message différent.
     assignee_notifs = await _notifications_for(903, request_id)
     assert any(n.title == "Ticket assigné" for n in assignee_notifs)
+    # Le demandeur est informé de la prise en charge, plus d'un traitement « en
+    # cours » : celui-ci ne commencera qu'au geste explicite du traitant.
     requester_notifs = await _notifications_for(MOCK_ACCOUNTS["user"].id, request_id)
-    assert any(n.title == "Ticket en cours de traitement" for n in requester_notifs)
+    titles = [n.title for n in requester_notifs]
+    assert "Ticket pris en charge" in titles, titles
 
 
 # ── assign() dédié (ex. "M'assigner" / "Assigner" depuis la fiche détail) ─────
 
-async def test_dedicated_assign_endpoint_starts_treatment_immediately(auth_client, unity_id):
-    await _ensure_test_account(904, unity_id=unity_id, role="agent-support")
+async def test_dedicated_assign_endpoint_assigns_without_starting(auth_client, unity_id):
+    await _ensure_test_account(904, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "dedicated-assign")
 
     resp = await _call_as(
@@ -114,18 +129,19 @@ async def test_dedicated_assign_endpoint_starts_treatment_immediately(auth_clien
     )
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
-    assert data["request_status"] == "in_progress"
+    assert data["request_status"] == "assigned"
 
     events = await _timeline(auth_client, request_id)
     assigned_events = [e for e in events if e["event_type"] == "assigned"]
+    # Une seule ligne de journal pour une seule action utilisateur. Le libellé ne
+    # mentionne plus de « traitement démarré » : l'assignation ne démarre plus
+    # rien, le démarrage a son propre événement `treatment_started`.
     assert len(assigned_events) == 1
-    # Une seule ligne de journal cohérente ("assigné" + "traitement démarré"),
-    # jamais deux événements distincts pour la même action (section 7).
-    assert "traitement démarré" in assigned_events[0]["label"]
+    assert not [e for e in events if e["event_type"] == "treatment_started"]
 
     # Pas de double transition possible ensuite.
     redundant = await _call_as(
-        _dep(904, "agent-support", unity_id), "PATCH", f"/api/v1/requests/{request_id}",
+        _dep(904, "chief-service", unity_id), "PATCH", f"/api/v1/requests/{request_id}",
         {"request_status": "in_progress"},
     )
     assert redundant.status_code == 400, redundant.text
@@ -134,19 +150,26 @@ async def test_dedicated_assign_endpoint_starts_treatment_immediately(auth_clien
 # ── Transmission dynamique après démarrage : continuité, pas de redémarrage ───
 
 async def test_transmission_after_take_preserves_cycle_no_restart(auth_client, unity_id):
-    await _ensure_test_account(905, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(906, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(905, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(906, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "transmit-after-take")
 
     take_resp = await _call_as(
-        _dep(905, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/qualify",
+        _dep(905, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/qualify",
         {"category": "panne", "priority": "medium", "unit_id": str(unity_id), "assignee_id": "905"},
     )
     assert take_resp.status_code == 200, take_resp.text
-    assert take_resp.json()["data"]["request_status"] == "in_progress"
+    assert take_resp.json()["data"]["request_status"] == "assigned"
+
+    started = await _call_as(
+        _dep(905, "chief-service", unity_id), "POST",
+        f"/api/v1/requests/{request_id}/start-treatment", {"location": "Site EDG"},
+    )
+    assert started.status_code == 200, started.text
+
 
     transmit_resp = await _call_as(
-        _dep(905, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
+        _dep(905, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
         {"to_user_id": "906", "work_done": "Diagnostic initial.", "reason": "Compétence réseau requise."},
     )
     assert transmit_resp.status_code == 200, transmit_resp.text
@@ -164,7 +187,7 @@ async def test_transmission_after_take_preserves_cycle_no_restart(auth_client, u
 
     # C (906) peut directement résoudre — aucune étape "Démarrer traitement" requise.
     resolve_resp = await _call_as(
-        _dep(906, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
+        _dep(906, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
         _FULL_RESOLVE_BODY,
     )
     assert resolve_resp.status_code == 200, resolve_resp.text
@@ -178,18 +201,24 @@ async def test_reopened_ticket_taken_from_queue_starts_new_cycle_immediately(aut
     vérifie uniquement la partie BR-QUEUE-AUTO-START-001 : une fois le ticket
     réouvert et de retour en File d'attente, une nouvelle prise démarre
     immédiatement un nouveau cycle de traitement."""
-    await _ensure_test_account(907, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(909, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(907, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(909, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "reopen-then-take")
 
     take_resp = await _call_as(
-        _dep(907, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/qualify",
+        _dep(907, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/qualify",
         {"category": "panne", "priority": "medium", "unit_id": str(unity_id), "assignee_id": "907"},
     )
     assert take_resp.status_code == 200, take_resp.text
 
+    started = await _call_as(
+        _dep(907, "chief-service", unity_id), "POST",
+        f"/api/v1/requests/{request_id}/start-treatment", {"location": "Site EDG"},
+    )
+    assert started.status_code == 200, started.text
+
     resolve_resp = await _call_as(
-        _dep(907, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
+        _dep(907, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
         _FULL_RESOLVE_BODY,
     )
     assert resolve_resp.status_code == 200, resolve_resp.text
@@ -207,14 +236,14 @@ async def test_reopened_ticket_taken_from_queue_starts_new_cycle_immediately(aut
 
     # Nouvel intervenant (jamais impliqué avant) prend le ticket réouvert.
     take_again = await _call_as(
-        _dep(909, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/qualify",
+        _dep(909, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/qualify",
         {"category": "panne", "priority": "medium", "unit_id": str(unity_id), "assignee_id": "909"},
     )
     assert take_again.status_code == 200, take_again.text
     take_again_data = take_again.json()["data"]
-    # BR-QUEUE-AUTO-START-001 — nouveau cycle démarré immédiatement, jamais
-    # réutilisation du timestamp/statut de l'ancien cycle.
-    assert take_again_data["request_status"] == "in_progress"
+    # BR-TRAITEMENT-PROGRESSIF-001 — la reprise après réouverture assigne le
+    # nouveau cycle sans le démarrer, comme toute prise depuis la File d'attente.
+    assert take_again_data["request_status"] == "assigned"
     assert not await _in_queue(request_id)
 
     events = await _timeline(auth_client, request_id)
@@ -232,7 +261,7 @@ async def test_requester_still_cannot_take_own_ticket_from_queue(auth_client, un
         request_id = str(created.json()["data"]["id"])
 
     resp = await _call_as(
-        _dep(MOCK_ACCOUNTS["user"].id, "agent-support", unity_id), "POST",
+        _dep(MOCK_ACCOUNTS["user"].id, "chief-service", unity_id), "POST",
         f"/api/v1/requests/{request_id}/qualify",
         {"category": "panne", "priority": "medium", "unit_id": str(unity_id), "assignee_id": str(MOCK_ACCOUNTS["user"].id)},
     )

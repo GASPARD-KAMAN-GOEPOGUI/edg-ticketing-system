@@ -97,6 +97,18 @@ class _RequestCommonFields(BaseResponse):
     assignee_name: Optional[str] = None
     requester_id: Optional[int] = None
     requester_unit_id: Optional[int] = None
+    requester_job: Optional[str] = None
+    employee_matricule: Optional[str] = None
+    # Identités organisationnelles figées (voir ModelRequest._frozen) — nulles
+    # sur les tickets antérieurs au figeage, que le frontend résout alors depuis
+    # les identifiants d'unité comme auparavant.
+    requester_direction_id: Optional[int] = None
+    requester_direction_label: Optional[str] = None
+    requester_department_label: Optional[str] = None
+    requester_service_label: Optional[str] = None
+    handler_direction_label: Optional[str] = None
+    handler_department_label: Optional[str] = None
+    handler_service_label: Optional[str] = None
     merged_into_id: Optional[int] = None
     ref: str
     title: str
@@ -134,8 +146,43 @@ class _RequestCommonFields(BaseResponse):
 
 
 class RequestListItemResponse(_RequestCommonFields):
-    """Schéma allégé pour les listes/dashboards — sans historique de workflow ni CSAT."""
+    """Schéma allégé pour les listes/dashboards — sans historique de workflow ni CSAT.
+
+    `proposed_solution` en est volontairement ABSENT : ce schéma sert aussi la
+    liste personnelle du demandeur (« Mes tickets »), à qui le descriptif de
+    solution ne doit jamais être montré. Les écrans qui en ont besoin passent
+    par `DistributionListItemResponse` (file du chef de division, endpoint
+    déjà gardé) ou par le détail `RequestResponse`.
+    """
     pass
+
+
+class DistributionListItemResponse(RequestListItemResponse):
+    """File « Distribution » du chef de division support uniquement.
+
+    Le CDS décide de prendre ou d'affecter le ticket DEPUIS LA LISTE : il lui
+    faut donc le descriptif de solution proposée sans ouvrir la fiche. Schéma
+    séparé plutôt qu'un champ ajouté au schéma commun : l'endpoint
+    `GET /requests/distribution` est gardé par `_distribution_guard`
+    (chef-division-support + admin), donc le champ ne peut structurellement pas
+    atteindre un demandeur.
+    """
+    proposed_solution: Optional[str] = None
+
+
+class PvTrackingItemResponse(RequestListItemResponse):
+    """TSI — Tableau de Suivi des Interventions (procédure tâche 3.4).
+
+    Servi par `GET /requests/pv-tracking`, gardé pour le chef de division : il y
+    suit les tickets qu'il a répartis jusqu'à l'archivage de leur PV. Schéma
+    séparé du schéma commun pour la même raison que `DistributionListItemResponse` :
+    ces champs ne doivent pas se retrouver dans les listes du demandeur.
+    """
+    pv_validated_at: Optional[datetime] = None
+    pv_submitted_at: Optional[datetime] = None
+    pv_archived_at: Optional[datetime] = None
+    intervenant_name: Optional[str] = None
+    intervenant_badge: Optional[str] = None
 
 
 class SlaCycleResponse(BaseModel):
@@ -163,7 +210,10 @@ class InterventionResponse(BaseModel):
     actor_id: Optional[str] = None
     actor_name: Optional[str] = None
     actor_role: Optional[str] = None
-    actor_matricule: Optional[str] = None
+    # PV d'intervention EDG/PS-GSI/PV-01 — figés au moment de l'intervention.
+    # `actor_status` : titulaire | prestataire | stagiaire.
+    actor_status: Optional[str] = None
+    actor_matricule: Optional[str] = None   # libellé métier : « Badge »
     actor_direction_label: Optional[str] = None
     actor_department_label: Optional[str] = None
     actor_service_label: Optional[str] = None
@@ -188,6 +238,12 @@ class InterventionResponse(BaseModel):
 
 class RequestResponse(_RequestCommonFields):
     """Schéma complet — page détail d'un ticket (historique + appréciation CSAT)."""
+    # `proposed_solution` est volontairement ABSENT de ce schéma. Vingt endpoints
+    # renvoient un `RequestResponse`, dont sept sont accessibles au demandeur
+    # (création, édition personnelle, clôture, réouverture, annulation, suivi…) :
+    # l'y ajouter obligerait à effacer le champ à chacun d'eux, et le premier
+    # endpoint ajouté ensuite fuirait. Il est donc servi par un endpoint dédié et
+    # gardé, `GET /requests/{id}/proposed-solution`.
     timelines: list[WorkflowDetailResponse] = []
     appreciation: Optional[AppreciationResponse] = None
     sla_cycles: list[SlaCycleResponse] = []

@@ -28,8 +28,8 @@ class ActivityLog(Base, BaseColumns):
     # ── Attributs métier ──────────────────────────────────────────────────────
     actor: Mapped[str] = mapped_column(String(200), nullable=False)
     actor_role: Mapped[str] = mapped_column(
-        SAEnum("public", "user", "agent-support", "chief-service", "chief-departement",
-               "director", "admin", name="log_role_enum"),
+        SAEnum("public", "user", "chief-service", "technicien", "chef-division-support",
+               "admin", name="log_role_enum"),
         nullable=False,
     )
     action: Mapped[str] = mapped_column(String(500), nullable=False)

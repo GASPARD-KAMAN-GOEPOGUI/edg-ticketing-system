@@ -46,12 +46,8 @@ def ticket(
         ("new", "qualifying"),
         ("qualifying", "assigned"),
         ("assigned", "in_progress"),
-        ("escalated", "in_progress"),
-        ("in_progress", "pending"),
         ("assigned", "resolved"),
         ("in_progress", "resolved"),
-        ("pending", "resolved"),
-        ("escalated", "qualifying"),
         ("resolved", "closed"),
         ("closed", "reopened"),
         ("assigned", "rejected"),
@@ -67,6 +63,15 @@ def test_transition_matrix_allows_expected_paths(current, target):
     [
         ("new", "resolved"),
         ("qualifying", "resolved"),
+        # "qualified", "pending" et "escalated" supprimes le 2026-09-28 : ni
+        # cibles, ni sources. Un ticket ne peut plus ni y entrer ni en sortir.
+        ("in_progress", "pending"),
+        ("in_progress", "escalated"),
+        ("qualifying", "qualified"),
+        ("escalated", "in_progress"),
+        ("pending", "resolved"),
+        ("escalated", "qualifying"),
+        ("qualified", "assigned"),
         ("new", "closed"),
         ("closed", "assigned"),
         ("resolved", "assigned"),
@@ -81,14 +86,12 @@ def test_transition_matrix_rejects_invalid_paths(current, target):
 
 def test_status_aliases_are_normalized():
     assert normalize_status("cancalled") == "cancelled"
-    assert normalize_status("escaladed") == "escalated"
 
 
 def test_agent_support_role_is_normalized_and_authorized_for_agent_actions():
-    assert_action_allowed("agent-support", "resolve")
-    assert_action_allowed("agent-support", "escalate")
+    assert_action_allowed("chief-service", "resolve")
     with pytest.raises(ForbiddenException):
-        assert_action_allowed("agent-support", "reject")
+        assert_action_allowed("chief-service", "reject")
 
 
 @pytest.mark.parametrize("current", ["cancelled", "cancalled", "closed", "resolved", "rejected"])
@@ -112,9 +115,10 @@ def test_transition_bypass_is_explicit_for_admin_and_dg():
     ("role", "action"),
     [
         ("agent", "resolve"),
-        ("chief", "reject"),
-        ("director", "reassign"),
-        ("admin", "escalate"),
+        # `reject` et `reassign` etaient portes par chief-departement/director,
+        # retires le 2026-09-25 : ces actions sont desormais admin-only.
+        ("admin", "reject"),
+        ("admin", "reassign"),
         ("user", "close"),
     ],
 )
@@ -261,158 +265,16 @@ def test_agent_can_assign_any_operational_handler_in_scope():
         )
 
 
-def test_chief_and_admin_can_assign_operational_handlers():
-    current_ticket = ticket(status="qualified", unity_id=1, assignee_id=None)
-
-    assert_assignment_allowed(
-        actor("chief", id=3, unity_id=1),
-        current_ticket,
-        assignee_id=2,
-        target_unity_id=1,
-        target_role="director",
-    )
-    assert_assignment_allowed(
-        actor("admin", id=6, unity_id=None),
-        current_ticket,
-        assignee_id=2,
-        target_unity_id=99,
-        target_role="admin",
-    )
-
-    with pytest.raises(ForbiddenException):
-        assert_assignment_allowed(
-            actor("chief", id=3, unity_id=1),
-            current_ticket,
-            assignee_id=2,
-            target_unity_id=2,
-            target_role="agent",
-        )
-
-    with pytest.raises(ForbiddenException):
-        assert_assignment_allowed(
-            actor("chief", id=3, unity_id=1),
-            current_ticket,
-            assignee_id=2,
-            target_unity_id=1,
-            target_role="user",
-        )
-
-
-def test_department_chief_and_director_can_assign_within_scope():
-    """Philosophie collaborative : chief-departement et director sont des
-    intervenants operationnels et peuvent assigner dans leur perimetre."""
-    current_ticket = ticket(status="qualified", unity_id=2, assignee_id=None)
-
-    assert_action_allowed("chief-departement", "assign")
-    assert_assignment_allowed(
-        actor("chief-departement", id=3, unity_id=1),
-        current_ticket,
-        assignee_id=2,
-        target_unity_id=2,
-        target_role="agent-support",
-        allowed_scope_unity_ids={1, 2, 3},
-    )
-    assert_action_allowed("director", "assign")
-    assert_assignment_allowed(
-        actor("director", id=4, unity_id=1),
-        current_ticket,
-        assignee_id=5,
-        target_unity_id=3,
-        target_role="chief-departement",
-        allowed_scope_unity_ids={1, 2, 3},
-    )
-
-    with pytest.raises(ForbiddenException):
-        assert_assignment_allowed(
-            actor("chief-departement", id=3, unity_id=1),
-            ticket(status="qualified", unity_id=99, assignee_id=None),
-            assignee_id=2,
-            target_unity_id=2,
-            target_role="agent-support",
-            allowed_scope_unity_ids={1, 2, 3},
-        )
-
-
-def test_service_reassignment_is_limited_by_role_scope():
-    # Lot 2.5 : "Changer de service" retire a chief-service — seul chief-departement
-    # (parmi les chefs) conserve cette action ; les cas ci-dessous utilisent donc
-    # chief-departement pour tester la logique de perimetre/motif elle-meme.
-    current_ticket = ticket(status="qualified", unity_id=10, direction_id=1)
-
-    assert_service_reassignment_allowed(
-        actor("chief-departement", id=3, unity_id=10),
-        current_ticket,
-        target_unity_id=11,
-        target_direction_id=1,
-        reason="Agent indisponible",
-    )
-    assert_service_reassignment_allowed(
-        actor("director", id=4, unity_id=1),
-        current_ticket,
-        target_unity_id=11,
-        target_direction_id=1,
-    )
-    assert_service_reassignment_allowed(
-        actor("admin", id=6, unity_id=None),
-        current_ticket,
-        target_unity_id=99,
-        target_direction_id=99,
-    )
-
-    with pytest.raises(ForbiddenException):
-        assert_service_reassignment_allowed(
-            actor("chief-departement", id=3, unity_id=10),
-            current_ticket,
-            target_unity_id=99,
-            target_direction_id=2,
-            reason="Mauvais service",
-        )
-
-    assert_service_reassignment_allowed(
-        actor("chief-departement", id=3, unity_id=10),
-        ticket(status="qualified", unity_id=10, direction_id=None),
-        target_unity_id=11,
-        target_direction_id=1,
-        actor_direction_id=1,
-        reason="Charge trop elevee",
-    )
-
-    with pytest.raises(ForbiddenException):
-        assert_service_reassignment_allowed(
-            actor("director", id=4, unity_id=1),
-            current_ticket,
-            target_unity_id=99,
-            target_direction_id=2,
-        )
-
-    with pytest.raises(ForbiddenException):
-        assert_service_reassignment_allowed(
-            actor("chief-departement", id=3, unity_id=10),
-            ticket(status="qualified", unity_id=10, direction_id=None),
-            target_unity_id=99,
-            target_direction_id=2,
-            actor_direction_id=1,
-            reason="Mauvais perimetre",
-        )
-
-
-@pytest.mark.parametrize("chief_role", ["chief-departement"])
-def test_chief_departement_reassignment_requires_reason(chief_role):
-    with pytest.raises(BusinessException):
-        assert_service_reassignment_allowed(
-            actor(chief_role, id=3, unity_id=10),
-            ticket(status="qualified", unity_id=10, direction_id=1),
-            target_unity_id=11,
-            target_direction_id=1,
-            reason="  ",
-        )
-
-
-@pytest.mark.parametrize("chief_role", ["chief", "chief-service"])
+@pytest.mark.parametrize("chief_role", ["chief-service"])
 def test_chief_service_can_no_longer_reassign(chief_role):
-    """Lot 2.5 (narrowing valide) : chief-service (et son alias legacy 'chief') ne
-    peut plus changer le service d'un ticket, quel que soit le motif fourni."""
-    assert_action_allowed("chief-departement", "reassign")  # regression : toujours autorise
+    """Lot 2.5 (narrowing valide) : chief-service ne peut plus changer le service
+    d'un ticket, quel que soit le motif fourni.
+
+    La contre-epreuve portait sur `chief-departement`, role retire le
+    2026-09-25 : elle s'appuie desormais sur `admin`, seul role conservant
+    l'action `reassign`.
+    """
+    assert_action_allowed("admin", "reassign")  # regression : toujours autorise
     with pytest.raises(ForbiddenException):
         assert_action_allowed(chief_role, "reassign")
     with pytest.raises(ForbiddenException):
@@ -425,7 +287,7 @@ def test_chief_service_can_no_longer_reassign(chief_role):
         )
 
 
-@pytest.mark.parametrize("agent_role", ["agent", "agent-support"])
+@pytest.mark.parametrize("agent_role", ["agent", "chief-service"])
 def test_agent_escalation_requires_own_assigned_ticket(agent_role):
     current_actor = actor(agent_role, id=2, unity_id=1)
 
@@ -439,56 +301,6 @@ def test_agent_escalation_requires_own_assigned_ticket(agent_role):
             current_actor,
             ticket(status="in_progress", unity_id=1, assignee_id=3),
         )
-
-
-def test_director_scope_is_limited_to_direction_services():
-    current_actor = actor("director", id=4, unity_id=1)
-
-    assert_ticket_scope(
-        current_actor,
-        ticket(unity_id=2, direction_id=1),
-        action="resolve",
-        allowed_dir_unity_ids={1, 2, 3},
-    )
-
-    with pytest.raises(ForbiddenException):
-        assert_ticket_scope(
-            current_actor,
-            ticket(unity_id=99, direction_id=99),
-            action="resolve",
-            allowed_dir_unity_ids={1, 2, 3},
-        )
-
-
-def test_director_can_resolve_any_active_status():
-    """BR-TRANSMIT-001 (remplace l'ancien test_director_resolves_only_escalated_tickets) :
-    l'ancienne limite "un directeur ne peut résoudre qu'un ticket déjà escaladé" a été
-    retirée — un directeur peut désormais terminer le traitement de tout ticket dont
-    il est l'intervenant actuel, quel que soit son statut actif, y compris reçu par
-    transmission sans escalade préalable (assert_role_specific_action_constraints n'a
-    plus de contrainte propre à director/resolve)."""
-    current_actor = actor("director", id=4, unity_id=1)
-
-    for status in ("assigned", "in_progress", "pending", "escalated"):
-        assert_ticket_action(
-            current_actor,
-            ticket(status=status, unity_id=2, direction_id=1),
-            "resolve",
-            target_status="resolved",
-            allowed_dir_unity_ids={1, 2, 3},
-        )
-
-
-def test_chief_departement_can_now_resolve():
-    """BR-TRANSMIT-001 (remplace l'ancien test_chief_departement_can_no_longer_resolve) :
-    l'exclusion Lot 3.2 est levée — un chef de département peut désormais terminer le
-    traitement d'un ticket dont il est l'intervenant actuel (assert_is_current_handler
-    vérifie assignee_id == actor.id ; le rôle n'est plus qu'un filtre général)."""
-    assert_action_allowed("chief-departement", "resolve")
-
-    # Regression : les autres roles autorises a resoudre restent inchanges.
-    for role in ("agent-support", "chief-service", "director", "admin"):
-        assert_action_allowed(role, "resolve")
 
 
 def test_ticket_action_combines_role_scope_and_transition():

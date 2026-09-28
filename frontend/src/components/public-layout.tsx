@@ -9,7 +9,6 @@ import { useTheme } from "@/lib/use-theme";
 const navLinks = [
   { to: "/", label: "Accueil" },
   { to: "/track", label: "Suivre mon ticket" },
-  { to: "/knowledge", label: "Base de connaissance" },
 ];
 
 export function PublicLayout({ children }: { children: ReactNode }) {
@@ -216,7 +215,6 @@ export function PublicLayout({ children }: { children: ReactNode }) {
                   {[
                     { label: "Espace employé", to: "/login" },
                     { label: "Suivre un ticket", to: "/track" },
-                    { label: "Base de connaissance", to: "/knowledge" },
                   ].map((l) => (
                     <li key={l.to}>
                       <Link
@@ -240,7 +238,6 @@ export function PublicLayout({ children }: { children: ReactNode }) {
                     { label: "Connexion", to: "/login" },
                     { label: "Notifications", to: "/login" },
                     { label: "Tickets", to: "/login" },
-                    { label: "Aide", to: "/help" },
                   ].map((l) => (
                     <li key={l.label}>
                       <Link
@@ -263,8 +260,6 @@ export function PublicLayout({ children }: { children: ReactNode }) {
                   {[
                     { label: "Conditions", to: "/" },
                     { label: "Confidentialité", to: "/" },
-                    { label: "FAQ", to: "/help" },
-                    { label: "Support", to: "/help" },
                   ].map((l) => (
                     <li key={l.label}>
                       <Link

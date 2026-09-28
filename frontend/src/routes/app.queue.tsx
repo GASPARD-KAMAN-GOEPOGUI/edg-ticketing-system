@@ -1,10 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { requireRole } from "@/lib/auth-guard";
+import { prefetch } from "@/lib/prefetch";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { GlassCard } from "@/components/glass-card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { PriorityBadge } from "@/components/status-badge";
 import {
   Select,
@@ -15,14 +17,13 @@ import {
 } from "@/components/ui/select";
 import { fetchTriage, fetchRequest, qualifyTriage } from "@/lib/api/requests";
 import { fetchUsers } from "@/lib/api/accounts";
-import { fetchDirections, fetchDepartments, fetchUnits } from "@/lib/api/directions-units";
-import { fetchRoutingRules, fetchRequestCategories } from "@/lib/api/admin-config";
+import { fetchRequestCategories } from "@/lib/api/admin-config";
 import { priorityLabels } from "@/lib/mock-data";
 import type { Priority, Role } from "@/lib/mock-data";
 import { toast } from "sonner";
 import {
   CheckCircle2, ChevronDown, ChevronUp, History,
-  Loader2, MessageSquare, User, UserPlus, Zap,
+  Loader2, User, UserPlus, Zap,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -31,13 +32,24 @@ import { StatusBadge } from "@/components/status-badge";
 import { useUser } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
+/** Seule la DSI traite les incidents : l'organisation traitante (direction,
+ *  département, service) n'est plus saisie ici — le backend la déduit du
+ *  rattachement du chef de service qui qualifie, déjà renseigné au back-office.
+ *  Le CSSHF ne choisit donc que la catégorie, la priorité et le chef de
+ *  division support de SON service à qui orienter le ticket. */
 type TriageForm = {
+  /** Vide à l'ouverture : la qualification est un point de contrôle, le chef de
+   *  service doit choisir activement. Pré-remplir depuis le ticket permettait de
+   *  valider sans avoir rien examiné. */
   category: string;
-  priority: Priority;
-  directionId: string;
-  departmentId: string;
-  unitId: string;
+  /** Vide à l'ouverture, même raison que `category` — d'où `| ""` plutôt que
+   *  `Priority` seul. */
+  priority: Priority | "";
   personId: string;
+  /** Procédure EDG/PS-GSI/Pro-02 tâche 1.3 — point de contrôle « descriptif de
+   *  la solution proposée ». Obligatoire dans les deux cas : orientation vers un
+   *  chef de division support comme prise en charge personnelle. */
+  proposedSolution: string;
 };
 
 const QUALIFIABLE_STATUSES = new Set(["new", "qualifying", "qualified", "reopened"]);
@@ -48,27 +60,44 @@ const STATUS_ALIASES: Record<string, string> = {
   escaladed: "escalated",
 };
 
+/** Libellé d'un chef de division support dans la liste d'imputation :
+ *  « nom complet.badge ». Un service peut compter plusieurs chefs de division,
+ *  et le nom seul ne suffit pas toujours à les distinguer — d'où le badge.
+ *
+ *  « Badge » est le libellé métier de `account.matricule` (la colonne n'est pas
+ *  renommée : la table `account` est partagée avec la plateforme centrale et le
+ *  matricule sert d'identifiant de connexion). Sans badge renseigné, on affiche
+ *  le nom complet seul, sans point orphelin — même repli que le PV d'intervention. */
+export function queueTargetLabel(person: { name: string; firstname?: string; matricule?: string }) {
+  const fullName = [person.firstname, person.name].filter(Boolean).join(" ").trim() || person.name;
+  const badge = person.matricule?.trim();
+  return badge ? `${fullName}.${badge}` : fullName;
+}
+
 function normalizeQueueStatus(status?: string) {
   const clean = (status || "new").trim().toLowerCase();
   return STATUS_ALIASES[clean] ?? clean;
 }
 
 const PRIORITIES: Priority[] = ["low", "medium", "high", "critical"];
-const OPERATIONAL_ROLES: Role[] = ["agent-support", "chief-service", "chief-departement", "director", "admin"];
+// Cibles possibles pour le routage d'un ticket depuis la file d'attente ("Personne
+// cible") — reste large (tous les roles traitants), distinct de qui peut ACCEDER a
+// cette page (PAGE_ACCESS_ROLES, restreint au Module 2).
+const OPERATIONAL_ROLES: Role[] = ["chief-service", "technicien", "chef-division-support", "admin"];
+// File d'attente — reservee au chef de service (CSSHF) et a l'admin (Module 2).
+const PAGE_ACCESS_ROLES: Role[] = ["chief-service", "admin"];
 
 export const Route = createFileRoute("/app/queue")({
-  // Philosophie collaborative : tous les rôles opérationnels peuvent prendre un
-  // ticket de la file d'attente ou devenir l'intervenant courant.
-  beforeLoad: () => requireRole("agent-support", "chief-service", "chief-departement", "director", "admin"),
+  beforeLoad: () => requireRole(...PAGE_ACCESS_ROLES),
   head: () => ({ meta: [{ title: "File d'attente — EDG Support" }] }),
   // Précharge les données (pas seulement le chunk JS) au survol du lien —
   // même queryKey que le useQuery du composant, donc pas de double fetch.
   loader: ({ context: { queryClient } }) =>
-    queryClient.ensureQueryData({
+    prefetch(queryClient.ensureQueryData({
       queryKey: ["qualify"],
       queryFn: () => fetchTriage({ limit: 50 }),
       staleTime: 20_000,
-    }),
+    })),
   component: QueuePage,
 });
 
@@ -101,12 +130,9 @@ function QueuePage() {
 function QualifyTab() {
   const sessionUser = useUser();
   const queryClient = useQueryClient();
-  const isOperationalRole = Boolean(sessionUser?.role && OPERATIONAL_ROLES.includes(sessionUser.role));
+  const isOperationalRole = Boolean(sessionUser?.role && PAGE_ACCESS_ROLES.includes(sessionUser.role));
   const canUseAssignForm = isOperationalRole;
   const canTakeRole = isOperationalRole;
-  const assignableRoles = sessionUser?.role === "admin"
-    ? OPERATIONAL_ROLES
-    : OPERATIONAL_ROLES.filter((role) => role !== "admin");
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["qualify"],
@@ -122,14 +148,11 @@ function QualifyTab() {
   const [forms, setForms] = useState<Record<string, TriageForm>>({});
 
   function getForm(id: string): TriageForm {
-    const req = queue.find((r) => r.id === id);
     return forms[id] ?? {
-      category: req?.category ?? "",
-      priority: (req?.priority as Priority) ?? "medium",
-      directionId: req?.directionId ?? "",
-      departmentId: "",
-      unitId: "",
+      category: "",
+      priority: "",
       personId: "",
+      proposedSolution: "",
     };
   }
 
@@ -144,58 +167,28 @@ function QualifyTab() {
   });
   const categories = categoryItems.filter((c) => c.status).map((c) => c.label);
 
-  const { data: routingRulesData = [] } = useQuery({
-    queryKey: ["routing-rules"],
-    queryFn: fetchRoutingRules,
-    staleTime: 5 * 60_000,
-  });
+  // Les règles de routage, la liste des directions et les cascades
+  // Direction → Département → Service ont été retirées de cet écran : la cible
+  // n'est plus choisie, elle EST le service du chef de service qui qualifie
+  // (déduit côté serveur dans ServiceRequest.qualify_triage).
 
-  const suggestDirection = (category: string) =>
-    routingRulesData.find(
-      (r) => r.conditionField === "category" && r.conditionValue === category && r.active,
-    ) ?? null;
-
-  const { data: realDirections = [] } = useQuery({
-    queryKey: ["directions", "active"],
-    queryFn: () => fetchDirections({ status: "active" }),
-    staleTime: 5 * 60_000,
-  });
-
-  const expandedDirectionId = expanded
-    ? (forms[expanded]?.directionId ?? queue.find((r) => r.id === expanded)?.directionId ?? "")
-    : "";
-  const expandedDepartmentId = expanded ? (forms[expanded]?.departmentId ?? "") : "";
-  const expandedUnitId = expanded ? (forms[expanded]?.unitId ?? "") : "";
-
-  const { data: expandedDepartments = [] } = useQuery({
-    queryKey: ["departments", expandedDirectionId, "active"],
-    queryFn: () => fetchDepartments({ directionId: expandedDirectionId, status: "active" }),
-    enabled: !!expandedDirectionId,
-    staleTime: 5 * 60_000,
-  });
-
-  const { data: expandedUnits = [] } = useQuery({
-    queryKey: ["units", expandedDepartmentId, "active"],
-    queryFn: () => fetchUnits({ departmentId: expandedDepartmentId, status: "active" }),
-    enabled: !!expandedDepartmentId,
-    staleTime: 5 * 60_000,
-  });
-
-  // Intervenants pouvant recevoir un ticket dans la direction sélectionnée :
-  // tous les rôles opérationnels, actifs (filtre déjà appliqué côté backend).
+  // Module 2 — depuis la File d'attente, le chef de service n'a que deux issues :
+  // prendre le ticket pour lui-même, ou l'envoyer à un chef de division support
+  // (CDS) de SON service. Ni technicien, ni chef-departement, ni director, ni un
+  // autre chef de service ne sont proposés ici. La chaîne de transmission
+  // dynamique (A → An) qui suit n'est pas concernée : elle reste libre.
+  const actorUnitId = sessionUser?.unit_id ? String(sessionUser.unit_id) : "";
   const { data: unitPeopleData } = useQuery({
-    queryKey: ["people-by-direction", expandedDirectionId, expandedUnitId, sessionUser?.role],
+    queryKey: ["queue-targets", actorUnitId],
     queryFn: async () => {
-      const scope = expandedDirectionId ? { direction_id: expandedDirectionId } : { unit_id: expandedUnitId };
-      const results = await Promise.all(
-        assignableRoles.map((role) => fetchUsers({ role, ...scope, limit: 100 })),
+      // fetchUsers({role}) élargit au groupe via l'alias RBAC backend — on
+      // refiltre donc strictement sur chef-division-support côté client.
+      const res = await fetchUsers({ role: "chef-division-support", unit_id: actorUnitId, limit: 100 });
+      return res.items.filter(
+        (person) => person.role === "chef-division-support" && String(person.unit_id ?? "") === actorUnitId,
       );
-      const byId = new Map(
-        results.flatMap((result) => result.items).map((person) => [person.id, person]),
-      );
-      return Array.from(byId.values());
     },
-    enabled: (!!expandedDirectionId || !!expandedUnitId) && assignableRoles.length > 0,
+    enabled: !!actorUnitId,
     staleTime: 5 * 60_000,
   });
   // BR-REQUESTER-NO-SELF-TREATMENT-001 — le demandeur du ticket en cours de
@@ -233,9 +226,10 @@ function QualifyTab() {
         {
           category: form.category,
           priority: form.priority,
-          direction_id: form.directionId,
-          unit_id: form.unitId || undefined,
+          // Ni direction_id ni unit_id : l'organisation traitante est celle du
+          // chef de service qui qualifie, déduite côté serveur.
           assignee_id: form.personId || undefined,
+          proposed_solution: form.proposedSolution.trim() || undefined,
         },
         sessionUser?.id,
       ),
@@ -264,9 +258,8 @@ function QualifyTab() {
       data: {
         category: string;
         priority: string;
-        direction_id?: string;
-        unit_id?: string;
         assignee_id: string;
+        proposed_solution?: string;
       };
     }) => qualifyTriage(id, data, sessionUser?.id),
     onSuccess: (_, { id }) => {
@@ -325,26 +318,30 @@ function QualifyTab() {
           {queue.map((req) => {
             const isOpen = expanded === req.id;
             const form = getForm(req.id);
-            const suggestion = form.category ? suggestDirection(form.category) : null;
-            const departments = isOpen ? expandedDepartments : [];
-            const services = isOpen ? expandedUnits : [];
             const people = isOpen ? unitPeople : [];
-            const canAssign = Boolean(
-              form.directionId && form.departmentId && form.unitId && form.personId,
+            // Procédure tâche 1.3 — la qualification est un point de contrôle
+            // bloquant : rien ne part de la file d'attente sans catégorie,
+            // priorité et solution proposée explicitement saisies. Aucun repli
+            // sur une valeur par défaut, qui laisserait passer un ticket que
+            // personne n'a réellement qualifié.
+            const qualified = Boolean(
+              form.category && form.priority && form.proposedSolution.trim(),
             );
+            // Orienter exige en plus le chef de division support destinataire.
+            const canAssign = qualified && Boolean(form.personId);
             const isPending = qualifyMut.isPending && qualifyMut.variables?.id === req.id;
-            const takeDirectionId = form.directionId || req.directionId || sessionUser?.direction_id || undefined;
-            const takeUnitId = form.unitId || sessionUser?.unit_id || req.serviceId || undefined;
-            const takeCategory = form.category || req.category || "autre";
             const status = normalizeQueueStatus(req.status);
-            const canTake = canTakeRole && QUALIFIABLE_STATUSES.has(status) && !TERMINAL_STATUSES.has(status);
+            const canTake =
+              canTakeRole
+              && qualified
+              && QUALIFIABLE_STATUSES.has(status)
+              && !TERMINAL_STATUSES.has(status);
             const takeData = canTake && sessionUser?.id
               ? {
-                  category: takeCategory,
-                  priority: form.priority || req.priority,
-                  ...(takeDirectionId ? { direction_id: takeDirectionId } : {}),
-                  ...(takeUnitId ? { unit_id: takeUnitId } : {}),
+                  category: form.category,
+                  priority: form.priority,
                   assignee_id: sessionUser.id,
+                  proposed_solution: form.proposedSolution.trim(),
                 }
               : null;
             const isTaking = takeMut.isPending && takeMut.variables?.id === req.id;
@@ -428,24 +425,10 @@ function QualifyTab() {
                     {/* Formulaire */}
                     <div className="grid gap-4 sm:grid-cols-2">
                       <div>
-                        <Label>Catégorie</Label>
+                        <Label>Catégorie <span className="text-destructive">*</span></Label>
                         <Select
                           value={form.category}
-                          onValueChange={(v) => {
-                            const s = suggestDirection(v);
-                            if (s) {
-                              const dir = realDirections.find((d) => d.name === s.targetDirection);
-                              patchForm(req.id, {
-                                category: v,
-                                directionId: dir ? String(dir.id) : "",
-                                departmentId: "",
-                                unitId: "",
-                                personId: "",
-                              });
-                            } else {
-                              patchForm(req.id, { category: v });
-                            }
-                          }}
+                          onValueChange={(v) => patchForm(req.id, { category: v })}
                         >
                           <SelectTrigger className="mt-1.5 h-11">
                             <SelectValue placeholder="Choisir" />
@@ -456,12 +439,14 @@ function QualifyTab() {
                         </Select>
                       </div>
                       <div>
-                        <Label>Priorité</Label>
+                        <Label>Priorité <span className="text-destructive">*</span></Label>
                         <Select
                           value={form.priority}
                           onValueChange={(v) => patchForm(req.id, { priority: v as Priority })}
                         >
-                          <SelectTrigger className="mt-1.5 h-11"><SelectValue /></SelectTrigger>
+                          <SelectTrigger className="mt-1.5 h-11">
+                            <SelectValue placeholder="Choisir" />
+                          </SelectTrigger>
                           <SelectContent>
                             {PRIORITIES.map((p) => <SelectItem key={p} value={p}>{priorityLabels[p]}</SelectItem>)}
                           </SelectContent>
@@ -469,140 +454,60 @@ function QualifyTab() {
                       </div>
                     </div>
 
-                    {/* Suggestion routage + hiérarchie d'assignation */}
+                    {/* Orientation — le destinataire seul reste à choisir */}
                     {canUseAssignForm && (
                       <>
-                        {form.category && suggestion && (
-                          <div className="flex items-start gap-3 rounded-xl border border-info/25 bg-info/8 px-3 py-2.5 text-sm">
-                            <Zap className="mt-0.5 h-4 w-4 shrink-0 text-info" />
-                            <p>
-                              <span className="font-semibold text-info">Routage suggéré :</span>
-                              {" "}{suggestion.targetDirection} → {suggestion.targetService}{" "}
-                              <button
-                                className="ml-1 font-medium text-info underline underline-offset-2 hover:no-underline"
-                                onClick={() => {
-                                  const dir = realDirections.find((d) => d.name === suggestion.targetDirection);
-                                  patchForm(req.id, {
-                                    directionId: dir ? String(dir.id) : "",
-                                    departmentId: "",
-                                    unitId: "",
-                                    personId: "",
-                                  });
-                                }}
-                              >
-                                Appliquer
-                              </button>
-                            </p>
-                          </div>
-                        )}
-                        {form.category && !suggestion && routingRulesData.length > 0 && (
-                          <div className="flex items-start gap-3 rounded-xl border border-warning/25 bg-warning/8 px-3 py-2.5 text-sm">
-                            <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-warning-foreground dark:text-warning" />
-                            <p className="text-warning-foreground dark:text-warning">
-                              <span className="font-semibold">Aucune règle de routage</span> ne correspond à cette catégorie — sélectionnez manuellement la direction cible.
-                            </p>
-                          </div>
-                        )}
+                        <div className="flex items-start gap-3 rounded-xl border border-info/25 bg-info/8 px-3 py-2.5 text-sm">
+                          <Zap className="mt-0.5 h-4 w-4 shrink-0 text-info" />
+                          <p>
+                            <span className="font-semibold text-info">Traitement :</span>{" "}
+                            le ticket est rattaché à votre direction, votre département et
+                            votre service. Choisissez simplement le chef de division support
+                            à qui l'orienter, ou prenez-le pour votre propre traitement.
+                          </p>
+                        </div>
 
-                        {/* Hiérarchie d'assignation — Direction → Département → Service → Personne */}
+                        {/* Procédure tâche 1.3 — point de contrôle de l'imputation */}
+                        <div>
+                          <Label htmlFor={`proposed-solution-${req.id}`}>
+                            Solution proposée <span className="text-destructive">*</span>
+                          </Label>
+                          <Textarea
+                            id={`proposed-solution-${req.id}`}
+                            value={form.proposedSolution}
+                            onChange={(e) => patchForm(req.id, { proposedSolution: e.target.value })}
+                            placeholder="Décrivez la piste de résolution envisagée pour ce ticket…"
+                            className="mt-1.5 min-h-24"
+                          />
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Lue par le chef de division support puis par le technicien.
+                            Jamais visible du demandeur. Obligatoire pour prendre comme
+                            pour orienter le ticket.
+                          </p>
+                        </div>
+
                         <div className="grid gap-4 sm:grid-cols-2">
                           <div>
-                            <Label>Direction cible <span className="text-destructive">*</span></Label>
+                            <Label>Chef de division support <span className="text-destructive">*</span></Label>
                             <Select
-                              value={form.directionId}
-                              onValueChange={(v) => patchForm(req.id, {
-                                directionId: v,
-                                departmentId: "",
-                                unitId: "",
-                                personId: "",
-                              })}
+                              value={form.personId}
+                              onValueChange={(v) => patchForm(req.id, { personId: v })}
                             >
                               <SelectTrigger className="mt-1.5 h-11">
                                 <SelectValue placeholder="Sélectionner" />
                               </SelectTrigger>
                               <SelectContent>
-                                {realDirections.map((d) => (
-                                  <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            {realDirections.length === 0 && (
-                              <p className="mt-1 text-xs text-muted-foreground">Aucune direction active disponible.</p>
-                            )}
-                          </div>
-                          <div>
-                            <Label>Département cible <span className="text-destructive">*</span></Label>
-                            <Select
-                              value={form.departmentId}
-                              onValueChange={(v) => patchForm(req.id, {
-                                departmentId: v,
-                                unitId: "",
-                                personId: "",
-                              })}
-                              disabled={!form.directionId}
-                            >
-                              <SelectTrigger className="mt-1.5 h-11">
-                                <SelectValue placeholder={
-                                  !form.directionId ? "Choisir d'abord une direction" : "Sélectionner"
-                                } />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {departments.map((dep) => (
-                                  <SelectItem key={dep.id} value={String(dep.id)}>{dep.name}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            {form.directionId && departments.length === 0 && (
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                Aucun département actif disponible pour cette direction.
-                              </p>
-                            )}
-                          </div>
-                          <div>
-                            <Label>Service cible <span className="text-destructive">*</span></Label>
-                            <Select
-                              value={form.unitId}
-                              onValueChange={(v) => patchForm(req.id, { unitId: v, personId: "" })}
-                              disabled={!form.departmentId}
-                            >
-                              <SelectTrigger className="mt-1.5 h-11">
-                                <SelectValue placeholder={
-                                  !form.departmentId ? "Choisir d'abord un département" : "Sélectionner"
-                                } />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {services.map((s) => (
-                                  <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            {form.departmentId && services.length === 0 && (
-                              <p className="mt-1 text-xs text-muted-foreground">Aucun service actif disponible.</p>
-                            )}
-                          </div>
-                          <div>
-                            <Label>Personne cible <span className="text-destructive">*</span></Label>
-                            <Select
-                              value={form.personId}
-                              onValueChange={(v) => patchForm(req.id, { personId: v })}
-                              disabled={!form.unitId}
-                            >
-                              <SelectTrigger className="mt-1.5 h-11">
-                                <SelectValue placeholder={
-                                  !form.unitId ? "Choisir d'abord un service" : "Sélectionner"
-                                } />
-                              </SelectTrigger>
-                              <SelectContent>
                                 {people.map((p) => (
                                   <SelectItem key={p.id} value={String(p.id)}>
-                                    {p.name}{p.role ? ` · ${p.role}` : ""}
+                                    {queueTargetLabel(p)}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
-                            {form.unitId && people.length === 0 && (
+                            {people.length === 0 && (
                               <p className="mt-1 text-xs text-muted-foreground">
-                                Aucun employé autorisé à traiter dans ce service.
+                                Aucun chef de division support dans votre service — prenez le ticket
+                                pour votre propre traitement.
                               </p>
                             )}
                           </div>

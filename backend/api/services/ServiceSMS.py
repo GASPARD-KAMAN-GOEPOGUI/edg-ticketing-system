@@ -8,24 +8,20 @@ Protocole attendu (configurable via .env) :
   {"to": "<numéro>", "from": "<sender>", "message": "<corps>"}
 
 La réponse HTTP 2xx est considérée comme un succès.
-Si SMS_GATEWAY_URL est vide ou si sms_on=False, l'envoi est silencieusement ignoré.
+Si SMS_GATEWAY_URL est vide, l'envoi est silencieusement ignoré.
 """
 from __future__ import annotations
 
 import logging
 
 import httpx
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.configs.Environment import get_environment
-from api.models.ModelCommunicationSetting import CommunicationSetting
 
 logger = logging.getLogger(__name__)
 
 
 async def send_sms(
-    session: AsyncSession,
     *,
     to: str,
     message: str,
@@ -39,16 +35,10 @@ async def send_sms(
         logger.debug("ServiceSMS : SMS_GATEWAY_URL non configuré — envoi ignoré.")
         return False
 
-    # Vérifie le toggle sms_on dans CommunicationSetting
-    setting_row = await session.execute(
-        select(CommunicationSetting).limit(1)
-    )
-    setting: CommunicationSetting | None = setting_row.scalar_one_or_none()
-    if setting is not None and not setting.sms_on:
-        logger.debug("ServiceSMS : sms_on=False — envoi ignoré.")
-        return False
-
-    sender = (setting.sender_sms if setting and setting.sender_sms else None) or env.SMS_SENDER
+    # Le coupe-circuit CommunicationSetting.sms_on et l'expéditeur surchargeable
+    # ont été retirés le 2026-09-24 : l'expéditeur vient de SMS_SENDER (.env) et
+    # l'envoi se coupe en vidant SMS_GATEWAY_URL.
+    sender = env.SMS_SENDER
 
     payload = {
         "to": to,

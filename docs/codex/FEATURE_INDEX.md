@@ -31,7 +31,7 @@ Identifiant: FEATURE-AGENT-TICKETS
 Nom: Mes tickets agent
 Module: MOD-AGENT
 Description: tickets personnellement assignes a l'intervenant, KPI dynamiques sur cette charge, actions de traitement, resolution et escalade. Depuis le 2026-08-06, pour `chief-service` et `chief-departement`, la vue inclut aussi les tickets `escalated` du perimetre operationnel autorise, en remplacement de l'ancien onglet `Repartition > Escalades`.
-Roles concernes: agent-support, chief-service, chief-departement, director, admin.
+Roles concernes: chief-service, chief-service, chief-departement, director, admin.
 Route frontend: `/app/my-tickets`, `/app/my-tickets/tickets/$id`.
 Page principale: `frontend/src/routes/app.my-tickets.tsx`, `frontend/src/routes/app.my-tickets_.tickets.$id.tsx`.
 Service frontend: `frontend/src/lib/api/requests.ts`.
@@ -48,8 +48,8 @@ Chemins probables: `app.my-tickets.tsx`, `capabilities.ts`, `ticket-navigation.t
 Identifiant: FEATURE-QUEUE-QUALIFICATION
 Nom: File d'attente et demandes a qualifier
 Module: MOD-AGENT / MOD-CHIEF / MOD-DIRECTION
-Description: une seule vue — `A qualifier`, pour les demandes a orienter ou a prendre en charge par l'utilisateur connecte. L'ancien onglet `A prendre` (tickets non assignes du perimetre agent/chef, `unassigned_only=true`) a ete retire le 2026-07-29 (voir BR-ROLE-AGENT-001, note retrait onglet) pour tous les roles ayant acces a la page. Depuis le 2026-08-05, tous les roles operationnels (`agent-support`, `chief-service`, `chief-departement`, `director`, `admin`) peuvent prendre un ticket depuis la File d'attente et assigner vers un intervenant operationnel autorise (`dg` exclu ; destinataire admin reserve a admin). Le formulaire d'assignation (bouton `Assigner`) impose depuis le 2026-07-29 une hierarchie stricte Direction -> Departement -> Service -> Personne, chaque niveau filtre aux entites actives et cascade sur le parent choisi (voir BR-TICKET-QUALIFY-001, note formulaire 4 niveaux).
-Roles concernes: agent-support, chief-service, chief-departement, director, admin.
+Description: une seule vue — `A qualifier`, pour les demandes a orienter ou a prendre en charge par l'utilisateur connecte. L'ancien onglet `A prendre` (tickets non assignes du perimetre agent/chef, `unassigned_only=true`) a ete retire le 2026-07-29 (voir BR-ROLE-AGENT-001, note retrait onglet) pour tous les roles ayant acces a la page. Depuis le 2026-08-05, tous les roles operationnels (`chief-service`, `chief-service`, `chief-departement`, `director`, `admin`) peuvent prendre un ticket depuis la File d'attente et assigner vers un intervenant operationnel autorise (`dg` exclu ; destinataire admin reserve a admin). Le formulaire d'assignation (bouton `Assigner`) impose depuis le 2026-07-29 une hierarchie stricte Direction -> Departement -> Service -> Personne, chaque niveau filtre aux entites actives et cascade sur le parent choisi (voir BR-TICKET-QUALIFY-001, note formulaire 4 niveaux).
+Roles concernes: chief-service, chief-service, chief-departement, director, admin.
 Route frontend: `/app/queue`, `/app/queue/tickets/$id`.
 Page principale: `frontend/src/routes/app.queue.tsx`, `frontend/src/routes/app.queue_.tickets.$id.tsx`.
 Endpoint backend: `GET /api/v1/requests/triage`, `POST /api/v1/requests/{id}/qualify`.
@@ -162,7 +162,7 @@ Identifiant: FEATURE-COLLABORATIVE-TREATMENT
 Nom: Workflow collaboratif dynamique post-file d'attente
 Module: MOD-AGENT / MOD-CHIEF / MOD-DIRECTION / MOD-WORKFLOW
 Description: apres qualification/assignation, le traitement suit un parcours dynamique — pas de chaine fixe. L'intervenant actuel (`assignee_id`) peut "Transmettre le traitement" a n'importe quel intervenant traitant actif de l'organisation (motif + travail effectue obligatoires, instruction/pieces jointes facultatives, statut preserve), ou "Terminer le traitement" (resume/solution/travail realise obligatoires) s'il est reserve a lui. Un meme acteur peut intervenir plusieurs fois (cycles distincts, tous conserves dans l'historique append-only).
-Roles concernes: agent-support, chief-service, chief-departement, director (intervenants traitants) ; admin (bypass exceptionnel, jamais un traitement normal).
+Roles concernes: chief-service, chief-service, chief-departement, director (intervenants traitants) ; admin (bypass exceptionnel, jamais un traitement normal).
 Route frontend: composant detail ticket partage (`RequestDetailPage`, `app.requests.$id.tsx`), boutons "Transmettre le traitement"/"Terminer le traitement" dans l'onglet Traitement.
 Endpoint backend: `POST /api/v1/requests/{id}/transmit`, `POST /api/v1/requests/{id}/resolve`.
 Route backend: `backend/api/routes/RouteRequest.py`.
@@ -181,7 +181,7 @@ Identifiant: FEATURE-REOPEN-QUEUE
 Nom: Reouverture immediate par le demandeur et retour automatique dans la File d'attente
 Module: MOD-PERSONAL / MOD-AGENT / MOD-CHIEF / MOD-WORKFLOW
 Description: le demandeur reouvre seul son ticket resolu/rejete/cloture, sans approbation d'un chef/directeur/admin (revision 2026-08-07 — remplace l'ancien mecanisme en deux phases "demande de reouverture" + approbation/refus, routes `request-reopen`/`reject-reopen` supprimees). Motif obligatoire. Effet atomique et immediat : le ticket libere systematiquement son ancien intervenant (`assignee_id=null`, jamais de reaffectation automatique) et retourne dans la File d'attente (`in_triage=true`) comme n'importe quelle demande en attente. Un nouvel agent (ou le meme, s'il le choisit) doit la reprendre depuis la File d'attente pour demarrer un nouveau cycle collaboratif dynamique (FEATURE-COLLABORATIVE-TREATMENT) — transmission/terminaison redeviennent alors disponibles pour ce nouvel intervenant. Corrige le blocage identifie par la verification du workflow dynamique (2026-08-04) : sans le correctif d'origine, un ticket reouvert restait affecte a l'ancien intervenant mais hors des statuts autorises pour transmettre/resoudre (`reopened` volontairement exclu de `TICKET_ACTION_STATUSES.transmit_treatment`/`resolve`), bloquant definitivement le workflow ; la revision 2026-08-07 supprime en plus l'etape d'approbation elle-meme.
-Roles concernes: demandeur uniquement (`request.requester_id`, quel que soit son role professionnel) pour la reouverture ; agent-support/chief-service/chief-departement/director (reprise depuis la File d'attente).
+Roles concernes: demandeur uniquement (`request.requester_id`, quel que soit son role professionnel) pour la reouverture ; chief-service/chief-service/chief-departement/director (reprise depuis la File d'attente).
 Route frontend: `app.requests.$id.tsx` (bouton "Réouvrir le ticket", motif obligatoire, mutation unique), `app.notifications.tsx`/`notification-panel.tsx` (action rapide "Rouvrir"), `rejected-ticket-modal.tsx` (motif obligatoire). `app.chief-inbox.tsx` : onglet "Reouvertures" retire (plus d'approbation en attente).
 Endpoint backend: `POST /api/v1/requests/{id}/reopen` (body `{reason: string}` obligatoire — comportement etendu, pas de nouvel endpoint). `POST /request-reopen` et `POST /reject-reopen` supprimes.
 Route backend: `backend/api/routes/RouteRequest.py`.
@@ -199,7 +199,7 @@ Identifiant: FEATURE-SLA-REOPEN-CYCLES
 Nom: Cycles SLA independants apres reouverture
 Module: MOD-WORKFLOW / MOD-CHIEF / MOD-DIRECTION / MOD-REPORT
 Description: le premier cycle SLA (creation -> premiere resolution) est fige definitivement et n'est jamais recalcule ; chaque reouverture approuvee (FEATURE-REOPEN-QUEUE) ouvre un nouveau cycle SLA independant mesure depuis la date de reouverture, permettant de comparer la performance du premier traitement et de chaque traitement post-reouverture separement, y compris sur plusieurs reouvertures successives. Reconstruit entierement depuis `workflow_detail` (aucune nouvelle table/colonne).
-Roles concernes: agent-support/chief-service/chief-departement/director (traitement, visible dans le detail ticket) ; chief-service/chief-departement/director/admin (KPI agreges, Centre SLA).
+Roles concernes: chief-service/chief-service/chief-departement/director (traitement, visible dans le detail ticket) ; chief-service/chief-departement/director/admin (KPI agreges, Centre SLA).
 Route frontend: `app.requests.$id.tsx` (onglet "Activité SLA" — un bloc par cycle : motif de reouverture, debut, fin, temps de resolution, respect SLA), `app.sla-center.tsx` (rangee KPI "Réouvertures").
 Endpoint backend: `GET /api/v1/reports/sla/reopen-stats` (nouveau, additif) ; donnees par ticket exposees via `GET /api/v1/requests/{id}` (`sla_cycles`, `reopen_count`).
 Route backend: `backend/api/routes/RouteReports.py`, `backend/api/routes/RouteRequest.py`.
@@ -217,7 +217,7 @@ Identifiant: FEATURE-TRACE-INTERVENTIONS
 Nom: Traçabilité complète des interventions
 Module: MOD-WORKFLOW / MOD-AGENT / MOD-CHIEF / MOD-DIRECTION / MOD-REPORT
 Description: la timeline devient un journal d'interventions hierarchique (Cycle -> Intervention) plutot qu'une simple liste d'evenements. Une intervention est un conteneur logique regroupant tout le travail d'un intervenant (commentaires, pieces jointes, travail effectue) depuis qu'il devient l'intervenant courant jusqu'a sa transmission ou sa resolution — identification (`intervention_id`/`intervention_order`/`intervention_cycle_number`) et identite de l'intervenant (matricule/direction/departement/service) explicitement enregistrees et figees a l'ecriture, jamais recalculees ni dependantes d'une jointure live. Compatible avec le workflow collaboratif dynamique (FEATURE-COLLABORATIVE-TREATMENT) et les cycles SLA (FEATURE-SLA-REOPEN-CYCLES), reconstruit entierement depuis `workflow_detail` (aucune nouvelle table/colonne).
-Roles concernes: agent-support/chief-service/chief-departement/director (consultation detail ticket) ; chief-service/chief-departement/director/admin (KPI agreges, Centre SLA).
+Roles concernes: chief-service/chief-service/chief-departement/director (consultation detail ticket) ; chief-service/chief-departement/director/admin (KPI agreges, Centre SLA).
 Route frontend: `app.requests.$id.tsx` (onglet "Journal" — bascule "Journal des interventions" (defaut) / "Chronologie complete"), `app.sla-center.tsx` (rangee KPI "Interventions" + tableau par agent).
 Endpoint backend: `GET /api/v1/reports/interventions` (nouveau, additif) ; donnees par ticket exposees via `GET /api/v1/requests/{id}` (`interventions`, incluant `actor_role`/`summary`/`solution`/`recommendations`).
 Route backend: `backend/api/routes/RouteReports.py`, `backend/api/routes/RouteRequest.py`.

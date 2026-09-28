@@ -12,18 +12,6 @@ from pydantic import ValidationError
 from backend.api.schemas.SchemaRequestStatus import (
     RequestStatusCreate, RequestStatusUpdate, RequestStatusResponse,
 )
-from backend.api.schemas.SchemaAccountStatus import (
-    AccountStatusCreate, AccountStatusUpdate, AccountStatusResponse,
-)
-from backend.api.schemas.SchemaAnnouncementCategory import (
-    AnnouncementCategoryCreate, AnnouncementCategoryUpdate, AnnouncementCategoryResponse,
-)
-from backend.api.schemas.SchemaAnnouncementPriority import (
-    AnnouncementPriorityCreate, AnnouncementPriorityUpdate, AnnouncementPriorityResponse,
-)
-from backend.api.schemas.SchemaAnnouncementStatus import (
-    AnnouncementStatusCreate, AnnouncementStatusUpdate, AnnouncementStatusResponse,
-)
 from backend.api.schemas.SchemaPriorityDefinition import (
     PriorityDefinitionCreate, PriorityDefinitionUpdate, PriorityDefinitionResponse,
 )
@@ -75,35 +63,6 @@ class TestRequestStatus:
     def test_create_missing_label_raises(self):
         with pytest.raises(ValidationError):
             RequestStatusCreate(code="new")
-
-
-class TestAccountStatus:
-    def test_create_valid(self):
-        obj = AccountStatusCreate(**_ref_create("active", "Actif"))
-        assert obj.code == "active"
-
-    def test_response_valid(self):
-        obj = AccountStatusResponse(**_ref_response("active", "Actif"))
-        assert obj.id == FAKE_ID
-
-
-class TestAnnouncementCategory:
-    def test_create_valid(self):
-        obj = AnnouncementCategoryCreate(**_ref_create("info", "Information"))
-        assert obj.code == "info"
-
-
-class TestAnnouncementPriority:
-    def test_create_valid(self):
-        obj = AnnouncementPriorityCreate(**_ref_create("high", "Haute"))
-        assert obj.code == "high"
-
-
-class TestAnnouncementStatus:
-    def test_create_valid(self):
-        obj = AnnouncementStatusCreate(**_ref_create("draft", "Brouillon"))
-        assert obj.code == "draft"
-
 
 class TestPriorityDefinition:
     def test_create_valid(self):

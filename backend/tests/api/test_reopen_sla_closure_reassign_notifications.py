@@ -97,67 +97,19 @@ def _patch_service_request_emit(monkeypatch):
     return calls
 
 
-# ── 2. SLA préventif — send_email=False atteint bien l'émetteur ───────────────
-
-async def test_sla_preventive_notify_is_app_only(monkeypatch):
-    """Vérifie que `_notify(..., send_email=False)` (ServiceEscalade.py) transmet
-    bien le flag jusqu'à NotificationEmitter.emit — la seule partie de
-    warn_sla_approaching() modifiée par ce lot (le seuil 80% et l'anti-spam
-    étaient déjà en place avant cette intervention)."""
-    calls: list[dict] = []
-
-    async def fake_emit(session, *, recipient_id, title, body, send_email=True, **kwargs):
-        calls.append({"recipient_id": str(recipient_id), "title": title, "send_email": send_email})
-
-    monkeypatch.setattr("api.services.NotificationEmitter.emit", fake_emit)
-
-    from tests.conftest import _TestSession
-    from api.services.ServiceEscalade import EscaladeService
-
-    async with _TestSession() as session:
-        svc = EscaladeService(session)
-        await svc._notify(
-            recipient_id="1",
-            title="SLA bientôt dépassé",
-            body="Attention : le ticket TEST-1 a consommé 80 % de son délai SLA.",
-            send_email=False,
-        )
-
-    assert len(calls) == 1
-    assert calls[0]["send_email"] is False
-
-
-async def test_auto_escalation_notify_still_defaults_to_email(monkeypatch):
-    """Non-régression : le mécanisme d'escalade automatique SLA DÉPASSÉ (distinct
-    du préventif) n'a pas été touché — `_notify()` sans send_email explicite
-    garde son comportement par défaut (email autorisé selon CommunicationSetting)."""
-    calls: list[dict] = []
-
-    async def fake_emit(session, *, recipient_id, title, body, send_email=True, **kwargs):
-        calls.append({"send_email": send_email})
-
-    monkeypatch.setattr("api.services.NotificationEmitter.emit", fake_emit)
-
-    from tests.conftest import _TestSession
-    from api.services.ServiceEscalade import EscaladeService
-
-    async with _TestSession() as session:
-        svc = EscaladeService(session)
-        await svc._notify(recipient_id="1", title="Escalade automatique SLA", body="test")
-
-    assert len(calls) == 1
-    assert calls[0]["send_email"] is True
-
+# ── 2. (retiré) SLA préventif via ServiceEscalade ────────────────────────────
+# Les deux tests qui couvraient `EscaladeService._notify()` sont partis le
+# 2026-09-26 avec le statut "escalated" : le service n'existe plus.
 
 # ── 3. Notification de clôture ─────────────────────────────────────────────────
 
 async def test_close_notifies_requester_and_last_handler(auth_client, unity_id, monkeypatch):
-    await _ensure_test_account(740, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(740, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "closure")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=740)
 
     resolve_resp = await _call_as(
-        _dep(740, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
+        _dep(740, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
         _FULL_RESOLVE_BODY,
     )
     assert resolve_resp.status_code == 200, resolve_resp.text
@@ -212,7 +164,7 @@ async def test_reassign_service_notifies_requester_and_previous_responsible(auth
     transition de statut, cf. ServiceRequest.update), ce qui reproduit un état
     atteignable en pratique (édition admin) sans violer la matrice de transition."""
     await _ensure_test_unity(9610, parent_direction_id=None)
-    await _ensure_test_account(741, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(741, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "reassign-service")
     async with auth_client("admin") as admin_client:
         qualify_resp = await admin_client.post(
@@ -256,8 +208,8 @@ async def test_reassign_service_notifies_requester_and_previous_responsible(auth
 
 async def test_transfer_direction_notifies_new_director_requester_and_previous_responsible(auth_client, unity_id, monkeypatch):
     await _ensure_test_unity(9620, parent_direction_id=None)
-    await _ensure_test_account(742, unity_id=9620, role="director")  # directeur cible
-    await _ensure_test_account(743, unity_id=unity_id, role="agent-support")  # ancien responsable
+    await _ensure_test_account(742, unity_id=9620, role="chief-service")  # directeur cible
+    await _ensure_test_account(743, unity_id=unity_id, role="chief-service")  # ancien responsable
     request_id = await _create_ticket(auth_client, unity_id, "transfer-direction")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=743)
 

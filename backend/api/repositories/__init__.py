@@ -12,11 +12,6 @@ from api.repositories.base_repository import (
 # ── Tables de référence (8) ───────────────────────────────────────────────────
 from api.repositories.RepositoryRequestStatus import RequestStatusRepository
 from api.repositories.RepositoryRequestCategory import RequestCategoryRepository
-from api.repositories.RepositoryAccountStatus import AccountStatusRepository
-from api.repositories.RepositoryKnowledgeCategory import KnowledgeCategoryRepository
-from api.repositories.RepositoryAnnouncementCategory import AnnouncementCategoryRepository
-from api.repositories.RepositoryAnnouncementPriority import AnnouncementPriorityRepository
-from api.repositories.RepositoryAnnouncementStatus import AnnouncementStatusRepository
 from api.repositories.RepositoryPriorityDefinition import PriorityDefinitionRepository
 
 # ── Structure organisationnelle ───────────────────────────────────────────────
@@ -40,27 +35,16 @@ from api.repositories.RepositoryTask import TaskRepository
 # ── Transversal ───────────────────────────────────────────────────────────────
 from api.repositories.RepositoryNotification import NotificationRepository
 from api.repositories.RepositoryActivityLog import ActivityLogRepository
-from api.repositories.RepositoryKnowledgeArticle import KnowledgeArticleRepository
-from api.repositories.RepositoryCommunicationSetting import CommunicationSettingRepository
 
 # ── Communication & CSAT ──────────────────────────────────────────────────────
-from api.repositories.RepositoryAnnouncement import AnnouncementRepository
-from api.repositories.RepositoryAnnouncementTargetRole import AnnouncementTargetRoleRepository
 from api.repositories.RepositoryAppreciation import AppreciationRepository
 
 __all__ = [
-    "BaseRepository", "ReferenceBaseRepository",
-    "NotFoundException", "RepositoryIntegrityError",
-    "RequestStatusRepository", "RequestCategoryRepository",
-    "AccountStatusRepository", "KnowledgeCategoryRepository",
-    "AnnouncementCategoryRepository", "AnnouncementPriorityRepository",
-    "AnnouncementStatusRepository", "PriorityDefinitionRepository",
-    "UnityRepository", "OrganigramRepository", "AccountRepository",
-    "RequestRepository", "AttachmentRepository",
-    "SlaPolicyRepository", "RoutingRuleRepository",
-    "WorkflowRepository", "WorkflowDetailRepository", "TaskRepository",
-    "NotificationRepository", "ActivityLogRepository",
-    "KnowledgeArticleRepository", "CommunicationSettingRepository",
-    "AnnouncementRepository", "AnnouncementTargetRoleRepository",
-    "AppreciationRepository",
+    "BaseRepository", "ReferenceBaseRepository", "NotFoundException",
+    "RepositoryIntegrityError", "RequestStatusRepository", "RequestCategoryRepository",
+    "PriorityDefinitionRepository", "UnityRepository", "OrganigramRepository",
+    "AccountRepository", "RequestRepository", "AttachmentRepository",
+    "SlaPolicyRepository", "RoutingRuleRepository", "WorkflowRepository",
+    "WorkflowDetailRepository", "TaskRepository", "NotificationRepository",
+    "ActivityLogRepository", "AppreciationRepository",
 ]

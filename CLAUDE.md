@@ -60,6 +60,7 @@ Le secrétaire a l'autorité complète de routage vers n'importe quel niveau —
 **Commandes dev:**
 - Frontend (`frontend/`) : `npm run dev` (Vite), `npm run build`, `npm run lint`, `npm run format`
 - Backend (`backend/`) : `uvicorn api.main:app --reload --reload-dir api --port 8000` (`--reload-dir api` limite la surveillance au code source — sans ça uvicorn surveille aussi `venv/`/`__pycache__/`/`uploads/`, ce qui peut bloquer silencieusement le rechargement et rendre le serveur injoignable sans arrêt volontaire) ; prod : `gunicorn api.main:app -c gunicorn_conf.py` (pas de `--reload`, non concerné)
+- **Tout-en-un réseau local** (`.\start.ps1` ou `start.cmd` double-clic, à la racine) : démarre MySQL s'il est à l'arrêt (détection du service, y compris `wampmysqld64`), détecte l'IP LAN, ouvre les ports au pare-feu, lance backend et frontend sur `0.0.0.0` et génère `frontend/.env.lan.local` (`VITE_API_URL` sur l'IP LAN — Vite fige cette valeur **au démarrage**, elle ne peut pas être injectée après coup). L'application devient utilisable depuis tout appareil du même réseau ; la **base reste locale, jamais exposée**. Options : `-IpAddress`, `-BackendPort`, `-FrontendPort`, `-NoQrCode`. Délègue à `scripts/dev-lan.ps1`. Les lancements séparés habituels restent locaux et inchangés.
 
 ---
 
@@ -68,9 +69,9 @@ Le secrétaire a l'autorité complète de routage vers n'importe quel niveau —
 **Routing:** File-based dans `routes/`. Convention : `app.requests.$id.tsx` → `/app/requests/:id`
 **Alias:** `@/*` → `./src/*`
 
-**Routes publiques:** `/`, `/login`, `/register`, `/admin-login`, `/forgot-password`, `/help`, `/track`, `/create-request`, `/knowledge`
-**Routes app protégée:** `/app`, `/app/requests`, `/app/requests/:id`, `/app/requests/history`, `/app/new`, `/app/queue`, `/app/triage`, `/app/my-tickets`, `/app/supervision`, `/app/direction`, `/app/dg`, `/app/chief-inbox`, `/app/reports`, `/app/sla-center`, `/app/notifications`, `/app/knowledge`, `/app/profile`
-**Routes admin (`/app/admin/*`):** users, security, directions, directions/$id, departments, units, org, priorities, references, sla, routing, knowledge, communication, logs, audit, homepage (pas de route `settings` dédiée — réglages répartis entre communication, references, priorities, sla, routing, homepage)
+**Routes publiques:** `/`, `/login`, `/register`, `/admin-login`, `/forgot-password`, `/track`, `/create-request`
+**Routes app protégée:** `/app`, `/app/requests`, `/app/requests/:id`, `/app/requests/history`, `/app/new`, `/app/queue`, `/app/triage`, `/app/my-tickets`, `/app/supervision`, `/app/direction`, `/app/dg`, `/app/chief-inbox`, `/app/reports`, `/app/sla-center`, `/app/notifications`, `/app/profile`
+**Routes admin (`/app/admin/*`):** users, security, directions, directions/$id, departments, units, org, priorities, references, sla, routing, logs, audit, homepage (pas de route `settings` dédiée — réglages répartis entre references, priorities, sla, routing, homepage)
 
 **Session/Auth:** `src/lib/session.ts` — `getRole()` décode le JWT access token en priorité (rôle local = UX only, le vrai rôle vient toujours du JWT signé serveur / re-vérifié en DB côté backend)
 
@@ -86,11 +87,11 @@ Le secrétaire a l'autorité complète de routage vers n'importe quel niveau —
 - `status-badge.tsx`, `pagination-bar.tsx`, `metadata-fields.tsx`
 
 **Librairie API (`src/lib/api/`):**
-`client.ts` (fetch + JWT auto-refresh + désencapsulation `{success, message, data}`), `auth.ts`, `requests.ts`, `accounts.ts`, `directions-units.ts`, `attachments.ts`, `comments.ts`, `escalations.ts`, `knowledge.ts`, `announcements.ts`, `activityLogs.ts`, `csat.ts`, `communication.ts`, `homepage.ts`, `workflow.ts`, `notifications.ts`, `admin-config.ts`, `securityIncidents.ts`, `biometric.ts`
+`client.ts` (fetch + JWT auto-refresh + désencapsulation `{success, message, data}`), `auth.ts`, `requests.ts`, `accounts.ts`, `directions-units.ts`, `attachments.ts`, `comments.ts`, `escalations.ts`, `activityLogs.ts`, `csat.ts`, `homepage.ts`, `workflow.ts`, `notifications.ts`, `admin-config.ts`, `securityIncidents.ts`, `biometric.ts`
 
 **Realtime (`src/lib/realtime/`):**
 - `sse-client.ts` — `SSEClient` singleton, `connect(getToken)`, backoff exponentiel 1s→30s, `on(eventType, handler)`
-- `invalidation-map.ts` — `INVALIDATION_MAP` mappant chaque événement SSE sur les prefixes queryKey TanStack Query à invalider (`request.*`, `escalation.*`, `task.*`, `notification.*`, `announcement.*`, `user.*`, `reference.*`)
+- `invalidation-map.ts` — `INVALIDATION_MAP` mappant chaque événement SSE sur les prefixes queryKey TanStack Query à invalider (`request.*`, `escalation.*`, `task.*`, `notification.*`, `user.*`, `reference.*`)
 - `src/providers/realtime-provider.tsx` — monté uniquement dans `/app` (après auth guard), connecte/déconnecte SSE, invalide le cache React Query, expose `useRealtimeStatus()`
 
 **Mock data restante (`src/lib/mock-data.ts`):** directions/services (8), utilisateurs exemples (23), listes statuts/priorités/catégories pour formulaires — pas de logique métier réelle dedans ; objectif à terme : supprimer ces dépendances au profit du backend.
@@ -131,12 +132,10 @@ Tous héritent de `BaseColumns` : `id`, `uuid`, `status`, `infos` (JSON), `creat
 - `ModelAppreciation` — CSAT rating 1-5
 - `ModelSlaPolicy` — response_hours, resolution_hours par priorité
 - `ModelRoutingRule` — category+priority → direction+unit
-- `ModelNotification`, `ModelActivityLog`, SmsLog, `ModelAnnouncement`, `ModelKnowledgeArticle`
-- ActiveSession — sessions actives (DB-backed, multi-worker safe)
-- `ModelSecurityIncident` — incidents biométriques/auth
+- `ModelNotification`, `ModelActivityLog`
 
 ### Routes (`routes/`, ~30 routeurs enregistrés dans `main.py`)
-`health`, `RouteAuth`, `RouteSSE`, `RouteReferences`, `RouteUnity`, `RouteOrganigram`, `RouteDirectionsUnits` (+ public), `RouteAccount`, `RouteRequest` (+ `public_request_router` pour `GET /requests/track` et `POST /requests/submit`, sans auth), `RouteAttachment`, `RouteSlaPolicy` (+ read), `RouteRoutingRule` (+ director), `RouteWorkflow` (+ request/detail), `RouteTask`, `RouteNotification`, `RouteActivityLog`, `RouteKnowledgeArticle`, `RouteAnnouncement`, `RouteAppreciation` (+ request), `RouteCsatStats`, `RouteCommunicationSetting`, `RouteAdminConfig`, `RouteUsers` (+ me + avatars), `RouteKnowledge` (+ public), `RouteStats` (+ agent), `RouteReports`, `RouteEscalation`
+`health`, `RouteAuth`, `RouteSSE`, `RouteReferences`, `RouteUnity`, `RouteOrganigram`, `RouteDirectionsUnits` (+ public), `RouteAccount`, `RouteRequest` (+ `public_request_router` pour `GET /requests/track` et `POST /requests/submit`, sans auth), `RouteAttachment`, `RouteSlaPolicy` (+ read), `RouteRoutingRule` (+ director), `RouteWorkflow` (+ request/detail), `RouteTask`, `RouteNotification`, `RouteActivityLog`, `RouteAppreciation` (+ request), `RouteCsatStats`, `RouteAdminConfig`, `RouteUsers` (+ me + avatars), `RouteStats` (+ agent), `RouteReports`, `RouteEscalation`
 
 Toutes les routes protégées passent par `get_current_user()` → recharge l'`Account` depuis la DB (**le rôle vient toujours de la DB, jamais du payload JWT côté client**).
 Scoping RBAC : `user` → self only · `agent`/`chief` → unit/direction · `director` → direction · `dg`/`admin` → global.
@@ -154,7 +153,7 @@ Scoping RBAC : `user` → self only · `agent`/`chief` → unit/direction · `di
 - `gunicorn_conf.py` — 4 workers UvicornWorker (prod)
 
 ### Variables d'environnement (`.env`, lues par `Environment.py`)
-`APP_NAME`, `APP_VERSION`, `APP_ENV`, `DEBUG_MODE`, `PORT` · `DATABASE_DIALECT`, `DATABASE_HOSTNAME`, `DATABASE_PORT`, `DATABASE_NAME`, `DATABASE_USERNAME`, `DATABASE_PASSWORD` · `SECRET_KEY`, `ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS` · `REDIS_URL` · `CLAMAV_HOST`, `CLAMAV_PORT`, `CLAMAV_TIMEOUT`, `CLAMAV_ENABLED` · `DISABLE_AUTH` · `CORS_ORIGINS` · `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` · `SMS_GATEWAY_URL`, `SMS_API_KEY`, `SMS_SENDER` · `ENCRYPTION_KEY` (Fernet, chiffrement champs sensibles — vide = désactivé)
+`APP_NAME`, `APP_VERSION`, `APP_ENV`, `DEBUG_MODE`, `PORT` · `DATABASE_DIALECT`, `DATABASE_HOSTNAME`, `DATABASE_PORT`, `DATABASE_NAME`, `DATABASE_USERNAME`, `DATABASE_PASSWORD` · `SECRET_KEY`, `ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS` · `CENTRAL_AUTH_CACHE_TTL` (TTL en s du cache des scopes/groupes centraux, défaut 45 ; 0 = désactivé) · `REDIS_URL` · `CLAMAV_HOST`, `CLAMAV_PORT`, `CLAMAV_TIMEOUT`, `CLAMAV_ENABLED` · `DISABLE_AUTH` · `CORS_ORIGINS` · `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` · `SMS_GATEWAY_URL`, `SMS_API_KEY`, `SMS_SENDER` · `ENCRYPTION_KEY` (Fernet, chiffrement champs sensibles — vide = désactivé)
 
 ---
 
@@ -164,7 +163,7 @@ Choisi plutôt que WebSocket — communication unidirectionnelle serveur→clien
 
 - **Endpoint:** `GET /api/v1/events?token=<jwt>` (token en query param — limitation d'`EventSource`), keepalive ping toutes les 25s, fan-out filtré par rôle. `DISABLE_AUTH=True` → mock admin.
 - **Event bus:** `AppEvent(type, payload, target)`, `target: {"roles": "all"|[...], "user_ids": [...]}`, singleton `event_bus`, helper `emit()` fire-and-forget (n'exceptionne jamais).
-- **Services émetteurs** (`emit_event` après chaque mutation) : `ServiceRequest` (created, status_changed, assigned, closed, resolved, reopened, cancelled), `ServiceNotification` (created, ciblage user_id), `ServiceEscalation` (created, resolved), `ServiceTask` (created, completed), `ServiceAnnouncement` (created, published, closed).
+- **Services émetteurs** (`emit_event` après chaque mutation) : `ServiceRequest` (created, status_changed, assigned, closed, resolved, reopened, cancelled), `ServiceNotification` (created, ciblage user_id), `ServiceEscalation` (created, resolved), `ServiceTask` (created, completed).
 
 ---
 
@@ -181,6 +180,21 @@ Déclenchement via compteur `sessionStorage` (`edg.admin.fail_count`) : 1ère er
 
 ---
 
+## Fonctionnalités retirées du périmètre
+
+- **Annonces institutionnelles** (CDC §11.4) et **Base de connaissances** (CDC §11.3) —
+  retirées le 2026-09-24 (migration Alembic `026`, 8 tables supprimées). Le référentiel
+  *Statuts de compte* disparaît avec elles ; la colonne `account.account_status` est
+  conservée mais n'est plus validée. Ne pas recréer ces entités sans nouvelle
+  spécification.
+- **`communication_setting`** — retirée le 2026-09-24 (migration `027`). Il n'y a plus
+  de coupe-circuit en base pour les mails et SMS : la coupure passe par `SMTP_HOST` /
+  `SMS_GATEWAY_URL` vides dans `.env`. Le comportement d'envoi est inchangé (les gardes
+  retirées étaient en fail-open). Écran `/app/admin/communication` supprimé.
+- ⚠️ **`activity_log` est CONSERVÉE** — seul mécanisme de journalisation des connexions
+  (`ActiveSession` et `security_incident` n'existent plus en base), exigé au CDC §10.5
+  et §13. Ne pas la supprimer. Affichée sur `/app/admin/logs`.
+
 ## Modules en suspens (état d'avancement)
 
 - **Module 1 — Routage dynamique triage** ✅ TERMINÉ (voir section Workflow ci-dessus)
@@ -188,14 +202,14 @@ Déclenchement via compteur `sessionStorage` (`edg.admin.fail_count`) : 1ère er
 - **Module 3 — `accepted` dans `workflow_detail`** ⏳ EN ATTENTE CHEF : champ `accepted` (1=accepté, 0=refusé) souhaité, mais intention exacte floue ("l'idée du chef est loin de ça" sur une interprétation déjà proposée). Ne rien coder tant que le cas d'usage exact n'est pas précisé.
 
 **Écarts CDC connus (dernier audit 2026-06-24, score 112/116 = 96,6%):**
-- DG5 : ✅ corrigé (vérifié 2026-07-04) — `/app/dg` dispose d'un panneau "Annonce globale" fonctionnel (titre/corps/catégorie/priorité + publication)
+- DG5 : ⛔ SANS OBJET depuis 2026-09-24 — le module Annonces a été retiré du périmètre sur décision produit (CDC §11.4). Le panneau "Annonce globale" de `/app/dg` n'existe plus.
 - S9 : ✅ corrigé (vérifié 2026-08-01, audit espace administrateur) — `backend/.env` a désormais `DISABLE_AUTH=False`
 
 ---
 
 ## Règles de travail à respecter
 
-1. **Conformité CDC:** après chaque session de correction ou d'ajout de fonctionnalité (backend ou frontend), lancer un audit de conformité vs `docs/cahier-des-charges.md` (§5 fonctionnalités par rôle, §6 règles métier SLA/routage/notifications/escalade/CSAT/KB/annonces, §7 sécurité JWT/biométrie/RBAC/rate limiting/CORS/audit trail) avant de déclarer la session terminée. Produire un tableau ✅/⚠️/❌ avec score global et signaler les écarts (priorité + effort).
+1. **Conformité CDC:** après chaque session de correction ou d'ajout de fonctionnalité (backend ou frontend), lancer un audit de conformité vs `docs/cahier-des-charges.md` (§5 fonctionnalités par rôle, §6 règles métier SLA/routage/notifications/escalade/CSAT, §7 sécurité JWT/biométrie/RBAC/rate limiting/CORS/audit trail) avant de déclarer la session terminée. Produire un tableau ✅/⚠️/❌ avec score global et signaler les écarts (priorité + effort).
 2. **Docs à jour:** à chaque évolution du frontend (nouveaux champs `mock-data.ts`, nouveaux statuts, nouvelles routes/entités), mettre à jour `docs/cahier-des-charges.md` et `docs/mise-a-jour-backend.md` (incrémenter version, ajouter entrée changelog).
 3. **RBAC:** ne jamais faire confiance au rôle décodé côté client pour des décisions de sécurité — toujours re-vérifier via la DB côté backend.
 4. **SLA:** ne jamais utiliser une colonne `sla_deadline` (elle n'existe pas) — toujours dériver via `sla_hours` + `TIMESTAMPDIFF`/`DATE_ADD`.

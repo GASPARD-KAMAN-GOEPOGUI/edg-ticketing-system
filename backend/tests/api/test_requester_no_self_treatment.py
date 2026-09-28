@@ -1,7 +1,7 @@
 """
 BR-REQUESTER-NO-SELF-TREATMENT-001 — le demandeur d'un ticket ne peut jamais
 devenir son intervenant (request.assignee_id), quel que soit son rôle
-professionnel (agent-support, chief-service, chief-departement, director,
+professionnel (chief-service, chief-service, chief-departement, director,
 admin). Couvre : assign, qualify_triage (routage direct depuis la file
 d'attente), transmit_treatment, le PATCH générique admin, la défense en
 profondeur en lecture ("Ma boîte de traitement"), et l'intégrité de l'état
@@ -48,12 +48,12 @@ async def _my_requests_ids(role_dep, requester_id: int) -> set[str]:
 # ── 1. Assignation directe vers le demandeur, par un tiers ────────────────────
 
 async def test_assign_to_requester_rejected_when_requester_is_staff(auth_client, unity_id):
-    """A (agent-support) crée T1 ; un chef tente de l'assigner à A lui-même — refusé,
+    """A (chief-service) crée T1 ; un chef tente de l'assigner à A lui-même — refusé,
     même si A porte un rôle traitant habilité (le conflit d'intérêt prime sur le rôle)."""
-    await _ensure_test_account(930, unity_id=unity_id, role="agent-support")  # A, requester
+    await _ensure_test_account(930, unity_id=unity_id, role="chief-service")  # A, requester
     await _ensure_test_account(931, unity_id=unity_id, role="chief-service")  # acteur
 
-    request_id = await _create_ticket_as(_dep(930, "agent-support", unity_id), unity_id, "assign-requester")
+    request_id = await _create_ticket_as(_dep(930, "chief-service", unity_id), unity_id, "assign-requester")
 
     resp = await _call_as(
         _dep(931, "chief-service", unity_id), "POST",
@@ -66,9 +66,9 @@ async def test_assign_to_requester_rejected_when_requester_is_staff(auth_client,
 # ── 2. Qualification directe (routage triage) vers le demandeur ───────────────
 
 async def test_qualify_triage_target_requester_rejected(auth_client, unity_id):
-    await _ensure_test_account(932, unity_id=unity_id, role="chief-departement")  # A, requester
+    await _ensure_test_account(932, unity_id=unity_id, role="chief-service")  # A, requester
 
-    request_id = await _create_ticket_as(_dep(932, "chief-departement", unity_id), unity_id, "qualify-requester")
+    request_id = await _create_ticket_as(_dep(932, "chief-service", unity_id), unity_id, "qualify-requester")
 
     async with auth_client("admin") as admin_client:
         resp = await admin_client.post(
@@ -82,15 +82,15 @@ async def test_qualify_triage_target_requester_rejected(auth_client, unity_id):
 # ── 3. Transmission vers le demandeur, par l'intervenant actuel ───────────────
 
 async def test_transmit_to_requester_rejected(auth_client, unity_id):
-    """A (agent-support) crée T1, pris en charge par B. B tente de transmettre à A — refusé."""
-    await _ensure_test_account(933, unity_id=unity_id, role="agent-support")  # A, requester
-    await _ensure_test_account(934, unity_id=unity_id, role="agent-support")  # B, intervenant
+    """A (chief-service) crée T1, pris en charge par B. B tente de transmettre à A — refusé."""
+    await _ensure_test_account(933, unity_id=unity_id, role="chief-service")  # A, requester
+    await _ensure_test_account(934, unity_id=unity_id, role="chief-service")  # B, intervenant
 
-    request_id = await _create_ticket_as(_dep(933, "agent-support", unity_id), unity_id, "transmit-requester")
+    request_id = await _create_ticket_as(_dep(933, "chief-service", unity_id), unity_id, "transmit-requester")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=934)
 
     resp = await _call_as(
-        _dep(934, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
+        _dep(934, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
         {"to_user_id": "933", "work_done": "Diagnostic.", "reason": "Tentative de transmission au demandeur."},
     )
     assert resp.status_code == 400, resp.text
@@ -100,16 +100,16 @@ async def test_transmit_to_requester_rejected(auth_client, unity_id):
 # ── 4. Aucun effet de bord après un refus ──────────────────────────────────────
 
 async def test_rejected_transmit_leaves_state_unchanged(auth_client, unity_id):
-    await _ensure_test_account(935, unity_id=unity_id, role="agent-support")  # A, requester
-    await _ensure_test_account(936, unity_id=unity_id, role="agent-support")  # B, intervenant
+    await _ensure_test_account(935, unity_id=unity_id, role="chief-service")  # A, requester
+    await _ensure_test_account(936, unity_id=unity_id, role="chief-service")  # B, intervenant
 
-    request_id = await _create_ticket_as(_dep(935, "agent-support", unity_id), unity_id, "no-side-effect")
+    request_id = await _create_ticket_as(_dep(935, "chief-service", unity_id), unity_id, "no-side-effect")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=936)
 
     events_before = await _timeline(auth_client, request_id)
 
     resp = await _call_as(
-        _dep(936, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
+        _dep(936, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
         {"to_user_id": "935", "work_done": "Diagnostic.", "reason": "Tentative refusée."},
     )
     assert resp.status_code == 400, resp.text
@@ -131,9 +131,9 @@ async def test_rejected_transmit_leaves_state_unchanged(auth_client, unity_id):
 # ── 5. PATCH générique admin — même garde ──────────────────────────────────────
 
 async def test_admin_generic_patch_to_requester_rejected(auth_client, unity_id):
-    await _ensure_test_account(937, unity_id=unity_id, role="director")  # A, requester
+    await _ensure_test_account(937, unity_id=unity_id, role="chief-service")  # A, requester
 
-    request_id = await _create_ticket_as(_dep(937, "director", unity_id), unity_id, "admin-patch-requester")
+    request_id = await _create_ticket_as(_dep(937, "chief-service", unity_id), unity_id, "admin-patch-requester")
 
     async with auth_client("admin") as admin_client:
         resp = await admin_client.put(
@@ -144,22 +144,22 @@ async def test_admin_generic_patch_to_requester_rejected(auth_client, unity_id):
     assert resp.json()["error_code"] == "REQUESTER_CANNOT_TREAT_OWN_TICKET"
 
 
-# ── 6. Scénario complet : A (agent-support) reste demandeur de bout en bout ───
+# ── 6. Scénario complet : A (chief-service) reste demandeur de bout en bout ───
 
 async def test_requester_agent_support_never_in_own_treatment_box(auth_client, unity_id):
     """
-    A (agent-support) crée T1 -> B prend -> B transmet à C -> C termine le
+    A (chief-service) crée T1 -> B prend -> B transmet à C -> C termine le
     traitement -> A retrouve T1 dans "Mes demandes" mais jamais dans "Ma boîte
     de traitement", à aucune étape, y compris après résolution et après une
     réouverture immédiate (le ticket retourne en file d'attente sans jamais
     redevenir accessible à A comme intervenant).
     """
-    await _ensure_test_account(940, unity_id=unity_id, role="agent-support")  # A, requester
-    await _ensure_test_account(941, unity_id=unity_id, role="agent-support")  # B
-    await _ensure_test_account(942, unity_id=unity_id, role="agent-support")  # C
-    a = _dep(940, "agent-support", unity_id)
-    b = _dep(941, "agent-support", unity_id)
-    c = _dep(942, "agent-support", unity_id)
+    await _ensure_test_account(940, unity_id=unity_id, role="chief-service")  # A, requester
+    await _ensure_test_account(941, unity_id=unity_id, role="chief-service")  # B
+    await _ensure_test_account(942, unity_id=unity_id, role="chief-service")  # C
+    a = _dep(940, "chief-service", unity_id)
+    b = _dep(941, "chief-service", unity_id)
+    c = _dep(942, "chief-service", unity_id)
 
     request_id = await _create_ticket_as(a, unity_id, "requester-full-cycle")
 

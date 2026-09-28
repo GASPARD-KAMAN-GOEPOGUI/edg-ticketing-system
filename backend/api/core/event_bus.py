@@ -8,7 +8,7 @@ Architecture :
 
 Ciblage (AppEvent.target) :
   {"roles": "all"}                          → tous les utilisateurs connectés
-  {"roles": ["agent", "chief", "admin"]}    → rôles spécifiques
+  {"roles": ["chief-service", "admin"]}     → rôles spécifiques
   {"user_ids": [123, 456]}                  → utilisateurs spécifiques
   {"roles": ["agent"], "user_ids": [99]}    → union des deux
 

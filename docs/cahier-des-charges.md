@@ -144,24 +144,55 @@ L'utilisateur :
 
 #### 2. Qualification
 
-Le support :
+Le chef de service (CSSHF) :
 
 - analyse le ticket ;
 - définit :
   - la catégorie ;
   - la priorité ;
-  - le niveau de criticité ;
-  - le service concerné.
+  - le niveau de criticité.
+
+**La qualification est un point de contrôle bloquant** (précisé le 2026-09-26) :
+aucun ticket ne quitte la File d'attente avant que la **catégorie**, la
+**priorité** et la **solution proposée** aient été saisies. Ces champs s'ouvrent
+**vides**, même lorsque le ticket portait déjà une valeur : un pré-remplissage
+permettrait de valider sans avoir rien examiné, ce qui viderait le contrôle de
+son sens. Les valeurs d'origine restent consultables sur la fiche du ticket.
+Orienter vers un chef de division support exige en plus de le désigner ; prendre
+le ticket pour soi-même ne le demande pas, puisqu'il n'y a alors personne à qui
+l'orienter.
+
+Un service pouvant compter **plusieurs chefs de division support**, la liste
+d'imputation les identifie au format **`nom complet.badge`** — le badge étant le
+libellé métier du matricule. Sans badge renseigné, le nom complet est affiché
+seul.
+
+**Le service traitant n'est pas saisi.** Seule la DSI traite les incidents :
+l'organisation qui prend en charge la demande (direction, département, service)
+est toujours celle du chef de service qui qualifie. Son rattachement étant déjà
+renseigné par l'administrateur lors de son enregistrement au back-office, il est
+repris automatiquement sur le ticket, sans ressaisie. Cette déduction est faite
+**côté serveur** : une direction ou un service transmis par un appel API est
+ignoré.
+
+Un ticket porte donc deux photographies organisationnelles distinctes :
+
+| Dimension | Source | Ce qu'elle répond |
+| --- | --- | --- |
+| Demandeur | compte du demandeur (direction, département, service, fonction, matricule) | d'où vient la demande |
+| Traitement | compte du chef de service qui qualifie | qui prend en charge |
 
 #### 3. Affectation
 
-Le ticket est :
+Après qualification, le chef de service a deux issues :
 
-- affecté automatiquement ;
-- ou affecté manuellement à :
-  - un service ;
-  - un agent ;
-  - un département.
+- prendre le ticket pour son propre traitement ;
+- ou l'orienter vers un **chef de division support de son propre service**, qui
+  le reçoit dans sa file « Distribution » et décide ensuite de le traiter ou de
+  l'assigner à un technicien de sa division.
+
+La chaîne de transmission dynamique qui suit (d'un intervenant A à un
+intervenant An) n'est pas concernée par cette restriction : elle reste libre.
 
 #### 4. Traitement
 
@@ -171,6 +202,51 @@ L'agent :
 - ajoute des commentaires ;
 - effectue les interventions ;
 - change le statut.
+
+**Workflow progressif** (2026-09-27) : les actions de traitement ne sont pas
+toutes proposées en même temps. Le traitant en voit **une seule à la fois**,
+selon l'état réel du ticket :
+
+| État du ticket | Action proposée |
+| --- | --- |
+| Assigné, sans constat | Constat d'intervention |
+| Assigné, constat consigné | Démarrer le traitement |
+| En cours | Terminer le traitement |
+| Résolu ou clôturé | aucune |
+
+**Une assignation ne démarre plus le traitement** : elle désigne un intervenant.
+Le traitement commence au geste explicite du traitant, qui saisit alors le
+**lieu de l'intervention** ; la date et l'heure de début sont horodatées par le
+système, jamais saisies. Le **demandeur ne renseigne pas le lieu** : c'est une
+donnée de terrain, connue du seul traitant.
+
+À la terminaison, la date et l'heure de fin sont enregistrées de la même façon,
+et le PV est établi. Il est **soumis automatiquement** au chef de division dès
+que le demandeur a validé le dépannage — la tâche 3.2 reste donc un point de
+contrôle, et le traitant n'a plus de soumission manuelle à faire.
+
+**« Transmettre le traitement » est indépendant de ce workflow** : il reste
+proposé à chaque étape, avec ses propres règles.
+
+**Constat d'intervention** (procédure EDG/PS-GSI/Pro-02 tâche 2.1) : avant de
+résoudre, le **technicien** confronte l'état réel trouvé sur place à ce que
+décrit la demande. Il déclare le constat **conforme** ou en **écart**, et
+consigne ses observations.
+
+En cas d'écart, il précise la **catégorie observée** et la **priorité
+observée**, toutes deux **obligatoires** et **choisies dans une liste** (précisé
+le 2026-09-26) — le même référentiel que celui de la qualification, puisque
+l'intérêt du constat est justement de comparer les deux. Elles étaient
+auparavant saisies en texte libre et facultatives, ce qui produisait des
+libellés hétérogènes et souvent vides. Un écart remet en cause la qualification,
+qui appartient au chef de service : celui-ci en est averti.
+
+Le constat du traitant actuel est consultable dans l'onglet **Description** du
+ticket, à la suite de la description du demandeur et de la solution proposée. Il
+est visible de **tous**, demandeur inclus — contrairement à la solution proposée,
+qui reste réservée au support. Le bouton de saisie disparaît une fois le constat
+de l'intervention en cours consigné, et réapparaît pour l'intervenant suivant
+après une transmission, qui ouvre une nouvelle intervention.
 
 #### 5. Validation
 
@@ -229,7 +305,6 @@ Le système doit permettre :
 - réouverture ticket ;
 - clôture ticket ;
 - affectation ticket ;
-- escalade ticket ;
 - fusion ticket ;
 - duplication ticket.
 
@@ -261,8 +336,16 @@ Notifications par :
 - affectation ;
 - changement statut ;
 - résolution ;
-- fermeture ;
-- escalade.
+- fermeture.
+
+Destinataires à la création d'un ticket (précisé le 2026-09-26) : le demandeur
+reçoit une confirmation (« Ticket créé »), et **tous les chefs de service
+(`chief-service`)** reçoivent « Nouvelle demande à qualifier », in-app et par
+email. Ce sont eux qui tiennent la File d'attente. L'administrateur en est
+volontairement exclu : il voit la même file mais ne qualifie pas, le notifier à
+chaque création ne produirait que du bruit. Ces notifications sont persistées en
+base, donc consultables même si le destinataire était déconnecté au moment de la
+création — l'évènement temps réel (SSE) ne fait que rafraîchir les écrans ouverts.
 
 ### 10.4 Gestion Des Utilisateurs
 
@@ -283,6 +366,19 @@ Le système doit journaliser :
 - les affectations ;
 - les connexions ;
 - les modifications.
+
+**Traçabilité organisationnelle** — chaque ticket conserve, d'un côté, la
+direction / le département / le service / la fonction / le matricule du
+**demandeur**, et de l'autre la direction / le département / le service qui
+**traite** la demande (voir §7.1).
+
+Ces informations sont **figées au moment des faits** et ne sont jamais
+recalculées ensuite : celles du demandeur à la création de la demande, celles de
+l'organisation traitante à la qualification, celles de chaque intervenant à
+l'ouverture de son intervention. Une mutation de personnel, un changement de
+fonction, un renommage de service ou une réorganisation de l'organigramme ne
+réécrivent donc pas l'historique : un ticket traité en janvier continue
+d'afficher la situation de janvier.
 
 **Export du dossier complet d'une demande (Administration)** — réservé au rôle
 `admin` : depuis la fiche détail d'un ticket dans l'espace Administration,
@@ -313,21 +409,51 @@ Le système devra :
 - générer des alertes ;
 - détecter les dépassements.
 
-### 11.2 Escalade Automatique
+### 11.2 Escalade Automatique — RETIRÉE (2026-09-26)
 
-Si un ticket dépasse le délai :
+L'escalade est retirée en même temps que le statut `escalated` : un ticket ne
+doit plus changer de statut ni de responsable sans action humaine explicite
+(règle déjà appliquée au job planifié, désactivé avant ce retrait). L'endpoint
+`POST /requests/{id}/escalate`, le service `ServiceEscalade`, `GET
+/stats/escalations` et toute l'interface d'arbitrage ont été supprimés.
 
-- notification automatique ;
-- escalade vers supérieur hiérarchique.
+Les statuts `pending` et `qualified` sont retirés par la même occasion. Les
+trois codes cessent d'être des **cibles** mais restent des **sources** de
+transition, afin qu'aucun ticket déjà en base ne se retrouve figé sans action
+disponible.
 
-### 11.3 Base De Connaissance
+### 11.3 Base De Connaissance — RETIRÉE (2026-09-24)
 
-Le système pourra intégrer :
+Cette fonctionnalité était optionnelle (« le système *pourra* intégrer ») et n'a
+jamais été alimentée : la table `knowledge_article` était vide en production.
 
-- FAQ ;
-- solutions fréquentes ;
-- guides techniques ;
-- procédures.
+Elle a été retirée du périmètre sur décision produit du 2026-09-24, avec ses
+tables (`knowledge_article`, `knowledge_category`), ses routes API, ses pages
+(`/knowledge` public, `/app/knowledge`, `/app/admin/knowledge`) et la permission
+`view_knowledge` / `manage_knowledge`. La route `/help`, qui n'était qu'une
+redirection vers `/knowledge`, disparaît également.
+
+Un éventuel retour de la fonctionnalité passera par une nouvelle spécification.
+
+### 11.4 Annonces Institutionnelles — RETIRÉE (2026-09-24)
+
+Le module d'annonces (publication d'un message à destination de tout ou partie
+des rôles, avec catégorie, priorité, canaux de diffusion et statistiques de
+consultation) a été retiré du périmètre à la même date, avec ses cinq tables
+(`announcement`, `announcement_target_role`, `announcement_category`,
+`announcement_priority`, `announcement_status`), ses routes API, ses événements
+SSE `announcement.*` et le panneau « Annonce globale » de l'espace DG.
+
+La table `announcement` était vide en production au moment du retrait.
+
+**Conséquence sur les écrans conservés :**
+
+- `/app/admin/communication` ne porte plus que les réglages de canaux et
+  d'expéditeur, qui servent les notifications de tickets (email, SMS,
+  notifications internes). La table `communication_setting` est conservée.
+- Le panneau et la page de notifications perdent l'onglet « Annonces ». Les
+  notifications non rattachées à un ticket sont désormais étiquetées
+  « Système ».
 
 ---
 
@@ -447,3 +573,7 @@ La mise en place de cette application de Ticketing/Support permettra à la DSI d
 | --- | --- |
 | 2026-08-15 | Ajout de l'export du dossier complet d'une demande, réservé à l'espace Administration (§10.5) — détails techniques dans `docs/mise-a-jour-backend.md`. |
 | 2026-08-19 | Rattachement post-login pour un utilisateur authentifié par la plateforme centrale sans compte local (auto-provisioning silencieux si groupe support déjà présent, sinon écran de consentement `/consent` puis rattachement à `collaborateur-support`) — nouvel endpoint `POST /auth/consent/accept`, nouvelles pages `/legal/terms` et `/legal/privacy` — détails techniques dans `docs/mise-a-jour-backend.md`. |
+| 2026-09-22 | Qualification : suppression de la saisie Direction / Département / Service (§7.1). Seule la DSI traitant les incidents, l'organisation traitante est désormais déduite côté serveur du rattachement du chef de service qui qualifie. Le formulaire `/app/queue` ne conserve que Catégorie, Priorité et Chef de division support. Exposition de la fonction (`requester_job`) et du matricule (`employee_matricule`) du demandeur, jusque-là lus par le frontend mais jamais fournis par l'API (§10.5) — détails techniques dans `docs/mise-a-jour-backend.md`. |
+| 2026-09-24 | Retrait de la table **`communication_setting`** (migration Alembic `027`), table vide et singleton dont seules 3 colonnes sur 9 étaient consommées (`email_on`, `sms_on`, `sender_sms`). Les gardes étaient en *fail-open* : le comportement d'envoi est **inchangé**. Conséquence assumée : plus de coupe-circuit en base pour les mails et SMS — la coupure passe désormais par `SMTP_HOST` / `SMS_GATEWAY_URL` vides dans `.env`, donc un redémarrage. Écran `/app/admin/communication` supprimé (il n'était lié à aucun menu). **`activity_log` est conservée** — exigence §10.5 et §13 sur la journalisation des connexions — détails techniques dans `docs/mise-a-jour-backend.md`. |
+| 2026-09-24 | Retrait des fonctionnalités **Base de connaissance** (§11.3) et **Annonces institutionnelles** (§11.4), ainsi que du référentiel *Statuts de compte*. Huit tables supprimées (migration Alembic `026`), aucune donnée métier perdue (`announcement` et `knowledge_article` étaient vides). La colonne `account.account_status` est conservée mais n'est plus validée contre un référentiel. Rouvre l'écart CDC **DG5** (panneau « Annonce globale » de l'espace DG), retrait assumé — détails techniques dans `docs/mise-a-jour-backend.md`. |
+| 2026-09-22 | Figeage des identités organisationnelles (§10.5) : celles du demandeur à la création, celles de l'organisation traitante à la qualification. Une mutation de personnel ou une réorganisation de l'organigramme ne réécrit plus rétroactivement l'historique des tickets. Complète le figeage des intervenants (BR-TRACE-001) déjà en place — détails techniques dans `docs/mise-a-jour-backend.md`. |

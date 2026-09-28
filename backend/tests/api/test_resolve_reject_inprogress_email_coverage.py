@@ -25,7 +25,7 @@ async def test_qualify_triage_direct_assignment_emails_requester(auth_client, un
         MOCK_ACCOUNTS["user"].id, unity_id=None, role="user",
         email=MOCK_ACCOUNTS["user"].email,
     )
-    await _ensure_test_account(910, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(910, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "inprogress-email")
 
     email_calls: list[dict] = []
@@ -54,7 +54,7 @@ async def test_resolve_emails_requester(auth_client, unity_id, monkeypatch):
         MOCK_ACCOUNTS["user"].id, unity_id=None, role="user",
         email=MOCK_ACCOUNTS["user"].email,
     )
-    await _ensure_test_account(920, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(920, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "resolve-email")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=920)
 
@@ -67,7 +67,7 @@ async def test_resolve_emails_requester(auth_client, unity_id, monkeypatch):
     monkeypatch.setattr("api.core.mailer.send_notification_email", _fake_send)
 
     resp = await _call_as(
-        _dep(920, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
+        _dep(920, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/resolve",
         _FULL_RESOLVE_BODY,
     )
     assert resp.status_code == 200, resp.text
@@ -85,7 +85,7 @@ async def test_self_take_from_queue_emails_the_taking_agent(auth_client, unity_i
     """BR-QUEUE-AUTO-START-001 — "Prendre le ticket" : l'agent se qualifie lui-même
     comme assignee_id depuis la file d'attente. Vérifie que ce chemin (distinct
     d'une assignation par un tiers) envoie bien un email à l'agent qui prend."""
-    await _ensure_test_account(950, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(950, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "self-take-email")
 
     email_calls: list[dict] = []
@@ -97,7 +97,7 @@ async def test_self_take_from_queue_emails_the_taking_agent(auth_client, unity_i
     monkeypatch.setattr("api.core.mailer.send_notification_email", _fake_send)
 
     resp = await _call_as(
-        _dep(950, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/qualify",
+        _dep(950, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/qualify",
         {"category": "panne", "priority": "medium", "unit_id": unity_id, "assignee_id": "950"},
     )
     assert resp.status_code == 200, resp.text
@@ -112,7 +112,7 @@ async def test_self_take_from_queue_emails_the_taking_agent(auth_client, unity_i
 
 async def test_assign_route_emails_the_assignee(auth_client, unity_id, monkeypatch):
     """Chemin dédié /assign (assignation par un tiers, distinct de qualify_triage)."""
-    await _ensure_test_account(960, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(960, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "assign-route-email")
 
     email_calls: list[dict] = []
@@ -135,8 +135,8 @@ async def test_assign_route_emails_the_assignee(auth_client, unity_id, monkeypat
 
 async def test_transmit_emails_the_new_handler(auth_client, unity_id, monkeypatch):
     """Chemin transmission (/transmit) — le nouvel intervenant reçoit un email."""
-    await _ensure_test_account(970, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(971, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(970, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(971, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "transmit-email")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=970)
 
@@ -149,7 +149,7 @@ async def test_transmit_emails_the_new_handler(auth_client, unity_id, monkeypatc
     monkeypatch.setattr("api.core.mailer.send_notification_email", _fake_send)
 
     resp = await _call_as(
-        _dep(970, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
+        _dep(970, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
         {"to_user_id": "971", "work_done": "Diagnostic.", "reason": "Motif de test."},
     )
     assert resp.status_code == 200, resp.text

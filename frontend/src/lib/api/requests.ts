@@ -101,10 +101,29 @@ export type RawRequest = {
   lng?: number;
   location_label?: string;
   requester_id?: number | string | null;
+  // Procédure tâche 1.3 — présent UNIQUEMENT sur la file Distribution du chef
+  // de division (endpoint gardé). Partout ailleurs il est absent par
+  // construction : le demandeur ne doit jamais le recevoir.
+  proposed_solution?: string | null;
+  // PV d'intervention (taches 3.3/3.4) — presents sur le TSI uniquement.
+  pv_validated_at?: string | null;
+  pv_submitted_at?: string | null;
+  pv_archived_at?: string | null;
+  intervenant_name?: string | null;
+  intervenant_badge?: string | null;
   employee_matricule?: string;
   requester_job?: string;
-  requester_direction_id?: string;
-  requester_unit_id?: string;
+  requester_direction_id?: number | string | null;
+  requester_unit_id?: number | string | null;
+  // Libellés organisationnels figés au moment des faits (création pour le
+  // demandeur, qualification pour le traitant) — absents des tickets antérieurs
+  // au figeage, que l'on continue alors de résoudre depuis les identifiants.
+  requester_direction_label?: string | null;
+  requester_department_label?: string | null;
+  requester_service_label?: string | null;
+  handler_direction_label?: string | null;
+  handler_department_label?: string | null;
+  handler_service_label?: string | null;
   sla_hours: number;
   sla_elapsed: number;
   sla_breached: boolean;
@@ -224,10 +243,22 @@ export function mapRequest(raw: RawRequest): RequestItem {
     requesterPhone: raw.requester_phone ?? undefined,
     requesterEmail: raw.requester_email ?? undefined,
     requesterAddress: raw.requester_address ?? undefined,
+    proposedSolution: raw.proposed_solution ?? undefined,
+    pvValidatedAt: raw.pv_validated_at ?? undefined,
+    pvSubmittedAt: raw.pv_submitted_at ?? undefined,
+    pvArchivedAt: raw.pv_archived_at ?? undefined,
+    intervenantName: raw.intervenant_name ?? undefined,
+    intervenantBadge: raw.intervenant_badge ?? undefined,
     employeeMatricule: raw.employee_matricule ?? undefined,
     requesterJob: raw.requester_job ?? undefined,
-    requesterDirectionId: raw.requester_direction_id ?? undefined,
-    requesterServiceId: raw.requester_unit_id ?? undefined,
+    requesterDirectionId: raw.requester_direction_id != null ? String(raw.requester_direction_id) : undefined,
+    requesterServiceId: raw.requester_unit_id != null ? String(raw.requester_unit_id) : undefined,
+    requesterDirectionLabel: raw.requester_direction_label ?? undefined,
+    requesterDepartmentLabel: raw.requester_department_label ?? undefined,
+    requesterServiceLabel: raw.requester_service_label ?? undefined,
+    handlerDirectionLabel: raw.handler_direction_label ?? undefined,
+    handlerDepartmentLabel: raw.handler_department_label ?? undefined,
+    handlerServiceLabel: raw.handler_service_label ?? undefined,
     meterNumber: raw.meter_number ?? undefined,
     clientRef: raw.client_ref ?? undefined,
     siteType: raw.site_type as "domicile" | "commerce" | "administration" | undefined,
@@ -246,24 +277,11 @@ export function mapRequest(raw: RawRequest): RequestItem {
     closedAt: raw.closed_at ?? undefined,
     slaHours: raw.sla_hours,
     slaElapsed: raw.sla_elapsed,
-    comments: (raw.timelines ?? [])
-      .filter((t) => t.event_type === "comment_added")
-      .map((t) => ({
-        id: t.id,
-        authorId: asString(t.infos?.actor_id) ?? (t.agent_id ? String(t.agent_id) : ""),
-        author: t.actor_name ?? "Système",
-        authorRole: asString(t.infos?.actor_role ?? t.infos?.source_role),
-        body: t.comment ?? t.label ?? "",
-        isPublic: t.infos?.is_public === true,
-        isDirective: t.infos?.is_directive === true,
-        replyToId: asString(t.infos?.reply_to_id),
-        // BR-MESSAGING-PAIR-001 — second participant de la conversation privée
-        // (toujours résolu côté backend, y compris pour les événements créés
-        // avant l'introduction de ce champ — cf. _resolve_comment_peer).
-        peerId: asString(t.infos?.peer_id),
-        isEdited: false,
-        createdAt: t.created_at,
-      })),
+    // Messagerie retirée le 2026-09-25 : le backend ne renvoie plus les
+    // événements `comment_added` (conservés en base comme historique), ce
+    // champ reste donc toujours vide. Gardé sur le type pour ne pas imposer
+    // un refactor à la trentaine d'entrées de `mock-data.ts`.
+    comments: [],
     timeline: (raw.timelines ?? []).map((t) => {
       const infos = t.infos ?? {};
       return {
@@ -347,25 +365,6 @@ export function mapIntervention(i: RawIntervention): Intervention {
     commentCount: i.comment_count ?? 0,
     attachmentCount: i.attachment_count ?? 0,
     eventIds: (i.event_ids ?? []).map(String),
-  };
-}
-
-export function mapComment(t: RawTimeline) {
-  return {
-    id: t.id,
-    authorId: asString(t.infos?.actor_id) ?? (t.agent_id ? String(t.agent_id) : ""),
-    author: t.actor_name ?? "Système",
-    body: t.comment ?? t.label ?? "",
-    isPublic: t.infos?.is_public === true,
-    isDirective: t.infos?.is_directive === true,
-    replyToId: asString(t.infos?.reply_to_id),
-    peerId: asString(t.infos?.peer_id),
-    isEdited: false,
-    createdAt: t.created_at,
-    attachmentId: asString(t.infos?.attachment_id),
-    attachmentName: typeof t.infos?.filename === "string" ? t.infos.filename : undefined,
-    attachmentMime: typeof t.infos?.mime_type === "string" ? t.infos.mime_type : undefined,
-    attachmentSize: typeof t.infos?.size_bytes === "number" ? t.infos.size_bytes : undefined,
   };
 }
 
@@ -605,6 +604,34 @@ export type TransmitTreatmentData = {
   attachment_ids?: string[];
 };
 
+/** BR-TRANSMIT-SCOPE-TECH-001 — destinataire possible pour une transmission. */
+export type TransmitTarget = {
+  id: string;
+  name: string;
+  /** « Badge » du formulaire : le matricule du personnel. */
+  matricule?: string | null;
+  role: string;
+  /** Vrai pour le responsable qui a confié le ticket (remontée hiérarchique). */
+  is_distributor: boolean;
+};
+
+/**
+ * Destinataires autorisés pour « Transmettre le traitement », calculés par le
+ * serveur selon le rôle de l'acteur et le ticket.
+ *
+ * `restricted: true` (technicien) → `items` est une liste fermée : le client
+ * affiche une sélection et masque les filtres direction/département/service.
+ * `restricted: false` → annuaire libre, comportement inchangé.
+ */
+export async function fetchTransmitTargets(
+  id: string,
+): Promise<{ restricted: boolean; items: TransmitTarget[] }> {
+  const res = await apiFetch<{ restricted: boolean; items: TransmitTarget[] }>(
+    `/requests/${id}/transmit-targets`,
+  );
+  return { restricted: !!res.restricted, items: res.items ?? [] };
+}
+
 export async function transmitTreatment(
   id: string,
   data: TransmitTreatmentData,
@@ -612,6 +639,67 @@ export async function transmitTreatment(
   const raw = await apiFetch<RawRequest>(`/requests/${id}/transmit`, {
     method: "POST",
     body: JSON.stringify(data),
+  });
+  return mapRequest(raw);
+}
+
+// BR-DISTRIBUTION-001 — file "Distribution" du chef de division support : tickets
+// que le chef de service lui a orientés et qui n'ont pas encore de responsable
+// opérationnel. Le périmètre est forcé côté backend depuis l'acteur authentifié.
+export async function fetchDistribution(
+  filters?: { page?: number; limit?: number },
+): Promise<{ items: RequestItem[]; total: number; page: number; pages: number; pageSize: number }> {
+  const params = new URLSearchParams();
+  if (filters) {
+    for (const [k, v] of Object.entries(filters)) {
+      if (v !== undefined && v !== null) {
+        const value = String(v);
+        if (value !== "") params.set(k, value);
+      }
+    }
+  }
+  const raw = await apiFetch<RawPaginated<RawRequest>>(
+    `/requests/distribution?${params.toString()}`,
+  );
+  return {
+    items: raw.items.map(mapRequest),
+    total: raw.total,
+    page: raw.page,
+    pages: raw.pages,
+    pageSize: raw.page_size,
+  };
+}
+
+export type DistributionTechnician = {
+  id: string;
+  name: string;
+  email?: string | null;
+  avatar?: string | null;
+};
+
+/** Techniciens actifs de la division du chef de division — liste métier dédiée,
+ *  déjà filtrée côté backend (aucun filtrage de sécurité côté client). */
+export async function fetchDistributionTechnicians(): Promise<DistributionTechnician[]> {
+  return apiFetch<DistributionTechnician[]>(`/requests/distribution/technicians`);
+}
+
+/** Le chef de division prend le ticket pour son propre traitement. */
+export async function takeFromDistribution(id: string): Promise<RequestItem> {
+  const raw = await apiFetch<RawRequest>(`/requests/${id}/distribution/take`, {
+    method: "POST",
+    body: "{}",
+  });
+  return mapRequest(raw);
+}
+
+/** Le chef de division assigne le ticket à un technicien de sa division. */
+export async function assignFromDistribution(
+  id: string,
+  technicianId: string,
+): Promise<RequestItem> {
+  const raw = await apiFetch<RawRequest>(`/requests/${id}/distribution/assign`, {
+    method: "POST",
+    body: JSON.stringify({ technician_id: technicianId }),
   });
   return mapRequest(raw);
 }
@@ -667,7 +755,58 @@ export type QualifyTriageData = {
   direction_id?: string;
   unit_id?: string;
   assignee_id?: string;
+  /** Procédure tâche 1.3 — exigé par le backend uniquement à l'imputation vers
+   *  un chef de division support (pas pour une prise en charge personnelle). */
+  proposed_solution?: string;
 };
+
+/** Procédure EDG/PS-GSI/Pro-02, tâche 2.1 — constat d'intervention.
+ *  L'intervenant confronte l'état réel de la requête à ce qui a été décrit,
+ *  AVANT de la résoudre (tâche 2.2). À ne pas confondre avec `qualifyTriage`,
+ *  qui est la qualification du chef de service depuis la File d'attente. */
+export type FieldCheckData = {
+  conformity: "conforme" | "ecart";
+  findings: string;
+  observed_category?: string;
+  observed_priority?: string;
+};
+
+export async function submitFieldCheck(
+  id: string,
+  data: FieldCheckData,
+): Promise<RequestItem> {
+  const raw = await apiFetch<RawRequest>(`/requests/${id}/field-check`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return mapRequest(raw);
+}
+
+/** BR-TRAITEMENT-PROGRESSIF-001 — « Démarrer le traitement », deuxième geste du
+ *  workflow progressif, entre le constat et la terminaison.
+ *
+ *  Seul le lieu est transmis : la date et l'heure de début sont prises côté
+ *  serveur, jamais envoyées par le navigateur. */
+export async function startTreatment(
+  id: string,
+  location: string,
+): Promise<RequestItem> {
+  const raw = await apiFetch<RawRequest>(`/requests/${id}/start-treatment`, {
+    method: "POST",
+    body: JSON.stringify({ location }),
+  });
+  return mapRequest(raw);
+}
+
+/** Descriptif de la solution proposée par le chef de service à l'imputation.
+ *  Endpoint séparé et gardé : ce descriptif n'est jamais inclus dans la fiche
+ *  du ticket, que le demandeur peut lire. Renvoie 403 pour le demandeur. */
+export async function fetchProposedSolution(id: string): Promise<string | undefined> {
+  const raw = await apiFetch<{ proposed_solution?: string | null }>(
+    `/requests/${id}/proposed-solution`,
+  );
+  return raw.proposed_solution ?? undefined;
+}
 
 export async function qualifyTriage(
   id: string,
@@ -726,54 +865,13 @@ export async function closeRequest(
   return mapRequest(raw);
 }
 
-// ── API : Commentaires ────────────────────────────────────────────────────────
-
-export type CreateCommentData = {
-  author_id: number | string;  // Le backend overrides depuis le JWT, envoyer 0 comme placeholder
-  author_name: string;
-  body: string;
-  is_public: boolean;
-  attachment_id?: string;
-  is_directive?: boolean;
-  reply_to_id?: string;
-  // BR-MESSAGING-PAIR-001 — obligatoire pour un message normal (destinataire de
-  // la conversation privée : le demandeur ou l'assigné courant, selon qui
-  // écrit) ; ignoré pour une directive (peer résolu côté backend = assigné).
-  peer_id?: string;
-};
-
-export async function fetchComments(requestId: string, peerId?: string) {
-  const params = peerId ? `?peer_id=${encodeURIComponent(peerId)}` : "";
-  const raw = await apiFetch<RawTimeline[]>(`/requests/${requestId}/comments${params}`);
-  return (raw ?? []).map(mapComment);
-}
-
-export async function createComment(
-  requestId: string,
-  data: CreateCommentData,
-) {
-  const raw = await apiFetch<RawTimeline>(`/requests/${requestId}/comments`, {
-    method: "POST",
-    body: JSON.stringify({
-      body: data.body,
-      is_public: data.is_public,
-      ...(data.attachment_id ? { attachment_id: data.attachment_id } : {}),
-      ...(data.is_directive ? { is_directive: true } : {}),
-      ...(data.reply_to_id ? { reply_to_id: data.reply_to_id } : {}),
-      ...(data.peer_id ? { peer_id: data.peer_id } : {}),
-    }),
-  });
-  return mapComment(raw);
-}
-
-export async function deleteComment(
-  requestId: string,
-  commentId: string,
-): Promise<void> {
-  await apiFetch<void>(`/requests/${requestId}/comments/${commentId}`, {
-    method: "DELETE",
-  });
-}
+// ── API : Commentaires — SUPPRIMÉE ────────────────────────────────────────────
+//
+// La messagerie de ticket a été retirée de l'application le 2026-09-25 : les
+// endpoints `/requests/{id}/comments` (lecture, écriture, suppression)
+// n'existent plus côté serveur, et les événements `comment_added` déjà
+// enregistrés ne sortent plus par l'API — ils restent en base comme historique.
+// `RequestItem.comments` est donc désormais toujours vide.
 
 // ── API : Pièces jointes ──────────────────────────────────────────────────────
 
@@ -837,6 +935,84 @@ export async function exportRequestDossier(
   return { blob: file.blob, filename: file.filename ?? `dossier-${id}.${ext}` };
 }
 
+/** PV d'intervention au format officiel EDG/PS-GSI/PV-01 (procédure tâche 3.1).
+ *  Accessible au demandeur également : c'est lui qui valide le dépannage et
+ *  signe le PV (tâche 3.2). Le document n'expose jamais la solution proposée. */
+export async function downloadPvIntervention(
+  id: string,
+): Promise<{ blob: Blob; filename: string }> {
+  const file = await apiFetchBlob(`/requests/${id}/pv`);
+  return { blob: file.blob, filename: file.filename ?? `PV-${id}.pdf` };
+}
+
+/** Procédure tâche 3.3 — « Soumettre le PV d'intervention au Chef de division ».
+ *  Le destinataire n'est pas choisi : c'est le chef de division qui a réparti le
+ *  ticket. Pièces jointes facultatives : le PV signé et scanné. */
+export async function submitPvIntervention(
+  id: string,
+  attachmentIds?: string[],
+): Promise<RequestItem> {
+  const raw = await apiFetch<RawRequest>(`/requests/${id}/pv/submit`, {
+    method: "POST",
+    body: JSON.stringify({ attachment_ids: attachmentIds ?? undefined }),
+  });
+  return mapRequest(raw);
+}
+
+/** Procédure tâche 3.4 — « Enregistrer et archiver le PV d'intervention ».
+ *  Réservé au chef de division qui a réparti le ticket. */
+export async function archivePvIntervention(id: string): Promise<RequestItem> {
+  const raw = await apiFetch<RawRequest>(`/requests/${id}/pv/archive`, {
+    method: "POST",
+    body: "{}",
+  });
+  return mapRequest(raw);
+}
+
+/** TSI — Tableau de Suivi des Interventions (livrable de la tâche 3.4).
+ *  Suit les tickets répartis par ce chef de division jusqu'à l'archivage de
+ *  leur PV. Distinct du rapport statistique `/reports/interventions`. */
+/** Onglet « Tickets résolus » — les tickets dont je suis l'intervenant courant
+ *  et dont le traitement est terminé (`resolved` ou `closed`). Le périmètre est
+ *  forcé côté serveur depuis le jeton : aucun paramètre ne le déplace. */
+export async function fetchResolvedByMe(
+  filters?: { page?: number; limit?: number },
+): Promise<{ items: RequestItem[]; total: number; page: number; pages: number; pageSize: number }> {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(filters ?? {})) {
+    if (v !== undefined && v !== null) params.set(k, String(v));
+  }
+  const raw = await apiFetch<RawPaginated<RawRequest>>(
+    `/requests/resolved-by-me?${params.toString()}`,
+  );
+  return {
+    items: raw.items.map(mapRequest),
+    total: raw.total,
+    page: raw.page,
+    pages: raw.pages,
+    pageSize: raw.page_size,
+  };
+}
+
+export async function fetchPvTracking(
+  filters?: { page?: number; limit?: number },
+): Promise<{ items: RequestItem[]; total: number; page: number; pages: number; pageSize: number }> {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(filters ?? {})) {
+    if (v !== undefined && v !== null) params.set(k, String(v));
+  }
+  const raw = await apiFetch<RawPaginated<RawRequest>>(
+    `/requests/pv-tracking?${params.toString()}`,
+  );
+  return {
+    items: raw.items.map(mapRequest),
+    total: raw.total,
+    page: raw.page,
+    pages: raw.pages,
+    pageSize: raw.page_size,
+  };
+}
+
 /** Rejet d'un ticket par le chef de service — motif obligatoire. */
 export async function rejectTicket(
   id: string,
@@ -875,27 +1051,10 @@ export async function transferDirection(
   return mapRequest(raw);
 }
 
-export async function escalateRequest(
-  id: string,
-  data: { reason: string },
-): Promise<void> {
-  await apiFetch<RawTimeline>(`/requests/${id}/escalate`, {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
-}
-
-// Lot 3.3 — "Escalade exceptionnelle" : réservée à chief-departement, cible
-// directement le directeur (court-circuite la hiérarchie normale de /escalate).
-export async function escalateToDirectorRequest(
-  id: string,
-  data: { reason: string },
-): Promise<void> {
-  await apiFetch<RawTimeline>(`/requests/${id}/escalate-to-director`, {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
-}
+// Escalade retiree le 2026-09-26 : elle ciblait exclusivement
+// chief-departement et director, deux roles supprimes du projet — elle
+// n'avait donc plus aucun destinataire possible. Endpoints, service et
+// statut `escalated` retires avec elle.
 
 export async function requesterEditRequest(
   id: string,

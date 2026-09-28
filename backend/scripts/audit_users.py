@@ -39,7 +39,7 @@ async def main():
 
         issues = []
         valid_roles = {
-            "public", "user", "agent-support", "chief-service", "chief-departement",
+            "public", "user", "chief-service", "chief-service", "chief-departement",
             "director", "admin",
         }
 

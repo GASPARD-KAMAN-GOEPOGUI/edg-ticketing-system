@@ -34,10 +34,15 @@ import {
   startOfMonth, endOfMonth, startOfYear, endOfYear,
 } from "date-fns";
 import { fr } from "date-fns/locale";
-import {
-  EscalationProgressBar,
-  buildRequesterStepsFromStatus,
-} from "@/components/escalation-progress-bar";
+// Masque le 2026-09-28 : le stepper de progression a ete retire des cartes de
+// « Mes tickets » (le statut est deja porte par le StatusBadge). Le composant
+// reste utilise par la page publique de suivi (routes/track.tsx) — pour
+// reafficher le stepper ici, decommenter cet import et les deux blocs
+// « Progress bar » plus bas.
+// import {
+//   EscalationProgressBar,
+//   buildRequesterStepsFromStatus,
+// } from "@/components/escalation-progress-bar";
 import { PaginationBar } from "@/components/pagination-bar";
 import { AsyncSwap } from "@/components/async-states";
 import { useSessionState, useScrollRestoration } from "@/lib/use-session-state";
@@ -91,7 +96,7 @@ const REQUEST_STATUS_OPTIONS = PERSONAL_ACTIVE_STATUSES;
 
 function RequestCard({ r, requesterAvatar }: { r: RequestItem; requesterAvatar?: string }) {
   const CategoryIcon = getCategoryIcon(r.category);
-  const steps = buildRequesterStepsFromStatus(r.status);
+  // const steps = buildRequesterStepsFromStatus(r.status);  // masque (voir import)
   return (
     <GlassCard className="flex h-full min-h-[196px] flex-col gap-3 p-4 transition-shadow hover:shadow-xl">
       {/* Header */}
@@ -143,7 +148,7 @@ function RequestCard({ r, requesterAvatar }: { r: RequestItem; requesterAvatar?:
         <p className="font-mono text-[11px] text-muted-foreground/60">Réf. {r.ref}</p>
       </div>
 
-      {/* Progress bar */}
+      {/* Progress bar — masquee le 2026-09-28 (voir commentaire sur l'import)
       <div className="border-t border-border/30 pt-2">
         <EscalationProgressBar
           compact
@@ -151,6 +156,7 @@ function RequestCard({ r, requesterAvatar }: { r: RequestItem; requesterAvatar?:
           className="!border-0 !shadow-none !bg-transparent !backdrop-blur-none !rounded-none !px-0 !py-0"
         />
       </div>
+      */}
     </GlassCard>
   );
 }
@@ -206,14 +212,6 @@ function RequestsList() {
     else if (val === "custom") { setPeriodPreset("custom"); }
     else { applyQuickDate(val as "today" | "week" | "month" | "year"); }
   }, [clearDates, applyQuickDate, setPeriodPreset]);
-
-  const clearAllFilters = useCallback(() => {
-    setQ("");
-    setStatus("all");
-    setOrigin("all");
-    clearDates();
-    setPage(1);
-  }, [setQ, setStatus, setOrigin, clearDates]);
 
   const visibleStatus = PERSONAL_TERMINAL_STATUS_SET.has(status as RequestStatus) ? "all" : status;
 
@@ -306,13 +304,6 @@ function RequestsList() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant="secondary"
-            className="rounded-full"
-            onClick={clearAllFilters}
-          >
-            Réinitialiser les filtres
-          </Button>
           <LayoutToggle layout={layout} onChange={setLayout} />
           <Button asChild className="rounded-full gradient-primary shadow-lg shadow-primary/30">
             <Link to="/app/new">

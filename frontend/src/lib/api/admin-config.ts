@@ -293,11 +293,6 @@ export async function testRoutingRule(data: Record<string, string>): Promise<{
 export const REF_TABLES = [
   "request_statuses",
   "request_categories",
-  "account_statuses",
-  "knowledge_categories",
-  "announcement_categories",
-  "announcement_priorities",
-  "announcement_statuses",
 ] as const;
 
 export type RefTableName = (typeof REF_TABLES)[number];
@@ -305,11 +300,6 @@ export type RefTableName = (typeof REF_TABLES)[number];
 export const REF_TABLE_LABELS: Record<RefTableName, string> = {
   request_statuses:        "Statuts de ticket",
   request_categories:      "Catégories de ticket",
-  account_statuses:        "Statuts de compte",
-  knowledge_categories:    "Catégories de connaissance",
-  announcement_categories: "Catégories d'annonce",
-  announcement_priorities: "Priorités d'annonce",
-  announcement_statuses:   "Statuts d'annonce",
 };
 
 export async function fetchRefTable(table: RefTableName): Promise<RawRefItem[]> {
@@ -320,12 +310,6 @@ export async function fetchRefTable(table: RefTableName): Promise<RawRefItem[]> 
 /** Endpoint public (tous rôles authentifiés) — utilisé dans les formulaires non-admin. */
 export async function fetchRequestCategories(): Promise<RawRefItem[]> {
   const raw = await apiFetch<RawRefItem[]>("/references/request-categories");
-  return Array.isArray(raw) ? raw : (raw as { items?: RawRefItem[] }).items ?? [];
-}
-
-/** Endpoint public (tous rôles authentifiés) — utilisé par /app/knowledge, accessible à tous. */
-export async function fetchKnowledgeCategories(): Promise<RawRefItem[]> {
-  const raw = await apiFetch<RawRefItem[]>("/references/knowledge-categories");
   return Array.isArray(raw) ? raw : (raw as { items?: RawRefItem[] }).items ?? [];
 }
 

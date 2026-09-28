@@ -54,7 +54,7 @@ async def test_create_notifies_requester(auth_client, unity_id):
 
 
 async def test_qualify_triage_direct_assignment_notifies_new_assignee(auth_client, unity_id):
-    await _ensure_test_account(830, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(830, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "qualify-direct")
 
     async with auth_client("admin") as admin_client:
@@ -70,16 +70,17 @@ async def test_qualify_triage_direct_assignment_notifies_new_assignee(auth_clien
     assignee_notifs = await _notifications_for(830, request_id)
     assert any(n.title == "Ticket assigné" for n in assignee_notifs)
 
-    # BR-QUEUE-AUTO-START-001 : qualify_triage() avec assignee_id direct démarre
-    # désormais directement le traitement (in_progress) — le titre reflète le
-    # chemin générique update()/_notif_map, distinct de "Ticket pris en charge"
-    # (réservé au chemin dédié assign()).
+    # BR-TRAITEMENT-PROGRESSIF-001 (2026-09-27) : qualify_triage() avec
+    # assignee_id direct ne démarre plus le traitement, il assigne. Le demandeur
+    # est donc informé de l'assignation, pas d'un traitement en cours — qui ne
+    # commencera qu'au geste explicite du traitant.
     requester_notifs = await _notifications_for(MOCK_ACCOUNTS["user"].id, request_id)
-    assert any(n.title == "Ticket en cours de traitement" for n in requester_notifs)
+    titles = [n.title for n in requester_notifs]
+    assert "Ticket pris en charge" in titles, titles
 
 
 async def test_assign_notifies_assignee_and_requester_app_only(auth_client, unity_id, monkeypatch):
-    await _ensure_test_account(831, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(831, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "assign-coherence")
 
     email_calls: list[dict] = []
@@ -120,14 +121,14 @@ async def test_transmit_confirms_emitter_app_only(auth_client, unity_id, monkeyp
     # assign()/qualify_triage(), ce lot) — on l'intercepte comme le reste.
     monkeypatch.setattr("api.core.mailer.send_notification_email", _fake_send)
 
-    await _ensure_test_account(840, unity_id=unity_id, role="agent-support")
-    await _ensure_test_account(841, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(840, unity_id=unity_id, role="chief-service")
+    await _ensure_test_account(841, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "transmit-app-only")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=840)
     email_calls.clear()
 
     resp = await _call_as(
-        _dep(840, "agent-support", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
+        _dep(840, "chief-service", unity_id), "POST", f"/api/v1/requests/{request_id}/transmit",
         {"to_user_id": "841", "work_done": "Diagnostic.", "reason": "Motif de test."},
     )
     assert resp.status_code == 200, resp.text
@@ -153,7 +154,7 @@ async def test_cancel_emails_requester_but_stays_app_only_for_assignee(auth_clie
         MOCK_ACCOUNTS["user"].id, unity_id=None, role="user",
         email=MOCK_ACCOUNTS["user"].email,
     )
-    await _ensure_test_account(850, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(850, unity_id=unity_id, role="chief-service")
     request_id = await _create_ticket(auth_client, unity_id, "cancel-requester-email")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=850)
 
@@ -183,45 +184,10 @@ async def test_cancel_emails_requester_but_stays_app_only_for_assignee(auth_clie
     assert email_calls[0]["to_email"] == MOCK_ACCOUNTS["user"].email
 
 
-async def test_requester_comment_notifies_current_handler_even_outside_pending(auth_client, unity_id):
-    """Généralisation §11 : avant ce lot, seul le statut `pending` déclenchait
-    cette notification ; elle doit désormais s'appliquer dès que le demandeur
-    écrit, quel que soit le statut du ticket."""
-    await _ensure_test_account(860, unity_id=unity_id, role="agent-support")
-    request_id = await _create_ticket(auth_client, unity_id, "comment-generalized")
-    await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=860)
-
-    # BR-MESSAGING-OPEN-001 — le demandeur ne peut écrire qu'après que
-    # l'intervenant actuel a lui-même ouvert la conversation. `name` requis :
-    # create_comment() retombe sur `actor.name` quand `_actor_display_name`
-    # ne trouve ni firstname ni name (SimpleNamespace nu de `_dep` sans ça).
-    def _agent_dep_with_name():
-        import types
-        return types.SimpleNamespace(
-            id=860, role="agent-support", unity_id=unity_id, direction_id=None, name="Agent 860",
-        )
-
-    resp = await _call_as(
-        _agent_dep_with_name, "POST", f"/api/v1/requests/{request_id}/comments",
-        {"body": "Bonjour, une précision ?", "is_public": True, "peer_id": "860"},
-    )
-    assert resp.status_code == 201, resp.text
-
-    async with auth_client("user") as user_client:
-        resp = await user_client.post(
-            f"/api/v1/requests/{request_id}/comments",
-            json={"body": "Une précision utile.", "is_public": True, "peer_id": "860"},
-        )
-        assert resp.status_code == 201, resp.text
-
-    handler_notifs = await _notifications_for(860, request_id)
-    assert any(n.title == "Réponse du demandeur" for n in handler_notifs)
-
-
 async def test_send_email_false_suppresses_mailer_call(monkeypatch, unity_id):
     """Test unitaire ciblé du nouveau paramètre `send_email` de
     NotificationEmitter.emit — indépendant du workflow ticket."""
-    await _ensure_test_account(870, unity_id=unity_id, role="agent-support", email="compte.test.870@test.edg.gn")
+    await _ensure_test_account(870, unity_id=unity_id, role="chief-service", email="compte.test.870@test.edg.gn")
 
     email_calls: list[dict] = []
 
@@ -257,3 +223,79 @@ async def test_send_email_false_suppresses_mailer_call(monkeypatch, unity_id):
     await _flush_background_emails()
 
     assert any(c.get("title") == "Test avec email" for c in email_calls)
+
+
+# ── File d'attente : les chefs de service doivent être prévenus ───────────────
+# L'événement SSE `request.created` ne fait que rafraîchir les écrans déjà
+# ouverts. Un chef de service déconnecté au moment de la création n'apprenait
+# donc jamais qu'une demande attendait sa qualification.
+
+async def test_create_notifies_chief_service_holding_the_queue(auth_client, unity_id):
+    await _ensure_test_account(841, unity_id=unity_id, role="chief-service")
+    request_id = await _create_ticket(auth_client, unity_id, "queue-notify-chief")
+
+    notifs = await _notifications_for(841, request_id)
+    assert any(n.title == "Nouvelle demande à qualifier" for n in notifs)
+
+
+async def test_create_does_not_notify_admin(auth_client, unity_id):
+    """L'admin voit la File d'attente mais ne qualifie pas : le notifier à chaque
+    création ne produirait que du bruit (décision produit 2026-09-26)."""
+    await _ensure_test_account(842, unity_id=None, role="admin")
+    request_id = await _create_ticket(auth_client, unity_id, "queue-notify-admin")
+
+    notifs = await _notifications_for(842, request_id)
+    assert not any(n.title == "Nouvelle demande à qualifier" for n in notifs)
+
+
+async def test_create_does_not_notify_chief_service_requester_twice(auth_client, unity_id):
+    """Un chef de service qui crée sa propre demande reçoit « Ticket créé » ; il
+    ne doit pas recevoir en plus l'alerte de file d'attente pour son ticket."""
+    requester_id = MOCK_ACCOUNTS["user"].id
+    await _ensure_test_account(requester_id, unity_id=unity_id, role="chief-service")
+    request_id = await _create_ticket(auth_client, unity_id, "queue-notify-self")
+
+    notifs = await _notifications_for(requester_id, request_id)
+    assert any(n.title == "Ticket créé" for n in notifs)
+    assert not any(n.title == "Nouvelle demande à qualifier" for n in notifs)
+
+
+async def test_create_emails_chief_service_of_the_queue(auth_client, monkeypatch, unity_id):
+    """Le fan-out email de `emit_bulk` est enveloppé dans un try/except qui
+    journalise sans lever : une panne y serait invisible. Ce test verrouille le
+    canal email choisi pour l'alerte de file d'attente (in-app + email)."""
+    await _ensure_test_account(
+        843, unity_id=unity_id, role="chief-service", email="compte.test.843@test.edg.gn"
+    )
+
+    email_calls: list[dict] = []
+
+    async def _fake_send(**kwargs):
+        email_calls.append(kwargs)
+        return True
+
+    monkeypatch.setattr("api.core.mailer.send_notification_email", _fake_send)
+
+    await _create_ticket(auth_client, unity_id, "queue-notify-email")
+    await _flush_background_emails()
+
+    queue_emails = [c for c in email_calls if c.get("title") == "Nouvelle demande à qualifier"]
+    assert queue_emails, f"aucun email de file d'attente envoyé — reçus : {[c.get('title') for c in email_calls]}"
+    assert any(c["to_email"] == "compte.test.843@test.edg.gn" for c in queue_emails)
+
+
+async def test_create_does_not_notify_technicien_nor_chef_division(auth_client, unity_id):
+    """Garde-fou contre l'expansion de groupe de `_role_filter` : elle élargit
+    `chief-service` à {chief-service, technicien, chef-division-support}. Utiliser
+    `list_by_role()` ici notifierait des rôles qui n'ont même pas accès à la File
+    d'attente. Seul `list_by_role_strict()` est correct."""
+    await _ensure_test_account(844, unity_id=unity_id, role="technicien")
+    await _ensure_test_account(845, unity_id=unity_id, role="chef-division-support")
+    request_id = await _create_ticket(auth_client, unity_id, "queue-strict-role")
+
+    for account_id in (844, 845):
+        notifs = await _notifications_for(account_id, request_id)
+        titles = [n.title for n in notifs]
+        assert "Nouvelle demande à qualifier" not in titles, (
+            f"le compte {account_id} ne tient pas la File d'attente — reçu : {titles}"
+        )

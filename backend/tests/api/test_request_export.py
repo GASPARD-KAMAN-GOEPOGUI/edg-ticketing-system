@@ -15,7 +15,6 @@ import openpyxl
 from tests.api.test_requests_baseline import _ensure_test_account
 from tests.api.test_trace_interventions import (
     _FULL_RESOLVE_BODY,
-    _add_comment_as,
     _assign_via_admin,
     _call_as,
     _create_ticket,
@@ -24,7 +23,7 @@ from tests.api.test_trace_interventions import (
 
 _EXPECTED_SHEETS = {
     "Synthèse", "Acteurs", "Historique", "Escalades",
-    "Conversations", "Pièces jointes", "Notifications",
+    "Pièces jointes", "Notifications",
 }
 
 
@@ -46,7 +45,7 @@ async def test_export_forbidden_for_non_admin_roles(auth_client, unity_id):
     request_id = await _create_ticket(auth_client, unity_id, "export-rbac")
 
     # "agent"/"chief" sont les clés MOCK_ACCOUNTS de test (aliases de
-    # "agent-support"/"chief-service" — cf. conftest.py:153-161).
+    # "chief-service"/"chief-service" — cf. conftest.py:153-161).
     for role in ("user", "agent", "chief", "director"):
         async with auth_client(role) as client:
             resp = await client.get(f"/api/v1/requests/{request_id}/export")
@@ -66,10 +65,9 @@ async def test_export_empty_ticket_has_all_sheets_with_no_data_placeholder(auth_
     wb = _load_workbook(resp.content)
     assert set(wb.sheetnames) == _EXPECTED_SHEETS
 
-    # Aucun commentaire ni escalade n'a eu lieu sur un ticket tout juste créé.
-    for name in ("Conversations", "Escalades"):
-        ws = wb[name]
-        assert ws.cell(row=1, column=1).value == "Aucune donnée enregistrée"
+    # Aucune escalade n'a eu lieu sur un ticket tout juste créé.
+    ws = wb["Escalades"]
+    assert ws.cell(row=1, column=1).value == "Aucune donnée enregistrée"
 
     # La création elle-même génère un événement `created` (Historique) et une
     # notification "Ticket créé" au demandeur (Notifications) — pas vides.
@@ -78,14 +76,13 @@ async def test_export_empty_ticket_has_all_sheets_with_no_data_placeholder(auth_
 
 
 async def test_export_rich_ticket_covers_lifecycle_without_sla_data(auth_client, unity_id):
-    await _ensure_test_account(2001, unity_id=unity_id, role="agent-support")
+    await _ensure_test_account(2001, unity_id=unity_id, role="chief-service")
 
     request_id = await _create_ticket(auth_client, unity_id, "export-rich")
     await _assign_via_admin(auth_client, request_id, unity_id, assignee_id=2001)
-    await _add_comment_as(request_id, 2001, "agent-support", unity_id, "Diagnostic en cours, RAS.")
 
     resolve_resp = await _call_as(
-        _dep(2001, "agent-support", unity_id),
+        _dep(2001, "chief-service", unity_id),
         "POST", f"/api/v1/requests/{request_id}/resolve", _FULL_RESOLVE_BODY,
     )
     assert resolve_resp.status_code == 200, resolve_resp.text
@@ -107,12 +104,6 @@ async def test_export_rich_ticket_covers_lifecycle_without_sla_data(auth_client,
         isinstance(v, str) and v.startswith("Résolution") for v in history_values
     )
     assert any(v == "Clôture" for v in history_values)
-
-    conversations_ws = wb["Conversations"]
-    conversation_messages = [
-        row[3].value for row in conversations_ws.iter_rows(min_row=2)
-    ]
-    assert any(msg and "Diagnostic en cours" in str(msg) for msg in conversation_messages)
 
     actors_ws = wb["Acteurs"]
     actor_names = [row[0].value for row in actors_ws.iter_rows(min_row=2)]

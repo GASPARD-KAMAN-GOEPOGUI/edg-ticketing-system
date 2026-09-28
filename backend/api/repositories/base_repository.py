@@ -48,15 +48,12 @@ _FK_TABLE_MAP: dict[str, tuple[str, str]] = {
     "workflow":              ("workflow",                "WORKFLOW_NOT_FOUND"),
     "task":                  ("tâche",                   "TASK_NOT_FOUND"),
     "routing_rule":          ("règle de routage",        "ROUTING_RULE_NOT_FOUND"),
-    "announcement":          ("annonce",                 "ANNOUNCEMENT_NOT_FOUND"),
-    "knowledge_article":     ("article",                 "ARTICLE_NOT_FOUND"),
     "appreciation":          ("appréciation",            "APPRECIATION_NOT_FOUND"),
     "notification":          ("notification",            "NOTIFICATION_NOT_FOUND"),
     "escalation":            ("escalade",                "ESCALATION_NOT_FOUND"),
     "attachment":            ("pièce jointe",            "ATTACHMENT_NOT_FOUND"),
     "workflow_detail":        ("étape / événement",       "WORKFLOW_DETAIL_NOT_FOUND"),
     "homepage_config":       ("configuration",           "CONFIG_NOT_FOUND"),
-    "communication_setting": ("paramètre",               "CONFIG_NOT_FOUND"),
     "activity_log":          ("journal",                 "LOG_NOT_FOUND"),
 }
 
@@ -317,7 +314,8 @@ class BaseRepository(Generic[ModelType]):
             _parse_integrity_error(exc)
         return obj
 
-    async def bulk_create(self, data_list: list[dict]) -> list[ModelType]:
+    async def bulk_create(self, data_list: list[dict], *, commit: bool = True) -> list[ModelType]:
+        """`commit=False` — flush au lieu de commit ; voir docstring de `create()`."""
         valid = self._valid_columns()
         objs: list[ModelType] = []
         for data in data_list:
@@ -325,11 +323,15 @@ class BaseRepository(Generic[ModelType]):
             objs.append(self.model(**row))
         self.session.add_all(objs)
         try:
-            await self.session.commit()
-            for obj in objs:
-                await self.session.refresh(obj)
+            if commit:
+                await self.session.commit()
+                for obj in objs:
+                    await self.session.refresh(obj)
+            else:
+                await self.session.flush()
         except IntegrityError as exc:
-            await self.session.rollback()
+            if commit:
+                await self.session.rollback()
             _parse_integrity_error(exc)
         return objs
 
@@ -410,9 +412,16 @@ class BaseRepository(Generic[ModelType]):
         return True
 
     async def get_or_create(
-        self, filters: dict, defaults: dict | None = None
+        self,
+        filters: dict,
+        defaults: dict | None = None,
+        *,
+        include_deleted: bool = False,
     ) -> tuple[ModelType, bool]:
-        obj = await self.get_one(filters)
+        """Récupère ou crée. include_deleted=True prend aussi en compte les lignes
+        soft-deletées : indispensable quand `filters` porte sur une colonne UNIQUE,
+        car l'index unique ignore `deleted_at` et l'INSERT échouerait en 1062."""
+        obj = await self.get_one(filters, include_deleted=include_deleted)
         if obj is not None:
             return obj, False
         return await self.create({**(defaults or {}), **filters}), True

@@ -56,5 +56,17 @@ if ($listeners.Count -gt 0) {
 $venvPython = Join-Path $BackendDir "venv\Scripts\python.exe"
 $python = if (Test-Path $venvPython) { $venvPython } else { "python" }
 
+# --reload-dir limite la surveillance au code source. Sans lui, uvicorn surveille
+# aussi venv/, __pycache__/ et uploads/ : le rechargement finit par se figer en
+# gardant le port, et le serveur devient injoignable sans qu'aucune erreur ne le
+# signale (cf. CLAUDE.md, section Commandes dev). UVICORN_RELOAD_DIRS permet d'en
+# surveiller d'autres, separes par des virgules.
+$reloadDirs = if ($env:UVICORN_RELOAD_DIRS) { $env:UVICORN_RELOAD_DIRS -split "," } else { @("api") }
+$reloadArgs = @()
+foreach ($dir in $reloadDirs) {
+  $trimmed = $dir.Trim()
+  if ($trimmed) { $reloadArgs += @("--reload-dir", $trimmed) }
+}
+
 Write-Host "Demarrage backend: http://${BindHost}:${Port}" -ForegroundColor Green
-& $python -m uvicorn api.main:app --host $BindHost --port $Port --reload
+& $python -m uvicorn api.main:app --host $BindHost --port $Port --reload @reloadArgs

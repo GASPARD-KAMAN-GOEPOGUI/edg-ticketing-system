@@ -12,8 +12,6 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as TrackRouteImport } from './routes/track'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as LoginRouteImport } from './routes/login'
-import { Route as KnowledgeRouteImport } from './routes/knowledge'
-import { Route as HelpRouteImport } from './routes/help'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as CreateRequestRouteImport } from './routes/create-request'
 import { Route as ConsentRouteImport } from './routes/consent'
@@ -25,20 +23,18 @@ import { Route as LegalTermsRouteImport } from './routes/legal.terms'
 import { Route as LegalPrivacyRouteImport } from './routes/legal.privacy'
 import { Route as AppTransmittedRouteImport } from './routes/app.transmitted'
 import { Route as AppSupervisionRouteImport } from './routes/app.supervision'
-import { Route as AppStrategicDashboardRouteImport } from './routes/app.strategic-dashboard'
 import { Route as AppSlaCenterRouteImport } from './routes/app.sla-center'
+import { Route as AppResolvedRouteImport } from './routes/app.resolved'
 import { Route as AppReportsRouteImport } from './routes/app.reports'
 import { Route as AppQueueRouteImport } from './routes/app.queue'
+import { Route as AppPvTrackingRouteImport } from './routes/app.pv-tracking'
 import { Route as AppProfileRouteImport } from './routes/app.profile'
 import { Route as AppNotificationsRouteImport } from './routes/app.notifications'
 import { Route as AppNewRouteImport } from './routes/app.new'
 import { Route as AppMyTicketsRouteImport } from './routes/app.my-tickets'
-import { Route as AppKnowledgeRouteImport } from './routes/app.knowledge'
 import { Route as AppHistoryRouteImport } from './routes/app.history'
-import { Route as AppDirectionRouteImport } from './routes/app.direction'
+import { Route as AppDistributionRouteImport } from './routes/app.distribution'
 import { Route as AppDgRouteImport } from './routes/app.dg'
-import { Route as AppDepartmentInboxRouteImport } from './routes/app.department-inbox'
-import { Route as AppChiefInboxRouteImport } from './routes/app.chief-inbox'
 import { Route as AppAdminRouteImport } from './routes/app.admin'
 import { Route as AppRequestsIndexRouteImport } from './routes/app.requests.index'
 import { Route as AppRequestsHistoryRouteImport } from './routes/app.requests.history'
@@ -52,22 +48,19 @@ import { Route as AppAdminReferencesRouteImport } from './routes/app.admin.refer
 import { Route as AppAdminPrioritiesRouteImport } from './routes/app.admin.priorities'
 import { Route as AppAdminOrgRouteImport } from './routes/app.admin.org'
 import { Route as AppAdminLogsRouteImport } from './routes/app.admin.logs'
-import { Route as AppAdminKnowledgeRouteImport } from './routes/app.admin.knowledge'
 import { Route as AppAdminHomepageRouteImport } from './routes/app.admin.homepage'
 import { Route as AppAdminDirectionsRouteImport } from './routes/app.admin.directions'
 import { Route as AppAdminDepartmentsRouteImport } from './routes/app.admin.departments'
-import { Route as AppAdminCommunicationRouteImport } from './routes/app.admin.communication'
 import { Route as AppAdminAuditRouteImport } from './routes/app.admin.audit'
 import { Route as AppTransmittedTicketsIdRouteImport } from './routes/app.transmitted_.tickets.$id'
 import { Route as AppSupervisionTicketsIdRouteImport } from './routes/app.supervision_.tickets.$id'
 import { Route as AppSlaCenterTicketsIdRouteImport } from './routes/app.sla-center_.tickets.$id'
+import { Route as AppResolvedTicketsIdRouteImport } from './routes/app.resolved_.tickets.$id'
 import { Route as AppQueueTicketsIdRouteImport } from './routes/app.queue_.tickets.$id'
 import { Route as AppMyTicketsTicketsIdRouteImport } from './routes/app.my-tickets_.tickets.$id'
 import { Route as AppHistoryTicketsIdRouteImport } from './routes/app.history_.tickets.$id'
-import { Route as AppDirectionTicketsIdRouteImport } from './routes/app.direction_.tickets.$id'
+import { Route as AppDistributionTicketsIdRouteImport } from './routes/app.distribution_.tickets.$id'
 import { Route as AppDgTicketsIdRouteImport } from './routes/app.dg_.tickets.$id'
-import { Route as AppDepartmentInboxTicketsIdRouteImport } from './routes/app.department-inbox_.tickets.$id'
-import { Route as AppChiefInboxTicketsIdRouteImport } from './routes/app.chief-inbox_.tickets.$id'
 import { Route as AppAdminTicketsIdRouteImport } from './routes/app.admin.tickets.$id'
 import { Route as AppAdminDirectionsIdRouteImport } from './routes/app.admin.directions.$id'
 
@@ -84,16 +77,6 @@ const RegisterRoute = RegisterRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const KnowledgeRoute = KnowledgeRouteImport.update({
-  id: '/knowledge',
-  path: '/knowledge',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const HelpRoute = HelpRouteImport.update({
-  id: '/help',
-  path: '/help',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
@@ -151,14 +134,14 @@ const AppSupervisionRoute = AppSupervisionRouteImport.update({
   path: '/supervision',
   getParentRoute: () => AppRoute,
 } as any)
-const AppStrategicDashboardRoute = AppStrategicDashboardRouteImport.update({
-  id: '/strategic-dashboard',
-  path: '/strategic-dashboard',
-  getParentRoute: () => AppRoute,
-} as any)
 const AppSlaCenterRoute = AppSlaCenterRouteImport.update({
   id: '/sla-center',
   path: '/sla-center',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppResolvedRoute = AppResolvedRouteImport.update({
+  id: '/resolved',
+  path: '/resolved',
   getParentRoute: () => AppRoute,
 } as any)
 const AppReportsRoute = AppReportsRouteImport.update({
@@ -169,6 +152,11 @@ const AppReportsRoute = AppReportsRouteImport.update({
 const AppQueueRoute = AppQueueRouteImport.update({
   id: '/queue',
   path: '/queue',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPvTrackingRoute = AppPvTrackingRouteImport.update({
+  id: '/pv-tracking',
+  path: '/pv-tracking',
   getParentRoute: () => AppRoute,
 } as any)
 const AppProfileRoute = AppProfileRouteImport.update({
@@ -191,34 +179,19 @@ const AppMyTicketsRoute = AppMyTicketsRouteImport.update({
   path: '/my-tickets',
   getParentRoute: () => AppRoute,
 } as any)
-const AppKnowledgeRoute = AppKnowledgeRouteImport.update({
-  id: '/knowledge',
-  path: '/knowledge',
-  getParentRoute: () => AppRoute,
-} as any)
 const AppHistoryRoute = AppHistoryRouteImport.update({
   id: '/history',
   path: '/history',
   getParentRoute: () => AppRoute,
 } as any)
-const AppDirectionRoute = AppDirectionRouteImport.update({
-  id: '/direction',
-  path: '/direction',
+const AppDistributionRoute = AppDistributionRouteImport.update({
+  id: '/distribution',
+  path: '/distribution',
   getParentRoute: () => AppRoute,
 } as any)
 const AppDgRoute = AppDgRouteImport.update({
   id: '/dg',
   path: '/dg',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppDepartmentInboxRoute = AppDepartmentInboxRouteImport.update({
-  id: '/department-inbox',
-  path: '/department-inbox',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppChiefInboxRoute = AppChiefInboxRouteImport.update({
-  id: '/chief-inbox',
-  path: '/chief-inbox',
   getParentRoute: () => AppRoute,
 } as any)
 const AppAdminRoute = AppAdminRouteImport.update({
@@ -286,11 +259,6 @@ const AppAdminLogsRoute = AppAdminLogsRouteImport.update({
   path: '/logs',
   getParentRoute: () => AppAdminRoute,
 } as any)
-const AppAdminKnowledgeRoute = AppAdminKnowledgeRouteImport.update({
-  id: '/knowledge',
-  path: '/knowledge',
-  getParentRoute: () => AppAdminRoute,
-} as any)
 const AppAdminHomepageRoute = AppAdminHomepageRouteImport.update({
   id: '/homepage',
   path: '/homepage',
@@ -304,11 +272,6 @@ const AppAdminDirectionsRoute = AppAdminDirectionsRouteImport.update({
 const AppAdminDepartmentsRoute = AppAdminDepartmentsRouteImport.update({
   id: '/departments',
   path: '/departments',
-  getParentRoute: () => AppAdminRoute,
-} as any)
-const AppAdminCommunicationRoute = AppAdminCommunicationRouteImport.update({
-  id: '/communication',
-  path: '/communication',
   getParentRoute: () => AppAdminRoute,
 } as any)
 const AppAdminAuditRoute = AppAdminAuditRouteImport.update({
@@ -331,6 +294,11 @@ const AppSlaCenterTicketsIdRoute = AppSlaCenterTicketsIdRouteImport.update({
   path: '/sla-center/tickets/$id',
   getParentRoute: () => AppRoute,
 } as any)
+const AppResolvedTicketsIdRoute = AppResolvedTicketsIdRouteImport.update({
+  id: '/resolved_/tickets/$id',
+  path: '/resolved/tickets/$id',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppQueueTicketsIdRoute = AppQueueTicketsIdRouteImport.update({
   id: '/queue_/tickets/$id',
   path: '/queue/tickets/$id',
@@ -346,25 +314,15 @@ const AppHistoryTicketsIdRoute = AppHistoryTicketsIdRouteImport.update({
   path: '/history/tickets/$id',
   getParentRoute: () => AppRoute,
 } as any)
-const AppDirectionTicketsIdRoute = AppDirectionTicketsIdRouteImport.update({
-  id: '/direction_/tickets/$id',
-  path: '/direction/tickets/$id',
-  getParentRoute: () => AppRoute,
-} as any)
+const AppDistributionTicketsIdRoute =
+  AppDistributionTicketsIdRouteImport.update({
+    id: '/distribution_/tickets/$id',
+    path: '/distribution/tickets/$id',
+    getParentRoute: () => AppRoute,
+  } as any)
 const AppDgTicketsIdRoute = AppDgTicketsIdRouteImport.update({
   id: '/dg_/tickets/$id',
   path: '/dg/tickets/$id',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppDepartmentInboxTicketsIdRoute =
-  AppDepartmentInboxTicketsIdRouteImport.update({
-    id: '/department-inbox_/tickets/$id',
-    path: '/department-inbox/tickets/$id',
-    getParentRoute: () => AppRoute,
-  } as any)
-const AppChiefInboxTicketsIdRoute = AppChiefInboxTicketsIdRouteImport.update({
-  id: '/chief-inbox_/tickets/$id',
-  path: '/chief-inbox/tickets/$id',
   getParentRoute: () => AppRoute,
 } as any)
 const AppAdminTicketsIdRoute = AppAdminTicketsIdRouteImport.update({
@@ -385,37 +343,31 @@ export interface FileRoutesByFullPath {
   '/consent': typeof ConsentRoute
   '/create-request': typeof CreateRequestRoute
   '/forgot-password': typeof ForgotPasswordRoute
-  '/help': typeof HelpRoute
-  '/knowledge': typeof KnowledgeRoute
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/track': typeof TrackRoute
   '/app/admin': typeof AppAdminRouteWithChildren
-  '/app/chief-inbox': typeof AppChiefInboxRoute
-  '/app/department-inbox': typeof AppDepartmentInboxRoute
   '/app/dg': typeof AppDgRoute
-  '/app/direction': typeof AppDirectionRoute
+  '/app/distribution': typeof AppDistributionRoute
   '/app/history': typeof AppHistoryRoute
-  '/app/knowledge': typeof AppKnowledgeRoute
   '/app/my-tickets': typeof AppMyTicketsRoute
   '/app/new': typeof AppNewRoute
   '/app/notifications': typeof AppNotificationsRoute
   '/app/profile': typeof AppProfileRoute
+  '/app/pv-tracking': typeof AppPvTrackingRoute
   '/app/queue': typeof AppQueueRoute
   '/app/reports': typeof AppReportsRoute
+  '/app/resolved': typeof AppResolvedRoute
   '/app/sla-center': typeof AppSlaCenterRoute
-  '/app/strategic-dashboard': typeof AppStrategicDashboardRoute
   '/app/supervision': typeof AppSupervisionRoute
   '/app/transmitted': typeof AppTransmittedRoute
   '/legal/privacy': typeof LegalPrivacyRoute
   '/legal/terms': typeof LegalTermsRoute
   '/app/': typeof AppIndexRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
-  '/app/admin/communication': typeof AppAdminCommunicationRoute
   '/app/admin/departments': typeof AppAdminDepartmentsRoute
   '/app/admin/directions': typeof AppAdminDirectionsRouteWithChildren
   '/app/admin/homepage': typeof AppAdminHomepageRoute
-  '/app/admin/knowledge': typeof AppAdminKnowledgeRoute
   '/app/admin/logs': typeof AppAdminLogsRoute
   '/app/admin/org': typeof AppAdminOrgRoute
   '/app/admin/priorities': typeof AppAdminPrioritiesRoute
@@ -430,13 +382,12 @@ export interface FileRoutesByFullPath {
   '/app/requests/': typeof AppRequestsIndexRoute
   '/app/admin/directions/$id': typeof AppAdminDirectionsIdRoute
   '/app/admin/tickets/$id': typeof AppAdminTicketsIdRoute
-  '/app/chief-inbox/tickets/$id': typeof AppChiefInboxTicketsIdRoute
-  '/app/department-inbox/tickets/$id': typeof AppDepartmentInboxTicketsIdRoute
   '/app/dg/tickets/$id': typeof AppDgTicketsIdRoute
-  '/app/direction/tickets/$id': typeof AppDirectionTicketsIdRoute
+  '/app/distribution/tickets/$id': typeof AppDistributionTicketsIdRoute
   '/app/history/tickets/$id': typeof AppHistoryTicketsIdRoute
   '/app/my-tickets/tickets/$id': typeof AppMyTicketsTicketsIdRoute
   '/app/queue/tickets/$id': typeof AppQueueTicketsIdRoute
+  '/app/resolved/tickets/$id': typeof AppResolvedTicketsIdRoute
   '/app/sla-center/tickets/$id': typeof AppSlaCenterTicketsIdRoute
   '/app/supervision/tickets/$id': typeof AppSupervisionTicketsIdRoute
   '/app/transmitted/tickets/$id': typeof AppTransmittedTicketsIdRoute
@@ -447,37 +398,31 @@ export interface FileRoutesByTo {
   '/consent': typeof ConsentRoute
   '/create-request': typeof CreateRequestRoute
   '/forgot-password': typeof ForgotPasswordRoute
-  '/help': typeof HelpRoute
-  '/knowledge': typeof KnowledgeRoute
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/track': typeof TrackRoute
   '/app/admin': typeof AppAdminRouteWithChildren
-  '/app/chief-inbox': typeof AppChiefInboxRoute
-  '/app/department-inbox': typeof AppDepartmentInboxRoute
   '/app/dg': typeof AppDgRoute
-  '/app/direction': typeof AppDirectionRoute
+  '/app/distribution': typeof AppDistributionRoute
   '/app/history': typeof AppHistoryRoute
-  '/app/knowledge': typeof AppKnowledgeRoute
   '/app/my-tickets': typeof AppMyTicketsRoute
   '/app/new': typeof AppNewRoute
   '/app/notifications': typeof AppNotificationsRoute
   '/app/profile': typeof AppProfileRoute
+  '/app/pv-tracking': typeof AppPvTrackingRoute
   '/app/queue': typeof AppQueueRoute
   '/app/reports': typeof AppReportsRoute
+  '/app/resolved': typeof AppResolvedRoute
   '/app/sla-center': typeof AppSlaCenterRoute
-  '/app/strategic-dashboard': typeof AppStrategicDashboardRoute
   '/app/supervision': typeof AppSupervisionRoute
   '/app/transmitted': typeof AppTransmittedRoute
   '/legal/privacy': typeof LegalPrivacyRoute
   '/legal/terms': typeof LegalTermsRoute
   '/app': typeof AppIndexRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
-  '/app/admin/communication': typeof AppAdminCommunicationRoute
   '/app/admin/departments': typeof AppAdminDepartmentsRoute
   '/app/admin/directions': typeof AppAdminDirectionsRouteWithChildren
   '/app/admin/homepage': typeof AppAdminHomepageRoute
-  '/app/admin/knowledge': typeof AppAdminKnowledgeRoute
   '/app/admin/logs': typeof AppAdminLogsRoute
   '/app/admin/org': typeof AppAdminOrgRoute
   '/app/admin/priorities': typeof AppAdminPrioritiesRoute
@@ -492,13 +437,12 @@ export interface FileRoutesByTo {
   '/app/requests': typeof AppRequestsIndexRoute
   '/app/admin/directions/$id': typeof AppAdminDirectionsIdRoute
   '/app/admin/tickets/$id': typeof AppAdminTicketsIdRoute
-  '/app/chief-inbox/tickets/$id': typeof AppChiefInboxTicketsIdRoute
-  '/app/department-inbox/tickets/$id': typeof AppDepartmentInboxTicketsIdRoute
   '/app/dg/tickets/$id': typeof AppDgTicketsIdRoute
-  '/app/direction/tickets/$id': typeof AppDirectionTicketsIdRoute
+  '/app/distribution/tickets/$id': typeof AppDistributionTicketsIdRoute
   '/app/history/tickets/$id': typeof AppHistoryTicketsIdRoute
   '/app/my-tickets/tickets/$id': typeof AppMyTicketsTicketsIdRoute
   '/app/queue/tickets/$id': typeof AppQueueTicketsIdRoute
+  '/app/resolved/tickets/$id': typeof AppResolvedTicketsIdRoute
   '/app/sla-center/tickets/$id': typeof AppSlaCenterTicketsIdRoute
   '/app/supervision/tickets/$id': typeof AppSupervisionTicketsIdRoute
   '/app/transmitted/tickets/$id': typeof AppTransmittedTicketsIdRoute
@@ -511,37 +455,31 @@ export interface FileRoutesById {
   '/consent': typeof ConsentRoute
   '/create-request': typeof CreateRequestRoute
   '/forgot-password': typeof ForgotPasswordRoute
-  '/help': typeof HelpRoute
-  '/knowledge': typeof KnowledgeRoute
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/track': typeof TrackRoute
   '/app/admin': typeof AppAdminRouteWithChildren
-  '/app/chief-inbox': typeof AppChiefInboxRoute
-  '/app/department-inbox': typeof AppDepartmentInboxRoute
   '/app/dg': typeof AppDgRoute
-  '/app/direction': typeof AppDirectionRoute
+  '/app/distribution': typeof AppDistributionRoute
   '/app/history': typeof AppHistoryRoute
-  '/app/knowledge': typeof AppKnowledgeRoute
   '/app/my-tickets': typeof AppMyTicketsRoute
   '/app/new': typeof AppNewRoute
   '/app/notifications': typeof AppNotificationsRoute
   '/app/profile': typeof AppProfileRoute
+  '/app/pv-tracking': typeof AppPvTrackingRoute
   '/app/queue': typeof AppQueueRoute
   '/app/reports': typeof AppReportsRoute
+  '/app/resolved': typeof AppResolvedRoute
   '/app/sla-center': typeof AppSlaCenterRoute
-  '/app/strategic-dashboard': typeof AppStrategicDashboardRoute
   '/app/supervision': typeof AppSupervisionRoute
   '/app/transmitted': typeof AppTransmittedRoute
   '/legal/privacy': typeof LegalPrivacyRoute
   '/legal/terms': typeof LegalTermsRoute
   '/app/': typeof AppIndexRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
-  '/app/admin/communication': typeof AppAdminCommunicationRoute
   '/app/admin/departments': typeof AppAdminDepartmentsRoute
   '/app/admin/directions': typeof AppAdminDirectionsRouteWithChildren
   '/app/admin/homepage': typeof AppAdminHomepageRoute
-  '/app/admin/knowledge': typeof AppAdminKnowledgeRoute
   '/app/admin/logs': typeof AppAdminLogsRoute
   '/app/admin/org': typeof AppAdminOrgRoute
   '/app/admin/priorities': typeof AppAdminPrioritiesRoute
@@ -556,13 +494,12 @@ export interface FileRoutesById {
   '/app/requests/': typeof AppRequestsIndexRoute
   '/app/admin/directions/$id': typeof AppAdminDirectionsIdRoute
   '/app/admin/tickets/$id': typeof AppAdminTicketsIdRoute
-  '/app/chief-inbox_/tickets/$id': typeof AppChiefInboxTicketsIdRoute
-  '/app/department-inbox_/tickets/$id': typeof AppDepartmentInboxTicketsIdRoute
   '/app/dg_/tickets/$id': typeof AppDgTicketsIdRoute
-  '/app/direction_/tickets/$id': typeof AppDirectionTicketsIdRoute
+  '/app/distribution_/tickets/$id': typeof AppDistributionTicketsIdRoute
   '/app/history_/tickets/$id': typeof AppHistoryTicketsIdRoute
   '/app/my-tickets_/tickets/$id': typeof AppMyTicketsTicketsIdRoute
   '/app/queue_/tickets/$id': typeof AppQueueTicketsIdRoute
+  '/app/resolved_/tickets/$id': typeof AppResolvedTicketsIdRoute
   '/app/sla-center_/tickets/$id': typeof AppSlaCenterTicketsIdRoute
   '/app/supervision_/tickets/$id': typeof AppSupervisionTicketsIdRoute
   '/app/transmitted_/tickets/$id': typeof AppTransmittedTicketsIdRoute
@@ -576,37 +513,31 @@ export interface FileRouteTypes {
     | '/consent'
     | '/create-request'
     | '/forgot-password'
-    | '/help'
-    | '/knowledge'
     | '/login'
     | '/register'
     | '/track'
     | '/app/admin'
-    | '/app/chief-inbox'
-    | '/app/department-inbox'
     | '/app/dg'
-    | '/app/direction'
+    | '/app/distribution'
     | '/app/history'
-    | '/app/knowledge'
     | '/app/my-tickets'
     | '/app/new'
     | '/app/notifications'
     | '/app/profile'
+    | '/app/pv-tracking'
     | '/app/queue'
     | '/app/reports'
+    | '/app/resolved'
     | '/app/sla-center'
-    | '/app/strategic-dashboard'
     | '/app/supervision'
     | '/app/transmitted'
     | '/legal/privacy'
     | '/legal/terms'
     | '/app/'
     | '/app/admin/audit'
-    | '/app/admin/communication'
     | '/app/admin/departments'
     | '/app/admin/directions'
     | '/app/admin/homepage'
-    | '/app/admin/knowledge'
     | '/app/admin/logs'
     | '/app/admin/org'
     | '/app/admin/priorities'
@@ -621,13 +552,12 @@ export interface FileRouteTypes {
     | '/app/requests/'
     | '/app/admin/directions/$id'
     | '/app/admin/tickets/$id'
-    | '/app/chief-inbox/tickets/$id'
-    | '/app/department-inbox/tickets/$id'
     | '/app/dg/tickets/$id'
-    | '/app/direction/tickets/$id'
+    | '/app/distribution/tickets/$id'
     | '/app/history/tickets/$id'
     | '/app/my-tickets/tickets/$id'
     | '/app/queue/tickets/$id'
+    | '/app/resolved/tickets/$id'
     | '/app/sla-center/tickets/$id'
     | '/app/supervision/tickets/$id'
     | '/app/transmitted/tickets/$id'
@@ -638,37 +568,31 @@ export interface FileRouteTypes {
     | '/consent'
     | '/create-request'
     | '/forgot-password'
-    | '/help'
-    | '/knowledge'
     | '/login'
     | '/register'
     | '/track'
     | '/app/admin'
-    | '/app/chief-inbox'
-    | '/app/department-inbox'
     | '/app/dg'
-    | '/app/direction'
+    | '/app/distribution'
     | '/app/history'
-    | '/app/knowledge'
     | '/app/my-tickets'
     | '/app/new'
     | '/app/notifications'
     | '/app/profile'
+    | '/app/pv-tracking'
     | '/app/queue'
     | '/app/reports'
+    | '/app/resolved'
     | '/app/sla-center'
-    | '/app/strategic-dashboard'
     | '/app/supervision'
     | '/app/transmitted'
     | '/legal/privacy'
     | '/legal/terms'
     | '/app'
     | '/app/admin/audit'
-    | '/app/admin/communication'
     | '/app/admin/departments'
     | '/app/admin/directions'
     | '/app/admin/homepage'
-    | '/app/admin/knowledge'
     | '/app/admin/logs'
     | '/app/admin/org'
     | '/app/admin/priorities'
@@ -683,13 +607,12 @@ export interface FileRouteTypes {
     | '/app/requests'
     | '/app/admin/directions/$id'
     | '/app/admin/tickets/$id'
-    | '/app/chief-inbox/tickets/$id'
-    | '/app/department-inbox/tickets/$id'
     | '/app/dg/tickets/$id'
-    | '/app/direction/tickets/$id'
+    | '/app/distribution/tickets/$id'
     | '/app/history/tickets/$id'
     | '/app/my-tickets/tickets/$id'
     | '/app/queue/tickets/$id'
+    | '/app/resolved/tickets/$id'
     | '/app/sla-center/tickets/$id'
     | '/app/supervision/tickets/$id'
     | '/app/transmitted/tickets/$id'
@@ -701,37 +624,31 @@ export interface FileRouteTypes {
     | '/consent'
     | '/create-request'
     | '/forgot-password'
-    | '/help'
-    | '/knowledge'
     | '/login'
     | '/register'
     | '/track'
     | '/app/admin'
-    | '/app/chief-inbox'
-    | '/app/department-inbox'
     | '/app/dg'
-    | '/app/direction'
+    | '/app/distribution'
     | '/app/history'
-    | '/app/knowledge'
     | '/app/my-tickets'
     | '/app/new'
     | '/app/notifications'
     | '/app/profile'
+    | '/app/pv-tracking'
     | '/app/queue'
     | '/app/reports'
+    | '/app/resolved'
     | '/app/sla-center'
-    | '/app/strategic-dashboard'
     | '/app/supervision'
     | '/app/transmitted'
     | '/legal/privacy'
     | '/legal/terms'
     | '/app/'
     | '/app/admin/audit'
-    | '/app/admin/communication'
     | '/app/admin/departments'
     | '/app/admin/directions'
     | '/app/admin/homepage'
-    | '/app/admin/knowledge'
     | '/app/admin/logs'
     | '/app/admin/org'
     | '/app/admin/priorities'
@@ -746,13 +663,12 @@ export interface FileRouteTypes {
     | '/app/requests/'
     | '/app/admin/directions/$id'
     | '/app/admin/tickets/$id'
-    | '/app/chief-inbox_/tickets/$id'
-    | '/app/department-inbox_/tickets/$id'
     | '/app/dg_/tickets/$id'
-    | '/app/direction_/tickets/$id'
+    | '/app/distribution_/tickets/$id'
     | '/app/history_/tickets/$id'
     | '/app/my-tickets_/tickets/$id'
     | '/app/queue_/tickets/$id'
+    | '/app/resolved_/tickets/$id'
     | '/app/sla-center_/tickets/$id'
     | '/app/supervision_/tickets/$id'
     | '/app/transmitted_/tickets/$id'
@@ -765,8 +681,6 @@ export interface RootRouteChildren {
   ConsentRoute: typeof ConsentRoute
   CreateRequestRoute: typeof CreateRequestRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
-  HelpRoute: typeof HelpRoute
-  KnowledgeRoute: typeof KnowledgeRoute
   LoginRoute: typeof LoginRoute
   RegisterRoute: typeof RegisterRoute
   TrackRoute: typeof TrackRoute
@@ -795,20 +709,6 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/knowledge': {
-      id: '/knowledge'
-      path: '/knowledge'
-      fullPath: '/knowledge'
-      preLoaderRoute: typeof KnowledgeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/help': {
-      id: '/help'
-      path: '/help'
-      fullPath: '/help'
-      preLoaderRoute: typeof HelpRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/forgot-password': {
@@ -888,18 +788,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSupervisionRouteImport
       parentRoute: typeof AppRoute
     }
-    '/app/strategic-dashboard': {
-      id: '/app/strategic-dashboard'
-      path: '/strategic-dashboard'
-      fullPath: '/app/strategic-dashboard'
-      preLoaderRoute: typeof AppStrategicDashboardRouteImport
-      parentRoute: typeof AppRoute
-    }
     '/app/sla-center': {
       id: '/app/sla-center'
       path: '/sla-center'
       fullPath: '/app/sla-center'
       preLoaderRoute: typeof AppSlaCenterRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/resolved': {
+      id: '/app/resolved'
+      path: '/resolved'
+      fullPath: '/app/resolved'
+      preLoaderRoute: typeof AppResolvedRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/reports': {
@@ -914,6 +814,13 @@ declare module '@tanstack/react-router' {
       path: '/queue'
       fullPath: '/app/queue'
       preLoaderRoute: typeof AppQueueRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/pv-tracking': {
+      id: '/app/pv-tracking'
+      path: '/pv-tracking'
+      fullPath: '/app/pv-tracking'
+      preLoaderRoute: typeof AppPvTrackingRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/profile': {
@@ -944,13 +851,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppMyTicketsRouteImport
       parentRoute: typeof AppRoute
     }
-    '/app/knowledge': {
-      id: '/app/knowledge'
-      path: '/knowledge'
-      fullPath: '/app/knowledge'
-      preLoaderRoute: typeof AppKnowledgeRouteImport
-      parentRoute: typeof AppRoute
-    }
     '/app/history': {
       id: '/app/history'
       path: '/history'
@@ -958,11 +858,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppHistoryRouteImport
       parentRoute: typeof AppRoute
     }
-    '/app/direction': {
-      id: '/app/direction'
-      path: '/direction'
-      fullPath: '/app/direction'
-      preLoaderRoute: typeof AppDirectionRouteImport
+    '/app/distribution': {
+      id: '/app/distribution'
+      path: '/distribution'
+      fullPath: '/app/distribution'
+      preLoaderRoute: typeof AppDistributionRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/dg': {
@@ -970,20 +870,6 @@ declare module '@tanstack/react-router' {
       path: '/dg'
       fullPath: '/app/dg'
       preLoaderRoute: typeof AppDgRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/department-inbox': {
-      id: '/app/department-inbox'
-      path: '/department-inbox'
-      fullPath: '/app/department-inbox'
-      preLoaderRoute: typeof AppDepartmentInboxRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/chief-inbox': {
-      id: '/app/chief-inbox'
-      path: '/chief-inbox'
-      fullPath: '/app/chief-inbox'
-      preLoaderRoute: typeof AppChiefInboxRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/admin': {
@@ -1077,13 +963,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminLogsRouteImport
       parentRoute: typeof AppAdminRoute
     }
-    '/app/admin/knowledge': {
-      id: '/app/admin/knowledge'
-      path: '/knowledge'
-      fullPath: '/app/admin/knowledge'
-      preLoaderRoute: typeof AppAdminKnowledgeRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
     '/app/admin/homepage': {
       id: '/app/admin/homepage'
       path: '/homepage'
@@ -1103,13 +982,6 @@ declare module '@tanstack/react-router' {
       path: '/departments'
       fullPath: '/app/admin/departments'
       preLoaderRoute: typeof AppAdminDepartmentsRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/communication': {
-      id: '/app/admin/communication'
-      path: '/communication'
-      fullPath: '/app/admin/communication'
-      preLoaderRoute: typeof AppAdminCommunicationRouteImport
       parentRoute: typeof AppAdminRoute
     }
     '/app/admin/audit': {
@@ -1140,6 +1012,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSlaCenterTicketsIdRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/resolved_/tickets/$id': {
+      id: '/app/resolved_/tickets/$id'
+      path: '/resolved/tickets/$id'
+      fullPath: '/app/resolved/tickets/$id'
+      preLoaderRoute: typeof AppResolvedTicketsIdRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/queue_/tickets/$id': {
       id: '/app/queue_/tickets/$id'
       path: '/queue/tickets/$id'
@@ -1161,11 +1040,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppHistoryTicketsIdRouteImport
       parentRoute: typeof AppRoute
     }
-    '/app/direction_/tickets/$id': {
-      id: '/app/direction_/tickets/$id'
-      path: '/direction/tickets/$id'
-      fullPath: '/app/direction/tickets/$id'
-      preLoaderRoute: typeof AppDirectionTicketsIdRouteImport
+    '/app/distribution_/tickets/$id': {
+      id: '/app/distribution_/tickets/$id'
+      path: '/distribution/tickets/$id'
+      fullPath: '/app/distribution/tickets/$id'
+      preLoaderRoute: typeof AppDistributionTicketsIdRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/dg_/tickets/$id': {
@@ -1173,20 +1052,6 @@ declare module '@tanstack/react-router' {
       path: '/dg/tickets/$id'
       fullPath: '/app/dg/tickets/$id'
       preLoaderRoute: typeof AppDgTicketsIdRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/department-inbox_/tickets/$id': {
-      id: '/app/department-inbox_/tickets/$id'
-      path: '/department-inbox/tickets/$id'
-      fullPath: '/app/department-inbox/tickets/$id'
-      preLoaderRoute: typeof AppDepartmentInboxTicketsIdRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/chief-inbox_/tickets/$id': {
-      id: '/app/chief-inbox_/tickets/$id'
-      path: '/chief-inbox/tickets/$id'
-      fullPath: '/app/chief-inbox/tickets/$id'
-      preLoaderRoute: typeof AppChiefInboxTicketsIdRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/admin/tickets/$id': {
@@ -1219,11 +1084,9 @@ const AppAdminDirectionsRouteWithChildren =
 
 interface AppAdminRouteChildren {
   AppAdminAuditRoute: typeof AppAdminAuditRoute
-  AppAdminCommunicationRoute: typeof AppAdminCommunicationRoute
   AppAdminDepartmentsRoute: typeof AppAdminDepartmentsRoute
   AppAdminDirectionsRoute: typeof AppAdminDirectionsRouteWithChildren
   AppAdminHomepageRoute: typeof AppAdminHomepageRoute
-  AppAdminKnowledgeRoute: typeof AppAdminKnowledgeRoute
   AppAdminLogsRoute: typeof AppAdminLogsRoute
   AppAdminOrgRoute: typeof AppAdminOrgRoute
   AppAdminPrioritiesRoute: typeof AppAdminPrioritiesRoute
@@ -1238,11 +1101,9 @@ interface AppAdminRouteChildren {
 
 const AppAdminRouteChildren: AppAdminRouteChildren = {
   AppAdminAuditRoute: AppAdminAuditRoute,
-  AppAdminCommunicationRoute: AppAdminCommunicationRoute,
   AppAdminDepartmentsRoute: AppAdminDepartmentsRoute,
   AppAdminDirectionsRoute: AppAdminDirectionsRouteWithChildren,
   AppAdminHomepageRoute: AppAdminHomepageRoute,
-  AppAdminKnowledgeRoute: AppAdminKnowledgeRoute,
   AppAdminLogsRoute: AppAdminLogsRoute,
   AppAdminOrgRoute: AppAdminOrgRoute,
   AppAdminPrioritiesRoute: AppAdminPrioritiesRoute,
@@ -1261,33 +1122,30 @@ const AppAdminRouteWithChildren = AppAdminRoute._addFileChildren(
 
 interface AppRouteChildren {
   AppAdminRoute: typeof AppAdminRouteWithChildren
-  AppChiefInboxRoute: typeof AppChiefInboxRoute
-  AppDepartmentInboxRoute: typeof AppDepartmentInboxRoute
   AppDgRoute: typeof AppDgRoute
-  AppDirectionRoute: typeof AppDirectionRoute
+  AppDistributionRoute: typeof AppDistributionRoute
   AppHistoryRoute: typeof AppHistoryRoute
-  AppKnowledgeRoute: typeof AppKnowledgeRoute
   AppMyTicketsRoute: typeof AppMyTicketsRoute
   AppNewRoute: typeof AppNewRoute
   AppNotificationsRoute: typeof AppNotificationsRoute
   AppProfileRoute: typeof AppProfileRoute
+  AppPvTrackingRoute: typeof AppPvTrackingRoute
   AppQueueRoute: typeof AppQueueRoute
   AppReportsRoute: typeof AppReportsRoute
+  AppResolvedRoute: typeof AppResolvedRoute
   AppSlaCenterRoute: typeof AppSlaCenterRoute
-  AppStrategicDashboardRoute: typeof AppStrategicDashboardRoute
   AppSupervisionRoute: typeof AppSupervisionRoute
   AppTransmittedRoute: typeof AppTransmittedRoute
   AppIndexRoute: typeof AppIndexRoute
   AppRequestsIdRoute: typeof AppRequestsIdRoute
   AppRequestsHistoryRoute: typeof AppRequestsHistoryRoute
   AppRequestsIndexRoute: typeof AppRequestsIndexRoute
-  AppChiefInboxTicketsIdRoute: typeof AppChiefInboxTicketsIdRoute
-  AppDepartmentInboxTicketsIdRoute: typeof AppDepartmentInboxTicketsIdRoute
   AppDgTicketsIdRoute: typeof AppDgTicketsIdRoute
-  AppDirectionTicketsIdRoute: typeof AppDirectionTicketsIdRoute
+  AppDistributionTicketsIdRoute: typeof AppDistributionTicketsIdRoute
   AppHistoryTicketsIdRoute: typeof AppHistoryTicketsIdRoute
   AppMyTicketsTicketsIdRoute: typeof AppMyTicketsTicketsIdRoute
   AppQueueTicketsIdRoute: typeof AppQueueTicketsIdRoute
+  AppResolvedTicketsIdRoute: typeof AppResolvedTicketsIdRoute
   AppSlaCenterTicketsIdRoute: typeof AppSlaCenterTicketsIdRoute
   AppSupervisionTicketsIdRoute: typeof AppSupervisionTicketsIdRoute
   AppTransmittedTicketsIdRoute: typeof AppTransmittedTicketsIdRoute
@@ -1295,33 +1153,30 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppAdminRoute: AppAdminRouteWithChildren,
-  AppChiefInboxRoute: AppChiefInboxRoute,
-  AppDepartmentInboxRoute: AppDepartmentInboxRoute,
   AppDgRoute: AppDgRoute,
-  AppDirectionRoute: AppDirectionRoute,
+  AppDistributionRoute: AppDistributionRoute,
   AppHistoryRoute: AppHistoryRoute,
-  AppKnowledgeRoute: AppKnowledgeRoute,
   AppMyTicketsRoute: AppMyTicketsRoute,
   AppNewRoute: AppNewRoute,
   AppNotificationsRoute: AppNotificationsRoute,
   AppProfileRoute: AppProfileRoute,
+  AppPvTrackingRoute: AppPvTrackingRoute,
   AppQueueRoute: AppQueueRoute,
   AppReportsRoute: AppReportsRoute,
+  AppResolvedRoute: AppResolvedRoute,
   AppSlaCenterRoute: AppSlaCenterRoute,
-  AppStrategicDashboardRoute: AppStrategicDashboardRoute,
   AppSupervisionRoute: AppSupervisionRoute,
   AppTransmittedRoute: AppTransmittedRoute,
   AppIndexRoute: AppIndexRoute,
   AppRequestsIdRoute: AppRequestsIdRoute,
   AppRequestsHistoryRoute: AppRequestsHistoryRoute,
   AppRequestsIndexRoute: AppRequestsIndexRoute,
-  AppChiefInboxTicketsIdRoute: AppChiefInboxTicketsIdRoute,
-  AppDepartmentInboxTicketsIdRoute: AppDepartmentInboxTicketsIdRoute,
   AppDgTicketsIdRoute: AppDgTicketsIdRoute,
-  AppDirectionTicketsIdRoute: AppDirectionTicketsIdRoute,
+  AppDistributionTicketsIdRoute: AppDistributionTicketsIdRoute,
   AppHistoryTicketsIdRoute: AppHistoryTicketsIdRoute,
   AppMyTicketsTicketsIdRoute: AppMyTicketsTicketsIdRoute,
   AppQueueTicketsIdRoute: AppQueueTicketsIdRoute,
+  AppResolvedTicketsIdRoute: AppResolvedTicketsIdRoute,
   AppSlaCenterTicketsIdRoute: AppSlaCenterTicketsIdRoute,
   AppSupervisionTicketsIdRoute: AppSupervisionTicketsIdRoute,
   AppTransmittedTicketsIdRoute: AppTransmittedTicketsIdRoute,
@@ -1336,8 +1191,6 @@ const rootRouteChildren: RootRouteChildren = {
   ConsentRoute: ConsentRoute,
   CreateRequestRoute: CreateRequestRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
-  HelpRoute: HelpRoute,
-  KnowledgeRoute: KnowledgeRoute,
   LoginRoute: LoginRoute,
   RegisterRoute: RegisterRoute,
   TrackRoute: TrackRoute,

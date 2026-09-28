@@ -2,8 +2,13 @@
 Planificateur de tâches APScheduler — EDG Support.
 
 Jobs enregistrés :
-  auto_escalation  — toutes les 10 min : escalade automatique SLA
+  auto_validation  — toutes les 6 h   : validation d'office des tickets résolus
+                                        depuis > 3 jours sans réponse du demandeur
   auto_close       — toutes les 6 h   : fermeture tickets résolus depuis > 4 jours
+
+L'ordre compte : la validation d'office passe à J+3 et libère le circuit du PV,
+la fermeture suit à J+4. Un ticket validé (par le demandeur ou d'office) n'est
+donc jamais fermé avant que son PV ait été soumis au chef de division.
 """
 from __future__ import annotations
 
@@ -18,28 +23,74 @@ logger = logging.getLogger(__name__)
 _scheduler = AsyncIOScheduler(timezone="UTC")
 
 AUTO_CLOSE_DAYS = 4  # jours avant fermeture automatique après résolution
+# BR-AUTO-VALIDATION-001 — jours CALENDAIRES (week-end compris) laissés au
+# demandeur pour valider la résolution ou rouvrir le ticket. Passé ce délai, le
+# système valide à sa place et le PV part au chef de division : sans cela, un
+# demandeur silencieux bloquait indéfiniment le circuit du PV.
+AUTO_VALIDATION_DAYS = 3
 
 
-async def _job_auto_escalation() -> None:
-    """Marque les SLA dépassés puis escalade les tickets concernés."""
+async def _job_auto_validation() -> None:
+    """Valide d'office les résolutions restées sans réponse du demandeur.
+
+    La validation d'office emprunte EXACTEMENT le même chemin que la validation
+    humaine (`record_pv_validation`) : elle déclenche donc la soumission
+    automatique du PV au chef de division, comme si le demandeur avait confirmé.
+
+    Aucune note de satisfaction n'est créée — le système ne peut pas inventer un
+    ressenti. L'événement du journal porte `auto_validated`, ce qui distingue
+    sans ambiguïté une validation subie d'une validation donnée, notamment pour
+    les statistiques CSAT.
+    """
     try:
+        from sqlalchemy import select
         from api.configs.Database import AsyncSessionLocal
-        from api.services.ServiceEscalade import EscaladeService
+        from api.models.ModelRequest import Request as RequestModel
+        from api.models.ModelRequestStatus import RequestStatus
+        from api.services.ServiceRequest import RequestService
+
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=AUTO_VALIDATION_DAYS)
 
         async with AsyncSessionLocal() as session:
-            svc = EscaladeService(session)
-            # BR-NOTIFICATION-WORKFLOW-001 §14 — alerte préventive avant dépassement,
-            # exécutée avant le marquage effectif du dépassement (ordre sans incidence
-            # fonctionnelle : un ticket qui vient de dépasser son SLA à ce passage
-            # précis n'est simplement pas éligible à l'alerte préventive ce tour-ci).
-            await svc.warn_sla_approaching()
-            await svc.mark_sla_breached()
-            count = await svc.run_auto_escalation()
+            result = await session.execute(
+                select(RequestModel.id)
+                .join(RequestStatus, RequestModel.request_status_id == RequestStatus.id)
+                .where(RequestStatus.code == "resolved")
+                .where(RequestModel.resolved_at.isnot(None))
+                .where(RequestModel.resolved_at <= cutoff)
+                .where(RequestModel.deleted_at.is_(None))
+            )
+            ids = [row[0] for row in result.all()]
+            if not ids:
+                return
+
+            svc = RequestService(session)
+            validated = 0
+            for req_id in ids:
+                try:
+                    # Idempotent : record_pv_validation ressort immédiatement si
+                    # `pv_validated_at` existe déjà (demandeur ayant validé, ou
+                    # passage précédent de ce job).
+                    done = await svc.record_pv_validation(
+                        str(req_id), confirmed=True, actor_id=None,
+                        actor_name=None, automatic=True,
+                    )
+                    if done:
+                        validated += 1
+                except Exception as exc:
+                    logger.warning(
+                        "[Scheduler] auto_validation ticket %s échouée : %s", req_id, exc
+                    )
+
             await session.commit()
-            if count:
-                logger.info("[Scheduler] auto_escalation : %d ticket(s) escaladé(s).", count)
+            if validated:
+                logger.info(
+                    "[Scheduler] auto_validation : %d résolution(s) validée(s) d'office "
+                    "après %d jours sans réponse du demandeur.",
+                    validated, AUTO_VALIDATION_DAYS,
+                )
     except Exception as exc:
-        logger.error("[Scheduler] auto_escalation échoué : %s", exc)
+        logger.error("[Scheduler] auto_validation échouée : %s", exc)
 
 
 async def _job_auto_close() -> None:
@@ -85,12 +136,16 @@ async def _job_auto_close() -> None:
 
 def start_scheduler(interval_minutes: int = 10) -> None:
     """Démarre le scheduler et enregistre tous les jobs."""
-    # Job "auto_escalation" désactivé sur demande : plus aucune action automatique
-    # sur le SLA (alerte préventive, marquage de dépassement, escalade + réassignation
-    # automatique) — un ticket ne doit plus changer de statut/responsable sans action
-    # humaine explicite. `_job_auto_escalation()` / `warn_sla_approaching()` /
-    # `mark_sla_breached()` / `run_auto_escalation()` restent en place, simplement
-    # plus invoqués automatiquement.
+    # Job "auto_escalation" supprimé le 2026-09-26 avec le statut "escalated" :
+    # il était déjà désactivé (aucun changement de statut/responsable sans action
+    # humaine) et son service `ServiceEscalade` n'existe plus.
+    _scheduler.add_job(
+        _job_auto_validation,
+        trigger=IntervalTrigger(hours=6),
+        id="auto_validation",
+        replace_existing=True,
+        misfire_grace_time=300,
+    )
     _scheduler.add_job(
         _job_auto_close,
         trigger=IntervalTrigger(hours=6),
@@ -100,7 +155,8 @@ def start_scheduler(interval_minutes: int = 10) -> None:
     )
     _scheduler.start()
     logger.info(
-        "[Scheduler] Démarré — auto_escalation désactivé, auto_close toutes les 6h.",
+        "[Scheduler] Démarré — auto_validation (%d j) et auto_close (%d j), toutes les 6h.",
+        AUTO_VALIDATION_DAYS, AUTO_CLOSE_DAYS,
     )
 
 

@@ -7,9 +7,7 @@ export type TicketDetailRoute =
   | "/app/queue/tickets/$id"
   | "/app/transmitted/tickets/$id"
   | "/app/my-tickets/tickets/$id"
-  | "/app/chief-inbox/tickets/$id"
-  | "/app/department-inbox/tickets/$id"
-  | "/app/direction/tickets/$id"
+  | "/app/distribution/tickets/$id"
   | "/app/dg/tickets/$id"
   | "/app/sla-center/tickets/$id"
   | "/app/admin/tickets/$id";
@@ -21,9 +19,7 @@ export type TicketListRoute =
   | "/app/queue"
   | "/app/transmitted"
   | "/app/my-tickets"
-  | "/app/chief-inbox"
-  | "/app/department-inbox"
-  | "/app/direction"
+  | "/app/distribution"
   | "/app/dg"
   | "/app/sla-center"
   | "/app/admin/users";
@@ -34,9 +30,7 @@ export function ticketDetailRouteForList(route: TicketListRoute): TicketDetailRo
   if (route === "/app/transmitted") return "/app/transmitted/tickets/$id";
   if (route === "/app/history") return "/app/history/tickets/$id";
   if (route === "/app/my-tickets") return "/app/my-tickets/tickets/$id";
-  if (route === "/app/chief-inbox") return "/app/chief-inbox/tickets/$id";
-  if (route === "/app/department-inbox") return "/app/department-inbox/tickets/$id";
-  if (route === "/app/direction") return "/app/direction/tickets/$id";
+  if (route === "/app/distribution") return "/app/distribution/tickets/$id";
   if (route === "/app/dg") return "/app/dg/tickets/$id";
   if (route === "/app/sla-center") return "/app/sla-center/tickets/$id";
   if (route === "/app/admin/users") return "/app/admin/tickets/$id";
@@ -44,10 +38,7 @@ export function ticketDetailRouteForList(route: TicketListRoute): TicketDetailRo
 }
 
 function ticketDetailRouteForRole(role?: Role): TicketDetailRoute {
-  if (role === "agent-support") return "/app/my-tickets/tickets/$id";
-  if (role === "chief-service") return "/app/supervision/tickets/$id";
-  if (role === "chief-departement") return "/app/supervision/tickets/$id";
-  if (role === "director") return "/app/supervision/tickets/$id";
+  if (role === "chief-service" || role === "technicien" || role === "chef-division-support") return "/app/my-tickets/tickets/$id";
   if (role === "admin") return "/app/admin/tickets/$id";
   return "/app/requests/$id";
 }
@@ -61,9 +52,7 @@ function explicitTicketDetailRouteFromSource(source?: string | null): TicketDeta
   if (value.includes("/app/queue")) return "/app/queue/tickets/$id";
   if (value.includes("/app/transmitted")) return "/app/transmitted/tickets/$id";
   if (value.includes("/app/my-tickets")) return "/app/my-tickets/tickets/$id";
-  if (value.includes("/app/department-inbox")) return "/app/department-inbox/tickets/$id";
-  if (value.includes("/app/chief-inbox")) return "/app/chief-inbox/tickets/$id";
-  if (value.includes("/app/direction")) return "/app/direction/tickets/$id";
+  if (value.includes("/app/distribution")) return "/app/distribution/tickets/$id";
   if (value.includes("/app/dg")) return "/app/dg/tickets/$id";
   if (value.includes("/app/sla-center")) return "/app/sla-center/tickets/$id";
   if (value.includes("/app/admin")) return "/app/admin/tickets/$id";

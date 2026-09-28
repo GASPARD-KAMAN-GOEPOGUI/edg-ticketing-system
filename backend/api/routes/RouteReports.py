@@ -20,7 +20,7 @@ Exports (ajout de ?format=csv|excel|pdf) :
   GET /reports/sla/export
   GET /reports/sla-center/export
 
-Accès : chief, director, admin
+Accès : admin
 """
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ from api.services.ServiceExport import (
 router = APIRouter(
     prefix="/reports",
     tags=["reports"],
-    dependencies=[Depends(require_roles("chief", "director", "admin"))],
+    dependencies=[Depends(require_roles("admin"))],
 )
 
 
@@ -79,20 +79,9 @@ async def _apply_decision_scope(
     unity_id: Optional[int] | list[int],
     svc: ReportService,
 ) -> tuple[Optional[int], Optional[int] | list[int]]:
-    role = normalize_role(getattr(actor, "role", None))
-    if role == "director":
-        actor_direction_id = getattr(actor, "direction_id", None)
-        direction_id = int(actor_direction_id) if actor_direction_id else -1
-    elif role == "chief-departement":
-        # Perimetre elargi au departement entier (departement + services rattaches),
-        # cf. BR-ROLE-CHIEF-DEPARTEMENT-001 deja applique ailleurs (ticket_actions.py,
-        # RouteRequest.py) — sans quoi la vue agregee par service (Lot 3) ne remonterait
-        # que le seul service du chef-departement au lieu de tout son departement.
-        actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
-        unity_id = await svc._scoped_unity_ids(int(actor_unity_id)) if actor_unity_id else [-1]
-    elif role == "chief-service":
-        actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
-        unity_id = int(actor_unity_id) if actor_unity_id else -1
+    # Les deux seuls roles qui restreignaient ce perimetre (director,
+    # chief-departement) ont ete retires le 2026-09-25 : seul l'admin atteint
+    # desormais ces rapports, avec un perimetre global non filtre.
     return direction_id, unity_id
 
 
@@ -105,19 +94,9 @@ async def _apply_intervention_scope(actor, svc: ReportService) -> list[int] | No
     role = normalize_role(getattr(actor, "role", None))
     if role == "admin":
         return None
-    if role == "director":
-        actor_direction_id = (
-            getattr(actor, "direction_id", None)
-            or getattr(actor, "unity_id", None)
-            or getattr(actor, "unit_id", None)
-        )
-        return await svc._scoped_unity_ids(int(actor_direction_id)) if actor_direction_id else []
-    if role == "chief-departement":
-        actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
-        return await svc._scoped_unity_ids(int(actor_unity_id)) if actor_unity_id else []
-    if role == "chief-service":
-        actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
-        return [int(actor_unity_id)] if actor_unity_id else []
+    # `director` et `chief-departement`, les deux seuls autres roles admis ici,
+    # ont ete retires le 2026-09-25. Tout autre role retombe sur la liste vide,
+    # qui force une reponse vide plutot qu'un repli global accidentel.
     return []
 
 
@@ -205,9 +184,6 @@ async def agent_report(
     svc: ReportService = Depends(_svc),
 ):
     """Performance des agents sur une période."""
-    if normalize_role(getattr(actor, "role", None)) == "chief-service":
-        actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
-        unity_id = int(actor_unity_id) if actor_unity_id else -1
     return await svc.agent_report(start, end, unity_id)
 
 
@@ -221,9 +197,6 @@ async def export_by_agent(
     svc: ReportService = Depends(_svc),
 ):
     """Export du rapport par agent (csv | excel | pdf)."""
-    if normalize_role(getattr(actor, "role", None)) == "chief-service":
-        actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
-        unity_id = int(actor_unity_id) if actor_unity_id else -1
     rows = await svc.agent_report(start, end, unity_id)
     cols = ["agent_name", "unity_label", "assigned_total", "resolved_total", "escalated_total", "avg_resolution_hours", "resolution_rate"]
     hdrs = ["Agent", "Unité", "Assignés", "Résolus", "Escaladés", "Moy. résolution (h)", "Taux (%)"]
@@ -247,14 +220,7 @@ async def unity_report(
     svc: ReportService = Depends(_svc),
 ):
     """Tickets par unité organisationnelle."""
-    role = normalize_role(getattr(actor, "role", None))
     unity_id = None
-    if role == "chief-service":
-        actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
-        unity_id = int(actor_unity_id) if actor_unity_id else -1
-        direction_id = None
-    elif role == "director":
-        direction_id = int(actor.direction_id) if actor.direction_id else None
     return await svc.unity_report(start, end, direction_id=direction_id, unity_id=unity_id)
 
 
@@ -268,14 +234,7 @@ async def export_by_unity(
     svc: ReportService = Depends(_svc),
 ):
     """Export du rapport par unité (csv | excel | pdf)."""
-    role = normalize_role(getattr(actor, "role", None))
     unity_id = None
-    if role == "chief-service":
-        actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
-        unity_id = int(actor_unity_id) if actor_unity_id else -1
-        direction_id = None
-    elif role == "director":
-        direction_id = int(actor.direction_id) if actor.direction_id else None
     rows = await svc.unity_report(start, end, direction_id=direction_id, unity_id=unity_id)
     cols = ["unity_label", "unity_codename", "total", "resolved", "active", "sla_breached", "resolution_rate"]
     hdrs = ["Service / Unité", "Code", "Total", "Résolus", "Actifs", "SLA breach", "Taux (%)"]
@@ -417,9 +376,6 @@ async def csat_report(
     svc: ReportService = Depends(_svc),
 ):
     """Rapport CSAT détaillé : résumé + par agent + par catégorie + évolution."""
-    if normalize_role(getattr(actor, "role", None)) == "chief-service":
-        actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
-        unity_id = int(actor_unity_id) if actor_unity_id else -1
     return await svc.csat_report(start, end, unity_id)
 
 
@@ -433,9 +389,6 @@ async def export_csat(
     svc: ReportService = Depends(_svc),
 ):
     """Export du rapport CSAT (csv | excel | pdf)."""
-    if normalize_role(getattr(actor, "role", None)) == "chief-service":
-        actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
-        unity_id = int(actor_unity_id) if actor_unity_id else -1
     data = await svc.csat_report(start, end, unity_id)
     rows = data["by_agent"]
     cols = ["agent_name", "unity_label", "total_ratings", "avg_rating", "satisfied_count"]
@@ -513,17 +466,12 @@ async def export_sla_center(
 ):
     """Export du Centre SLA : tickets actifs en dépassement SLA sur la période choisie
     (mêmes règles/périmètre que la page — cf. sla_center_breach_rows)."""
-    role = normalize_role(getattr(actor, "role", None))
+    # Les deux roles qui restreignaient ce perimetre (chief-departement,
+    # director) ont ete retires le 2026-09-25 : seul l'admin atteint cet
+    # export, avec la vue globale groupee par direction.
     direction_id: Optional[int] = None
     unity_id: Optional[int] = None
-    group_by_direction = False
-    if role in ("chief-service", "chief-departement"):
-        actor_unity_id = getattr(actor, "unity_id", None) or getattr(actor, "unit_id", None)
-        unity_id = int(actor_unity_id) if actor_unity_id else -1
-    elif role == "director":
-        direction_id = int(actor.direction_id) if actor.direction_id else -1
-    else:
-        group_by_direction = True
+    group_by_direction = True
 
     rows = await svc.sla_center_breach_rows(
         start, end,

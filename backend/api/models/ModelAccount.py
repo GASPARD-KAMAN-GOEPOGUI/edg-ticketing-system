@@ -6,12 +6,16 @@ from typing import TYPE_CHECKING, Optional
 from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from api.core.rbac import normalize_role
 
 from .base import Base, BaseColumns, MYSQL_ARGS
 
 if TYPE_CHECKING:
     from .ModelUnity import Unity
+
+# PV d'intervention EDG/PS-GSI/PV-01, bloc « Affectation » — cases à cocher
+# Titulaire / Prestataire, auxquelles s'ajoute Stagiaire (demande métier).
+# Qualifie l'INTERVENANT, jamais le demandeur.
+INTERVENANT_STATUSES = frozenset({"titulaire", "prestataire", "stagiaire"})
 
 
 class Account(Base, BaseColumns):
@@ -44,10 +48,9 @@ class Account(Base, BaseColumns):
         SAEnum(
             "public",
             "user",
-            "agent-support",
             "chief-service",
-            "chief-departement",
-            "director",
+            "technicien",
+            "chef-division-support",
             "admin",
             name="role_enum",
         ),
@@ -97,8 +100,32 @@ class Account(Base, BaseColumns):
 
     @property
     def direction_id(self) -> Optional[int]:
-        """Pour un directeur, l'unité rattachée représente sa direction."""
-        return self.unity_id if normalize_role(self.role) == "director" else None
+        """Direction du compte.
+
+        Seul le rôle `director` voyait son unité rattachée interprétée comme une
+        direction. Ce rôle ayant été retiré le 2026-09-25, la propriété renvoie
+        désormais toujours `None`. Elle est conservée parce que plusieurs
+        appelants la lisent encore sur un compte (`actor.direction_id`) : la
+        supprimer casserait ces accès, alors qu'un `None` y est déjà traité.
+        """
+        return None
+
+    @property
+    def intervenant_status(self) -> Optional[str]:
+        """Statut de l'intervenant au sens du PV d'intervention
+        (EDG/PS-GSI/PV-01) : `titulaire`, `prestataire` ou `stagiaire`.
+
+        Stocké dans `infos` et NON dans une colonne dédiée : la table `account`
+        est partagée avec la plateforme centrale, et l'on ne modifie pas son
+        schéma (cf. migration 024). `infos` porte déjà des données propres à
+        EDG Connect (indicateur d'e-mail de bienvenue), c'est donc l'endroit
+        cohérent.
+
+        Distinct de `is_edg_employee`, booléen déduit de la présence d'un badge :
+        un stagiaire EDG peut avoir un badge sans être titulaire."""
+        infos = self.infos if isinstance(self.infos, dict) else {}
+        value = infos.get("intervenant_status")
+        return value if value in INTERVENANT_STATUSES else None
 
     __table_args__ = (
         Index("idx_account_role", "role"),

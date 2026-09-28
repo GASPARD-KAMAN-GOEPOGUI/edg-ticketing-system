@@ -37,14 +37,14 @@ async def _qualify_as(role_dep, request_id: str, unity_id: int, assignee_id: int
 
 
 async def test_agent_support_authorization_gate_allows_third_party_qualify(auth_client, unity_id):
-    """Philosophie collaborative : agent-support peut router vers un autre
+    """Philosophie collaborative : chief-service peut router vers un autre
     intervenant. L'id fictif echoue ensuite sur la validation d'existence du compte,
     pas sur l'autorisation de role."""
     async with auth_client("user") as user_client:
         request_id = await _create_ticket(user_client, unity_id, "third-party-blocked")
 
     def _agent_dep():
-        return SimpleNamespace(id=601, role="agent-support", unity_id=unity_id, direction_id=None)
+        return SimpleNamespace(id=601, role="chief-service", unity_id=unity_id, direction_id=None)
 
     resp = await _qualify_as(_agent_dep, request_id, unity_id, assignee_id=602)
     assert resp.status_code != 403, resp.text
@@ -58,7 +58,7 @@ async def test_agent_support_can_still_self_assign(auth_client, unity_id):
         request_id = await _create_ticket(user_client, unity_id, "self-assign-ok")
 
     def _agent_dep():
-        return SimpleNamespace(id=603, role="agent-support", unity_id=unity_id, direction_id=None)
+        return SimpleNamespace(id=603, role="chief-service", unity_id=unity_id, direction_id=None)
 
     resp = await _qualify_as(_agent_dep, request_id, unity_id, assignee_id=603)
     assert resp.status_code != 403, resp.text

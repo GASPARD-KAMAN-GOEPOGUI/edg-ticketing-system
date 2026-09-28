@@ -68,7 +68,7 @@ export function RejectedTicketModal({ id, open, onClose }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
-      <DialogContent className="max-w-2xl max-h-[88vh] overflow-hidden flex flex-col p-0 gap-0">
+      <DialogContent className="max-w-2xl max-h-[88dvh] overflow-hidden overflow-y-hidden flex flex-col p-0 gap-0">
         {/* Header fixe */}
         <DialogHeader className="px-6 pt-6 pb-4 border-b border-border/40 shrink-0">
           {isLoading ? (

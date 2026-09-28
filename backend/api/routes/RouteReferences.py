@@ -14,11 +14,6 @@ from api.core.enums import (
 from api.services import (
     RequestStatusService,
     RequestCategoryService,
-    AccountStatusService,
-    KnowledgeCategoryService,
-    AnnouncementCategoryService,
-    AnnouncementPriorityService,
-    AnnouncementStatusService,
     PriorityDefinitionService,
 )
 
@@ -46,11 +41,6 @@ async def get_all_references(db: AsyncSession = Depends(get_db)):
         "workflow_statuses":       [e.value for e in WorkflowStatusEnum],
         "task_types":              [e.value for e in TaskTypeEnum],
         "task_statuses":           [e.value for e in TaskStatusEnum],
-        "account_statuses":        await AccountStatusService(db).list_all(),
-        "knowledge_categories":    await KnowledgeCategoryService(db).list_all(),
-        "announcement_categories": await AnnouncementCategoryService(db).list_all(),
-        "announcement_priorities": await AnnouncementPriorityService(db).list_all(),
-        "announcement_statuses":   await AnnouncementStatusService(db).list_all(),
         "priority_definitions":    await PriorityDefinitionService(db).list_all(),
     }
 
@@ -145,166 +135,6 @@ async def list_task_types():
 @router.get("/task-statuses")
 async def list_task_statuses():
     return [{"code": e.value} for e in TaskStatusEnum]
-
-
-# ── Account statuses ──────────────────────────────────────────────────────────
-
-@router.get("/account-statuses")
-async def list_account_statuses(db: AsyncSession = Depends(get_db)):
-    return await AccountStatusService(db).list_all()
-
-
-@router.get("/account-statuses/{id}")
-async def get_account_status(id: int, db: AsyncSession = Depends(get_db)):
-    return await AccountStatusService(db).get_by_id(id)
-
-
-@router.post("/account-statuses", status_code=status.HTTP_201_CREATED, dependencies=[_admin])
-async def create_account_status(data: dict, db: AsyncSession = Depends(get_db)):
-    return await AccountStatusService(db).create(data)
-
-
-@router.put("/account-statuses/{id}", dependencies=[_admin])
-async def update_account_status(id: int, data: dict, db: AsyncSession = Depends(get_db)):
-    return await AccountStatusService(db).update(id, data)
-
-
-@router.delete("/account-statuses/{id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[_admin])
-async def delete_account_status(id: int, db: AsyncSession = Depends(get_db)):
-    await AccountStatusService(db).delete(id)
-
-
-@router.put("/account-statuses/{id}/restore", dependencies=[_admin])
-async def restore_account_status(id: int, db: AsyncSession = Depends(get_db)):
-    return await AccountStatusService(db).restore(id)
-
-
-# ── Knowledge categories ──────────────────────────────────────────────────────
-
-@router.get("/knowledge-categories")
-async def list_knowledge_categories(db: AsyncSession = Depends(get_db)):
-    return await KnowledgeCategoryService(db).list_all()
-
-
-@router.get("/knowledge-categories/{id}")
-async def get_knowledge_category(id: int, db: AsyncSession = Depends(get_db)):
-    return await KnowledgeCategoryService(db).get_by_id(id)
-
-
-@router.post("/knowledge-categories", status_code=status.HTTP_201_CREATED, dependencies=[_admin])
-async def create_knowledge_category(data: dict, db: AsyncSession = Depends(get_db)):
-    return await KnowledgeCategoryService(db).create(data)
-
-
-@router.put("/knowledge-categories/{id}", dependencies=[_admin])
-async def update_knowledge_category(id: int, data: dict, db: AsyncSession = Depends(get_db)):
-    return await KnowledgeCategoryService(db).update(id, data)
-
-
-@router.delete("/knowledge-categories/{id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[_admin])
-async def delete_knowledge_category(id: int, db: AsyncSession = Depends(get_db)):
-    await KnowledgeCategoryService(db).delete(id)
-
-
-@router.put("/knowledge-categories/{id}/restore", dependencies=[_admin])
-async def restore_knowledge_category(id: int, db: AsyncSession = Depends(get_db)):
-    return await KnowledgeCategoryService(db).restore(id)
-
-
-# ── Announcement categories ───────────────────────────────────────────────────
-
-@router.get("/announcement-categories")
-async def list_announcement_categories(db: AsyncSession = Depends(get_db)):
-    return await AnnouncementCategoryService(db).list_all()
-
-
-@router.get("/announcement-categories/{id}")
-async def get_announcement_category(id: int, db: AsyncSession = Depends(get_db)):
-    return await AnnouncementCategoryService(db).get_by_id(id)
-
-
-@router.post("/announcement-categories", status_code=status.HTTP_201_CREATED, dependencies=[_admin])
-async def create_announcement_category(data: dict, db: AsyncSession = Depends(get_db)):
-    return await AnnouncementCategoryService(db).create(data)
-
-
-@router.put("/announcement-categories/{id}", dependencies=[_admin])
-async def update_announcement_category(id: int, data: dict, db: AsyncSession = Depends(get_db)):
-    return await AnnouncementCategoryService(db).update(id, data)
-
-
-@router.delete("/announcement-categories/{id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[_admin])
-async def delete_announcement_category(id: int, db: AsyncSession = Depends(get_db)):
-    await AnnouncementCategoryService(db).delete(id)
-
-
-@router.put("/announcement-categories/{id}/restore", dependencies=[_admin])
-async def restore_announcement_category(id: int, db: AsyncSession = Depends(get_db)):
-    return await AnnouncementCategoryService(db).restore(id)
-
-
-# ── Announcement priorities ───────────────────────────────────────────────────
-
-@router.get("/announcement-priorities")
-async def list_announcement_priorities(db: AsyncSession = Depends(get_db)):
-    return await AnnouncementPriorityService(db).list_all()
-
-
-@router.get("/announcement-priorities/{id}")
-async def get_announcement_priority(id: int, db: AsyncSession = Depends(get_db)):
-    return await AnnouncementPriorityService(db).get_by_id(id)
-
-
-@router.post("/announcement-priorities", status_code=status.HTTP_201_CREATED, dependencies=[_admin])
-async def create_announcement_priority(data: dict, db: AsyncSession = Depends(get_db)):
-    return await AnnouncementPriorityService(db).create(data)
-
-
-@router.put("/announcement-priorities/{id}", dependencies=[_admin])
-async def update_announcement_priority(id: int, data: dict, db: AsyncSession = Depends(get_db)):
-    return await AnnouncementPriorityService(db).update(id, data)
-
-
-@router.delete("/announcement-priorities/{id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[_admin])
-async def delete_announcement_priority(id: int, db: AsyncSession = Depends(get_db)):
-    await AnnouncementPriorityService(db).delete(id)
-
-
-@router.put("/announcement-priorities/{id}/restore", dependencies=[_admin])
-async def restore_announcement_priority(id: int, db: AsyncSession = Depends(get_db)):
-    return await AnnouncementPriorityService(db).restore(id)
-
-
-# ── Announcement statuses ─────────────────────────────────────────────────────
-
-@router.get("/announcement-statuses")
-async def list_announcement_statuses(db: AsyncSession = Depends(get_db)):
-    return await AnnouncementStatusService(db).list_all()
-
-
-@router.get("/announcement-statuses/{id}")
-async def get_announcement_status(id: int, db: AsyncSession = Depends(get_db)):
-    return await AnnouncementStatusService(db).get_by_id(id)
-
-
-@router.post("/announcement-statuses", status_code=status.HTTP_201_CREATED, dependencies=[_admin])
-async def create_announcement_status(data: dict, db: AsyncSession = Depends(get_db)):
-    return await AnnouncementStatusService(db).create(data)
-
-
-@router.put("/announcement-statuses/{id}", dependencies=[_admin])
-async def update_announcement_status(id: int, data: dict, db: AsyncSession = Depends(get_db)):
-    return await AnnouncementStatusService(db).update(id, data)
-
-
-@router.delete("/announcement-statuses/{id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[_admin])
-async def delete_announcement_status(id: int, db: AsyncSession = Depends(get_db)):
-    await AnnouncementStatusService(db).delete(id)
-
-
-@router.put("/announcement-statuses/{id}/restore", dependencies=[_admin])
-async def restore_announcement_status(id: int, db: AsyncSession = Depends(get_db)):
-    return await AnnouncementStatusService(db).restore(id)
 
 
 # ── Priority definitions ──────────────────────────────────────────────────────

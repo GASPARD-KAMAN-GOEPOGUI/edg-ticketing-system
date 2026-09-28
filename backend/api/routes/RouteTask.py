@@ -25,14 +25,14 @@ def _svc(db: AsyncSession = Depends(get_db)) -> TaskService:
 async def list_tasks(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    _=Depends(require_roles("agent", "chief", "director", "admin")),
+    _=Depends(require_roles("agent", "admin")),
     svc: TaskService = Depends(_svc),
 ):
     """M-02 — liste globale des tâches réservée au staff ; les citoyens n'ont pas accès."""
     return await svc.list_all(page=page, limit=limit)
 
 
-_staff = Depends(require_roles("agent", "chief", "director", "admin"))
+_staff = Depends(require_roles("agent", "admin"))
 
 
 @router.get("/pending", response_model=PaginatedResponse)
@@ -75,7 +75,7 @@ async def get_task(id: str, _=_staff, svc: TaskService = Depends(_svc)):
 @router.post("/", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
 async def create_task(
     body: TaskCreate,
-    _=Depends(require_roles("agent", "chief", "admin")),
+    _=Depends(require_roles("agent", "admin")),
     svc: TaskService = Depends(_svc),
 ):
     return await svc.create(body.dict())
@@ -85,7 +85,7 @@ async def create_task(
 async def update_task(
     id: str,
     body: TaskUpdate,
-    _=Depends(require_roles("agent", "chief", "admin")),
+    _=Depends(require_roles("agent", "admin")),
     svc: TaskService = Depends(_svc),
 ):
     return await svc.update(id, body.dict(exclude_unset=True))
@@ -95,7 +95,7 @@ async def update_task(
 async def complete_task(
     id: str,
     resolution_note: Optional[str] = Query(None),
-    _=Depends(require_roles("agent", "chief", "admin")),
+    _=Depends(require_roles("agent", "admin")),
     svc: TaskService = Depends(_svc),
 ):
     return await svc.complete(id, resolution_note=resolution_note)
@@ -105,7 +105,7 @@ async def complete_task(
 async def reject_task(
     id: str,
     rejection_reason: Optional[str] = Query(None),
-    _=Depends(require_roles("chief", "admin")),
+    _=Depends(require_roles("admin")),
     svc: TaskService = Depends(_svc),
 ):
     return await svc.reject(id, rejection_reason=rejection_reason)
@@ -114,7 +114,7 @@ async def reject_task(
 @router.post("/{id}/approve", response_model=TaskResponse)
 async def approve_task(
     id: str,
-    _=Depends(require_roles("chief", "admin")),
+    _=Depends(require_roles("admin")),
     svc: TaskService = Depends(_svc),
 ):
     return await svc.approve(id)
@@ -123,7 +123,7 @@ async def approve_task(
 @router.post("/{id}/cancel", response_model=TaskResponse)
 async def cancel_task(
     id: str,
-    _=Depends(require_roles("agent", "chief", "admin")),
+    _=Depends(require_roles("agent", "admin")),
     svc: TaskService = Depends(_svc),
 ):
     return await svc.cancel(id)

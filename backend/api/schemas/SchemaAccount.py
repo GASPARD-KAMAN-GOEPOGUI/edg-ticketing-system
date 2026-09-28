@@ -68,8 +68,11 @@ class AccountUpdate(BaseModel):
     phone: Optional[str] = None
     role: Optional[str] = None
     account_status: Optional[str] = None
-    matricule: Optional[str] = None
+    matricule: Optional[str] = None   # libellé métier : « Badge »
     job: Optional[str] = None
+    # PV d'intervention — titulaire | prestataire | stagiaire. Écrit dans `infos`
+    # par ServiceAccount (pas de colonne : table partagée avec le central).
+    intervenant_status: Optional[str] = None
     avatar_url: Optional[str] = None
     is_edg_employee: Optional[bool] = None
     availability: Optional[str] = None
@@ -115,8 +118,12 @@ class AccountResponse(BaseResponse):
     phone: Optional[str] = None
     role: str
     account_status: str
-    matricule: Optional[str] = None
+    matricule: Optional[str] = None   # libellé métier : « Badge »
     job: Optional[str] = None
+    # PV d'intervention EDG/PS-GSI/PV-01 — titulaire | prestataire | stagiaire.
+    # Lu depuis `infos` (la table `account` est partagée avec la plateforme
+    # centrale : son schéma n'est pas modifié).
+    intervenant_status: Optional[str] = None
     avatar_url: Optional[str] = None
     is_edg_employee: bool
     email_verified: bool

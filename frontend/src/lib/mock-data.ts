@@ -1,38 +1,33 @@
 export type Role =
   | "public"
   | "user"
-  | "agent-support"
   | "chief-service"
-  | "chief-departement"
-  | "director"
+  | "technicien"
+  | "chef-division-support"
   | "admin";
 
+// "qualified", "pending" et "escalated" supprimés le 2026-09-28 : aucun ticket
+// ne les portait et plus aucune transition n'y menait.
 export type RequestStatus =
   | "new"
   | "qualifying"
-  | "qualified"
   | "assigned"
   | "in_progress"
-  | "pending"
   | "resolved"
   | "closed"
   | "reopened"
   | "rejected"
-  | "escalated"
   | "cancelled";
 
 export const statusOrder: RequestStatus[] = [
   "new",
   "qualifying",
-  "qualified",
   "assigned",
   "in_progress",
-  "pending",
   "resolved",
   "closed",
   "reopened",
   "rejected",
-  "escalated",
 ];
 
 export type Priority = "low" | "medium" | "high" | "critical";
@@ -120,37 +115,37 @@ export type AppUser = {
 
 export const users: AppUser[] = [
   { id: "u1", name: "Mariama Diallo", email: "mariama@edg.gn", role: "user", matricule: "EDG-2847", job: "Technicienne", direction: "dsi", service: "dsi-app" },
-  { id: "u2", name: "Ousmane Camara", email: "ousmane@edg.gn", role: "agent-support", direction: "dsi", service: "dsi-support", matricule: "EDG-1023", job: "Agent support" },
+  { id: "u2", name: "Ousmane Camara", email: "ousmane@edg.gn", role: "chief-service", direction: "dsi", service: "dsi-support", matricule: "EDG-1023", job: "Chef de service" },
   { id: "u3", name: "Fatoumata Bah", email: "fatoumata@edg.gn", role: "chief-service", direction: "dsi", service: "dsi-support", matricule: "EDG-0541", job: "Chef service support" },
-  { id: "u4", name: "Ibrahima Sow", email: "ibrahima@edg.gn", role: "director", direction: "dsi", matricule: "EDG-0102", job: "Directeur DSI" },
-  { id: "u5", name: "Aïssatou Barry", email: "aissatou@edg.gn", role: "director", direction: "dg", matricule: "EDG-0001", job: "Directrice" },
+  { id: "u4", name: "Ibrahima Sow", email: "ibrahima@edg.gn", role: "chief-service", direction: "dsi", matricule: "EDG-0102", job: "Directeur DSI" },
+  { id: "u5", name: "Aïssatou Barry", email: "aissatou@edg.gn", role: "chief-service", direction: "dg", matricule: "EDG-0001", job: "Directrice" },
   { id: "u6", name: "Mohamed Touré", email: "admin@edg.gn", role: "admin", matricule: "EDG-9999", job: "Administrateur système" },
-  { id: "u7", name: "Sékou Condé", email: "sekou@edg.gn", role: "agent-support", direction: "reseau", service: "res-pannes", matricule: "EDG-3312", job: "Agent terrain réseau" },
-  { id: "u8", name: "Hadja Sylla", email: "hadja@edg.gn", role: "agent-support", direction: "com", service: "com-clients", matricule: "EDG-2204", job: "Chargée clientèle" },
+  { id: "u7", name: "Sékou Condé", email: "sekou@edg.gn", role: "chief-service", direction: "reseau", service: "res-pannes", matricule: "EDG-3312", job: "Agent terrain réseau" },
+  { id: "u8", name: "Hadja Sylla", email: "hadja@edg.gn", role: "chief-service", direction: "com", service: "com-clients", matricule: "EDG-2204", job: "Chargée clientèle" },
   { id: "u9", name: "Alpha Diaby", email: "alpha.diaby@gmail.com", role: "user" },
   { id: "u10", name: "Kadiatou Keita", email: "kadi@yahoo.com", role: "user" },
   /* Technique */
-  { id: "u11", name: "Mamadou Barry", email: "mamadou.barry@edg.gn", role: "agent-support", direction: "tech", service: "tech-maint" },
+  { id: "u11", name: "Mamadou Barry", email: "mamadou.barry@edg.gn", role: "chief-service", direction: "tech", service: "tech-maint" },
   { id: "u12", name: "Mariame Kouyaté", email: "mariame@edg.gn", role: "chief-service", direction: "tech", service: "tech-maint" },
-  { id: "u13", name: "Boubacar Diallo", email: "boubacar@edg.gn", role: "director", direction: "tech" },
+  { id: "u13", name: "Boubacar Diallo", email: "boubacar@edg.gn", role: "chief-service", direction: "tech" },
   /* Financière */
-  { id: "u14", name: "Hawa Cissé", email: "hawa@edg.gn", role: "agent-support", direction: "fin", service: "fin-compta" },
+  { id: "u14", name: "Hawa Cissé", email: "hawa@edg.gn", role: "chief-service", direction: "fin", service: "fin-compta" },
   { id: "u15", name: "Lansana Traoré", email: "lansana@edg.gn", role: "chief-service", direction: "fin", service: "fin-budget" },
-  { id: "u16", name: "Ibrahima Bah", email: "ibrahima.bah@edg.gn", role: "director", direction: "fin" },
+  { id: "u16", name: "Ibrahima Bah", email: "ibrahima.bah@edg.gn", role: "chief-service", direction: "fin" },
   /* RH */
-  { id: "u17", name: "Nènè Camara", email: "nene@edg.gn", role: "agent-support", direction: "rh", service: "rh-carrieres" },
+  { id: "u17", name: "Nènè Camara", email: "nene@edg.gn", role: "chief-service", direction: "rh", service: "rh-carrieres" },
   { id: "u18", name: "Fatoumata Konaté", email: "fatou.konate@edg.gn", role: "chief-service", direction: "rh", service: "rh-paie" },
-  { id: "u19", name: "Alpha Touré", email: "alpha.toure@edg.gn", role: "director", direction: "rh" },
+  { id: "u19", name: "Alpha Touré", email: "alpha.toure@edg.gn", role: "chief-service", direction: "rh" },
   /* Réseau */
-  { id: "u20", name: "Aissatou Diallo", email: "aissatou.d@edg.gn", role: "director", direction: "reseau" },
+  { id: "u20", name: "Aissatou Diallo", email: "aissatou.d@edg.gn", role: "chief-service", direction: "reseau" },
   { id: "u30", name: "Saran Bah", email: "saran@edg.gn", role: "chief-service", direction: "reseau", service: "res-ht" },
   /* Communication */
-  { id: "u21", name: "Mamadou Diallo", email: "mamadou.d@edg.gn", role: "agent-support", direction: "comm", service: "comm-presse" },
-  { id: "u22", name: "Kadiatou Barry", email: "kadi.barry@edg.gn", role: "director", direction: "comm" },
+  { id: "u21", name: "Mamadou Diallo", email: "mamadou.d@edg.gn", role: "chief-service", direction: "comm", service: "comm-presse" },
+  { id: "u22", name: "Kadiatou Barry", email: "kadi.barry@edg.gn", role: "chief-service", direction: "comm" },
   /* Commerciale */
-  { id: "u23", name: "Ousmane Bah", email: "ousmane.bah@edg.gn", role: "agent-support", direction: "dsi", service: "dsi-app" },
-  { id: "u24", name: "Sékou Barry", email: "sekou.barry@edg.gn", role: "director", direction: "com" },
-  { id: "u28", name: "Lansana Diallo", email: "lansana.d@edg.gn", role: "agent-support", direction: "dsi", service: "dsi-infra" },
+  { id: "u23", name: "Ousmane Bah", email: "ousmane.bah@edg.gn", role: "chief-service", direction: "dsi", service: "dsi-app" },
+  { id: "u24", name: "Sékou Barry", email: "sekou.barry@edg.gn", role: "chief-service", direction: "com" },
+  { id: "u28", name: "Lansana Diallo", email: "lansana.d@edg.gn", role: "chief-service", direction: "dsi", service: "dsi-infra" },
   /* Citoyens / agents externes */
   { id: "u25", name: "Mariama Bangoura", email: "mariama.b@gmail.com", role: "user" },
   { id: "u26", name: "Ibrahim Kourouma", email: "ibrahim.k@yahoo.fr", role: "user" },
@@ -245,11 +240,30 @@ export type RequestItem = {
   requesterPhone?: string;
   requesterEmail?: string;
   requesterAddress?: string;
+  // Procédure EDG/PS-GSI/Pro-02 tâche 1.3 — descriptif de la solution proposée
+  // par le chef de service à l'imputation. Jamais visible du demandeur : servi
+  // par la file Distribution (CDS) et par GET /requests/:id/proposed-solution.
+  proposedSolution?: string;
+  // PV d'intervention (procedure taches 3.3/3.4) — servis par le TSI.
+  pvValidatedAt?: string;
+  pvSubmittedAt?: string;
+  pvArchivedAt?: string;
+  intervenantName?: string;
+  intervenantBadge?: string;
   // Champs employé EDG (interne)
   employeeMatricule?: string;
   requesterJob?: string;
   requesterDirectionId?: string;
   requesterServiceId?: string;
+  // Libellés figés au moment des faits — à préférer aux libellés résolus depuis
+  // l'organigramme courant, qui reflètent la situation d'aujourd'hui et non
+  // celle du jour de la demande (voir docs/mise-a-jour-backend.md, 2026-09-22).
+  requesterDirectionLabel?: string;
+  requesterDepartmentLabel?: string;
+  requesterServiceLabel?: string;
+  handlerDirectionLabel?: string;
+  handlerDepartmentLabel?: string;
+  handlerServiceLabel?: string;
   // Champs client externe
   meterNumber?: string;
   clientRef?: string;
@@ -409,8 +423,8 @@ export const requests: RequestItem[] = [
     ],
     timeline: [
       { id: "t1", type: "created", label: "Ticket créé", at: h(72) },
-      { id: "t2", type: "assigned", label: "Assignée · Agent support — DSI", at: h(70) },
-      { id: "t3", type: "resolved", label: "Résolue", at: h(48), by: "Agent support — DSI" },
+      { id: "t2", type: "assigned", label: "Assignée · Chef de service — DSI", at: h(70) },
+      { id: "t3", type: "resolved", label: "Résolue", at: h(48), by: "Chef de service — DSI" },
     ],
   },
   {
@@ -771,8 +785,8 @@ export const requests: RequestItem[] = [
     ],
     timeline: [
       { id: "t1", type: "created", label: "Ticket créé", at: h(56) },
-      { id: "t2", type: "assigned", label: "Assignée · Agent support — DSI", at: h(54) },
-      { id: "t3", type: "resolved", label: "Résolue", at: h(40), by: "Agent support — DSI" },
+      { id: "t2", type: "assigned", label: "Assignée · Chef de service — DSI", at: h(54) },
+      { id: "t3", type: "resolved", label: "Résolue", at: h(40), by: "Chef de service — DSI" },
     ],
   },
   {
@@ -916,7 +930,7 @@ export const requests: RequestItem[] = [
     comments: [],
     timeline: [
       { id: "t1", type: "created", label: "Ticket créé", at: h(22) },
-      { id: "t2", type: "assigned", label: "Assignée · Agent support — DSI", at: h(6) },
+      { id: "t2", type: "assigned", label: "Assignée · Chef de service — DSI", at: h(6) },
     ],
   },
   {
@@ -1158,50 +1172,15 @@ export const requests: RequestItem[] = [
   },
 ];
 
-export const knowledgeArticles = [
-  {
-    id: "k1",
-    title: "Comment signaler une coupure d'électricité ?",
-    excerpt:
-      "Guide pas-à-pas pour déclarer une panne et suivre l'intervention en temps réel.",
-    category: "Pannes",
-    readTime: 3,
-  },
-  {
-    id: "k2",
-    title: "Obtenir une attestation de consommation",
-    excerpt: "Documents requis, délais de traitement et téléchargement en ligne.",
-    category: "Documents",
-    readTime: 2,
-  },
-  {
-    id: "k3",
-    title: "Raccordement d'un nouveau site",
-    excerpt: "Procédure complète, devis et délais selon la puissance demandée.",
-    category: "Raccordement",
-    readTime: 5,
-  },
-  {
-    id: "k4",
-    title: "Comprendre votre facture EDG",
-    excerpt: "Décomposition de la facture, tarifs et modes de paiement disponibles.",
-    category: "Facturation",
-    readTime: 4,
-  },
-];
-
 export const statusLabels: Record<RequestStatus, string> = {
   new: "Nouvelle",
   qualifying: "En qualification",
-  qualified: "Qualifiée",
   assigned: "Assignée",
   in_progress: "En cours",
-  pending: "En attente",
   resolved: "Résolue",
   closed: "Clôturée",
   reopened: "Réouverte",
   rejected: "Rejetée",
-  escalated: "Escaladée",
   cancelled: "Annulée",
 };
 
@@ -1292,10 +1271,9 @@ export const priorityDefinitions: PriorityDefinition[] = [
 export const roleLabels: Record<Role, string> = {
   public: "Public",
   user: "Utilisateur",
-  "agent-support": "Agent Support",
   "chief-service": "Chef de Service",
-  "chief-departement": "Chef de Département",
-  director: "Directeur",
+  technicien: "Technicien",
+  "chef-division-support": "Chef de Division Support",
   admin: "Administrateur",
 };
 
@@ -1308,7 +1286,7 @@ export function getUserByMatricule(matricule: string): AppUser | undefined {
 }
 
 /* ------------------------------------------------------------------ */
-/* Supervision — SLA par agent + escalades simulées                    */
+/* Supervision — SLA par agent                                         */
 /* ------------------------------------------------------------------ */
 
 export type AgentSLA = {
@@ -1334,32 +1312,6 @@ export const agentSLAs: AgentSLA[] = [
   { id: "a6", name: "Fanta Diallo", direction: "Commerciale", service: "Facturation", open: 3, handled: 142, avgResolutionH: 8.2, slaRespect: 96, satisfaction: 4.8, status: "available" },
   { id: "a7", name: "Lansana Camara", direction: "Réseau", service: "Basse tension", open: 5, handled: 110, avgResolutionH: 7.5, slaRespect: 83, satisfaction: 4.2, status: "busy" },
   { id: "a8", name: "Aminata Touré", direction: "RH", service: "Paie", open: 2, handled: 78, avgResolutionH: 14.0, slaRespect: 89, satisfaction: 4.4, status: "off" },
-];
-
-export type EscalationLevel = "L1" | "L2" | "L3";
-
-export type EscalationItem = {
-  id: string;
-  requestId?: string;
-  requestRef: string;
-  title: string;
-  fromAgent: string;
-  toAgent: string;
-  level: EscalationLevel;
-  reason: string;
-  slaOverHours: number;
-  priority: Priority;
-  at: string;
-  status: "open" | "in_review" | "resolved" | "rejected";
-  decisionComment?: string;
-};
-
-export const escalations: EscalationItem[] = [
-  { id: "e1", requestRef: "EDG-2026-0421", title: "Coupure prolongée — Kaloum", fromAgent: "Sékou Condé", toAgent: "Fatoumata Bah", level: "L2", reason: "SLA dépassé de 2h sur incident critique", slaOverHours: 2, priority: "critical", at: h(1), status: "open" },
-  { id: "e2", requestRef: "EDG-2026-0416", title: "Double prélèvement facturation", fromAgent: "Hadja Sylla", toAgent: "Directeur Commercial", level: "L3", reason: "Réclamation client > 48h sans réponse", slaOverHours: 26, priority: "high", at: h(4), status: "in_review" },
-  { id: "e3", requestRef: "EDG-2026-0411", title: "Raccordement industriel Coyah", fromAgent: "Mamadou Sylla", toAgent: "Fatoumata Bah", level: "L2", reason: "Manque de validation budgétaire", slaOverHours: 8, priority: "high", at: h(12), status: "open" },
-  { id: "e4", requestRef: "EDG-2026-0402", title: "Panne transformateur Matam", fromAgent: "Sékou Condé", toAgent: "Directeur", level: "L3", reason: "Impact > 5 000 abonnés, escalade obligatoire", slaOverHours: 14, priority: "critical", at: h(18), status: "in_review" },
-  { id: "e5", requestRef: "EDG-2026-0395", title: "Demande attestation urgente", fromAgent: "Hadja Sylla", toAgent: "Fatoumata Bah", level: "L2", reason: "Demande VIP — délai contractuel", slaOverHours: 4, priority: "medium", at: h(28), status: "resolved" },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -1434,92 +1386,21 @@ export type ActivityLog = {
 
 const ua = "Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36";
 export const activityLogs: ActivityLog[] = [
-  { id: "l1", at: h(0.2), actor: "Mohamed Touré", actorRole: "admin", action: "Modification du rôle utilisateur", category: "admin", target: "u3 → chief-service", ip: "196.207.84.12", userAgent: ua, status: "success", metadata: { from: "agent-support", to: "chief-service", user_id: "u3", reason: "Promotion service", approved_by: "Directeur" } },
-  { id: "l2", at: h(0.5), actor: "Sékou Condé", actorRole: "agent-support", action: "Mise à jour du statut ticket", category: "request", target: "EDG-2026-0421", ip: "10.12.3.44", userAgent: ua, status: "success", metadata: { ref: "EDG-2026-0421", previous_status: "qualifying", new_status: "in_progress", sla_ok: true } },
+  { id: "l1", at: h(0.2), actor: "Mohamed Touré", actorRole: "admin", action: "Modification du rôle utilisateur", category: "admin", target: "u3 → chief-service", ip: "196.207.84.12", userAgent: ua, status: "success", metadata: { from: "user", to: "chief-service", user_id: "u3", reason: "Promotion service" } },
+  { id: "l2", at: h(0.5), actor: "Sékou Condé", actorRole: "chief-service", action: "Mise à jour du statut ticket", category: "request", target: "EDG-2026-0421", ip: "10.12.3.44", userAgent: ua, status: "success", metadata: { ref: "EDG-2026-0421", previous_status: "qualifying", new_status: "in_progress", sla_ok: true } },
   { id: "l3", at: h(0.7), actor: "system", actorRole: "admin", action: "Escalade automatique", category: "system", target: "EDG-2026-0416", ip: "—", userAgent: "edg-engine/1.4", status: "warning", metadata: { rule: "SLA dépassé > 24h", level: "L3", sla_breach_h: 31.5, escalated_to: "Fatoumata Bah" } },
-  { id: "l4", at: h(1.1), actor: "Aïssatou Barry", actorRole: "director", action: "Connexion réussie", category: "auth", target: "—", ip: "41.83.12.7", userAgent: ua, status: "success", metadata: { mfa: true, session_id: "sess_8f2a3c" } },
+  { id: "l4", at: h(1.1), actor: "Aïssatou Barry", actorRole: "chief-service", action: "Connexion réussie", category: "auth", target: "—", ip: "41.83.12.7", userAgent: ua, status: "success", metadata: { mfa: true, session_id: "sess_8f2a3c" } },
   { id: "l5", at: h(1.4), actor: "anon", actorRole: "public", action: "Échec d'authentification", category: "security", target: "admin@edg.gn", ip: "185.34.220.18", userAgent: "curl/8.4", status: "error", metadata: { attempts: 5, blocked: true, ip_country: "RU", lockout_min: 30 } },
   { id: "l6", at: h(2.2), actor: "Fatoumata Bah", actorRole: "chief-service", action: "Assignation de ticket", category: "request", target: "EDG-2026-0420 → Hadja Sylla", ip: "10.12.7.89", userAgent: ua, status: "success", metadata: { ref: "EDG-2026-0420", assigned_to: "u7", agent_name: "Hadja Sylla", team: "Service client" } },
   { id: "l7", at: h(3.0), actor: "Mohamed Touré", actorRole: "admin", action: "Modification SLA", category: "admin", target: "Panne réseau · critical", ip: "196.207.84.12", userAgent: ua, status: "success", metadata: { responseH: 1, resolutionH: 4, previous_responseH: 2, previous_resolutionH: 8 } },
   { id: "l8", at: h(4.5), actor: "Alpha Diaby", actorRole: "user", action: "Création de ticket", category: "request", target: "EDG-2026-0418", ip: "102.130.45.7", userAgent: "EDG-Mobile/2.1", status: "success", metadata: { ref: "EDG-2026-0418", channel: "mobile", attachments: 2 } },
   { id: "l9", at: h(6.8), actor: "system", actorRole: "admin", action: "Sauvegarde quotidienne", category: "system", target: "PostgreSQL", ip: "—", userAgent: "edg-backup/2.0", status: "success", metadata: { size_mb: 412, tables: 18, success: true, compressed: true, duration_min: 4 } },
-  { id: "l10", at: h(8.2), actor: "Ousmane Camara", actorRole: "agent-support", action: "Clôture de ticket", category: "request", target: "EDG-2026-0419", ip: "10.12.3.55", userAgent: ua, status: "success", metadata: { ref: "EDG-2026-0419", resolution_h: 22, csat_rating: 4, sla_ok: true } },
+  { id: "l10", at: h(8.2), actor: "Ousmane Camara", actorRole: "chief-service", action: "Clôture de ticket", category: "request", target: "EDG-2026-0419", ip: "10.12.3.55", userAgent: ua, status: "success", metadata: { ref: "EDG-2026-0419", resolution_h: 22, csat_rating: 4, sla_ok: true } },
   { id: "l11", at: h(9.3), actor: "Mohamed Touré", actorRole: "admin", action: "Création règle de routage", category: "admin", target: "Mots-clés SAP/ERP", ip: "196.207.84.12", userAgent: ua, status: "success", metadata: { rule_id: "r5", keywords: ["SAP", "ERP", "SIRH"], target_service: "DSI" } },
   { id: "l12", at: h(14.0), actor: "system", actorRole: "admin", action: "Indisponibilité partielle", category: "system", target: "module notifications", ip: "—", userAgent: "edg-monitor/1.0", status: "warning", metadata: { duration_min: 7, affected_users: 43, auto_recovered: true } },
   { id: "l13", at: h(22.5), actor: "Mariama Diallo", actorRole: "user", action: "Connexion réussie", category: "auth", target: "—", ip: "102.130.55.2", userAgent: ua, status: "success", metadata: { mfa: false, device: "web" } },
   { id: "l14", at: h(26.0), actor: "anon", actorRole: "public", action: "Tentative SQL injection détectée", category: "security", target: "/api/requests", ip: "45.142.122.9", userAgent: "sqlmap/1.7", status: "error", metadata: { blocked: true, fingerprint: "WAF-018", payload: "' OR 1=1--", waf_rule: "SQL001", ip_country: "CN" } },
   { id: "l15", at: h(36.0), actor: "Mohamed Touré", actorRole: "admin", action: "Publication article KB", category: "admin", target: "k1 — Comment signaler une coupure", ip: "196.207.84.12", userAgent: ua, status: "success", metadata: { article_id: "k1", visible_to: ["user", "public"], tags: ["coupure", "signalement"] } },
-];
-
-export type KnowledgeArticle = {
-  id: string;
-  title: string;
-  excerpt: string;
-  body: string;
-  category: string;
-  readTime: number;
-  author: string;
-  updatedAt: string;
-  published: boolean;
-  tags?: string[];
-};
-
-export const knowledgeFull: KnowledgeArticle[] = [
-  {
-    id: "k1",
-    title: "Comment signaler une coupure d'électricité ?",
-    excerpt: "Guide pas-à-pas pour déclarer une panne et suivre l'intervention en temps réel.",
-    body: "1. Connectez-vous à votre espace EDG Support.\n2. Cliquez sur « Nouveau ticket » puis sélectionnez « Panne réseau ».\n3. Renseignez l'adresse exacte et le type d'incident.\n4. Joignez si possible une photo du compteur ou de la zone.\n5. Validez. Un numéro de suivi vous sera attribué — un agent terrain est dispatché sous 1h pour les pannes critiques.",
-    category: "Pannes",
-    readTime: 3,
-    author: "Direction Réseau",
-    updatedAt: h(72),
-    published: true,
-  },
-  {
-    id: "k2",
-    title: "Obtenir une attestation de consommation",
-    excerpt: "Documents requis, délais de traitement et téléchargement en ligne.",
-    body: "Munissez-vous de votre numéro de compteur, d'une pièce d'identité et d'une facture récente. Soumettez le ticket depuis l'onglet Services → Documents administratifs. Délai indicatif : 48h ouvrées. Le document signé est téléchargeable depuis votre espace.",
-    category: "Documents",
-    readTime: 2,
-    author: "Service Clients",
-    updatedAt: h(120),
-    published: true,
-  },
-  {
-    id: "k3",
-    title: "Raccordement d'un nouveau site",
-    excerpt: "Procédure complète, devis et délais selon la puissance demandée.",
-    body: "Le raccordement nécessite : un plan de situation, un certificat de conformité installation, et la fourniture du contrat de bail. Délai moyen 30 jours (basse tension) ou 90 jours (haute tension). Un devis est émis sous 7 jours.",
-    category: "Raccordement",
-    readTime: 5,
-    author: "Direction Technique",
-    updatedAt: h(48),
-    published: true,
-  },
-  {
-    id: "k4",
-    title: "Comprendre votre facture EDG",
-    excerpt: "Décomposition de la facture, tarifs et modes de paiement disponibles.",
-    body: "Votre facture se compose de : la consommation (kWh × tarif), la prime fixe, la TVA et taxes locales. Modes de paiement acceptés : Orange Money, MTN Mobile Money, virement bancaire, ou paiement direct en agence.",
-    category: "Facturation",
-    readTime: 4,
-    author: "Direction Commerciale",
-    updatedAt: h(96),
-    published: true,
-  },
-  {
-    id: "k5",
-    title: "Sécurité du compte et MFA",
-    excerpt: "Activer la double authentification pour protéger votre espace EDG Support.",
-    body: "Rendez-vous dans Profil → Sécurité. Activez l'authentification à deux facteurs (TOTP). Scannez le QR code avec votre application Authenticator. En cas de perte, contactez le support avec une pièce d'identité.",
-    category: "Sécurité",
-    readTime: 3,
-    author: "DSI",
-    updatedAt: h(200),
-    published: false,
-  },
 ];
 
 export const logCategoryLabels: Record<ActivityLog["category"], string> = {
@@ -1689,329 +1570,5 @@ export function csatStats(): {
 /* COMMUNICATION INSTITUTIONNELLE                                      */
 /* ================================================================== */
 
-export type AnnouncementCategory =
-  | "general"
-  | "service_note"
-  | "maintenance"
-  | "system_update"
-  | "training"
-  | "security"
-  | "alert"
-  | "emergency"
-  | "outage";
 
-export type AnnouncementPriority =
-  | "low"
-  | "medium"
-  | "high"
-  | "critical"
-  | "absolute_emergency";
 
-export type AnnouncementChannel =
-  | "internal_notif"
-  | "email"
-  | "sms"
-  | "dashboard"
-  | "homepage";
-
-export type AnnouncementAudience = "internal" | "external" | "all";
-
-export type AnnouncementStatus = "draft" | "published" | "expired" | "closed";
-
-export type AnnouncementTargets = {
-  roles: Role[];
-  directions: string[];
-  services: string[];
-  audience: AnnouncementAudience;
-};
-
-export type AnnouncementMetrics = {
-  emailsSent: number;
-  smsSent: number;
-  notificationsSent: number;
-  viewCount: number;
-  consultationRate: number;
-};
-
-export type Announcement = {
-  id: string;
-  title: string;
-  description: string;
-  category: AnnouncementCategory;
-  priority: AnnouncementPriority;
-  publishedAt: string;
-  expiresAt?: string;
-  attachmentName?: string;
-  targets: AnnouncementTargets;
-  channels: AnnouncementChannel[];
-  authorId: string;
-  authorName: string;
-  status: AnnouncementStatus;
-  metrics: AnnouncementMetrics;
-  createdAt: string;
-  updatedAt: string;
-  closedAt?: string;
-};
-
-export type CommunicationChannelSettings = {
-  internal_notif: boolean;
-  email: boolean;
-  sms: boolean;
-  banner: boolean;
-  whatsapp: boolean;
-  push_mobile: boolean;
-};
-
-export type CommunicationSettings = {
-  channels: CommunicationChannelSettings;
-  senderEmail: string;
-  senderSms: string;
-  replyTo: string;
-};
-
-export const defaultCommunicationSettings: CommunicationSettings = {
-  channels: {
-    internal_notif: true,
-    email: true,
-    sms: true,
-    banner: true,
-    whatsapp: false,
-    push_mobile: false,
-  },
-  senderEmail: "noreply@edg.gn",
-  senderSms: "EDG",
-  replyTo: "support@edg.gn",
-};
-
-export const announcementCategoryLabels: Record<AnnouncementCategory, string> = {
-  general:       "Information générale",
-  service_note:  "Note de service",
-  maintenance:   "Maintenance",
-  system_update: "Mise à jour système",
-  training:      "Formation",
-  security:      "Sécurité informatique",
-  alert:         "Alerte",
-  emergency:     "Urgence",
-  outage:        "Panne générale",
-};
-
-export const announcementPriorityLabels: Record<AnnouncementPriority, string> = {
-  low:                "Faible",
-  medium:             "Normale",
-  high:               "Importante",
-  critical:           "Critique",
-  absolute_emergency: "Urgence absolue",
-};
-
-export const announcementStatusLabels: Record<AnnouncementStatus, string> = {
-  draft:     "Brouillon",
-  published: "Publiée",
-  expired:   "Expirée",
-  closed:    "Clôturée",
-};
-
-export const announcements: Announcement[] = [
-  {
-    id: "ann1",
-    title: "Coupure programmée réseau Kaloum — nuit du 8 au 9 juin",
-    description: "Une coupure programmée de 22h à 4h du matin est planifiée pour maintenance préventive des transformateurs du secteur Kaloum. Les équipes interviennent pour renforcer la fiabilité du réseau. Des groupes électrogènes seront mis à disposition des structures sanitaires.",
-    category: "outage",
-    priority: "critical",
-    publishedAt: h(2),
-    expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
-    targets: { roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], directions: [], services: [], audience: "all" },
-    channels: ["internal_notif", "email", "sms", "homepage"],
-    authorId: "u6",
-    authorName: "Mohamed Touré",
-    status: "published",
-    metrics: { emailsSent: 1240, smsSent: 3870, notificationsSent: 89, viewCount: 2145, consultationRate: 67 },
-    createdAt: h(3),
-    updatedAt: h(2),
-  },
-  {
-    id: "ann2",
-    title: "Mise à jour du système SAP ERP — samedi 14 juin",
-    description: "Une mise à jour majeure du module SAP FI/CO sera déployée le samedi 14 juin de 8h à 18h. L'accès aux applications métier sera indisponible. Merci de planifier vos activités en conséquence et de traiter tous les tickets urgents avant le vendredi 13 juin.",
-    category: "system_update",
-    priority: "high",
-    publishedAt: h(12),
-    expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
-    targets: { roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], directions: ["dsi", "fin", "rh"], services: [], audience: "internal" },
-    channels: ["internal_notif", "email", "dashboard"],
-    authorId: "u6",
-    authorName: "Mohamed Touré",
-    status: "published",
-    metrics: { emailsSent: 128, smsSent: 0, notificationsSent: 128, viewCount: 312, consultationRate: 84 },
-    createdAt: h(14),
-    updatedAt: h(12),
-  },
-  {
-    id: "ann3",
-    title: "Formation sécurité des données — inscriptions ouvertes",
-    description: "Une session de formation obligatoire sur la sécurité des données et la gestion des accès est organisée les 18 et 19 juin. Toutes les directions sont concernées. Inscription via votre responsable RH avant le 12 juin.",
-    category: "training",
-    priority: "medium",
-    publishedAt: h(48),
-    expiresAt: new Date(Date.now() + 12 * 24 * 3600 * 1000).toISOString(),
-    targets: { roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], directions: [], services: [], audience: "internal" },
-    channels: ["internal_notif", "email"],
-    authorId: "u6",
-    authorName: "Mohamed Touré",
-    status: "published",
-    metrics: { emailsSent: 280, smsSent: 0, notificationsSent: 280, viewCount: 198, consultationRate: 71 },
-    createdAt: h(50),
-    updatedAt: h(48),
-  },
-  {
-    id: "ann4",
-    title: "Note de service — nouveaux délais de traitement des demandes de raccordement",
-    description: "Conformément à la décision du Conseil de Direction du 3 juin 2026, les délais de traitement des demandes de raccordement sont révisés : basse tension 30 jours → 21 jours, haute tension 90 jours → 60 jours. Cette mesure entre en vigueur immédiatement.",
-    category: "service_note",
-    priority: "high",
-    publishedAt: h(72),
-    targets: { roles: ["agent-support", "chief-service", "chief-departement", "director", "admin"], directions: ["tech", "reseau"], services: [], audience: "internal" },
-    channels: ["internal_notif", "email"],
-    authorId: "u5",
-    authorName: "Aïssatou Barry",
-    status: "published",
-    metrics: { emailsSent: 42, smsSent: 0, notificationsSent: 42, viewCount: 89, consultationRate: 92 },
-    createdAt: h(74),
-    updatedAt: h(72),
-  },
-  {
-    id: "ann5",
-    title: "Incident de sécurité détecté — réinitialisation des mots de passe requise",
-    description: "Suite à la détection d'une tentative d'intrusion sur le portail applicatif (réf. WAF-018), l'ensemble des mots de passe employés doivent être réinitialisés avant le 10 juin 2026. Rendez-vous dans Profil → Sécurité. Ne cliquez sur aucun lien suspect reçu par email.",
-    category: "security",
-    priority: "critical",
-    publishedAt: h(1),
-    targets: { roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], directions: [], services: [], audience: "internal" },
-    channels: ["internal_notif", "email", "sms", "dashboard"],
-    authorId: "u6",
-    authorName: "Mohamed Touré",
-    status: "published",
-    metrics: { emailsSent: 310, smsSent: 310, notificationsSent: 310, viewCount: 298, consultationRate: 96 },
-    createdAt: h(2),
-    updatedAt: h(1),
-  },
-  {
-    id: "ann6",
-    title: "Maintenance préventive réseau basse tension — secteurs Ratoma et Matoto",
-    description: "Des travaux de maintenance préventive sont programmés les 20-21 juin dans les secteurs Ratoma et Matoto. Des coupures de courte durée (max 2h) peuvent survenir. Les équipes seront mobilisées de 6h à 22h.",
-    category: "maintenance",
-    priority: "medium",
-    publishedAt: h(24),
-    expiresAt: new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString(),
-    targets: { roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], directions: [], services: [], audience: "all" },
-    channels: ["internal_notif", "email", "homepage"],
-    authorId: "u6",
-    authorName: "Mohamed Touré",
-    status: "published",
-    metrics: { emailsSent: 520, smsSent: 0, notificationsSent: 95, viewCount: 430, consultationRate: 58 },
-    createdAt: h(26),
-    updatedAt: h(24),
-  },
-  {
-    id: "ann7",
-    title: "Nouvelle procédure de dépôt des notes de frais",
-    description: "À compter du 1er juillet 2026, toutes les notes de frais doivent être déposées exclusivement via EDG Support (catégorie Remboursement). Les formulaires papier ne seront plus acceptés.",
-    category: "service_note",
-    priority: "medium",
-    publishedAt: h(120),
-    targets: { roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], directions: [], services: [], audience: "internal" },
-    channels: ["internal_notif"],
-    authorId: "u5",
-    authorName: "Aïssatou Barry",
-    status: "closed",
-    closedAt: h(96),
-    metrics: { emailsSent: 0, smsSent: 0, notificationsSent: 280, viewCount: 210, consultationRate: 75 },
-    createdAt: h(122),
-    updatedAt: h(96),
-  },
-  {
-    id: "ann8",
-    title: "Brouillon — Campagne de sensibilisation économies d'énergie",
-    description: "Communication prévue pour la semaine du 15 juillet sur les bonnes pratiques d'économies d'énergie. À compléter et relire avant publication.",
-    category: "general",
-    priority: "low",
-    publishedAt: new Date(Date.now() + 38 * 24 * 3600 * 1000).toISOString(),
-    targets: { roles: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"], directions: [], services: [], audience: "all" },
-    channels: ["internal_notif", "email", "homepage"],
-    authorId: "u6",
-    authorName: "Mohamed Touré",
-    status: "draft",
-    metrics: { emailsSent: 0, smsSent: 0, notificationsSent: 0, viewCount: 0, consultationRate: 0 },
-    createdAt: h(6),
-    updatedAt: h(4),
-  },
-];
-
-/** Annonces actives mode alerte (priorité critique ou urgence absolue, publiées, non clôturées) */
-export function getActiveAlerts(): Announcement[] {
-  return announcements.filter(
-    (a) =>
-      a.status === "published" &&
-      (a.priority === "critical" || a.priority === "high"),
-  );
-}
-
-/** Annonces visibles selon le rôle et le type audience */
-export function getVisibleAnnouncements(role: Role): Announcement[] {
-  return announcements.filter((a) => {
-    if (a.status === "draft") return false;
-    const isAdmin = role === "admin";
-    if (isAdmin) return true;
-    const isInternal = role !== "public";
-    if (a.targets.audience === "external" && isInternal) return false;
-    if (a.targets.audience === "internal" && !isInternal) return false;
-    // Le filtre par rôle ne s'applique que pour les annonces internes
-    if (
-      a.targets.audience === "internal" &&
-      a.targets.roles.length > 0 &&
-      !a.targets.roles.includes(role)
-    ) return false;
-    return true;
-  });
-}
-
-/** Annonces publiques (audience all ou external, publiées, non clôturées) — page d'accueil */
-export function getPublicAnnouncements(): Announcement[] {
-  return announcements.filter(
-    (a) =>
-      a.status === "published" &&
-      (a.targets.audience === "all" || a.targets.audience === "external"),
-  ).sort((a, b) => {
-    const order: Record<AnnouncementPriority, number> = {
-      absolute_emergency: 0, critical: 1, high: 2, medium: 3, low: 4,
-    };
-    return order[a.priority] - order[b.priority];
-  });
-}
-
-export type CommunicationKpis = {
-  total: number;
-  published: number;
-  active_alerts: number;
-  drafts: number;
-  total_emails: number;
-  total_sms: number;
-  total_notifs: number;
-  avg_consultation: number;
-};
-
-export function communicationStats(): CommunicationKpis {
-  const pub = announcements.filter((a) => a.status === "published");
-  return {
-    total: announcements.length,
-    published: pub.length,
-    active_alerts: getActiveAlerts().length,
-    drafts: announcements.filter((a) => a.status === "draft").length,
-    total_emails: announcements.reduce((s, a) => s + a.metrics.emailsSent, 0),
-    total_sms: announcements.reduce((s, a) => s + a.metrics.smsSent, 0),
-    total_notifs: announcements.reduce((s, a) => s + a.metrics.notificationsSent, 0),
-    avg_consultation:
-      pub.length > 0
-        ? Math.round(pub.reduce((s, a) => s + a.metrics.consultationRate, 0) / pub.length)
-        : 0,
-  };
-}

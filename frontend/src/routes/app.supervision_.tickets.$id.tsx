@@ -3,7 +3,7 @@ import { requireRole } from "@/lib/auth-guard";
 import { RequestDetailPage } from "./app.requests.$id";
 
 export const Route = createFileRoute("/app/supervision_/tickets/$id")({
-  beforeLoad: () => requireRole("chief-service", "chief-departement", "director", "admin"),
+  beforeLoad: () => requireRole("admin"),
   head: () => ({ meta: [{ title: "Dossier supervise — EDG Support" }] }),
   component: SupervisionTicketDetail,
 });

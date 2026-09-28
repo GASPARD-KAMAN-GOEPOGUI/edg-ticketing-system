@@ -152,7 +152,17 @@ function TablePanel({ table }: { table: RefTableName }) {
       setConfirmOpen(false);
       setDeleteTarget(null);
     },
-    onError: () => toast.error("Impossible de supprimer cette entrée"),
+    // Le backend explique POURQUOI : combien de tickets utilisent la valeur, et
+    // que la désactivation reste possible. Écraser ce message par un générique
+    // laisserait l'administrateur sans solution.
+    onError: (err) => {
+      setConfirmOpen(false);
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : "Impossible d'archiver cette entrée",
+      );
+    },
   });
 
   const restoreMut = useMutation({
@@ -193,9 +203,20 @@ function TablePanel({ table }: { table: RefTableName }) {
     if (dialogMode === "create") {
       createMut.mutate(form);
     } else if (editItem) {
-      updateMut.mutate({ id: String(editItem.id), data: form });
+      // Sur une valeur intégrée, le code n'est pas envoyé : le backend le
+      // refuserait, et il n'a de toute façon pas pu être modifié.
+      const { code, ...rest } = form;
+      updateMut.mutate({
+        id: String(editItem.id),
+        data: editItem.is_builtin ? rest : form,
+      });
     }
   }
+
+  // Le code n'est verrouille que sur une valeur INTEGREE : le fonctionnement de
+  // l'application s'y refere (litteraux de statut, appariement des politiques
+  // SLA par le texte du code). Sur une valeur creee ici, il reste libre.
+  const codeLocked = dialogMode === "edit" && Boolean(editItem?.is_builtin);
 
   const isBusy = createMut.isPending || updateMut.isPending;
   const archivedCount = items.filter((i) => i.deleted_at).length;
@@ -284,15 +305,13 @@ function TablePanel({ table }: { table: RefTableName }) {
                       </Button>
                     ) : (
                       <>
-                        {!item.is_builtin && (
-                          <Switch
-                            checked={item.status}
-                            onCheckedChange={(v) =>
-                              toggleMut.mutate({ id: String(item.id), status: v })
-                            }
-                            className="scale-75"
-                          />
-                        )}
+                        <Switch
+                          checked={item.status}
+                          onCheckedChange={(v) =>
+                            toggleMut.mutate({ id: String(item.id), status: v })
+                          }
+                          className="scale-75"
+                        />
                         <Button
                           variant="ghost"
                           size="icon"
@@ -302,20 +321,18 @@ function TablePanel({ table }: { table: RefTableName }) {
                         >
                           <Edit3 className="h-3.5 w-3.5" />
                         </Button>
-                        {!item.is_builtin && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-destructive hover:text-destructive"
-                            title="Archiver"
-                            onClick={() => {
-                              setDeleteTarget(item);
-                              setConfirmOpen(true);
-                            }}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive hover:text-destructive"
+                          title="Archiver"
+                          onClick={() => {
+                            setDeleteTarget(item);
+                            setConfirmOpen(true);
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
                       </>
                     )}
                   </div>
@@ -343,10 +360,14 @@ function TablePanel({ table }: { table: RefTableName }) {
                 placeholder="ex: web, branchement…"
                 value={form.code}
                 onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
-                disabled={dialogMode === "edit"}
+                disabled={codeLocked}
               />
-              {dialogMode === "edit" && (
-                <p className="text-xs text-muted-foreground">Le code n'est pas modifiable.</p>
+              {codeLocked && (
+                <p className="text-xs text-muted-foreground">
+                  Cette valeur est intégrée au fonctionnement de l'application, qui
+                  se réfère à son code : il ne peut pas être modifié. Le libellé,
+                  lui, reste modifiable.
+                </p>
               )}
             </div>
 

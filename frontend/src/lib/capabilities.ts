@@ -1,7 +1,7 @@
 /**
  * Système de capacités hiérarchiques — Algo 2
  *
- * Les rôles sont additifs : un chief-service/chief-departement hérite des capacités agent-support,
+ * Les rôles sont additifs : un chief-departement hérite des capacités chief-service,
  * qui hérite de toutes celles d'un user.
  * Règle : le rôle détermine ce qu'on peut FAIRE — la propriété du ticket
  * détermine ce qu'on VOIT (voir iAmRequester dans les composants).
@@ -13,10 +13,9 @@ import type { RequestStatus, Role } from "@/lib/mock-data";
 const ROLE_RANK: Record<Role, number> = {
   public:              0,  // visiteur non-authentifié — aucune capacité opérationnelle
   user:                1,
-  "agent-support":     2,
-  "chief-service":     3,
-  "chief-departement": 3,
-  director:            4,
+  "chief-service":     2,
+  technicien:          2,
+  "chef-division-support": 2,
   admin:               5,
 };
 
@@ -44,7 +43,7 @@ const CAPABILITY_FLOOR: Record<string, number> = {
  *
  * Usage :
  *   can(role, "submit_request")  → true pour TOUS les rôles
- *   can(role, "process_ticket")  → true pour agent-support, chief-service, chief-departement, director, admin
+ *   can(role, "process_ticket")  → true pour chief-service, chief-departement, director, admin
  *   can(role, "admin_system")    → true uniquement pour admin
  */
 export function can(role: Role, capability: string): boolean {
@@ -80,8 +79,6 @@ export type TicketAction =
   | "reopen"
   | "cancel"
   | "reject"
-  | "escalate"
-  | "escalate_to_director"
   | "change_priority"
   | "change_service"
   | "transfer_direction"
@@ -94,58 +91,59 @@ type TicketActionOptions = {
   canReopenClosed?: boolean;
 };
 
-const AUTHENTICATED_ROLES: Role[] = ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"];
+const AUTHENTICATED_ROLES: Role[] = ["user", "chief-service", "technicien", "chef-division-support", "admin"];
 
 const TICKET_ACTION_ROLES: Record<TicketAction, Role[]> = {
   requester_edit: AUTHENTICATED_ROLES,
-  self_assign: ["agent-support"],
-  request_info: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
-  resume: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
-  assign: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
+  self_assign: ["chief-service", "technicien", "chef-division-support"],
+  request_info: ["chief-service", "technicien", "chef-division-support", "admin"],
+  resume: ["chief-service", "technicien", "chef-division-support", "admin"],
+  assign: ["chief-service", "technicien", "chef-division-support", "admin"],
   // BR-TRANSMIT-001 (remplace Lot 3.2) : "Terminer le traitement" est réservé à
   // l'intervenant actuel (isAssignedToMe, voir canTicketAction ci-dessous) — chief-
   // departement redevient éligible dès lors qu'il est devenu intervenant actuel via
   // une transmission ; le rôle n'est plus qu'un filtre de sécurité général.
-  resolve: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
+  resolve: ["chief-service", "technicien", "chef-division-support", "admin"],
   // BR-TRANSMIT-001 : "Transmettre le traitement" — mêmes rôles traitants que resolve,
   // même garde isAssignedToMe.
-  transmit_treatment: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
+  transmit_treatment: ["chief-service", "technicien", "chef-division-support", "admin"],
   close: AUTHENTICATED_ROLES,
   // BR-REOPEN-QUEUE-001 (révision — réouverture immédiate) : réservé au demandeur
   // (garde réelle : options.isRequester dans canTicketAction ci-dessous) — le rôle
   // ne sert que de filtre de sécurité général, comme ailleurs dans ce module.
   reopen: AUTHENTICATED_ROLES,
-  cancel: ["user", "agent-support", "chief-service", "chief-departement", "director", "admin"],
-  reject: ["chief-service", "chief-departement", "admin"],
-  escalate: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
-  // Lot 3.3 : "Escalade exceptionnelle" — reservee au chef de departement.
-  escalate_to_director: ["chief-departement"],
-  change_priority: ["chief-service", "chief-departement", "director", "admin"],
+  cancel: ["user", "chief-service", "technicien", "chef-division-support", "admin"],
+  reject: ["admin"],
+  // Escalade (`escalate`, `escalate_to_director`) retirée le 2026-09-26 avec le
+  // statut "escalated" : plus d'endpoint ni de service côté backend.
+  change_priority: ["admin"],
   // Lot 2.5 : chief-service n'a plus accès à "Changer de service" (reste chief-departement,
   // director, admin) — cf. ticket_actions.ACTION_ALLOWED_ROLES["reassign"] côté backend.
-  change_service: ["chief-departement", "director", "admin"],
-  transfer_direction: ["director", "admin"],
-  accept_workflow_step: ["agent-support", "chief-service", "chief-departement", "director", "admin"],
+  change_service: ["admin"],
+  transfer_direction: ["admin"],
+  accept_workflow_step: ["chief-service", "technicien", "chef-division-support", "admin"],
 };
 
+// Ces listes portent le statut COURANT du ticket, pas le statut cible.
+// "qualified", "pending" et "escalated" en ont été retirés le 2026-09-28 avec
+// la suppression de ces statuts : aucun ticket ne les portait, la précaution
+// qui les gardait en source n'a plus d'objet.
 const TICKET_ACTION_STATUSES: Record<TicketAction, RequestStatus[]> = {
   requester_edit: ["new", "qualifying"],
-  self_assign: ["new", "qualifying", "qualified", "reopened"],
+  self_assign: ["new", "qualifying", "reopened"],
   request_info: ["in_progress", "assigned"],
   resume: ["pending"],
-  assign: ["new", "qualifying", "qualified", "reopened"],
-  resolve: ["assigned", "in_progress", "pending", "escalated"],
-  transmit_treatment: ["assigned", "in_progress", "pending", "escalated"],
+  assign: ["new", "qualifying", "reopened"],
+  resolve: ["assigned", "in_progress"],
+  transmit_treatment: ["assigned", "in_progress"],
   close: ["resolved"],
   reopen: ["resolved", "closed", "rejected"],
-  cancel: ["new", "qualifying", "qualified", "assigned", "in_progress", "pending"],
-  reject: ["new", "qualifying", "qualified", "assigned", "in_progress", "pending"],
-  escalate: ["qualifying", "assigned", "in_progress", "pending"],
-  escalate_to_director: ["qualifying", "assigned", "in_progress", "pending"],
-  change_priority: ["new", "qualifying", "qualified", "assigned", "in_progress", "pending", "escalated", "reopened"],
-  change_service: ["new", "qualifying", "qualified", "reopened"],
-  transfer_direction: ["new", "qualifying", "qualified", "assigned", "in_progress", "pending", "escalated", "reopened"],
-  accept_workflow_step: ["new", "qualifying", "qualified", "assigned", "in_progress", "pending", "escalated", "reopened"],
+  cancel: ["new", "qualifying", "assigned", "in_progress"],
+  reject: ["new", "qualifying", "assigned", "in_progress"],
+  change_priority: ["new", "qualifying", "assigned", "in_progress", "reopened"],
+  change_service: ["new", "qualifying", "reopened"],
+  transfer_direction: ["new", "qualifying", "assigned", "in_progress", "reopened"],
+  accept_workflow_step: ["new", "qualifying", "assigned", "in_progress", "reopened"],
 };
 
 const OWN_REQUEST_ALLOWED_ACTIONS = new Set<TicketAction>([

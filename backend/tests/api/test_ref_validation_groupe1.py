@@ -5,8 +5,13 @@ VÉRIF A : autonomie admin bout en bout (ajoute un code → usage métier accept
 VÉRIF B : rejet d'une valeur invalide (422 via check_ref_code)
 VÉRIF C : garde-fous de suppression (builtin protégé + nettoyage de test)
 
-Référentiels testés : task_type / task_status / account_status /
+Référentiels testés : task_type / task_status /
                       escalation_level / escalation_status / workflow_status
+
+Le référentiel `account_status` a été retiré le 2026-09-24 avec les annonces et
+la base de connaissances : la colonne `account.account_status` subsiste mais
+n'est plus validée. Les trois tests qui couvraient cette validation (a4, b3, c2)
+sont supprimés — le comportement testé n'existe plus par décision produit.
 """
 from __future__ import annotations
 
@@ -95,44 +100,6 @@ class TestVerifA_AutonomieAdmin:
             f"obtenu {r.status_code}: {r.text}"
         )
 
-    async def test_a4_account_status_custom_accepte(self, auth_client, mock_central_auth):
-        """Admin ajoute account_status custom → update compte accepté immédiatement."""
-        async with auth_client("admin") as c:
-            # Création du code custom
-            cr = await c.post(f"{BASE}/references/account-statuses", json={
-                "code": "test_account_status",
-                "label": "Statut compte test",
-                "sort_order": 99,
-                "is_builtin": False,
-            })
-            assert cr.status_code == 201, f"Création account_status custom : {cr.status_code} {cr.text}"
-
-            # Création d'un compte pour le test (role=public : pas de contrainte
-            # d'affectation organisationnelle, hors sujet pour ce test d'account_status)
-            acct_r = await c.post(f"{BASE}/users/", json={
-                "name": "TestRef",
-                "email": "testref_a4@edg.gn",
-                "password": "Password123!",
-                "role": "public",
-                "account_status": "active",
-            })
-            assert acct_r.status_code in (200, 201), f"Création compte : {acct_r.status_code}"
-            acct_id = _unwrap(acct_r)["id"]
-
-            # Mise à jour avec le code custom
-            upd_r = await c.put(f"{BASE}/users/{acct_id}", json={
-                "account_status": "test_account_status",
-            })
-        assert upd_r.status_code == 200, (
-            f"account_status='test_account_status' doit être accepté (200), "
-            f"obtenu {upd_r.status_code}: {upd_r.text}"
-        )
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# VÉRIF B — Rejet d'une valeur invalide (422)
-# ══════════════════════════════════════════════════════════════════════════════
-
 class TestVerifB_RejetValeurInvalide:
     """
     Tenter de créer/modifier une ressource métier avec un code absent des
@@ -164,22 +131,6 @@ class TestVerifB_RejetValeurInvalide:
             })
         assert r.status_code == 422, (
             f"task_status invalide doit être rejeté en 422, "
-            f"obtenu {r.status_code}: {r.text}"
-        )
-
-    async def test_b3_account_status_inconnu_rejete_422(self, auth_client, unity_id, mock_central_auth):
-        """POST /users/ avec account_status inexistant → 422."""
-        async with auth_client("admin") as c:
-            r = await c.post(f"{BASE}/users/", json={
-                "name": "TestInvalid",
-                "email": "testinvalid_b3@edg.gn",
-                "password": "Password123!",
-                "role": "user",
-                "account_status": "statut_bidon_xyz",
-                "unity_id": unity_id,
-            })
-        assert r.status_code == 422, (
-            f"account_status='statut_bidon_xyz' doit être rejeté en 422, "
             f"obtenu {r.status_code}: {r.text}"
         )
 
@@ -283,25 +234,6 @@ class TestVerifC_GardesFousSuppression:
 
         assert del_r.status_code == 400, (
             f"Suppression d'un code builtin doit retourner 400, "
-            f"obtenu {del_r.status_code}: {del_r.text}"
-        )
-
-    async def test_c2_suppression_builtin_account_status_interdit(self, auth_client):
-        """DELETE sur 'active' (account_status builtin) → 400."""
-        async with auth_client("admin") as c:
-            list_r = await c.get(f"{BASE}/references/account-statuses")
-            assert list_r.status_code == 200
-            items = _unwrap(list_r)
-            if isinstance(items, dict):
-                items = items.get("items", [])
-
-            active = next((i for i in items if i["code"] == "active"), None)
-            assert active, "Le code 'active' (builtin) doit exister dans account_status"
-
-            del_r = await c.delete(f"{BASE}/references/account-statuses/{active['id']}")
-
-        assert del_r.status_code == 400, (
-            f"Suppression de 'active' (builtin) doit retourner 400, "
             f"obtenu {del_r.status_code}: {del_r.text}"
         )
 

@@ -11,7 +11,7 @@ import aiomysql
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 ROLE_MAP = {
-    "agent": "agent-support",
+    "agent": "chief-service",
     "chief": "chief-service",
     "chief-department": "chief-departement",
     "chief-dept": "chief-departement",
@@ -24,7 +24,7 @@ def infer_role(name: str, email: str) -> str:
     if any(token in text for token in ("chief", "chef", "service")):
         return "chief-service"
     if any(token in text for token in ("agent", "support", "agt")):
-        return "agent-support"
+        return "chief-service"
     if any(token in text for token in ("directeur", "director", "dir")):
         return "director"
     if "admin" in text:
@@ -46,9 +46,9 @@ async def main() -> None:
         await cur.execute("SHOW COLUMNS FROM account LIKE 'role'")
         column = await cur.fetchone()
         enum_def = column[1] if column else ""
-        if "agent-support" not in enum_def:
+        if "chief-service" not in enum_def:
             await cur.execute(
-                "ALTER TABLE account MODIFY role ENUM('public','user','agent-support','chief-service','chief-departement','director','admin') NOT NULL"
+                "ALTER TABLE account MODIFY role ENUM('public','user','chief-service','chief-service','chief-departement','director','admin') NOT NULL"
             )
             print("account.role enum migrated to canonical values.")
 

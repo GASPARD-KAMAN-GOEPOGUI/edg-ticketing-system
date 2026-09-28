@@ -51,6 +51,16 @@ class Request(Base, BaseColumns):
     requester_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("account.id"), nullable=True
     )
+    # BR-DISTRIBUTION-001 — destinataire de DISTRIBUTION (chef de division support),
+    # distinct du responsable OPERATIONNEL (`assignee_id`). Renseigne quand le chef de
+    # service oriente le ticket vers un CDS : le ticket entre alors dans la file
+    # "Distribution" de ce CDS (`distributor_id = lui` ET `assignee_id IS NULL`) sans
+    # que personne ne soit encore traitant. Conserve ensuite pour la tracabilite
+    # (on sait qui a distribue), la sortie de la file se lisant sur `assignee_id`.
+    # NULL pour tout l'existant — aucun impact sur les tickets anterieurs.
+    distributor_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("account.id"), nullable=True
+    )
 
     # ── Attributs métier ──────────────────────────────────────────────────────
     ref: Mapped[str] = mapped_column(String(30), unique=True, nullable=False)
@@ -70,6 +80,12 @@ class Request(Base, BaseColumns):
     requester_phone: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     requester_email: Mapped[Optional[str]] = mapped_column(String(320), nullable=True)
     requester_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Procédure EDG/PS-GSI/Pro-02, tâche 1.3 — descriptif de la solution proposée
+    # par le chef de service lorsqu'il impute la réquisition à un chef de
+    # division support. Distinct de la clé `solution` des infos de l'événement
+    # `treatment_completed`, qui est la solution RÉELLEMENT APPLIQUÉE par le
+    # technicien. Jamais exposé au demandeur (voir RouteRequest._redact_for_requester).
+    proposed_solution: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     meter_number: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     client_ref: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     lat: Mapped[Optional[float]] = mapped_column(Double, nullable=True)
@@ -111,6 +127,9 @@ class Request(Base, BaseColumns):
     )
     requester: Mapped[Optional[Account]] = relationship(
         "Account", foreign_keys="Request.requester_id", lazy="selectin",
+    )
+    distributor: Mapped[Optional[Account]] = relationship(
+        "Account", foreign_keys="Request.distributor_id", lazy="selectin",
     )
 
     attachments: Mapped[list[Attachment]] = relationship(
@@ -154,16 +173,41 @@ class Request(Base, BaseColumns):
         return self.request_source
 
     @property
+    def _frozen(self) -> dict[str, Any]:
+        """Identités organisationnelles figées dans `infos` (voir
+        ServiceRequest._requester_identity_snapshot / _handler_org_snapshot).
+        Absentes des tickets antérieurs à ce figeage : chaque lecture retombe
+        alors sur le compte/l'organigramme courants."""
+        return self.infos if isinstance(self.infos, dict) else {}
+
+    @property
     def direction_id(self) -> Optional[int]:
-        """Direction parente déduite depuis l'unité de la demande.
+        """Direction de l'organisation TRAITANTE.
+        Figée à la qualification (`handler_direction_id`) ; à défaut — tickets
+        antérieurs au figeage, ou jamais qualifiés — déduite de l'unité :
         - Si unity est un service (a un parent_direction_id) → retourne le parent
         - Si unity EST une direction (pas de parent) → retourne son propre id
         """
+        frozen = self._frozen.get("handler_direction_id")
+        if frozen is not None:
+            return frozen
         if not self.unity:
             return None
         if self.unity.parent_direction_id:
             return self.unity.parent_direction_id
         return self.unity.id
+
+    @property
+    def handler_direction_label(self) -> Optional[str]:
+        return self._frozen.get("handler_direction_label")
+
+    @property
+    def handler_department_label(self) -> Optional[str]:
+        return self._frozen.get("handler_department_label")
+
+    @property
+    def handler_service_label(self) -> Optional[str]:
+        return self._frozen.get("handler_service_label")
 
     @property
     def assignee_name(self) -> Optional[str]:
@@ -176,10 +220,87 @@ class Request(Base, BaseColumns):
 
     @property
     def requester_unit_id(self) -> Optional[int]:
-        """Unite d'appartenance du demandeur (Account.unity_id), pour affichage
-        Direction/Departement/Service du demandeur cote frontend (resolu via la
-        liste des unites deja chargee, meme pattern que Request.direction_id)."""
+        """Service d'appartenance du demandeur, figé à la création ; à défaut
+        (tickets antérieurs au figeage) lu sur le compte. Toutes les lectures
+        `requester_*` ci-dessous suivent cette même règle et ne touchent que des
+        colonnes simples de `self.requester`, déjà chargé en `lazy="selectin"` —
+        accéder à `self.requester.unity` déclencherait un chargement différé,
+        interdit en contexte async (MissingGreenlet)."""
+        frozen = self._frozen.get("requester_unit_id")
+        if frozen is not None:
+            return frozen
         return self.requester.unity_id if self.requester else None
+
+    @property
+    def requester_job(self) -> Optional[str]:
+        """Fonction du demandeur au moment de la demande."""
+        frozen = self._frozen.get("requester_job")
+        if frozen is not None:
+            return frozen
+        return self.requester.job if self.requester else None
+
+    @property
+    def employee_matricule(self) -> Optional[str]:
+        """Matricule EDG du demandeur."""
+        frozen = self._frozen.get("requester_matricule")
+        if frozen is not None:
+            return frozen
+        return self.requester.matricule if self.requester else None
+
+    @property
+    def requester_direction_id(self) -> Optional[int]:
+        """Direction du demandeur, figée à la création. Pas de repli possible
+        ici : la déduire exigerait de remonter l'organigramme depuis l'unité du
+        demandeur, donc un chargement différé interdit dans une propriété de
+        modèle. Pour les tickets antérieurs au figeage, le frontend la résout
+        depuis `requester_unit_id` et la liste des unités déjà chargée."""
+        return self._frozen.get("requester_direction_id")
+
+    @property
+    def requester_direction_label(self) -> Optional[str]:
+        return self._frozen.get("requester_direction_label")
+
+    @property
+    def requester_department_label(self) -> Optional[str]:
+        return self._frozen.get("requester_department_label")
+
+    @property
+    def requester_service_label(self) -> Optional[str]:
+        return self._frozen.get("requester_service_label")
+
+    # ── PV d'intervention (procédure §3) ──────────────────────────────────────
+    # Le PV est un document DÉRIVÉ du ticket : seul son circuit est suivi, dans
+    # `infos`. Aucune table ni colonne.
+
+    @property
+    def pv_validated_at(self) -> Optional[str]:
+        """Tâche 3.2 — validation du dépannage par le demandeur."""
+        return self._frozen.get("pv_validated_at")
+
+    @property
+    def pv_submitted_at(self) -> Optional[str]:
+        """Tâche 3.3 — soumission du PV au chef de division."""
+        return self._frozen.get("pv_submitted_at")
+
+    @property
+    def pv_archived_at(self) -> Optional[str]:
+        """Tâche 3.4 — enregistrement et archivage du PV."""
+        return self._frozen.get("pv_archived_at")
+
+    @property
+    def intervenant_name(self) -> Optional[str]:
+        """Nom de l'intervenant courant, figé à l'ouverture de son intervention.
+
+        Lu depuis `infos` et NON depuis `interventions` : la requête du TSI saute
+        volontairement les relations de workflow (performance), donc les
+        interventions n'y sont pas reconstruites."""
+        return self._frozen.get("current_intervenant_name")
+
+    @property
+    def intervenant_badge(self) -> Optional[str]:
+        """Badge de l'intervenant, figé ; à défaut son nom — même règle que sur
+        le PV, où la case ne doit jamais rester vide."""
+        return self._frozen.get("current_intervenant_badge")
 
     @property
     def timelines(self):
@@ -291,6 +412,7 @@ class Request(Base, BaseColumns):
                     "actor_id": seed.get("actor_id"),
                     "actor_name": seed.get("actor_name"),
                     "actor_role": seed.get("actor_role"),
+                    "actor_status": seed.get("actor_status"),
                     "actor_matricule": seed.get("actor_matricule"),
                     "actor_direction_label": seed.get("actor_direction_label"),
                     "actor_department_label": seed.get("actor_department_label"),
@@ -331,6 +453,7 @@ class Request(Base, BaseColumns):
                     "actor_id": infos.get("target_user_id"),
                     "actor_name": infos.get("target_user_name"),
                     "actor_role": infos.get("target_role") or infos.get("dest_role"),
+                    "actor_status": next_iv.get("actor_status"),
                     "actor_matricule": next_iv.get("actor_matricule"),
                     "actor_direction_label": next_iv.get("actor_direction_label"),
                     "actor_department_label": next_iv.get("actor_department_label"),
@@ -351,6 +474,7 @@ class Request(Base, BaseColumns):
                 "actor_id": infos.get("intervention_actor_id") or event.agent_id,
                 "actor_name": infos.get("intervention_actor_name") or event.actor_name,
                 "actor_role": infos.get("intervention_actor_role"),
+                "actor_status": infos.get("actor_status"),
                 "actor_matricule": infos.get("actor_matricule"),
                 "actor_direction_label": infos.get("actor_direction_label"),
                 "actor_department_label": infos.get("actor_department_label"),

@@ -11,7 +11,7 @@ Chaque requête protégée valide le bearer token auprès de la plateforme centr
 (scopes + groupes), résout le compte local par central_user_id (aucun
 rattachement automatique ici — voir api.core.central_auth), puis synchronise le
 rôle local depuis le groupe central mappé, uniquement si le rôle actuel
-appartient à {admin, agent-support, user} (chief/director restent locaux).
+appartient à {admin, chief-service, user} (chief/director restent locaux).
 
 Le SEUL endroit où un compte local peut être créé sans passer par
 POST /accounts (admin) ou POST /auth/register est POST /auth/login, via
@@ -28,7 +28,10 @@ Mode développement :
 """
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import logging
+import time
 from typing import AsyncGenerator, Callable, Optional
 
 from fastapi import Depends, HTTPException, status
@@ -43,7 +46,13 @@ from api.core.rbac import Permission, ROLE_GROUP_ALIASES, ROLE_PERMISSIONS, norm
 logger = logging.getLogger(__name__)
 _env = get_environment()
 
-_ROLE_SYNC_SPACE = {"admin", "agent-support", "user"}
+# Roles dont le rôle local peut être mis à jour par la synchro depuis la plateforme
+# centrale (à la connexion). Doit couvrir exactement les rôles ayant un groupe central
+# dédié dans GROUP_ROLE_PRIORITY — sinon un changement de groupe côté central ne
+# descendrait jamais jusqu'au rôle local.
+# `chief-departement` et `director` en sont volontairement exclus : ils n'ont aucun
+# groupe central, donc restent purement locaux et ne sont jamais écrasés.
+_ROLE_SYNC_SPACE = {"admin", "chief-service", "chef-division-support", "technicien", "user"}
 
 # ── C-07 : Garde DISABLE_AUTH en production ───────────────────────────────────
 if _env.DISABLE_AUTH and _env.APP_ENV == "production":
@@ -119,10 +128,105 @@ async def _sync_role_from_groups(account, groups: list[dict], repo):
     return account
 
 
+# ── Cache des scopes/groupes centraux ────────────────────────────────────────
+#
+# Sans cache, CHAQUE requête protégée déclenchait deux appels HTTP vers la
+# plateforme centrale (get_scopes + get_groups), soit ~3 s de latence réseau par
+# requête. Un écran qui en émet cinq — la création d'utilisateur et ses listes en
+# cascade direction → département → service — payait dix allers-retours et
+# pouvait dépasser le timeout de 15 s du client, laissant des listes vides sans
+# message d'erreur.
+#
+# Trois mécanismes, chacun pour une raison distincte :
+#   1. TTL court (CENTRAL_AUTH_CACHE_TTL) — mutualise les requêtes d'un même
+#      écran. Volontairement bas : une révocation ou un changement de groupe
+#      central met au pire TTL secondes à être vu.
+#   2. Verrou par token — sans lui, cinq requêtes parallèles sur un cache froid
+#      partiraient toutes au réseau ; c'est précisément le cas du chargement
+#      d'écran qu'on cherche à corriger. La première appelle, les autres
+#      attendent puis lisent le cache.
+#   3. Appels en parallèle — get_scopes et get_groups sont indépendants ;
+#      asyncio.gather divise par deux la latence des cache miss restants.
+#
+# Cache mémoire par processus : en production (4 workers gunicorn) chaque worker
+# a le sien, ce qui reste correct — le pire cas est un appel par worker et par
+# TTL. Un cache partagé passerait par Redis, comme la blacklist de tokens.
+_scopes_cache: dict[str, tuple[float, dict, list[dict]]] = {}
+_scopes_locks: dict[str, asyncio.Lock] = {}
+_CACHE_MAX_ENTRIES = 512
+
+
+def _token_key(token: str) -> str:
+    """Le token n'est jamais conservé en clair, même en mémoire."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _cache_sweep(now: float) -> None:
+    expired = [k for k, (exp, _, _) in _scopes_cache.items() if exp <= now]
+    for key in expired:
+        _scopes_cache.pop(key, None)
+        lock = _scopes_locks.get(key)
+        if lock is not None and not lock.locked():
+            _scopes_locks.pop(key, None)
+    # Garde-fou mémoire : si le cache déborde malgré le sweep (beaucoup de tokens
+    # actifs), on repart de zéro plutôt que de croître sans limite.
+    if len(_scopes_cache) > _CACHE_MAX_ENTRIES:
+        _scopes_cache.clear()
+        for key, lock in list(_scopes_locks.items()):
+            if not lock.locked():
+                _scopes_locks.pop(key, None)
+
+
+def invalidate_central_auth_cache(token: str | None = None) -> None:
+    """Purge le cache — un token précis (déconnexion), ou tout le cache.
+
+    Appelé au logout : sans ça, le token resterait accepté jusqu'à l'expiration
+    de son entrée, alors que l'utilisateur vient de se déconnecter.
+    """
+    if token is None:
+        _scopes_cache.clear()
+        return
+    key = _token_key(token)
+    _scopes_cache.pop(key, None)
+    lock = _scopes_locks.get(key)
+    if lock is not None and not lock.locked():
+        _scopes_locks.pop(key, None)
+
+
 async def _fetch_scopes_and_groups(token: str) -> tuple[dict, list[dict]]:
+    ttl = _env.CENTRAL_AUTH_CACHE_TTL
+    if ttl <= 0:
+        return await _fetch_scopes_and_groups_uncached(token)
+
+    key = _token_key(token)
+    now = time.monotonic()
+
+    cached = _scopes_cache.get(key)
+    if cached is not None and cached[0] > now:
+        return cached[1], cached[2]
+
+    lock = _scopes_locks.setdefault(key, asyncio.Lock())
+    async with lock:
+        # Une requête concurrente a pu remplir le cache pendant l'attente.
+        now = time.monotonic()
+        cached = _scopes_cache.get(key)
+        if cached is not None and cached[0] > now:
+            return cached[1], cached[2]
+
+        scopes, groups = await _fetch_scopes_and_groups_uncached(token)
+        # Seuls les succès sont mis en cache : une erreur d'auth ou une panne du
+        # central ne doit pas être figée pour les requêtes suivantes.
+        _scopes_cache[key] = (time.monotonic() + ttl, scopes, groups)
+        _cache_sweep(now)
+        return scopes, groups
+
+
+async def _fetch_scopes_and_groups_uncached(token: str) -> tuple[dict, list[dict]]:
     try:
-        scopes = await central_auth.get_scopes(token)
-        groups = await central_auth.get_groups(token)
+        scopes, groups = await asyncio.gather(
+            central_auth.get_scopes(token),
+            central_auth.get_groups(token),
+        )
     except central_auth.CentralUnavailableError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -141,7 +245,7 @@ async def resolve_central_account(token: str, db: AsyncSession):
     """
     Valide un bearer token auprès de la plateforme centrale (scopes + groupes),
     résout le compte local par central_user_id (aucun rattachement automatique
-    ici) et synchronise le rôle si celui-ci appartient à {admin, agent-support,
+    ici) et synchronise le rôle si celui-ci appartient à {admin, chief-service,
     user}. Lève HTTPException (401/503) en cas d'échec. Utilisé par
     get_current_user et par la validation du token de connexion SSE
     (RouteSSE.py) — comportement strict inchangé, voir
@@ -295,14 +399,12 @@ def require_roles(*roles: str) -> Callable:
     ait l'un des rôles listés.
 
     Usage :
-        @router.get("/", dependencies=[Depends(require_roles("admin", "chief-service"))])
+        @router.get("/", dependencies=[Depends(require_roles("admin"))])
     """
     async def _guard(current_user=Depends(get_current_user)):
         current_role = normalize_role(current_user.role)
         allowed_roles = set()
         for role in roles:
-            if role == "dg":
-                continue
             raw = role.strip().lower()
             allowed_roles.update(ROLE_GROUP_ALIASES.get(raw, ROLE_GROUP_ALIASES.get(normalize_role(role), {normalize_role(role)})))
         if current_role not in allowed_roles:

@@ -25,7 +25,7 @@ async def _make_person(
     name: str,
     matricule: str,
     phone: str | None = None,
-    role: str = "agent-support",
+    role: str = "chief-service",
 ) -> None:
     from api.models.ModelAccount import Account
 

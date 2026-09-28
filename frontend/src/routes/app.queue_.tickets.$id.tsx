@@ -3,7 +3,7 @@ import { requireRole } from "@/lib/auth-guard";
 import { RequestDetailPage } from "./app.requests.$id";
 
 export const Route = createFileRoute("/app/queue_/tickets/$id")({
-  beforeLoad: () => requireRole("agent-support", "chief-service", "chief-departement", "director", "admin"),
+  beforeLoad: () => requireRole("chief-service", "admin"),
   head: () => ({ meta: [{ title: "Ticket en file d'attente — EDG Support" }] }),
   component: QueueTicketDetail,
 });

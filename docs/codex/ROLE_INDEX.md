@@ -17,7 +17,7 @@ Nomenclature canonique alignee sur les 6 acteurs du cahier des charges DSI + `pu
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `public` | *(hors CDC)* | visiteur | suivi public, knowledge public | aucun | `/track`, `/knowledge` | demande par ref + justificatif | suivre, consulter KB publique |
 | `user` | Utilisateur | demandeur/employe | `/app`, `/app/requests`, `/app/requests/history`, `/app/profile` | aucun traitement ticket | aucun | ses demandes | creer, modifier si `new`, annuler, demander reouverture, cloturer apres resolution |
-| `agent-support` | Agent Support | traitement quotidien | idem user | tickets assignes, file, qualification | `/app/my-tickets`, `/app/queue` | tickets personnellement assignes; tickets libres non assignes de son unite (service); triage selon regle | qualifier, s'auto-assigner, traiter, resoudre, escalader, changer son etat selon scope |
+| `chief-service` | Agent Support | traitement quotidien | idem user | tickets assignes, file, qualification | `/app/my-tickets`, `/app/queue` | tickets personnellement assignes; tickets libres non assignes de son unite (service); triage selon regle | qualifier, s'auto-assigner, traiter, resoudre, escalader, changer son etat selon scope |
 | `chief-service` | Chef de Service | responsable d'un service | idem user | Mon travail (traitement personnel) + Pilotage (service), SLA, rapports | `/app/my-tickets`, `/app/queue`, `/app/chief-inbox`, `/app/supervision`, `/app/sla-center`, `/app/reports` | tickets de son service/unite uniquement | s'auto-assigner (file d'attente), assigner a agent de son service, reassigner service dans la direction, priorite, escalade, approuver/rejeter reouverture |
 | `chief-departement` | Chef Departement | validation/suivi departemental | idem user | Mon travail (traitement personnel) + Pilotage (departement), SLA, rapports | `/app/my-tickets`, `/app/queue`, `/app/department-inbox`, `/app/supervision`, `/app/sla-center`, `/app/reports` | tickets de tous les services rattaches a son departement (perimetre elargi via l'organigramme, pas juste sa propre unite) | prendre un ticket, recevoir/faire une assignation vers un role operationnel de son perimetre, traiter/transmettre/terminer s'il est intervenant courant |
 | `director` | Direction DSI | pilotage/arbitrage direction | idem user | Mon travail (`/app/direction` et `/app/my-tickets`) + Pilotage direction, SLA, rapports | `/app/my-tickets`, `/app/direction`, `/app/queue`, `/app/supervision`, `/app/strategic-dashboard`, `/app/sla-center`, `/app/reports` | tickets des departements/services rattaches a sa direction | prendre un ticket, recevoir/faire une assignation vers un role operationnel de sa direction, traiter/transmettre/terminer s'il est intervenant courant, priorite, reouverture |
@@ -36,13 +36,13 @@ Source: `backend/api/core/rbac.py`.
 Les permissions sont cumulatives dans la hierarchie:
 
 ```text
-public < user < agent-support < chief-service = chief-departement < director < admin
+public < user < chief-service < chief-service = chief-departement < director < admin
 ```
 
 Permissions importantes:
 
 - user: `CREATE_REQUEST`, `VIEW_OWN_REQUESTS`, `CANCEL_REQUEST`, `VIEW_NOTIFICATIONS`;
-- agent-support: `VIEW_ALL_REQUESTS`, `ASSIGN_REQUEST`, `CLOSE_REQUEST`, `REOPEN_REQUEST`, `ESCALATE_REQUEST`, `VIEW_WORKFLOWS`, `VIEW_TASKS`;
+- chief-service: `VIEW_ALL_REQUESTS`, `ASSIGN_REQUEST`, `CLOSE_REQUEST`, `REOPEN_REQUEST`, `ESCALATE_REQUEST`, `VIEW_WORKFLOWS`, `VIEW_TASKS`;
 - chief-service / chief-departement: `MANAGE_REQUESTS`, `MANAGE_ESCALATIONS`, `VIEW_REPORTS`, `VIEW_STATS`, `MANAGE_WORKFLOWS` (memes permissions ; perimetre organisationnel different, voir note ci-dessus);
 - director: `VIEW_GLOBAL_REPORTS`;
 - admin: toutes permissions.
@@ -53,18 +53,18 @@ Source: `backend/api/core/ticket_actions.py`.
 
 | Action | Roles backend | Note |
 | --- | --- | --- |
-| `qualify` | agent-support, chief-service, chief-departement, director, admin (`dg` exclu) | qualification/orientation/prise depuis file |
-| `assign` | agent-support, chief-service, chief-departement, director, admin (`dg` exclu) | assignation vers tout role operationnel autorise, avec controle de perimetre pour les non-admin; destinataire admin reserve a admin |
-| `resolve` ("Terminer le traitement") | agent-support, chief-service, chief-departement, director, admin | BR-TRANSMIT-001 : reserve a l'intervenant actuel (`assignee_id == actor.id`), quel que soit le role parmi ceux-ci ; resume/solution/travail realise obligatoires |
-| `transmit_treatment` ("Transmettre le traitement") | agent-support, chief-service, chief-departement, director, admin | BR-TRANSMIT-001 : reserve a l'intervenant actuel ; cible libre dans toute l'organisation (role traitant + actif) ; statut preserve |
-| `close` | user, agent-support, chief-service, chief-departement, director, admin | demandeur peut cloturer sa demande resolue |
-| `request_reopen` | user, agent-support, chief-service, chief-departement, director, admin | seul demandeur via scope |
+| `qualify` | chief-service, chief-service, chief-departement, director, admin (`dg` exclu) | qualification/orientation/prise depuis file |
+| `assign` | chief-service, chief-service, chief-departement, director, admin (`dg` exclu) | assignation vers tout role operationnel autorise, avec controle de perimetre pour les non-admin; destinataire admin reserve a admin |
+| `resolve` ("Terminer le traitement") | chief-service, chief-service, chief-departement, director, admin | BR-TRANSMIT-001 : reserve a l'intervenant actuel (`assignee_id == actor.id`), quel que soit le role parmi ceux-ci ; resume/solution/travail realise obligatoires |
+| `transmit_treatment` ("Transmettre le traitement") | chief-service, chief-service, chief-departement, director, admin | BR-TRANSMIT-001 : reserve a l'intervenant actuel ; cible libre dans toute l'organisation (role traitant + actif) ; statut preserve |
+| `close` | user, chief-service, chief-service, chief-departement, director, admin | demandeur peut cloturer sa demande resolue |
+| `request_reopen` | user, chief-service, chief-service, chief-departement, director, admin | seul demandeur via scope |
 | `reopen`, `reject_reopen` | chief-service, chief-departement, director, admin | demande de reouverture requise |
-| `cancel` | user, agent-support, chief-service, chief-departement, director, admin | scope applique |
+| `cancel` | user, chief-service, chief-service, chief-departement, director, admin | scope applique |
 | `reassign` | chief-service, chief-departement, director, admin | service selon perimetre (meme direction) |
 | `transfer_direction` | director, admin | transfert inter-direction |
 | `reject` | chief-service, chief-departement, admin | rejet demande/ticket |
-| `escalate` | agent-support, chief-service, chief-departement, director, admin | agent seulement ticket assigne |
+| `escalate` | chief-service, chief-service, chief-departement, director, admin | agent seulement ticket assigne |
 | `change_priority` | chief-service, chief-departement, director, admin | tous chefs inclus |
 
 ## Regles de navigation

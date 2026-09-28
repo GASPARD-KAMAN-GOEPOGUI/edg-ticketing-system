@@ -54,6 +54,12 @@ async def get_request_appreciation(
     return await svc.get_by_request_or_none(request_id)
 
 
+def _actor_display_name(actor) -> str | None:
+    parts = [getattr(actor, "firstname", None), getattr(actor, "name", None)]
+    full = " ".join(p for p in parts if p).strip()
+    return full or None
+
+
 @router.post(
     "/{request_id}/appreciation",
     response_model=AppreciationResponse,
@@ -69,7 +75,10 @@ async def submit_request_appreciation(
     """3.2 — seul le demandeur (ou admin) peut soumettre l'appréciation."""
     req = await req_svc.get_by_id(request_id)
     _check_appreciation_owner(actor, req)
-    return await svc.create_for_request(request_id, body.dict())
+    return await svc.create_for_request(
+        request_id, body.dict(),
+        actor_id=str(actor.id), actor_name=_actor_display_name(actor),
+    )
 
 
 @router.put("/{request_id}/appreciation", response_model=AppreciationResponse)
@@ -83,4 +92,7 @@ async def update_request_appreciation(
     """3.2 — seul le demandeur (ou admin) peut modifier l'appréciation."""
     req = await req_svc.get_by_id(request_id)
     _check_appreciation_owner(actor, req)
-    return await svc.update_for_request(request_id, body.dict(exclude_unset=True))
+    return await svc.update_for_request(
+        request_id, body.dict(exclude_unset=True),
+        actor_id=str(actor.id), actor_name=_actor_display_name(actor),
+    )

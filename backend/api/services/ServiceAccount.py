@@ -11,10 +11,9 @@ from api.core.event_bus import AppEvent, emit as emit_event
 from api.core.logger import get_logger
 from api.core.phone import normalize_phone
 from api.core.rbac import normalize_role
-from api.core.ref_validation import check_ref_code
 from api.models.ModelOrganigram import Organigram
 from api.models.ModelUnity import Unity
-from api.repositories import AccountRepository, AccountStatusRepository
+from api.repositories import AccountRepository
 from api.services.base_service import BaseService
 from api.services.NotificationEmitter import _send_email_fire_and_forget
 
@@ -75,6 +74,34 @@ class AccountService(BaseService):
 
     # ── Helpers internes ──────────────────────────────────────────────────────
 
+    @staticmethod
+    def _fold_intervenant_status(data: dict, current=None) -> dict:
+        """Traduit `intervenant_status` (PV EDG/PS-GSI/PV-01) vers `infos`.
+
+        Pas de colonne dédiée : la table `account` est partagée avec la
+        plateforme centrale et son schéma n'est pas modifié. La valeur est donc
+        FUSIONNÉE dans `infos` — jamais substituée — pour ne pas effacer ce que
+        ce champ porte déjà (indicateur d'e-mail de bienvenue, entre autres)."""
+        from api.models.ModelAccount import INTERVENANT_STATUSES
+
+        if "intervenant_status" not in data:
+            return data
+        status = data.pop("intervenant_status")
+        base = data.get("infos")
+        if not isinstance(base, dict):
+            existing = getattr(current, "infos", None) if current is not None else None
+            base = dict(existing) if isinstance(existing, dict) else {}
+        else:
+            base = dict(base)
+        if status in INTERVENANT_STATUSES:
+            base["intervenant_status"] = status
+        elif status in (None, ""):
+            base.pop("intervenant_status", None)
+        else:
+            raise ValueError(f"Statut d'intervenant invalide : {status!r}")
+        data["infos"] = base
+        return data
+
     def _auto_edg_employee(self, data: dict) -> dict:
         """
         Si la clé 'matricule' est présente dans data, positionne automatiquement
@@ -100,11 +127,11 @@ class AccountService(BaseService):
         found = await self.repo.find_by_matricule(matricule)
         if found and (exclude_id is None or found.id != exclude_id):
             raise self.conflict(
-                "Ce matricule est déjà utilisé par un autre compte.",
+                "Ce badge est déjà utilisé par un autre compte.",
                 error_code=ErrorCode.MATRICULE_ALREADY_EXISTS,
                 field="matricule",
                 value=matricule,
-                hint="Chaque matricule doit être unique. Vérifiez la valeur saisie.",
+                hint="Chaque badge doit être unique. Vérifiez la valeur saisie.",
             )
 
     def _notify_account_created(self, account) -> None:
@@ -193,15 +220,7 @@ class AccountService(BaseService):
         if role == "public":
             return
 
-        if role == "director":
-            allowed = {"direction"}
-            message = "La direction est obligatoire pour ce rôle."
-            hint = "Affectez ce compte à une direction active."
-        elif role in {"chief-service", "chief-departement"}:
-            allowed = {"department", "unit"}
-            message = "Le chef doit être affecté à un département ou à un service actif."
-            hint = "Sélectionnez Chef de département ou Chef de service dans le formulaire admin."
-        elif role in {"user", "agent-support", "admin"}:
+        if role in {"user", "chief-service", "technicien", "chef-division-support", "admin"}:
             allowed = {"unit"}
             message = "Le service ou l'unité est obligatoire pour ce rôle."
             hint = "Affectez ce compte à une unité active appartenant à un département."
@@ -320,7 +339,7 @@ class AccountService(BaseService):
         obj = await self.repo.find_by_matricule(matricule)
         if obj is None:
             raise self.not_found(
-                f"Aucun compte avec le matricule '{matricule}'.",
+                f"Aucun compte avec le badge '{matricule}'.",
                 error_code=ErrorCode.ACCOUNT_NOT_FOUND,
                 field="matricule",
                 value=matricule,
@@ -367,12 +386,15 @@ class AccountService(BaseService):
             data["phone"] = normalize_phone(data["phone"])
             await self._check_phone_unique(data["phone"])
 
-        # Validation référentiel account_status
-        if data.get("account_status"):
-            await check_ref_code(self.session, AccountStatusRepository, data["account_status"], "account_status")
 
         # Auto is_edg_employee
         data = self._auto_edg_employee(data)
+        try:
+            data = self._fold_intervenant_status(data)
+        except ValueError as exc:
+            raise self.bad_request(
+                str(exc), error_code=ErrorCode.INVALID_FIELD_VALUE, field="intervenant_status",
+            )
 
         if validate_org_assignment:
             await self._validate_role_org_assignment(
@@ -527,12 +549,15 @@ class AccountService(BaseService):
             data["phone"] = normalize_phone(data["phone"])
             await self._check_phone_unique(data["phone"], exclude_id=id)
 
-        # Validation référentiel account_status
-        if data.get("account_status"):
-            await check_ref_code(self.session, AccountStatusRepository, data["account_status"], "account_status")
 
         # Auto is_edg_employee
         data = self._auto_edg_employee(data)
+        try:
+            data = self._fold_intervenant_status(data, current)
+        except ValueError as exc:
+            raise self.bad_request(
+                str(exc), error_code=ErrorCode.INVALID_FIELD_VALUE, field="intervenant_status",
+            )
 
         if validate_org_assignment and ("role" in data or "unity_id" in data):
             await self._validate_role_org_assignment(

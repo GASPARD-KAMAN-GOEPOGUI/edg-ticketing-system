@@ -65,6 +65,24 @@ class ResetPasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=8)
 
 
+class ChangePasswordRequest(BaseModel):
+    """Changement de mot de passe depuis l'espace connecté (page Profil).
+
+    Aucun email, aucun code OTP : l'utilisateur est deja authentifie, il saisit
+    simplement son nouveau mot de passe et sa confirmation. Le mot de passe n'est
+    stocke que par la plateforme centrale — la mise a jour y est donc immediate
+    et vaut pour toutes les applications qui en dependent.
+    """
+    new_password: str = Field(..., min_length=8)
+    confirm_password: str = Field(..., min_length=8)
+
+    @validator("confirm_password")
+    def _passwords_match(cls, v, values):
+        if "new_password" in values and v != values["new_password"]:
+            raise ValueError("Les deux mots de passe ne correspondent pas.")
+        return v
+
+
 class RefreshRequest(BaseModel):
     refresh_token: str
 

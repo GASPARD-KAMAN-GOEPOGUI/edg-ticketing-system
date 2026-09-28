@@ -41,8 +41,19 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%]",
-        "gap-4 bg-card p-6 shadow-xl sm:rounded-2xl outline-none",
+        // Responsive par défaut — ces trois garanties valent pour TOUTES les
+        // modales de l'application, y compris celles à venir :
+        //  - `w-[calc(100%-2rem)]` laisse toujours une gouttière latérale : sur un
+        //    téléphone la modale ne colle plus aux bords. `max-w-lg` continue de
+        //    la brider sur grand écran, et un appelant peut l'élargir (twMerge).
+        //  - `max-h` + `overflow-y-auto` empêchent une modale plus haute que
+        //    l'écran d'en sortir : centrée par translation, c'est le HAUT qui
+        //    débordait — titre et bouton de fermeture inclus, laissant
+        //    l'utilisateur piégé. `dvh` suit la barre d'adresse mobile.
+        //  - padding réduit sur petit écran, restauré au-delà.
+        "fixed left-[50%] top-[50%] z-50 grid w-[calc(100%-2rem)] max-w-lg translate-x-[-50%] translate-y-[-50%]",
+        "max-h-[calc(100dvh-2rem)] overflow-y-auto",
+        "gap-4 bg-card p-4 sm:p-6 shadow-xl rounded-2xl outline-none",
         "data-[state=open]:animate-in data-[state=closed]:animate-out",
         "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
         "data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",

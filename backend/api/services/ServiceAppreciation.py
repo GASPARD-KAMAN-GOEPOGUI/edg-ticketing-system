@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -63,7 +65,25 @@ class AppreciationService(BaseService):
         """Retourne l'appréciation ou None (pas de 404)."""
         return await self.repo.find_by_request(request_id)
 
-    async def create_for_request(self, request_id: str, data: dict):
+    async def _sync_pv_circuit(
+        self, request_id: str, confirmed: bool,
+        actor_id: Optional[str], actor_name: Optional[str],
+    ) -> None:
+        """Procédure EDG/PS-GSI/Pro-02, tâche 3.2 — « valider le dépannage ».
+
+        La validation du demandeur n'est pas un geste supplémentaire : c'est la
+        confirmation de résolution qu'il donne déjà avec son appréciation. On la
+        rattache donc au circuit du PV plutôt que d'en créer une seconde."""
+        from api.services.ServiceRequest import RequestService
+
+        await RequestService(self.session).record_pv_validation(
+            request_id, confirmed=confirmed, actor_id=actor_id, actor_name=actor_name,
+        )
+
+    async def create_for_request(
+        self, request_id: str, data: dict,
+        *, actor_id: Optional[str] = None, actor_name: Optional[str] = None,
+    ):
         req = await self.request_repo.get_by_id(request_id)
         if req is None:
             raise self.not_found("Demande introuvable")
@@ -78,21 +98,52 @@ class AppreciationService(BaseService):
         data["request_id"] = request_id
         obj = await self.repo.create(data)
 
-        if not data.get("resolved_confirmed", True):
+        confirmed = bool(data.get("resolved_confirmed", True))
+        if not confirmed:
             await self._reopen_request(request_id)
+        # Tache 3.2 — rattachement au circuit du PV (voir _sync_pv_circuit).
+        await self._sync_pv_circuit(request_id, confirmed, actor_id, actor_name)
 
         return obj
 
     async def _reopen_request(self, request_id: str) -> None:
+        """Le demandeur conteste la résolution : le ticket repart en traitement.
+
+        BR-REOPEN-TO-DISTRIBUTOR-001 — il retourne dans la boîte du **chef de
+        division qui l'avait réparti** (`distributor_id`), et non dans la file
+        d'attente : c'est lui qui a confié le travail, c'est à lui d'arbitrer la
+        suite (le reprendre, ou le réassigner à un technicien). Sans traitant
+        désigné (`assignee_id=None`), le ticket réapparaît donc dans sa file
+        Distribution, exactement comme à la première répartition.
+
+        Repli : un ticket jamais passé par la distribution (traité directement
+        par le chef de service, par exemple) n'a pas de distributeur — il repart
+        alors en file d'attente, comportement historique.
+        """
         r = await self.session.execute(
             select(RequestStatus.id)
             .where(RequestStatus.code == "reopened")
             .where(RequestStatus.deleted_at.is_(None))
         )
         status_id = r.scalar_one()
-        await self.request_repo.update(request_id, {"request_status_id": status_id})
 
-    async def update_for_request(self, request_id: str, data: dict):
+        current = await self.request_repo.get_by_id(request_id)
+        distributor_id = getattr(current, "distributor_id", None) if current else None
+
+        patch: dict = {"request_status_id": status_id, "assignee_id": None}
+        if distributor_id is not None:
+            # Retour chez le répartiteur : sa file Distribution liste les tickets
+            # qu'il a reçus et qui n'ont pas encore de responsable opérationnel.
+            patch["in_triage"] = False
+        else:
+            patch["in_triage"] = True
+
+        await self.request_repo.update(request_id, patch)
+
+    async def update_for_request(
+        self, request_id: str, data: dict,
+        *, actor_id: Optional[str] = None, actor_name: Optional[str] = None,
+    ):
         existing = await self.repo.find_by_request(request_id)
         if not existing:
             raise self.not_found("Aucune appréciation pour cette demande")
@@ -108,8 +159,11 @@ class AppreciationService(BaseService):
         obj = await self.repo.update(existing.id, data)
         await self.repo.mark_modified(existing.id)
 
-        if data.get("resolved_confirmed") is False:
-            await self._reopen_request(request_id)
+        if "resolved_confirmed" in data:
+            confirmed = bool(data.get("resolved_confirmed"))
+            if not confirmed:
+                await self._reopen_request(request_id)
+            await self._sync_pv_circuit(request_id, confirmed, actor_id, actor_name)
 
         return obj
 

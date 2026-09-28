@@ -16,17 +16,6 @@ SCHEMA_MODULES = [
     # (module_name, [classes_to_check])
     ("backend.api.schemas.SchemaRequestStatus",
      ["RequestStatusBase", "RequestStatusCreate", "RequestStatusUpdate", "RequestStatusResponse"]),
-    ("backend.api.schemas.SchemaAccountStatus",
-     ["AccountStatusBase", "AccountStatusCreate", "AccountStatusUpdate", "AccountStatusResponse"]),
-    ("backend.api.schemas.SchemaAnnouncementCategory",
-     ["AnnouncementCategoryBase", "AnnouncementCategoryCreate",
-      "AnnouncementCategoryUpdate", "AnnouncementCategoryResponse"]),
-    ("backend.api.schemas.SchemaAnnouncementPriority",
-     ["AnnouncementPriorityBase", "AnnouncementPriorityCreate",
-      "AnnouncementPriorityUpdate", "AnnouncementPriorityResponse"]),
-    ("backend.api.schemas.SchemaAnnouncementStatus",
-     ["AnnouncementStatusBase", "AnnouncementStatusCreate",
-      "AnnouncementStatusUpdate", "AnnouncementStatusResponse"]),
     ("backend.api.schemas.SchemaPriorityDefinition",
      ["PriorityDefinitionBase", "PriorityDefinitionCreate",
       "PriorityDefinitionUpdate", "PriorityDefinitionResponse"]),
@@ -61,20 +50,9 @@ SCHEMA_MODULES = [
      ["TaskBase", "TaskCreate", "TaskUpdate", "TaskResponse"]),
     ("backend.api.schemas.SchemaNotification",
      ["NotificationBase", "NotificationCreate", "NotificationUpdate", "NotificationResponse"]),
-    ("backend.api.schemas.SchemaKnowledgeArticle",
-     ["KnowledgeArticleBase", "KnowledgeArticleCreate",
-      "KnowledgeArticleUpdate", "KnowledgeArticleResponse"]),
     # Append-only — pas de Base ni Update
     ("backend.api.schemas.SchemaActivityLog",
      ["ActivityLogCreate", "ActivityLogResponse"]),
-    ("backend.api.schemas.SchemaAnnouncement",
-     ["AnnouncementBase", "AnnouncementCreate", "AnnouncementUpdate", "AnnouncementResponse"]),
-    ("backend.api.schemas.SchemaAnnouncementTargetRole",
-     ["AnnouncementTargetRoleBase", "AnnouncementTargetRoleCreate",
-      "AnnouncementTargetRoleUpdate", "AnnouncementTargetRoleResponse"]),
-    ("backend.api.schemas.SchemaCommunicationSetting",
-     ["CommunicationSettingBase", "CommunicationSettingCreate",
-      "CommunicationSettingUpdate", "CommunicationSettingResponse"]),
     ("backend.api.schemas.SchemaAppreciation",
      ["AppreciationBase", "AppreciationCreate", "AppreciationUpdate", "AppreciationResponse"]),
 ]
@@ -125,8 +103,11 @@ class TestSchemaImports:
             name for name in dir(s)
             if name.endswith("Response") and not name.startswith("_")
         ]
-        assert len(response_classes) >= 18, (
-            f"Attendu ≥18 Response, trouvé {len(response_classes)}: {response_classes}"
+        # Seuil abaisse au fil des retraits de septembre 2026 :
+        #   18 -> 17 : annonces + base de connaissances (5 classes Response)
+        #   17 -> 16 : communication_setting (CommunicationSettingResponse)
+        assert len(response_classes) >= 16, (
+            f"Attendu ≥16 Response, trouvé {len(response_classes)}: {response_classes}"
         )
 
     def test_enum_values(self):

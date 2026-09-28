@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { GlassCard } from "@/components/glass-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchMe, updateMe, uploadAvatar, deleteAvatar, buildAvatarUrl } from "@/lib/api/accounts";
+import { changeMyPassword } from "@/lib/api/auth";
 import { fetchRequests } from "@/lib/api/requests";
 import { cn } from "@/lib/utils";
 import { PHONE_FORMAT_HINT } from "@/lib/phone";
@@ -65,20 +66,25 @@ function SectionHeader({
   desc,
   color = "bg-primary/10",
   iconColor = "text-primary",
+  asDialogTitle = false,
 }: {
   icon: LucideIcon;
   label: string;
   desc: string;
   color?: string;
   iconColor?: string;
+  /** Dans une modale, ce titre EST le titre accessible : pas de second titre
+   *  `sr-only` en doublon, le lecteur d'écran n'annonce qu'une seule fois. */
+  asDialogTitle?: boolean;
 }) {
+  const Title = asDialogTitle ? DialogTitle : "h3";
   return (
     <div className="flex items-center gap-3 border-b border-border/40 pb-4">
       <div className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl", color)}>
         <Icon className={cn("h-5 w-5", iconColor)} />
       </div>
       <div>
-        <h3 className="font-semibold">{label}</h3>
+        <Title className="font-semibold">{label}</Title>
         <p className="text-xs text-muted-foreground">{desc}</p>
       </div>
     </div>
@@ -275,6 +281,35 @@ function ProfilePage() {
   const [section, setSection] = useState<Section>("info");
   const [modalOpen, setModalOpen] = useState(false);
 
+  // ── Changement de mot de passe (self-service, sans email) ──────────────────
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+
+  const resetPasswordForm = () => {
+    setNewPassword("");
+    setConfirmPassword("");
+    setShowPassword(false);
+  };
+
+  const passwordsMatch = newPassword === confirmPassword;
+  const passwordLongEnough = newPassword.length >= 8;
+  const canSubmitPassword = passwordLongEnough && passwordsMatch && confirmPassword.length > 0;
+
+  const changePasswordMut = useMutation({
+    mutationFn: () => changeMyPassword(newPassword, confirmPassword),
+    onSuccess: () => {
+      toast.success("Mot de passe modifié. Il est actif immédiatement.");
+      setPasswordModalOpen(false);
+      resetPasswordForm();
+    },
+    onError: (e) =>
+      toast.error(
+        e instanceof ApiError ? e.message : "Impossible de modifier le mot de passe. Réessayez.",
+      ),
+  });
+
   const openSection = (id: Section) => {
     setSection(id);
     setModalOpen(true);
@@ -332,7 +367,7 @@ function ProfilePage() {
     {
       id: "pro",
       label: "Profil professionnel",
-      desc: "Poste, direction, matricule",
+      desc: "Poste, direction, badge",
       icon: Briefcase,
     },
     { id: "security", label: "Sécurité", desc: "Mot de passe, 2FA, sessions", icon: Shield },
@@ -531,400 +566,492 @@ function ProfilePage() {
 
       {/* ── Modal sections ── */}
       <Dialog open={modalOpen} onOpenChange={setModalOpen}>
-        <DialogContent className="max-w-2xl max-h-[88vh] overflow-y-auto">
-          <DialogTitle className="sr-only">
-            {navItems.find((i) => i.id === section)?.label ?? ""}
-          </DialogTitle>
+        <DialogContent className="max-w-2xl">
+          {/* ── Informations personnelles ── */}
+          {section === "info" && (
+            <div className="space-y-6">
+              <SectionHeader
+                asDialogTitle
+                icon={User}
+                label="Informations personnelles"
+                desc="Modifiez vos données de contact"
+              />
 
-          <div className="space-y-4">
-            {/* ── Informations personnelles ── */}
-            {section === "info" && (
-              <GlassCard className="space-y-6">
-                <SectionHeader
-                  icon={User}
-                  label="Informations personnelles"
-                  desc="Modifiez vos données de contact"
-                />
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="grid gap-2">
-                    <Label htmlFor="fname">Prénom</Label>
-                    <Input
-                      id="fname"
-                      value={fName}
-                      onChange={(e) => setFName(e.target.value)}
-                      placeholder="Prénom"
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="lname">Nom de famille</Label>
-                    <Input
-                      id="lname"
-                      value={lName}
-                      onChange={(e) => setLName(e.target.value)}
-                      placeholder="Nom"
-                    />
-                  </div>
-                </div>
-
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="grid gap-2">
-                  <Label htmlFor="email" className="flex items-center gap-1.5">
-                    <Mail className="h-3.5 w-3.5 text-muted-foreground" />
-                    Adresse email
-                  </Label>
+                  <Label htmlFor="fname">Prénom</Label>
                   <Input
-                    id="email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="votre@email.com"
+                    id="fname"
+                    value={fName}
+                    onChange={(e) => setFName(e.target.value)}
+                    placeholder="Prénom"
                   />
                 </div>
-
                 <div className="grid gap-2">
-                  <Label htmlFor="phone" className="flex items-center gap-1.5">
-                    <Phone className="h-3.5 w-3.5 text-muted-foreground" />
-                    Téléphone
-                  </Label>
+                  <Label htmlFor="lname">Nom de famille</Label>
                   <Input
-                    id="phone"
-                    ref={phoneInput.ref}
-                    type="tel"
-                    inputMode="tel"
-                    value={phoneInput.display}
-                    onChange={phoneInput.onChange}
-                    placeholder="+224 6XX XX XX XX"
+                    id="lname"
+                    value={lName}
+                    onChange={(e) => setLName(e.target.value)}
+                    placeholder="Nom"
                   />
-                  {phoneInput.hasError && (
-                    <p className="text-xs text-destructive">
-                      Format invalide. Attendu : {PHONE_FORMAT_HINT}.
-                    </p>
-                  )}
                 </div>
+              </div>
 
-                <div className="flex justify-end border-t border-border/40 pt-4">
-                  <Button
-                    className="rounded-xl gradient-primary text-background shadow-md shadow-primary/30"
-                    disabled={updateMeMut.isPending || phoneInput.hasError}
-                    onClick={() =>
-                      updateMeMut.mutate(
-                        {
-                          firstname: fName.trim() || undefined,
-                          name: lName.trim() || fName.trim(),
-                          phone: phoneInput.value || undefined,
-                          email: email.trim() || undefined,
-                        },
-                        { onSuccess: () => setModalOpen(false) },
-                      )
-                    }
-                  >
-                    <CheckCircle2 className="mr-2 h-4 w-4" />
-                    Enregistrer les modifications
-                  </Button>
-                </div>
-              </GlassCard>
-            )}
-
-            {/* ── Profil professionnel ── */}
-            {section === "pro" && (
-              <GlassCard className="space-y-5">
-                <SectionHeader
-                  icon={Briefcase}
-                  label="Profil professionnel"
-                  desc="Données gérées par les Ressources Humaines"
-                  color="bg-info/10"
-                  iconColor="text-info"
+              <div className="grid gap-2">
+                <Label htmlFor="email" className="flex items-center gap-1.5">
+                  <Mail className="h-3.5 w-3.5 text-muted-foreground" />
+                  Adresse email
+                </Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="votre@email.com"
                 />
+              </div>
 
-                <div className="flex items-start gap-2 rounded-xl border border-info/20 bg-info/5 p-3 text-sm text-info">
-                  <Info className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>
-                    Ces informations sont en lecture seule. Contactez les Ressources Humaines pour
-                    toute modification.
-                  </span>
-                </div>
-
-                <div className="space-y-2">
-                  {[
-                    { label: "Matricule", value: me?.matricule ?? "—", icon: FileText, mono: true },
-                    { label: "Poste", value: me?.job ?? "—", icon: Briefcase, mono: false },
-                    {
-                      label: "Direction",
-                      value: (
-                        directionsData.find((d) => d.id === me?.direction_id)?.name ??
-                        me?.direction_id ??
-                        "—"
-                      ).toUpperCase(),
-                      icon: Building2,
-                      mono: false,
-                    },
-                    {
-                      label: "Service",
-                      value:
-                        unitsData.find((u) => u.id === me?.unit_id)?.name ?? me?.unit_id ?? "—",
-                      icon: Zap,
-                      mono: false,
-                    },
-                  ].map(({ label, value, icon: Icon, mono }) => (
-                    <div
-                      key={label}
-                      className="flex items-center justify-between rounded-xl bg-card/40 px-4 py-3"
-                    >
-                      <div className="flex items-center gap-3">
-                        <Icon className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm text-muted-foreground">{label}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={cn("text-sm font-medium", mono && "font-mono text-primary")}
-                        >
-                          {value}
-                        </span>
-                        <Lock className="h-3.5 w-3.5 text-muted-foreground/40" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </GlassCard>
-            )}
-
-            {/* ── Sécurité ── */}
-            {section === "security" && (
-              <GlassCard className="space-y-3">
-                <SectionHeader
-                  icon={Shield}
-                  label="Mot de passe"
-                  desc="Identité gérée par la plateforme centrale EDG"
+              <div className="grid gap-2">
+                <Label htmlFor="phone" className="flex items-center gap-1.5">
+                  <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+                  Téléphone
+                </Label>
+                <Input
+                  id="phone"
+                  ref={phoneInput.ref}
+                  type="tel"
+                  inputMode="tel"
+                  value={phoneInput.display}
+                  onChange={phoneInput.onChange}
+                  placeholder="+224 6XX XX XX XX"
                 />
-                <p className="text-sm text-muted-foreground">
-                  Votre mot de passe est géré par la plateforme centrale d&apos;authentification
-                  EDG, mais vous pouvez le modifier vous-même à tout moment via un code de
-                  vérification envoyé par email — aucune intervention d&apos;un administrateur
-                  n&apos;est nécessaire.
-                </p>
-                <Button asChild variant="outline" className="rounded-full">
-                  <Link to="/forgot-password">Changer le mot de passe</Link>
+                {phoneInput.hasError && (
+                  <p className="text-xs text-destructive">
+                    Format invalide. Attendu : {PHONE_FORMAT_HINT}.
+                  </p>
+                )}
+              </div>
+
+              <div className="flex justify-end border-t border-border/40 pt-4">
+                <Button
+                  className="rounded-xl gradient-primary text-background shadow-md shadow-primary/30"
+                  disabled={updateMeMut.isPending || phoneInput.hasError}
+                  onClick={() =>
+                    updateMeMut.mutate(
+                      {
+                        firstname: fName.trim() || undefined,
+                        name: lName.trim() || fName.trim(),
+                        phone: phoneInput.value || undefined,
+                        email: email.trim() || undefined,
+                      },
+                      { onSuccess: () => setModalOpen(false) },
+                    )
+                  }
+                >
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                  Enregistrer les modifications
                 </Button>
-              </GlassCard>
-            )}
+              </div>
+            </div>
+          )}
 
-            {/* ── Notifications ── */}
-            {section === "notifications" && (
-              <GlassCard className="space-y-6">
-                <SectionHeader
-                  icon={Bell}
-                  label="Préférences de notification"
-                  desc="Choisissez ce que vous souhaitez recevoir"
-                />
+          {/* ── Profil professionnel ── */}
+          {section === "pro" && (
+            <div className="space-y-5">
+              <SectionHeader
+                asDialogTitle
+                icon={Briefcase}
+                label="Profil professionnel"
+                desc="Données gérées par les Ressources Humaines"
+                color="bg-info/10"
+                iconColor="text-info"
+              />
 
-                <div>
-                  <h4 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    <Bell className="h-3.5 w-3.5" />
-                    Notifications in-app
-                  </h4>
-                  <div className="space-y-2">
-                    <NotifRow
-                      label="Toutes les notifications"
-                      desc="Activez ou désactivez toutes les alertes in-app"
-                      value={nInApp}
-                      set={setNInApp}
-                    />
-                    <NotifRow
-                      label="Alertes délais critiques"
-                      desc="Délais dépassés ou proches d'expiration"
-                      value={nSLA}
-                      set={setNSLA}
-                    />
-                    <NotifRow
-                      label="Escalades reçues"
-                      desc="Tickets transmis à votre niveau"
-                      value={nEscalade}
-                      set={setNEscalade}
-                    />
-                    <NotifRow
-                      label="Résolution de tickets"
-                      desc="Notification quand un ticket est résolu"
-                      value={nResolution}
-                      set={setNResolution}
-                    />
-                  </div>
-                </div>
+              <div className="flex items-start gap-2 rounded-xl border border-info/20 bg-info/5 p-3 text-sm text-info">
+                <Info className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>
+                  Ces informations sont en lecture seule. Contactez les Ressources Humaines pour
+                  toute modification.
+                </span>
+              </div>
 
-                <div>
-                  <h4 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    <Mail className="h-3.5 w-3.5" />
-                    Email
-                  </h4>
-                  <div className="space-y-2">
-                    <NotifRow
-                      label="Alertes délais par email"
-                      desc="Envoi email pour les délais critiques"
-                      value={nEmail}
-                      set={setNEmail}
-                    />
-                    <NotifRow
-                      label="Nouveaux commentaires"
-                      desc="Réponses sur vos tickets en cours"
-                      value={nEmailComments}
-                      set={setNEmailComments}
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-end border-t border-border/40 pt-4">
-                  <Button
-                    className="rounded-xl gradient-primary text-background shadow-md shadow-primary/30"
-                    disabled={updateMeMut.isPending}
-                    onClick={() =>
-                      updateMeMut.mutate(
-                        {
-                          notif_sla_alerts: nSLA,
-                          notif_escalations: nEscalade,
-                          notif_resolutions: nResolution,
-                          notif_comments: nEmailComments,
-                        },
-                        { onSuccess: () => setModalOpen(false) },
-                      )
-                    }
+              <div className="space-y-2">
+                {[
+                  { label: "Badge", value: me?.matricule ?? "—", icon: FileText, mono: true },
+                  { label: "Poste", value: me?.job ?? "—", icon: Briefcase, mono: false },
+                  {
+                    label: "Direction",
+                    value: (
+                      directionsData.find((d) => d.id === me?.direction_id)?.name ??
+                      me?.direction_id ??
+                      "—"
+                    ).toUpperCase(),
+                    icon: Building2,
+                    mono: false,
+                  },
+                  {
+                    label: "Service",
+                    value: unitsData.find((u) => u.id === me?.unit_id)?.name ?? me?.unit_id ?? "—",
+                    icon: Zap,
+                    mono: false,
+                  },
+                ].map(({ label, value, icon: Icon, mono }) => (
+                  <div
+                    key={label}
+                    className="flex items-center justify-between rounded-xl bg-card/40 px-4 py-3"
                   >
-                    <CheckCircle2 className="mr-2 h-4 w-4" />
-                    Enregistrer
-                  </Button>
-                </div>
-              </GlassCard>
-            )}
-
-            {/* ── Apparence ── */}
-            {section === "appearance" && (
-              <GlassCard className="space-y-6">
-                <SectionHeader
-                  icon={Palette}
-                  label="Apparence"
-                  desc="Personnalisez l'interface selon vos préférences"
-                  color="bg-primary/10"
-                  iconColor="text-primary"
-                />
-
-                <div>
-                  <Label className="mb-3 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Thème
-                  </Label>
-                  <div className="grid grid-cols-3 gap-3">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (dark) toggleDark();
-                      }}
-                      className={cn(
-                        "relative flex flex-col overflow-hidden rounded-2xl border-2 transition hover:scale-[1.02]",
-                        !dark
-                          ? "border-primary shadow-md shadow-primary/20"
-                          : "border-border/40 hover:border-border",
-                      )}
-                    >
-                      <div className="h-20 w-full bg-white p-2">
-                        <div className="mb-1.5 h-3 w-full rounded bg-slate-100" />
-                        <div className="flex gap-1">
-                          <div className="h-12 w-8 rounded bg-slate-50 border border-slate-100" />
-                          <div className="flex-1 space-y-1 pt-0.5">
-                            <div className="h-2 w-full rounded bg-slate-200" />
-                            <div className="h-2 w-3/4 rounded bg-slate-200" />
-                            <div className="h-2 w-1/2 rounded bg-slate-200" />
-                          </div>
-                        </div>
-                      </div>
-                      <div
-                        className={cn(
-                          "flex items-center justify-center gap-1.5 py-2 text-xs font-medium",
-                          !dark ? "text-primary" : "text-muted-foreground",
-                        )}
-                      >
-                        <Sun className="h-3.5 w-3.5" />
-                        Clair
-                      </div>
-                      {!dark && (
-                        <div className="absolute right-2 top-2 grid h-5 w-5 place-items-center rounded-full bg-primary text-background">
-                          <CheckCircle2 className="h-3 w-3" />
-                        </div>
-                      )}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!dark) toggleDark();
-                      }}
-                      className={cn(
-                        "relative flex flex-col overflow-hidden rounded-2xl border-2 transition hover:scale-[1.02]",
-                        dark
-                          ? "border-primary shadow-md shadow-primary/20"
-                          : "border-border/40 hover:border-border",
-                      )}
-                    >
-                      <div className="h-20 w-full bg-slate-900 p-2">
-                        <div className="mb-1.5 h-3 w-full rounded bg-slate-800" />
-                        <div className="flex gap-1">
-                          <div className="h-12 w-8 rounded bg-slate-800/80" />
-                          <div className="flex-1 space-y-1 pt-0.5">
-                            <div className="h-2 w-full rounded bg-slate-700" />
-                            <div className="h-2 w-3/4 rounded bg-slate-700" />
-                            <div className="h-2 w-1/2 rounded bg-slate-700" />
-                          </div>
-                        </div>
-                      </div>
-                      <div
-                        className={cn(
-                          "flex items-center justify-center gap-1.5 py-2 text-xs font-medium",
-                          dark ? "text-primary" : "text-muted-foreground",
-                        )}
-                      >
-                        <Moon className="h-3.5 w-3.5" />
-                        Sombre
-                      </div>
-                      {dark && (
-                        <div className="absolute right-2 top-2 grid h-5 w-5 place-items-center rounded-full bg-primary text-background">
-                          <CheckCircle2 className="h-3 w-3" />
-                        </div>
-                      )}
-                    </button>
-
-                    <div className="relative flex cursor-not-allowed flex-col overflow-hidden rounded-2xl border-2 border-border/30 opacity-40">
-                      <div className="h-20 w-full bg-gradient-to-br from-white to-slate-900 p-2">
-                        <div className="mb-1.5 h-3 w-full rounded bg-slate-400/30" />
-                        <div className="flex gap-1">
-                          <div className="h-12 w-8 rounded bg-slate-400/20" />
-                          <div className="flex-1 space-y-1 pt-0.5">
-                            <div className="h-2 w-full rounded bg-slate-400/30" />
-                            <div className="h-2 w-3/4 rounded bg-slate-400/30" />
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-center gap-1.5 py-2 text-xs font-medium text-muted-foreground">
-                        <Monitor className="h-3.5 w-3.5" />
-                        Système
-                      </div>
-                      <span className="absolute inset-x-0 bottom-8 text-center text-[9px] text-muted-foreground">
-                        Bientôt
+                    <div className="flex items-center gap-3">
+                      <Icon className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm text-muted-foreground">{label}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={cn("text-sm font-medium", mono && "font-mono text-primary")}>
+                        {value}
                       </span>
+                      <Lock className="h-3.5 w-3.5 text-muted-foreground/40" />
                     </div>
                   </div>
-                </div>
+                ))}
+              </div>
+            </div>
+          )}
 
-                <div className="flex justify-end border-t border-border/40 pt-4">
-                  <Button
-                    className="rounded-xl gradient-primary text-background shadow-md shadow-primary/30"
-                    onClick={() => {
-                      toast.success("Préférences d'apparence enregistrées");
-                      setModalOpen(false);
-                    }}
-                  >
-                    <CheckCircle2 className="mr-2 h-4 w-4" />
-                    Appliquer
-                  </Button>
+          {/* ── Sécurité ── */}
+          {section === "security" && (
+            <div className="space-y-3">
+              <SectionHeader
+                asDialogTitle
+                icon={Shield}
+                label="Mot de passe"
+                desc="Identité gérée par la plateforme centrale EDG"
+              />
+              <p className="text-sm text-muted-foreground">
+                Vous pouvez modifier votre mot de passe directement ici. La mise à jour est
+                immédiate et s&apos;applique partout où vous utilisez votre compte EDG.
+              </p>
+              <Button
+                variant="outline"
+                className="rounded-full"
+                onClick={() => setPasswordModalOpen(true)}
+              >
+                Modifier mon mot de passe
+              </Button>
+            </div>
+          )}
+
+          {/* ── Notifications ── */}
+          {section === "notifications" && (
+            <div className="space-y-6">
+              <SectionHeader
+                asDialogTitle
+                icon={Bell}
+                label="Préférences de notification"
+                desc="Choisissez ce que vous souhaitez recevoir"
+              />
+
+              <div>
+                <h4 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <Bell className="h-3.5 w-3.5" />
+                  Notifications in-app
+                </h4>
+                <div className="space-y-2">
+                  <NotifRow
+                    label="Toutes les notifications"
+                    desc="Activez ou désactivez toutes les alertes in-app"
+                    value={nInApp}
+                    set={setNInApp}
+                  />
+                  <NotifRow
+                    label="Alertes délais critiques"
+                    desc="Délais dépassés ou proches d'expiration"
+                    value={nSLA}
+                    set={setNSLA}
+                  />
+                  {/* Bascule "Escalades reçues" retirée le 2026-09-26 avec le statut
+                      "escalated" : plus aucune notification d'escalade n'est émise. La
+                      colonne `notif_escalations` reste écrite telle quelle ci-dessous —
+                      la table `account` est partagée avec la plateforme centrale et son
+                      schéma ne doit pas être modifié. */}
+                  <NotifRow
+                    label="Résolution de tickets"
+                    desc="Notification quand un ticket est résolu"
+                    value={nResolution}
+                    set={setNResolution}
+                  />
                 </div>
-              </GlassCard>
-            )}
-          </div>
+              </div>
+
+              <div>
+                <h4 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <Mail className="h-3.5 w-3.5" />
+                  Email
+                </h4>
+                <div className="space-y-2">
+                  <NotifRow
+                    label="Alertes délais par email"
+                    desc="Envoi email pour les délais critiques"
+                    value={nEmail}
+                    set={setNEmail}
+                  />
+                  <NotifRow
+                    label="Nouveaux commentaires"
+                    desc="Réponses sur vos tickets en cours"
+                    value={nEmailComments}
+                    set={setNEmailComments}
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end border-t border-border/40 pt-4">
+                <Button
+                  className="rounded-xl gradient-primary text-background shadow-md shadow-primary/30"
+                  disabled={updateMeMut.isPending}
+                  onClick={() =>
+                    updateMeMut.mutate(
+                      {
+                        notif_sla_alerts: nSLA,
+                        notif_escalations: nEscalade,
+                        notif_resolutions: nResolution,
+                        notif_comments: nEmailComments,
+                      },
+                      { onSuccess: () => setModalOpen(false) },
+                    )
+                  }
+                >
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                  Enregistrer
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Apparence ── */}
+          {section === "appearance" && (
+            <div className="space-y-6">
+              <SectionHeader
+                asDialogTitle
+                icon={Palette}
+                label="Apparence"
+                desc="Personnalisez l'interface selon vos préférences"
+                color="bg-primary/10"
+                iconColor="text-primary"
+              />
+
+              <div>
+                <Label className="mb-3 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Thème
+                </Label>
+                <div className="grid grid-cols-3 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (dark) toggleDark();
+                    }}
+                    className={cn(
+                      "relative flex flex-col overflow-hidden rounded-2xl border-2 transition hover:scale-[1.02]",
+                      !dark
+                        ? "border-primary shadow-md shadow-primary/20"
+                        : "border-border/40 hover:border-border",
+                    )}
+                  >
+                    <div className="h-20 w-full bg-white p-2">
+                      <div className="mb-1.5 h-3 w-full rounded bg-slate-100" />
+                      <div className="flex gap-1">
+                        <div className="h-12 w-8 rounded bg-slate-50 border border-slate-100" />
+                        <div className="flex-1 space-y-1 pt-0.5">
+                          <div className="h-2 w-full rounded bg-slate-200" />
+                          <div className="h-2 w-3/4 rounded bg-slate-200" />
+                          <div className="h-2 w-1/2 rounded bg-slate-200" />
+                        </div>
+                      </div>
+                    </div>
+                    <div
+                      className={cn(
+                        "flex items-center justify-center gap-1.5 py-2 text-xs font-medium",
+                        !dark ? "text-primary" : "text-muted-foreground",
+                      )}
+                    >
+                      <Sun className="h-3.5 w-3.5" />
+                      Clair
+                    </div>
+                    {!dark && (
+                      <div className="absolute right-2 top-2 grid h-5 w-5 place-items-center rounded-full bg-primary text-background">
+                        <CheckCircle2 className="h-3 w-3" />
+                      </div>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!dark) toggleDark();
+                    }}
+                    className={cn(
+                      "relative flex flex-col overflow-hidden rounded-2xl border-2 transition hover:scale-[1.02]",
+                      dark
+                        ? "border-primary shadow-md shadow-primary/20"
+                        : "border-border/40 hover:border-border",
+                    )}
+                  >
+                    <div className="h-20 w-full bg-slate-900 p-2">
+                      <div className="mb-1.5 h-3 w-full rounded bg-slate-800" />
+                      <div className="flex gap-1">
+                        <div className="h-12 w-8 rounded bg-slate-800/80" />
+                        <div className="flex-1 space-y-1 pt-0.5">
+                          <div className="h-2 w-full rounded bg-slate-700" />
+                          <div className="h-2 w-3/4 rounded bg-slate-700" />
+                          <div className="h-2 w-1/2 rounded bg-slate-700" />
+                        </div>
+                      </div>
+                    </div>
+                    <div
+                      className={cn(
+                        "flex items-center justify-center gap-1.5 py-2 text-xs font-medium",
+                        dark ? "text-primary" : "text-muted-foreground",
+                      )}
+                    >
+                      <Moon className="h-3.5 w-3.5" />
+                      Sombre
+                    </div>
+                    {dark && (
+                      <div className="absolute right-2 top-2 grid h-5 w-5 place-items-center rounded-full bg-primary text-background">
+                        <CheckCircle2 className="h-3 w-3" />
+                      </div>
+                    )}
+                  </button>
+
+                  <div className="relative flex cursor-not-allowed flex-col overflow-hidden rounded-2xl border-2 border-border/30 opacity-40">
+                    <div className="h-20 w-full bg-gradient-to-br from-white to-slate-900 p-2">
+                      <div className="mb-1.5 h-3 w-full rounded bg-slate-400/30" />
+                      <div className="flex gap-1">
+                        <div className="h-12 w-8 rounded bg-slate-400/20" />
+                        <div className="flex-1 space-y-1 pt-0.5">
+                          <div className="h-2 w-full rounded bg-slate-400/30" />
+                          <div className="h-2 w-3/4 rounded bg-slate-400/30" />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-center gap-1.5 py-2 text-xs font-medium text-muted-foreground">
+                      <Monitor className="h-3.5 w-3.5" />
+                      Système
+                    </div>
+                    <span className="absolute inset-x-0 bottom-8 text-center text-[9px] text-muted-foreground">
+                      Bientôt
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end border-t border-border/40 pt-4">
+                <Button
+                  className="rounded-xl gradient-primary text-background shadow-md shadow-primary/30"
+                  onClick={() => {
+                    toast.success("Préférences d'apparence enregistrées");
+                    setModalOpen(false);
+                  }}
+                >
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                  Appliquer
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Modale : changer mon mot de passe (sans email ni code) ────────── */}
+      <Dialog
+        open={passwordModalOpen}
+        onOpenChange={(open) => {
+          // Ne pas fermer pendant l'envoi — évite de perdre l'état en cours.
+          if (changePasswordMut.isPending) return;
+          setPasswordModalOpen(open);
+          if (!open) resetPasswordForm();
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogTitle>Modifier mon mot de passe</DialogTitle>
+          <p className="text-sm text-muted-foreground">
+            Saisissez votre nouveau mot de passe. La modification est immédiate et s&apos;applique
+            partout où vous utilisez votre compte EDG.
+          </p>
+
+          <form
+            className="space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!canSubmitPassword || changePasswordMut.isPending) return;
+              changePasswordMut.mutate();
+            }}
+          >
+            <div>
+              <Label htmlFor="new-password">Nouveau mot de passe</Label>
+              <Input
+                id="new-password"
+                type={showPassword ? "text" : "password"}
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                autoComplete="new-password"
+                autoFocus
+                className="mt-1.5"
+                disabled={changePasswordMut.isPending}
+              />
+              {newPassword.length > 0 && !passwordLongEnough && (
+                <p className="mt-1 text-xs text-destructive">8 caractères minimum.</p>
+              )}
+            </div>
+
+            <div>
+              <Label htmlFor="confirm-password">Confirmer le mot de passe</Label>
+              <Input
+                id="confirm-password"
+                type={showPassword ? "text" : "password"}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                autoComplete="new-password"
+                className="mt-1.5"
+                disabled={changePasswordMut.isPending}
+              />
+              {confirmPassword.length > 0 && !passwordsMatch && (
+                <p className="mt-1 text-xs text-destructive">
+                  Les deux mots de passe ne correspondent pas.
+                </p>
+              )}
+            </div>
+
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={showPassword}
+                onChange={(e) => setShowPassword(e.target.checked)}
+                disabled={changePasswordMut.isPending}
+              />
+              Afficher les mots de passe
+            </label>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-full"
+                disabled={changePasswordMut.isPending}
+                onClick={() => {
+                  setPasswordModalOpen(false);
+                  resetPasswordForm();
+                }}
+              >
+                Annuler
+              </Button>
+              <Button
+                type="submit"
+                className="gradient-primary rounded-full"
+                disabled={!canSubmitPassword || changePasswordMut.isPending}
+              >
+                {changePasswordMut.isPending ? "Modification…" : "Valider"}
+              </Button>
+            </div>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

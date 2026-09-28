@@ -11,11 +11,6 @@ from __future__ import annotations
 # ── Tables de référence dynamiques (8) ───────────────────────────────────────
 from .ModelRequestStatus import RequestStatus
 from .ModelRequestCategory import RequestCategory
-from .ModelAccountStatus import AccountStatus
-from .ModelKnowledgeCategory import KnowledgeCategory
-from .ModelAnnouncementCategory import AnnouncementCategory
-from .ModelAnnouncementStatus import AnnouncementStatus
-from .ModelAnnouncementPriority import AnnouncementPriority
 from .ModelPriorityDefinition import PriorityDefinition
 
 # ── Structure organisationnelle (2) ──────────────────────────────────────────
@@ -40,34 +35,16 @@ from .ModelRoutingRule import RoutingRule
 
 # ── Tables transverses (3) ───────────────────────────────────────────────────
 from .ModelNotification import Notification
-from .ModelKnowledgeArticle import KnowledgeArticle
 from .ModelActivityLog import ActivityLog
 
 # ── Communication & CSAT (4) ─────────────────────────────────────────────────
-from .ModelAnnouncement import Announcement
-from .ModelAnnouncementTargetRole import AnnouncementTargetRole
-from .ModelCommunicationSetting import CommunicationSetting
 from .ModelAppreciation import Appreciation
 
 __all__ = [
-    # Référence (8)
-    "RequestStatus", "RequestCategory", "AccountStatus",
-    "KnowledgeCategory",
-    "AnnouncementCategory", "AnnouncementStatus", "AnnouncementPriority",
-    "PriorityDefinition",
-    # Organisation (2)
-    "Unity", "Organigram",
-    # Métier (1)
-    "Account",
-    # Request (2)
-    "Request", "Attachment",
-    # Workflow (3)
-    "Workflow", "Task", "WorkflowDetail",
-    # Configuration (2)
-    "SlaPolicy", "RoutingRule",
-    # Transverses (3)
-    "Notification", "KnowledgeArticle", "ActivityLog",
-    # Communication & CSAT (4)
-    "Announcement", "AnnouncementTargetRole",
-    "CommunicationSetting", "Appreciation",
+    "RequestStatus", "RequestCategory", "PriorityDefinition",
+    "Unity", "Organigram", "Account",
+    "Request", "Attachment", "Workflow",
+    "Task", "WorkflowDetail", "SlaPolicy",
+    "RoutingRule", "Notification", "ActivityLog",
+    "Appreciation",
 ]

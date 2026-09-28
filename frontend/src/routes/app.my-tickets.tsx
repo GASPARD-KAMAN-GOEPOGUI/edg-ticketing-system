@@ -32,6 +32,7 @@ import { AsyncSwap } from "@/components/async-states";
 import { useSessionState } from "@/lib/use-session-state";
 import { cn, initialsFor, formatElapsedHours } from "@/lib/utils";
 import { getUser } from "@/lib/session";
+import { prefetch } from "@/lib/prefetch";
 
 const ACTIVE_STATUSES: RequestStatus[] = [
   "new", "qualifying", "qualified", "assigned",
@@ -40,7 +41,7 @@ const ACTIVE_STATUSES: RequestStatus[] = [
 const TERMINAL_STATUSES = "resolved,closed,cancelled,rejected";
 
 export const Route = createFileRoute("/app/my-tickets")({
-  beforeLoad: () => requireRole("agent-support", "chief-service", "chief-departement", "director", "admin"),
+  beforeLoad: () => requireRole("chief-service", "technicien", "chef-division-support", "admin"),
   head: () => ({ meta: [{ title: "Mes tickets — EDG Support" }] }),
   // Précharge la vue par défaut (sans filtre) au survol du lien — même
   // queryKey que le useQuery du composant tant qu'aucun filtre n'est appliqué,
@@ -48,11 +49,11 @@ export const Route = createFileRoute("/app/my-tickets")({
   loader: ({ context: { queryClient } }) => {
     const uid = getUser()?.id;
     if (!uid) return;
-    return queryClient.ensureQueryData({
+    return prefetch(queryClient.ensureQueryData({
       queryKey: ["my-tickets", { assignee_id: uid, exclude_status: TERMINAL_STATUSES }],
       queryFn: () => fetchRequests({ assignee_id: uid, exclude_status: TERMINAL_STATUSES, page: 1, limit: 1000 }),
       staleTime: 30_000,
-    });
+    }));
   },
   component: MyTicketsPage,
 });
@@ -77,7 +78,9 @@ function MyTicketsPage() {
   const [pageSize, setPageSize] = useState(20);
   const currentUserId = sessionUser?.id ? String(sessionUser.id) : "";
   const role = sessionUser?.role;
-  const includeScopedEscalations = role === "chief-service" || role === "chief-departement";
+  // Le seul role qui voyait les escalades de son perimetre ici
+  // (chief-departement) a ete retire le 2026-09-25.
+  const includeScopedEscalations = false;
   const showScopedEscalations =
     includeScopedEscalations && (filterStatus === "all" || filterStatus === "escalated");
 

@@ -14,7 +14,7 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)],
 )
 
-_staff = Depends(require_roles("agent", "chief", "director", "admin"))
+_staff = Depends(require_roles("agent", "admin"))
 
 
 def _svc(db: AsyncSession = Depends(get_db)) -> OrganigramService:

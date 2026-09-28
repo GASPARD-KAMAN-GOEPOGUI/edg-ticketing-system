@@ -382,7 +382,6 @@ function AgentDashboard() {
   const myRequests = myRequestsData?.items ?? [];
   const inProgress = assigned.filter((r) => r.status === "in_progress").length;
   const pendingCount = assigned.filter((r) => r.status === "pending").length;
-  const escalatedMine = assigned.filter((r) => r.status === "escalated").length;
   const reopenedCount = assigned.filter((r) => r.status === "reopened").length;
 
   return (
@@ -397,7 +396,7 @@ function AgentDashboard() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <Stat label="En cours" value={inProgress} icon={Clock} tone="accent" loading={loadAssigned} hint="Mes tickets actifs" />
         <Stat label="En attente" value={pendingCount} icon={MessageSquareWarning} tone="warning" loading={loadAssigned} hint="Attente demandeur" />
-        <Stat label="Réouverts / escaladés" value={reopenedCount + escalatedMine} icon={ArrowUpRight} tone="warning" loading={loadAssigned} />
+        <Stat label="Réouverts" value={reopenedCount} icon={ArrowUpRight} tone="warning" loading={loadAssigned} />
       </div>
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.55fr)]">
         <RecentList
@@ -479,7 +478,6 @@ function ChiefDashboard() {
   const open         = items.filter((r) => ACTIVE_ST.includes(r.status)).length;
   const inProgress   = items.filter((r) => r.status === "in_progress").length;
   const pendingCount = items.filter((r) => r.status === "pending").length;
-  const escalated    = items.filter((r) => r.status === "escalated").length;
   const reopened     = items.filter((r) => r.status === "reopened").length;
   const critical     = items.filter((r) => r.priority === "critical" && ACTIVE_ST.includes(r.status)).length;
 
@@ -492,8 +490,7 @@ function ChiefDashboard() {
         <Stat label="En attente"      value={pendingCount} icon={MessageSquareWarning} tone="warning"     loading={isLoading} />
         <Stat label="CSAT service"    value={(csat?.global ?? 0) > 0 ? `${csat!.global}/5` : "—"} icon={Star} tone="primary" />
       </div>
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-        <Stat label="Escaladées"    value={escalated}   icon={AlertTriangle} tone="warning"     loading={isLoading} />
+      <div className="grid grid-cols-2 gap-4">
         <Stat label="Réouvertes"    value={reopened}    icon={RotateCcw}     tone="warning"     loading={isLoading} />
         <Stat label="Critiques"     value={critical}    icon={AlertTriangle} tone="destructive" loading={isLoading} hint="Priorité critique active" />
       </div>
@@ -502,73 +499,6 @@ function ChiefDashboard() {
           title="Tickets du service"
           to="/app/supervision"
           detailTo="/app/supervision/tickets/$id"
-          items={items.slice(0, 5)}
-          isLoading={isLoading}
-        />
-        <StatusPie  data={items}              isLoading={isLoading} />
-      </div>
-    </>
-  );
-}
-
-function DirectorDashboard() {
-  const sessionUser = useUser();
-  const directionId = sessionUser?.direction_id ?? (
-    sessionUser?.role === "director" ? sessionUser?.unit_id : undefined
-  );
-
-  const { data, isLoading } = useQuery({
-    queryKey: ["director-requests", directionId],
-    queryFn: () => fetchRequests({ direction_id: directionId, limit: 200 }),
-    enabled: !!directionId,
-    staleTime: 30_000,
-  });
-  const { data: csat } = useQuery({ queryKey: ["csat-stats"], queryFn: fetchCsatStats, staleTime: 300_000 });
-
-  if (!directionId) {
-    return (
-      <GlassCard className="flex min-h-[320px] flex-col items-center justify-center gap-3 py-16 text-center">
-        <div className="rounded-full bg-warning/15 p-4 text-warning">
-          <AlertTriangle className="h-8 w-8" />
-        </div>
-        <h3 className="text-xl font-semibold">Direction non renseignée</h3>
-        <p className="max-w-md text-sm text-muted-foreground">
-          Votre accueil directeur affichera les données dès que votre compte sera rattaché à une direction.
-        </p>
-      </GlassCard>
-    );
-  }
-
-  const items = data?.items ?? [];
-  const total = data?.total ?? 0;
-
-  const ACTIVE_ST = ["new", "qualifying", "qualified", "assigned", "in_progress", "pending", "reopened"];
-  const open         = items.filter((r) => ACTIVE_ST.includes(r.status)).length;
-  const inProgress   = items.filter((r) => r.status === "in_progress").length;
-  const pendingCount = items.filter((r) => r.status === "pending").length;
-  const escalated    = items.filter((r) => r.status === "escalated").length;
-  const reopened     = items.filter((r) => r.status === "reopened").length;
-  const critical     = items.filter((r) => r.priority === "critical" && ACTIVE_ST.includes(r.status)).length;
-
-  return (
-    <>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        <Stat label="Total direction"  value={total}        icon={Inbox}                tone="primary"      loading={isLoading} hint={directionId ? `Direction ${directionId.toUpperCase()}` : undefined} />
-        <Stat label="Ouvertes"         value={open}         icon={Clock}                tone="accent"       loading={isLoading} />
-        <Stat label="En cours"         value={inProgress}   icon={Clock}                tone="accent"       loading={isLoading} />
-        <Stat label="En attente"       value={pendingCount} icon={MessageSquareWarning} tone="warning"      loading={isLoading} />
-        <Stat label="CSAT direction"   value={(csat?.global ?? 0) > 0 ? `${csat!.global}/5` : "—"} icon={Star} tone="success" />
-      </div>
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-        <Stat label="Escaladées"    value={escalated}   icon={AlertTriangle} tone="warning"     loading={isLoading} />
-        <Stat label="Réouvertes"    value={reopened}    icon={RotateCcw}     tone="warning"     loading={isLoading} />
-        <Stat label="Critiques"     value={critical}    icon={AlertTriangle} tone="destructive" loading={isLoading} />
-      </div>
-      <div className="grid gap-4 lg:grid-cols-3">
-        <RecentList
-          title="Tickets de la direction"
-          to="/app/direction"
-          detailTo="/app/direction/tickets/$id"
           items={items.slice(0, 5)}
           isLoading={isLoading}
         />
@@ -658,7 +588,8 @@ function AdminDashboard() {
             {[
               { to: "/app/admin/users",     label: "Utilisateurs & Rôles",  icon: Users2 },
               { to: "/app/admin/directions", label: "Directions & Services", icon: Building2 },
-              { to: "/app/admin/sla",        label: "SLA & Priorités",       icon: Clock },
+              // Accès rapide "SLA & Priorités" masqué sur demande (2026-09-28),
+              // en cohérence avec le retrait de l'entrée de navigation.
               { to: "/app/admin/logs",       label: "Journaux d'activité",   icon: Inbox },
             ].map((q) => (
               <Link

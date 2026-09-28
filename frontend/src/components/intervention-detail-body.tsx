@@ -23,7 +23,7 @@ export function InterventionDetailBody({
     <div className="space-y-3">
       {(iv.actorMatricule || iv.actorDirectionLabel) && (
         <p className="text-xs text-muted-foreground">
-          {iv.actorMatricule && <span>Matricule : {iv.actorMatricule}</span>}
+          {iv.actorMatricule && <span>Badge : {iv.actorMatricule}</span>}
           {iv.actorMatricule && iv.actorDirectionLabel && <span> · </span>}
           {iv.actorDirectionLabel && <span>{iv.actorDirectionLabel}</span>}
           {iv.actorDepartmentLabel && iv.actorDepartmentLabel !== iv.actorDirectionLabel && (

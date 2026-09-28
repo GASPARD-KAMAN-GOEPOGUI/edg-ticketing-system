@@ -44,7 +44,7 @@ function AppRoute() {
         <Outlet />
 
         <Dialog open={isNewRequestOpen} onOpenChange={(open) => { if (!open) handleClose(); }}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto p-0">
+          <DialogContent className="max-w-2xl max-h-[90dvh] overflow-y-auto p-0">
             <DialogHeader className="px-6 pt-6 pb-2">
               <div className="flex items-center gap-2">
                 <div className="grid h-8 w-8 place-items-center rounded-lg bg-primary/15">

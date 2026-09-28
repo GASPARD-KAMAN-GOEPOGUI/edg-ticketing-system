@@ -164,9 +164,14 @@ MOCK_ACCOUNTS: dict[str, MockAccount] = {
     "public":   MockAccount("public",   id=0),
     "user":     MockAccount("user",     id=1),
     "agent":    MockAccount("agent",    id=2, unity_id=1),
-    "chief":    MockAccount("chief",    id=3, unity_id=1),
-    "director": MockAccount("director", id=4, unity_id=1),
-    "dg":       MockAccount("dg",       id=5),
+    # Roles `chief-departement` et `director` retires le 2026-09-25, ainsi que
+    # leurs alias `chief`/`dg`. Les cles sont conservees pour ne pas casser les
+    # tests qui les parametrent encore : elles pointent sur un role existant,
+    # ces tests verifient donc desormais un refus d'acces la ou ils attendaient
+    # un acces privilegie.
+    "chief":    MockAccount("chief-service", id=3, unity_id=1),
+    "director": MockAccount("chief-service", id=4, unity_id=1),
+    "dg":       MockAccount("chief-service", id=5),
     "admin":    MockAccount("admin",    id=6),
 }
 

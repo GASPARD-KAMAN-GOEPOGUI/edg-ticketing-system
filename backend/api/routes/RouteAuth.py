@@ -50,6 +50,7 @@ from api.dependencies import (
     _ensure_account_active,
     _sync_role_from_groups,
     _fetch_scopes_and_groups,
+    invalidate_central_auth_cache,
 )
 from api.repositories import AccountRepository
 from api.schemas.SchemaAuth import (
@@ -57,6 +58,7 @@ from api.schemas.SchemaAuth import (
     LoginRequest,
     ForgotPasswordRequest,
     ResetPasswordRequest,
+    ChangePasswordRequest,
     RefreshRequest,
     LogoutRequest,
     ConsentAcceptRequest,
@@ -497,6 +499,11 @@ async def logout(
     bearer_token: str | None = Depends(oauth2_scheme),
     current_user=Depends(get_current_user_optional),
 ):
+    # Purge du cache des scopes/groupes : sans ça le token resterait accepté
+    # jusqu'à l'expiration de son entrée alors que l'utilisateur se déconnecte.
+    if bearer_token:
+        invalidate_central_auth_cache(bearer_token)
+
     if current_user is not None:
         await _log_auth_event(
             db, actor=current_user.email, actor_id=current_user.id, actor_role=current_user.role,
@@ -510,6 +517,43 @@ async def logout(
 
 
 # ── Profil courant ────────────────────────────────────────────────────────────
+
+@router.post(
+    "/change-password",
+    summary="Changer son mot de passe depuis son espace (utilisateur connecté)",
+)
+async def change_password_route(
+    request: Request,
+    body: ChangePasswordRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Changement de mot de passe en self-service, depuis la page Profil.
+
+    Se distingue de /forgot-password + /reset-password : l'utilisateur etant deja
+    authentifie, aucun email ni code OTP n'est envoye. Le mot de passe n'existe
+    que sur la plateforme centrale — l'ecriture y est donc immediatement valable
+    partout, il n'y a rien a synchroniser localement.
+    """
+    if not current_user.central_user_uuid:
+        raise ValidationException(
+            "Ce compte n'est pas rattaché à la plateforme centrale — "
+            "contactez un administrateur.",
+            error_code="ACCOUNT_NOT_CENTRAL_LINKED",
+        )
+
+    machine_token = await central_auth.get_machine_token()
+    await central_auth.reset_central_password(
+        current_user.central_user_uuid, machine_token, new_password=body.new_password,
+    )
+
+    await _log_auth_event(
+        db, actor=current_user.email, actor_id=current_user.id,
+        actor_role=current_user.role, action="change_password",
+        target=f"account:{current_user.id}", ip_address=_client_ip(request),
+    )
+    return {"changed": True}
+
 
 @router.get(
     "/me",

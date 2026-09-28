@@ -18,7 +18,7 @@ router = APIRouter(
 )
 
 _admin = Depends(require_roles("admin"))
-_assign = Depends(require_roles("agent", "chief", "director", "admin"))
+_assign = Depends(require_roles("agent", "admin"))
 
 
 def _svc(db: AsyncSession = Depends(get_db)) -> AccountService:

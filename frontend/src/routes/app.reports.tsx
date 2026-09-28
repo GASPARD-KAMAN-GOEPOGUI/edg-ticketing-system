@@ -50,7 +50,7 @@ import {
 } from "recharts";
 
 export const Route = createFileRoute("/app/reports")({
-  beforeLoad: () => requireRole("chief-service", "chief-departement", "director", "admin"),
+  beforeLoad: () => requireRole("admin"),
   head: () => ({ meta: [{ title: "Rapports — EDG Support" }] }),
   component: ReportsPage,
 });
@@ -65,29 +65,24 @@ function isDirectionUnit(label?: string) {
 function ReportsPage() {
   const [role] = useRole();
   const sessionUser = useUser();
-  const isChiefService = role === "chief-service";
-  const directorDirectionId = role === "director"
-    ? (sessionUser?.direction_id ?? sessionUser?.unit_id)
-    : undefined;
+  // chief-service (role supprime) ne peut plus jamais atteindre cette page (garde de route) ;
+  // conserve `false` pour ne pas toucher a la logique downstream qui en depend.
+  const isChiefService = false;
+  // director et chief-departement ont ete retires le 2026-09-25 : la page est
+  // reservee a l'admin (garde de route), donc perimetre global.
+  const directorDirectionId = undefined;
   const [period] = useState("year");
-  const [direction] = useState(
-    role === "director" ? (directorDirectionId ?? "all") : "all",
-  );
+  const [direction] = useState("all");
   const [exportFormat, setExportFormat] = useState<ExportFormat>("excel");
   const [exportPending, setExportPending] = useState(false);
 
-  const directionFilter =
-    role === "director"
-      ? directorDirectionId
-      : direction === "all"
-        ? undefined
-        : direction;
+  const directionFilter = direction === "all" ? undefined : direction;
   const serviceReportReady = isChiefService || !!directionFilter;
 
   const { data: reqData, isLoading: loadReq } = useQuery({
     queryKey: ["report-requests", directionFilter],
     queryFn: () => fetchRequests({ direction_id: directionFilter, limit: 500 }),
-    enabled: role !== "director" || !!directionFilter,
+    enabled: true,
     staleTime: 60_000,
   });
 
@@ -270,10 +265,7 @@ function ReportsPage() {
     }
   };
 
-  const roleLabel =
-    role === "director" ? "Direction"
-    : role === "chief-service" || role === "chief-departement" ? "Service"
-    : "Globaux";
+  const roleLabel = "Globaux";
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">

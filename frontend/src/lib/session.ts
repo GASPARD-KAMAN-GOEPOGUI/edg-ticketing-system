@@ -40,10 +40,11 @@ export type SessionUser = {
 
 export function normalizeRole(role: string | null | undefined): Role {
   const value = String(role ?? "user").trim().toLowerCase();
-  if (value === "dg") return "director";
-  if (value === "agent") return "agent-support";
-  if (value === "chief") return "chief-service";
-  if (["public", "user", "agent-support", "chief-service", "chief-departement", "director", "admin"].includes(value)) {
+  // Les alias "dg" et "chief" pointaient vers les roles director et
+  // chief-departement, retires le 2026-09-25 : un jeton encore porteur de ces
+  // valeurs retombe desormais sur "user" via le repli final.
+  if (value === "agent") return "chief-service";
+  if (["public", "user", "chief-service", "technicien", "chef-division-support", "admin"].includes(value)) {
     return value as Role;
   }
   return "user";
@@ -243,13 +244,27 @@ export { roleLabels };
 // ── Routing par rôle — source de vérité unique ────────────────────────────────
 // Toute logique de redirection doit référencer ce mapping, jamais de chemins en dur.
 
+// Chaque rôle arrive dans SON espace de travail, là où son activité commence,
+// plutôt que sur un tableau de bord commun qu'il devait traverser. Le tableau
+// de bord reste accessible d'un clic : l'entrée « Accueil » du menu (groupe
+// « Mon espace ») pointe sur `/app` pour tous les rôles authentifiés.
+//
+// Ce mapping sert AUSSI de destination de repli à `requireRole()` : un rôle qui
+// tente une page interdite est renvoyé sur son espace, et non plus sur une page
+// neutre — le rebond est donc utile au lieu d'être un cul-de-sac.
 export const ROLE_DEFAULT_ROUTES: Record<Role, string> = {
+  // Non authentifié : `requireAuth()` le renvoie vers /login bien avant.
   public:              "/app",
-  user:                "/app",
-  "agent-support":     "/app",
-  "chief-service":     "/app",
-  "chief-departement": "/app",
-  director:            "/app",
+  // Le demandeur suit ses propres demandes.
+  user:                "/app/requests",
+  // Le chef de service qualifie : son travail commence dans la file d'attente.
+  "chief-service":     "/app/queue",
+  // Le technicien ne qualifie ni ne répartit — il traite ce qui lui est confié.
+  technicien:          "/app/my-tickets",
+  // Le chef de division répartit : sa file propre est la Distribution.
+  "chef-division-support": "/app/distribution",
+  // L'admin n'a pas d'espace de traitement unique : il pilote. Le tableau de
+  // bord global EST sa vue de travail.
   admin:               "/app",
 };
 

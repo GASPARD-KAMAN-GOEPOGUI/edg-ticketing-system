@@ -32,11 +32,12 @@ class RequestRepository(BaseRepository[Request]):
     # ── Statuts par code ──────────────────────────────────────────────────────
 
     _INACTIVE_STATUSES: list[str] = ["resolved", "closed", "cancelled", "rejected"]
+    # "qualified", "pending" et "escalated" supprimes le 2026-09-28 (aucun ticket
+    # ne les portait, plus aucune transition n'y menait).
     _ACTIVE_STATUSES: list[str] = [
-        "new", "qualifying", "qualified", "assigned",
-        "in_progress", "pending", "escalated", "reopened",
+        "new", "qualifying", "assigned", "in_progress", "reopened",
     ]
-    _QUALIFIABLE_STATUSES: list[str] = ["new", "qualifying", "qualified", "reopened"]
+    _QUALIFIABLE_STATUSES: list[str] = ["new", "qualifying", "reopened"]
 
     # ── Surcharge _apply_filters : traduit code → subquery FK ─────────────────
 
@@ -67,6 +68,29 @@ class RequestRepository(BaseRepository[Request]):
         exclude_request_status = filters.pop("exclude_request_status", None)
         unassigned_only = filters.pop("unassigned_only", None)
         exclude_requester_id = filters.pop("exclude_requester_id", None)
+        scope_actor_id = filters.pop("scope_actor_id", None)
+        if scope_actor_id is not None:
+            # BR-REQUESTER-NEVER-LOSES-001 — le périmètre d'un rôle staff est son
+            # unité, MAIS il ne doit jamais lui faire perdre de vue un ticket qui
+            # le concerne personnellement. Sans ce OU, un technicien ou un chef
+            # qui dépose une demande traitée par une autre unité — ou dont
+            # l'unité traitante n'est pas renseignée — ne la retrouvait nulle
+            # part : ni dans son historique (scopé unité), ni dans Ma boîte (qui
+            # exclut volontairement les tickets dont on est le demandeur).
+            # Aucun élargissement de droits : demandeur et assigné sont déjà
+            # autorisés à voir leur propre ticket.
+            unity_scope = filters.pop("unity_id", None)
+            clauses = [
+                Request.requester_id == scope_actor_id,
+                Request.assignee_id == scope_actor_id,
+            ]
+            if unity_scope is not None:
+                clauses.append(
+                    Request.unity_id.in_(list(unity_scope))
+                    if isinstance(unity_scope, (list, tuple, set))
+                    else Request.unity_id == unity_scope
+                )
+            stmt = stmt.where(or_(*clauses))
         if date_from:
             stmt = stmt.where(Request.created_at >= date_from)
         if date_to:
@@ -261,6 +285,98 @@ class RequestRepository(BaseRepository[Request]):
             load_options=_SKIP_UNUSED_RELS,
         )
 
+    async def list_distribution_for(
+        self, account_id: str | int, *, page: int = 1, limit: int = 50
+    ) -> tuple[list[Request], int]:
+        """BR-DISTRIBUTION-001 — file "Distribution" d'un chef de division support.
+
+        Un ticket y figure s'il lui a ete oriente (`distributor_id`) ET qu'il n'a pas
+        encore de responsable operationnel (`assignee_id IS NULL`). La visibilite ne
+        repose donc pas sur le seul statut : elle suit l'etat de distribution, ce qui
+        fait sortir le ticket de la file des qu'il est pris ou assigne.
+        """
+        stmt = (
+            select(Request)
+            .where(Request.deleted_at.is_(None))
+            .where(Request.distributor_id == int(account_id))
+            .where(Request.assignee_id.is_(None))
+        )
+        stmt = self._apply_filters(stmt, {"request_status": self._ACTIVE_STATUSES})
+
+        total_stmt = select(func.count()).select_from(stmt.subquery())
+        total = (await self.session.execute(total_stmt)).scalar_one()
+
+        rows = await self.session.execute(
+            stmt.options(*_SKIP_UNUSED_RELS)
+            .order_by(Request.created_at.desc())
+            .offset((page - 1) * limit)
+            .limit(limit)
+        )
+        return list(rows.scalars().unique().all()), int(total)
+
+    async def list_pv_tracking_for(
+        self, account_id: str | int, *, page: int = 1, limit: int = 50
+    ) -> tuple[list[Request], int]:
+        """Tableau de Suivi des Interventions (TSI) d'un chef de division support
+        — livrable de la tache 3.4 de la procedure EDG/PS-GSI/Pro-02.
+
+        Perimetre : les tickets que CE chef de division a repartis
+        (`distributor_id`), quel qu'en soit l'etat d'avancement — contrairement a
+        la file "Distribution", qui ne montre que ceux restant a repartir
+        (`assignee_id IS NULL`). Le TSI suit l'intervention jusqu'a l'archivage
+        de son PV, donc bien apres la sortie de la file.
+        """
+        stmt = (
+            select(Request)
+            .where(Request.deleted_at.is_(None))
+            .where(Request.distributor_id == int(account_id))
+        )
+
+        total_stmt = select(func.count()).select_from(stmt.subquery())
+        total = (await self.session.execute(total_stmt)).scalar_one()
+
+        rows = await self.session.execute(
+            stmt.options(*_SKIP_UNUSED_RELS)
+            .order_by(Request.created_at.desc())
+            .offset((page - 1) * limit)
+            .limit(limit)
+        )
+        return list(rows.scalars().unique().all()), int(total)
+
+    async def list_resolved_by(
+        self, account_id: str | int, *, page: int = 1, limit: int = 50
+    ) -> tuple[list[Request], int]:
+        """Onglet « Tickets résolus » d'un intervenant.
+
+        Périmètre : les tickets dont il est l'INTERVENANT COURANT
+        (`assignee_id`) et dont le traitement est terminé — `resolved` (il a
+        rendu son travail) ou `closed` (le demandeur a validé). La clôture ne
+        doit pas faire disparaître le ticket de la liste : le travail reste le
+        sien.
+
+        Volontairement fondé sur `assignee_id` et non sur les interventions
+        figées (BR-TRACE-001) : la liste montre ce dont il a la charge au
+        moment présent, pas l'historique de tout ce qu'il a pu toucher avant
+        de le transmettre.
+        """
+        stmt = (
+            select(Request)
+            .where(Request.deleted_at.is_(None))
+            .where(Request.assignee_id == int(account_id))
+        )
+        stmt = self._apply_filters(stmt, {"request_status": ["resolved", "closed"]})
+
+        total_stmt = select(func.count()).select_from(stmt.subquery())
+        total = (await self.session.execute(total_stmt)).scalar_one()
+
+        rows = await self.session.execute(
+            stmt.options(*_SKIP_UNUSED_RELS)
+            .order_by(Request.updated_at.desc())
+            .offset((page - 1) * limit)
+            .limit(limit)
+        )
+        return list(rows.scalars().unique().all()), int(total)
+
     async def list_sla_breached(
         self, *, page: int = 1, limit: int = 20
     ) -> tuple[list[Request], int]:
@@ -278,8 +394,8 @@ class RequestRepository(BaseRepository[Request]):
     ) -> tuple[list[Request], int]:
         """
         BR-TRANSMIT-001 — tickets où `actor_id` a personnellement transmis le
-        traitement (event_type='treatment_transmitted') à un moment de
-        l'historique, ET dont `actor_id` n'est pas l'intervenant actuel
+        traitement à un moment de l'historique, ET dont `actor_id` n'est pas
+        l'intervenant actuel
         (r.assignee_id != actor_id). L'historique de transmission (workflow_detail)
         reste permanent ; seule cette vue opérationnelle exclut les tickets qui
         sont revenus depuis à cet acteur (voir "Ma boîte de traitement",
@@ -300,6 +416,20 @@ class RequestRepository(BaseRepository[Request]):
         lui soit revenu entre-temps (réassignation/réouverture) — pas besoin de
         modéliser ce "retour" séparément, le comptage des transmissions suffit.
         """
+        # BR-TRANSMIT-HANDOVER-001 — assigner EST transmettre. Un chef qui confie
+        # le ticket à quelqu'un d'autre s'en dessaisit, exactement comme une
+        # transmission de traitement : ses envois doivent donc figurer dans
+        # « Tickets transmis ».
+        #   treatment_transmitted   — transmission de traitement (tout traitant)
+        #   distributed_to_division — le chef de service impute au chef de division
+        #                             depuis la file d'attente
+        #   distribution_assigned   — le chef de division confie à un technicien
+        #                             depuis sa file Distribution
+        # Ne PAS inclure `distribution_taken` : le chef de division se l'assigne à
+        # lui-même, il ne transmet rien.
+        _HANDOVER_EVENTS = (
+            "'treatment_transmitted', 'distributed_to_division', 'distribution_assigned'"
+        )
         params = {"actor_id": str(actor_id)}
         search_clause = ""
         if search and search.strip():
@@ -322,7 +452,7 @@ class RequestRepository(BaseRepository[Request]):
                 FROM workflow_detail wd
                 JOIN workflow wf ON wf.id = wd.workflow_id
                 JOIN request r   ON r.id = wf.request_id AND r.deleted_at IS NULL
-                WHERE wd.event_type = 'treatment_transmitted'
+                WHERE wd.event_type IN ({_HANDOVER_EVENTS})
                   AND wd.deleted_at IS NULL
                   AND JSON_UNQUOTE(JSON_EXTRACT(wd.infos, '$.actor_id')) = :actor_id
                   AND (r.assignee_id IS NULL OR r.assignee_id != :actor_id)
@@ -340,7 +470,7 @@ class RequestRepository(BaseRepository[Request]):
             FROM workflow_detail wd
             JOIN workflow wf ON wf.id = wd.workflow_id
             JOIN request r   ON r.id = wf.request_id AND r.deleted_at IS NULL
-            WHERE wd.event_type = 'treatment_transmitted'
+            WHERE wd.event_type IN ({_HANDOVER_EVENTS})
               AND wd.deleted_at IS NULL
               AND JSON_UNQUOTE(JSON_EXTRACT(wd.infos, '$.actor_id')) = :actor_id
               AND (r.assignee_id IS NULL OR r.assignee_id != :actor_id)

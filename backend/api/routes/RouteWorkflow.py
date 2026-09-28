@@ -75,7 +75,7 @@ class AcceptedDetailBody(BaseModel):
     comment: Optional[str] = None
 
 
-_staff = Depends(require_roles("agent", "chief", "director", "admin"))
+_staff = Depends(require_roles("agent", "admin"))
 
 
 @request_workflow_router.get(
@@ -98,7 +98,7 @@ async def list_request_workflows(
 async def create_request_workflow(
     request_id: str,
     body: WorkflowCreateBody,
-    _=Depends(require_roles("agent", "chief", "admin")),
+    _=Depends(require_roles("agent", "admin")),
     svc: WorkflowService = Depends(_svc),
 ):
     return await svc.create_for_request(request_id, body.dict(exclude_unset=True))
@@ -117,7 +117,7 @@ async def create_request_workflow(
 async def create_auto_circuit(
     request_id: str,
     body: AutoCircuitBody,
-    actor=Depends(require_roles("agent", "chief", "admin")),
+    actor=Depends(require_roles("agent", "admin")),
     svc: WorkflowService = Depends(_svc),
 ):
     return await svc.create_for_request_with_auto_circuit(
@@ -182,7 +182,7 @@ async def get_workflow(id: str, _=_staff, svc: WorkflowService = Depends(_svc)):
 @router.post("/", response_model=WorkflowResponse, status_code=status.HTTP_201_CREATED)
 async def create_workflow(
     body: WorkflowCreate,
-    _=Depends(require_roles("agent", "chief", "admin")),
+    _=Depends(require_roles("agent", "admin")),
     svc: WorkflowService = Depends(_svc),
 ):
     return await svc.create(body.dict())
@@ -192,7 +192,7 @@ async def create_workflow(
 async def update_workflow(
     id: str,
     body: WorkflowUpdate,
-    _=Depends(require_roles("agent", "chief", "admin")),
+    _=Depends(require_roles("agent", "admin")),
     svc: WorkflowService = Depends(_svc),
 ):
     return await svc.update(id, body.dict(exclude_unset=True))
@@ -201,7 +201,7 @@ async def update_workflow(
 @router.post("/{id}/complete", response_model=WorkflowResponse)
 async def complete_workflow(
     id: str,
-    _=Depends(require_roles("agent", "chief", "admin")),
+    _=Depends(require_roles("agent", "admin")),
     svc: WorkflowService = Depends(_svc),
 ):
     return await svc.complete(id)
@@ -210,7 +210,7 @@ async def complete_workflow(
 @router.post("/{id}/suspend", response_model=WorkflowResponse)
 async def suspend_workflow(
     id: str,
-    _=Depends(require_roles("chief", "admin")),
+    _=Depends(require_roles("admin")),
     svc: WorkflowService = Depends(_svc),
 ):
     return await svc.suspend(id)
@@ -253,7 +253,7 @@ async def list_workflow_details(id: str, _=_staff, svc: WorkflowService = Depend
 async def create_workflow_detail(
     id: str,
     body: WorkflowDetailBody,
-    _=Depends(require_roles("chief", "admin")),
+    _=Depends(require_roles("admin")),
     svc: WorkflowService = Depends(_svc),
 ):
     data = body.dict(exclude_unset=True)
@@ -269,7 +269,7 @@ async def update_workflow_detail(
     id: str,
     detail_id: str,
     body: WorkflowDetailUpdate,
-    _=Depends(require_roles("agent", "chief", "admin")),
+    _=Depends(require_roles("agent", "admin")),
     svc: WorkflowService = Depends(_svc),
 ):
     return await svc.update_detail(detail_id, body.dict(exclude_unset=True))
@@ -290,7 +290,7 @@ async def accept_workflow_detail(
     id: str,
     detail_id: str,
     body: WorkflowDetailAcceptSchema,
-    actor=Depends(require_roles("agent", "chief", "director", "admin")),
+    actor=Depends(require_roles("agent", "admin")),
     svc: WorkflowService = Depends(_svc),
 ):
     return await svc.accept_detail(
@@ -335,7 +335,7 @@ async def get_current_step(
 async def create_circuit(
     id: str,
     body: list[WorkflowDetailStepSchema],
-    _=Depends(require_roles("chief", "admin")),
+    _=Depends(require_roles("admin")),
     svc: WorkflowService = Depends(_svc),
 ):
     steps = [s.dict(exclude_unset=True) for s in body]
@@ -429,7 +429,7 @@ async def search_all_workflow_details(
 )
 async def accepted_detail(
     body: AcceptedDetailBody,
-    actor=Depends(require_roles("agent", "chief", "director", "admin")),
+    actor=Depends(require_roles("agent", "admin")),
     svc: WorkflowService = Depends(_svc),
 ):
     return await svc.accept_detail(

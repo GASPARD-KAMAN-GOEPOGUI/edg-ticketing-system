@@ -84,6 +84,71 @@ if ($IpAddress) {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
+# 1 bis. MySQL — la base reste LOCALE (jamais exposée au réseau)
+#
+# Seul le backend lui parle, sur 127.0.0.1 : les appareils du réseau n'accèdent
+# qu'au frontend et à l'API. Exposer MySQL au LAN serait un risque inutile.
+# On se contente donc de vérifier qu'elle répond, et de démarrer son service
+# Windows si elle est à l'arrêt — sans quoi le backend échoue au démarrage.
+# ═══════════════════════════════════════════════════════════════════════════
+
+function Get-MySqlService {
+    # Le nom varie beaucoup selon la distribution : MySQL80, MySQL57, MariaDB,
+    # et surtout wampmysqld64 sous WAMP ou mysql sous XAMPP. On cherche donc
+    # "mysql"/"mariadb" N'IMPORTE OU dans le nom — une expression ancree sur le
+    # debut laisserait passer wampmysqld64, le cas le plus courant ici.
+    # Un service deja demarre est prefere : certaines machines en declarent
+    # plusieurs (une installation MySQL residuelle a cote de WAMP).
+    return Get-Service -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match 'mysql|mariadb' -or $_.DisplayName -match 'mysql|mariadb' } |
+        Sort-Object -Property @{Expression = { $_.Status -eq 'Running' }; Descending = $true} |
+        Select-Object -First 1
+}
+
+function Test-MySqlPort {
+    param([int]$Port = 3306)
+    try {
+        $client = New-Object System.Net.Sockets.TcpClient
+        $async = $client.BeginConnect("127.0.0.1", $Port, $null, $null)
+        $ok = $async.AsyncWaitHandle.WaitOne(1500, $false) -and $client.Connected
+        $client.Close()
+        return $ok
+    } catch {
+        return $false
+    }
+}
+
+if (Test-MySqlPort) {
+    Write-OK "MySQL repond sur 127.0.0.1:3306 (base locale, non exposee au reseau)."
+} else {
+    $svc = Get-MySqlService
+    if (-not $svc) {
+        Write-FAIL "MySQL ne repond pas sur 127.0.0.1:3306 et aucun service MySQL/MariaDB n'a ete trouve."
+        Write-INFO "Demarrez votre serveur MySQL (XAMPP/WAMP/Laragon : bouton Start du panneau), puis relancez."
+        exit 1
+    }
+    Write-INFO "MySQL est a l'arret (service '$($svc.Name)') — demarrage en cours…"
+    try {
+        Start-Service -Name $svc.Name -ErrorAction Stop
+    } catch {
+        Write-FAIL "Impossible de demarrer le service '$($svc.Name)' : $($_.Exception.Message)"
+        Write-INFO "Relancez ce script depuis un PowerShell EN ADMINISTRATEUR, ou demarrez MySQL a la main."
+        exit 1
+    }
+    $mysqlUp = $false
+    for ($i = 0; $i -lt 20; $i++) {
+        Start-Sleep -Seconds 1
+        if (Test-MySqlPort) { $mysqlUp = $true; break }
+    }
+    if ($mysqlUp) {
+        Write-OK "MySQL demarre (service '$($svc.Name)')."
+    } else {
+        Write-FAIL "Le service '$($svc.Name)' a ete demarre mais le port 3306 ne repond toujours pas."
+        exit 1
+    }
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
 # 2. Vérification des ports
 # ═══════════════════════════════════════════════════════════════════════════
 

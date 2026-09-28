@@ -19,7 +19,7 @@ import { AsyncSwap } from "@/components/async-states";
 import { cn, initialsFor, formatElapsedHours } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/transmitted")({
-  beforeLoad: () => requireRole("agent-support", "chief-service", "chief-departement", "director", "admin"),
+  beforeLoad: () => requireRole("chief-service", "technicien", "chef-division-support", "admin"),
   head: () => ({ meta: [{ title: "Tickets transmis — EDG Support" }] }),
   component: TransmittedTicketsPage,
 });

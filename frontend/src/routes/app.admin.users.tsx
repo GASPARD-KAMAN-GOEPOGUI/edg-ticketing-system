@@ -44,6 +44,7 @@ import {
   deleteUser,
 } from "@/lib/api/accounts";
 import type { AccountUser } from "@/lib/api/accounts";
+import { copyWithToast } from "@/lib/clipboard";
 import { fetchDepartments, fetchDirections, fetchUnits } from "@/lib/api/directions-units";
 import type { Department, Direction, Unit } from "@/lib/api/directions-units";
 import { toast } from "sonner";
@@ -70,7 +71,7 @@ export const Route = createFileRoute("/app/admin/users")({
 // Limité aux 3 rôles ayant une correspondance de groupe côté plateforme centrale
 // (admin-support / qualify-support / collaborateur-support) — chief-service,
 // chief-departement et director n'ont pas de groupe central pour le moment.
-const ROLES: Role[] = ["user", "agent-support", "admin"];
+const ROLES: Role[] = ["user", "chief-service", "technicien", "chef-division-support", "admin"];
 
 const statusBadge: Record<string, string> = {
   active: "bg-success/15 text-success",
@@ -90,6 +91,9 @@ type FormData = {
   role: Role;
   matricule: string;
   job: string;
+  /** PV d'intervention EDG/PS-GSI/PV-01 — titulaire | prestataire | stagiaire.
+   *  Qualifie l'intervenant, jamais le demandeur. */
+  intervenant_status: string;
   direction_id: string;
   department_id: string;
   unit_id: string;
@@ -104,6 +108,7 @@ const emptyForm = (): FormData => ({
   role: "user",
   matricule: "",
   job: "",
+  intervenant_status: "",
   direction_id: "",
   department_id: "",
   unit_id: "",
@@ -115,15 +120,17 @@ type OrgTarget = "direction" | "department" | "unit";
 
 const USER_FORM_ROLE_OPTIONS: Array<{ value: Role; label: string }> = [
   { value: "user", label: roleLabels.user },
-  { value: "agent-support", label: roleLabels["agent-support"] },
+  { value: "chief-service", label: roleLabels["chief-service"] },
+  { value: "technicien", label: roleLabels.technicien },
+  { value: "chef-division-support", label: roleLabels["chef-division-support"] },
   { value: "admin", label: roleLabels.admin },
 ];
 
-// Niveau organisationnel requis selon BR-ADMIN-USER-ORG-001 :
-// director -> direction ; chief-departement -> departement ; les autres -> service/unite.
-function orgTargetForRole(role: Role): OrgTarget {
-  if (role === "director") return "direction";
-  if (role === "chief-departement") return "department";
+// Niveau organisationnel requis selon BR-ADMIN-USER-ORG-001. Les deux roles qui
+// visaient un niveau superieur (director -> direction, chief-departement ->
+// departement) ont ete retires le 2026-09-25 : tous les roles restants sont
+// rattaches a un service/unite.
+function orgTargetForRole(_role: Role): OrgTarget {
   return "unit";
 }
 
@@ -389,6 +396,7 @@ function AdminUsers() {
       email: u.email,
       role: u.role as Role,
       matricule: u.matricule ?? "",
+      intervenant_status: u.intervenant_status ?? "",
       job: u.job ?? "",
       direction_id: assignment.direction_id,
       department_id: assignment.department_id,
@@ -418,6 +426,7 @@ function AdminUsers() {
       role: form.role,
       matricule: form.matricule || undefined,
       job: form.job || undefined,
+      intervenant_status: form.intervenant_status || undefined,
       ...buildOrgPayload(form),
       is_edg_employee: form.is_edg_employee,
     });
@@ -439,6 +448,7 @@ function AdminUsers() {
         role: form.role,
         matricule: form.matricule || undefined,
         job: form.job || undefined,
+        intervenant_status: form.intervenant_status || undefined,
         ...buildOrgPayload(form),
       },
     });
@@ -472,7 +482,7 @@ function AdminUsers() {
         {[
           { label: "Total", value: list.length },
           { label: "Actifs", value: list.filter((u) => u.account_status === "active").length },
-          { label: "Agents", value: list.filter((u) => u.role === "agent-support").length },
+          { label: "Agents", value: list.filter((u) => u.role === "chief-service" || u.role === "technicien" || u.role === "chef-division-support").length },
           { label: "Admins", value: list.filter((u) => u.role === "admin").length },
         ].map((s) => (
           <GlassCard key={s.label} className="py-4">
@@ -489,7 +499,7 @@ function AdminUsers() {
           <Input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Nom, email, matricule…"
+            placeholder="Nom, email, badge…"
             className="h-10 rounded-full pl-9"
           />
         </div>
@@ -740,7 +750,7 @@ function AdminUsers() {
                   variant="ghost"
                   className="h-7 w-7"
                   title="Copier"
-                  onClick={() => navigator.clipboard.writeText(resetResultPassword)}
+                  onClick={() => void copyWithToast(resetResultPassword, "Mot de passe copié")}
                 >
                   <Copy className="h-3.5 w-3.5" />
                 </Button>
@@ -956,12 +966,34 @@ function UserForm({
           </div>
         )}
         <div className="space-y-1.5">
-          <Label>Matricule</Label>
+          <Label>Badge</Label>
           <Input value={form.matricule} onChange={(e) => field("matricule", e.target.value)} placeholder="EDG-0000" />
         </div>
         <div className="space-y-1.5">
           <Label>Poste / Fonction</Label>
           <Input value={form.job} onChange={(e) => field("job", e.target.value)} placeholder="Ex. Technicien réseau" />
+        </div>
+        {/* PV d'intervention EDG/PS-GSI/PV-01, bloc « Affectation » — case à
+            cocher Titulaire / Prestataire, étendue à Stagiaire. Figé sur le PV
+            au moment de l'intervention : le modifier ici n'altère aucun PV
+            déjà produit. */}
+        <div className="space-y-1.5">
+          <Label>Statut d'intervenant</Label>
+          <Select
+            value={form.intervenant_status || "none"}
+            onValueChange={(v) => field("intervenant_status", v === "none" ? "" : v)}
+          >
+            <SelectTrigger><SelectValue placeholder="Non renseigné" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Non renseigné</SelectItem>
+              <SelectItem value="titulaire">Titulaire</SelectItem>
+              <SelectItem value="prestataire">Prestataire</SelectItem>
+              <SelectItem value="stagiaire">Stagiaire</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Reporté sur le PV d'intervention. Sans badge, le PV imprime le nom complet.
+          </p>
         </div>
       </div>
 

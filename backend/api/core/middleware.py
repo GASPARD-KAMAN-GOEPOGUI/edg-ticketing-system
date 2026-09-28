@@ -53,14 +53,22 @@ _SKIP_WRAP_PREFIXES: tuple[str, ...] = ("/api/v1/events",)
 
 def _make_500_response(method: str = "", path: str = "", exc: BaseException | None = None) -> JSONResponse:
     """
-    Retourne une réponse JSON 500 propre et logue UNE seule ligne d'erreur.
+    Retourne une réponse JSON 500 propre et logue l'erreur AVEC sa trace.
     Ne laisse jamais fuiter de détails techniques dans la réponse.
+
+    Deux exigences distinctes, à ne pas confondre :
+      - la RÉPONSE HTTP reste neutre (message générique, aucun détail interne) ;
+      - le LOG serveur, lui, doit tout dire.
+    Sans la trace, un log `KeyError: 'x'` n'indique ni le fichier ni la ligne :
+    le 500 devient impossible à diagnostiquer autrement qu'en reproduisant le bug
+    à l'aveugle. `exc_info` ajoute la pile d'appels au log seul.
     """
     cause = _unwrap_exception(exc) if exc is not None else None
 
     if cause is not None:
         _req_log.error(
-            f"❌ 500 {method:<6} {path} — {type(cause).__name__}: {str(cause)[:200]}"
+            f"❌ 500 {method:<6} {path} — {type(cause).__name__}: {str(cause)[:200]}",
+            exc_info=exc,
         )
     return JSONResponse(
         status_code=500,
@@ -162,12 +170,9 @@ _PATH_MESSAGES: dict[str, str] = {
     "/tasks":                   "Tâche",
     "/notifications":           "Notification",
     "/activity-logs":           "Journal d'activité",
-    "/knowledge":               "Article de connaissance",
-    "/announcements":           "Annonce",
     "/appreciations":           "Appréciation",
     "/employees":               "Employé",
     "/homepage-config":         "Configuration",
-    "/communication-settings":  "Paramètre de communication",
     "/stats":                   "Statistique",
     "/references":              "Référentiel",
 }
@@ -201,7 +206,8 @@ class ResponseWrapperMiddleware(BaseHTTPMiddleware):
             # est bien enregistré en dernier (= exécuté en premier).
             _wrap_log.error(
                 f"❌ Exception non capturée dans ResponseWrapper: "
-                f"{type(_unwrap_exception(exc)).__name__}"
+                f"{type(_unwrap_exception(exc)).__name__}",
+                exc_info=exc,
             )
             return _make_500_response(request.method, request.url.path, exc)
         except BaseException as exc:

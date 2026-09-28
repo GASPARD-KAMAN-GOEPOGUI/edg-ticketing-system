@@ -33,18 +33,26 @@ class NotificationRepository(BaseRepository[Notification]):
     ) -> tuple[list[Notification], int]:
         """Liste les notifications d'un destinataire avec filtres read/nature/visibility.
 
-        `archived=True` bascule vers les notifications archivées (deleted_at renseigné)
-        — jamais supprimées physiquement, juste masquées de la vue active par défaut.
+        `archived=True` renvoie les notifications DEJA LUES (`is_read`). Ce filtre
+        portait auparavant sur `deleted_at` : depuis le retrait de l'archivage
+        (2026-09-26, cf. RouteNotification.py), plus rien ne renseigne cette
+        colonne, la vue "Archivees" etait donc vide par construction. On ne
+        supprime jamais de notification : "archivee" designe desormais
+        simplement celles que l'utilisateur a deja consultees.
         """
         base = [
             Notification.recipient_id == recipient_id,
-            Notification.deleted_at.isnot(None) if archived else Notification.deleted_at.is_(None),
+            Notification.deleted_at.is_(None),
         ]
+        if archived:
+            base.append(Notification.is_read == True)  # noqa: E712
         if not _is_admin_role(actor_role):
             base.append(Notification.visibility == "public")
         if unread_only:
             base.append(Notification.is_read == False)  # noqa: E712
-        if nature == "annonce":
+        # "systeme" : notification non rattachee a un ticket (ex-"annonce",
+        # renomme au retrait des annonces — le critere, lui, est inchange).
+        if nature == "systeme":
             base.append(Notification.request_id.is_(None))
         elif nature == "demande":
             base.append(Notification.request_id.isnot(None))

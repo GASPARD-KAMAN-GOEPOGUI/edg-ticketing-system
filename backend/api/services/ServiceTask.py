@@ -64,7 +64,7 @@ class TaskService(BaseService):
         await emit_event(AppEvent(
             type="task.created",
             payload={"id": obj.id, "request_id": obj.request_id, "task_type": obj.task_type},
-            target={"roles": ["agent-support", "chief-service", "chief-departement", "admin"]},
+            target={"roles": ["chief-service", "technicien", "chef-division-support", "admin"]},
         ))
         return obj
 
@@ -85,7 +85,7 @@ class TaskService(BaseService):
         await emit_event(AppEvent(
             type="task.completed",
             payload={"id": id, "request_id": task.request_id},
-            target={"roles": ["agent-support", "chief-service", "chief-departement", "admin"]},
+            target={"roles": ["chief-service", "technicien", "chef-division-support", "admin"]},
         ))
         return obj
 

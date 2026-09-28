@@ -98,7 +98,7 @@ export function InterventionFilters({
             setSearchDraft(e.target.value);
             patch({ search: e.target.value });
           }}
-          placeholder="Rechercher (nom, matricule, travail, motif…)"
+          placeholder="Rechercher (nom, badge, travail, motif…)"
           aria-label="Rechercher dans le journal d'intervention"
           className="h-8 w-52 pl-8 text-xs sm:w-64"
         />

@@ -5,7 +5,9 @@ import { GlassCard } from "@/components/glass-card";
 import { motion, Reveal, Floating, fadeUp, stagger } from "@/components/motion-primitives";
 import { DEFAULT_CONFIG } from "@/lib/homepage-config";
 import type { SectionConfig } from "@/lib/homepage-config";
-import { fetchHomepageConfig, fetchSlides } from "@/lib/api/homepage";
+// Décâblage 2026-09-22 : fetchHomepageConfig / fetchSlides ne sont plus appelés
+// depuis cette page (voir le commentaire dans Home()). Les fonctions restent
+// disponibles dans @/lib/api/homepage pour un recâblage ultérieur.
 import type { HomepageSlide } from "@/lib/api/homepage";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -33,14 +35,6 @@ import {
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { AnimatePresence } from "framer-motion";
-import {
-  announcementPriorityLabels,
-  announcementCategoryLabels,
-  type Announcement,
-  type AnnouncementPriority,
-  type AnnouncementCategory,
-} from "@/lib/mock-data";
-import { fetchPublishedAnnouncements } from "@/lib/api/communication";
 import { fetchActiveDirectionsCount } from "@/lib/api/directions-units";
 
 export const Route = createFileRoute("/")({
@@ -182,7 +176,7 @@ function HowSection() {
       n: "02",
       icon: Users,
       title: "Prise en charge",
-      desc: "Un agent support prend le ticket depuis la file d'attente et le traite ; il peut le transmettre à un autre intervenant si nécessaire.",
+      desc: "Un chef de service prend le ticket depuis la file d'attente et le traite ; il peut le transmettre à un autre intervenant si nécessaire.",
     },
     {
       n: "03",
@@ -248,7 +242,7 @@ function TrustSection() {
     { icon: ShieldCheck,    t: "Sécurisé",    d: "Contrôle d'accès strict (RBAC), authentification JWT et biométrie optionnelle." },
     { icon: Clock,          t: "Temps réel",  d: "Notifications instantanées à chaque changement de statut de votre ticket." },
     { icon: CheckCircle2,   t: "Traçable",    d: "Historique complet et journal d'audit inviolable sur chaque ticket." },
-    { icon: HeartHandshake, t: "Collaboratif", d: "Un agent dédié pour chaque dossier, avec escalade automatique si nécessaire." },
+    { icon: HeartHandshake, t: "Collaboratif", d: "Un intervenant dédié pour chaque dossier, du dépôt à la clôture." },
   ] as const;
 
   return (
@@ -308,76 +302,6 @@ function TrustSection() {
 // ══════════════════════════════════════════════════════════════════════════════
 // Map section ID → composant de rendu
 // ══════════════════════════════════════════════════════════════════════════════
-
-// ══════════════════════════════════════════════════════════════════════════════
-// Carrousel des publications publiques
-// ══════════════════════════════════════════════════════════════════════════════
-
-const PRIORITY_CARD: Record<
-  AnnouncementPriority,
-  { bg: string; border: string; badge: string; bar: string; dot: string; Icon: typeof Info }
-> = {
-  critical: {
-    bg: "bg-gradient-to-br from-red-950/50 via-background/60 to-background/60",
-    border: "border-red-500/40",
-    badge: "bg-red-500/15 text-red-400 border-red-500/30",
-    bar: "bg-red-500",
-    dot: "bg-red-400",
-    Icon: AlertTriangle,
-  },
-  high: {
-    bg: "bg-gradient-to-br from-orange-950/40 via-background/60 to-background/60",
-    border: "border-orange-500/35",
-    badge: "bg-orange-500/15 text-orange-400 border-orange-500/30",
-    bar: "bg-orange-500",
-    dot: "bg-orange-400",
-    Icon: AlertTriangle,
-  },
-  medium: {
-    bg: "bg-gradient-to-br from-yellow-950/30 via-background/60 to-background/60",
-    border: "border-yellow-500/30",
-    badge: "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
-    bar: "bg-yellow-500",
-    dot: "bg-yellow-400",
-    Icon: Bell,
-  },
-  low: {
-    bg: "bg-card/60",
-    border: "border-border/40",
-    badge: "bg-muted/50 text-muted-foreground border-border/40",
-    bar: "bg-muted-foreground/40",
-    dot: "bg-muted-foreground/40",
-    Icon: Info,
-  },
-  absolute_emergency: {
-    bg: "bg-gradient-to-br from-red-950/70 via-background/60 to-background/60",
-    border: "border-red-400/60",
-    badge: "bg-red-400/20 text-red-300 border-red-400/40",
-    bar: "bg-red-400",
-    dot: "bg-red-300",
-    Icon: AlertTriangle,
-  },
-};
-
-const CATEGORY_ICON: Record<AnnouncementCategory, typeof Info> = {
-  general:       Info,
-  service_note:  FileText,
-  maintenance:   Wrench,
-  system_update: Zap,
-  training:      BookOpen,
-  security:      Shield,
-  alert:         Bell,
-  emergency:     AlertTriangle,
-  outage:        Zap,
-};
-
-const EASE_SMOOTH = [0.25, 0.46, 0.45, 0.94] as [number, number, number, number];
-
-const slideVars = {
-  enter:  (d: number) => ({ x: d > 0 ? "110%" : "-110%", opacity: 0 }),
-  center: { x: 0, opacity: 1, transition: { duration: 0.45, ease: EASE_SMOOTH } },
-  exit:   (d: number) => ({ x: d > 0 ? "-60%" : "60%",   opacity: 0, transition: { duration: 0.3 } }),
-};
 
 function SlidesCarousel({ slides }: { slides: HomepageSlide[] }) {
   const [idx, setIdx] = useState(0);
@@ -505,160 +429,6 @@ function SlidesCarousel({ slides }: { slides: HomepageSlide[] }) {
   );
 }
 
-function AnnouncementsCarousel({ items }: { items: Announcement[] }) {
-  const [idx, setIdx]     = useState(0);
-  const [dir, setDir]     = useState(1);
-  const [pbKey, setPbKey] = useState(0);
-
-  function go(to: number, d: number) {
-    setDir(d);
-    setIdx(to);
-    setPbKey((k) => k + 1);
-  }
-
-  function advance() {
-    setDir(1);
-    setIdx((c) => (c + 1) % items.length);
-    setPbKey((k) => k + 1);
-  }
-
-  const ann = items[idx];
-  const s   = PRIORITY_CARD[ann.priority];
-  const CatIcon = CATEGORY_ICON[ann.category] ?? Info;
-
-  return (
-    <section className="mx-auto mt-12 max-w-screen-2xl px-4 sm:mt-16 sm:px-8 lg:px-12">
-      <Reveal>
-        <div className="mb-5 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2.5">
-            <div className="rounded-xl bg-primary/10 p-2">
-              <Megaphone className="h-4 w-4 text-primary" />
-            </div>
-            <div>
-              <h2 className="font-semibold">Informations &amp; Actualités EDG</h2>
-              <p className="text-xs text-muted-foreground">Publications officielles de l'Électricité de Guinée</p>
-            </div>
-          </div>
-          {items.length > 1 && (
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => go((idx - 1 + items.length) % items.length, -1)}
-                className="rounded-xl border border-border/40 bg-card/60 p-1.5 transition-colors hover:bg-card"
-                aria-label="Précédent"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              <span className="min-w-[40px] text-center text-xs text-muted-foreground">
-                {idx + 1} / {items.length}
-              </span>
-              <button
-                onClick={() => go((idx + 1) % items.length, 1)}
-                className="rounded-xl border border-border/40 bg-card/60 p-1.5 transition-colors hover:bg-card"
-                aria-label="Suivant"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
-          )}
-        </div>
-      </Reveal>
-
-      <div className="relative overflow-hidden rounded-2xl">
-        <AnimatePresence mode="wait" custom={dir}>
-          <motion.div
-            key={ann.id}
-            custom={dir}
-            variants={slideVars}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            drag="x"
-            dragConstraints={{ left: 0, right: 0 }}
-            dragElastic={0.1}
-            onDragEnd={(_, info) => {
-              if (info.offset.x < -60)  go((idx + 1) % items.length, 1);
-              else if (info.offset.x > 60) go((idx - 1 + items.length) % items.length, -1);
-            }}
-            className="cursor-grab active:cursor-grabbing will-change-transform select-none"
-          >
-            <div className={`rounded-2xl border backdrop-blur-md p-6 sm:p-8 ${s.bg} ${s.border}`}>
-              {/* Badge row */}
-              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${s.badge}`}>
-                    <s.Icon className="h-3 w-3" />
-                    {announcementPriorityLabels[ann.priority]}
-                  </span>
-                  <span className="flex items-center gap-1.5 rounded-full border border-border/40 bg-background/50 px-3 py-1 text-xs text-muted-foreground">
-                    <CatIcon className="h-3 w-3" />
-                    {announcementCategoryLabels[ann.category]}
-                  </span>
-                </div>
-                <time className="text-xs text-muted-foreground">
-                  {new Date(ann.publishedAt).toLocaleDateString("fr-FR", {
-                    day: "numeric", month: "long", year: "numeric",
-                  })}
-                </time>
-              </div>
-
-              {/* Title */}
-              <h3 className="max-w-3xl text-xl font-bold leading-snug sm:text-2xl">
-                {ann.title}
-              </h3>
-
-              {/* Description */}
-              <p className="mt-3 line-clamp-3 max-w-3xl text-sm leading-relaxed text-muted-foreground sm:line-clamp-4">
-                {ann.description}
-              </p>
-
-              {/* Footer */}
-              <div className="mt-6 flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">
-                  Électricité de Guinée · {ann.authorName}
-                </span>
-                <Link
-                  to="/track"
-                  className="text-xs font-medium text-primary hover:underline underline-offset-2"
-                >
-                  Suivre mon ticket →
-                </Link>
-              </div>
-            </div>
-          </motion.div>
-        </AnimatePresence>
-
-        {/* Progress bar & dots */}
-        {items.length > 1 && (
-          <div className="mt-4 space-y-3">
-            <div className="h-1 overflow-hidden rounded-full bg-border/30">
-              <motion.div
-                key={`pb-${pbKey}`}
-                className={`h-full rounded-full ${s.bar}`}
-                initial={{ width: "0%" }}
-                animate={{ width: "100%" }}
-                transition={{ duration: 5, ease: "linear" }}
-                onAnimationComplete={advance}
-              />
-            </div>
-            <div className="flex justify-center gap-2">
-              {items.map((_, i) => (
-                <button
-                  key={i}
-                  onClick={() => go(i, i > idx ? 1 : -1)}
-                  className={`rounded-full transition-all duration-300 ${
-                    i === idx ? `h-2 w-6 ${s.dot}` : "h-2 w-2 bg-muted-foreground/25 hover:bg-muted-foreground/50"
-                  }`}
-                  aria-label={`Annonce ${i + 1}`}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
 function CustomSection({ id, title, content }: { id: string; title: string; content?: string }) {
   return (
     <section className="mx-auto mt-16 max-w-screen-lg px-4 sm:px-8" key={id}>
@@ -695,23 +465,21 @@ function renderSection(section: SectionConfig, missionText: string) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function Home() {
-  const { data: config = DEFAULT_CONFIG } = useQuery({
-    queryKey: ["homepage-config"],
-    queryFn: () => fetchHomepageConfig(),
-    staleTime: 5 * 60 * 1000,
-  });
-  const { data: announcementsData } = useQuery({
-    queryKey: ["announcements", "public"],
-    queryFn: () => fetchPublishedAnnouncements({ audience: "external", limit: 20 }),
-    staleTime: 5 * 60_000,
-  });
-  const publicAnnouncements = announcementsData?.items ?? [];
-
-  const { data: slides = [] } = useQuery({
-    queryKey: ["homepage-slides"],
-    queryFn: fetchSlides,
-    staleTime: 5 * 60_000,
-  });
+  // ── Appels décâblés de la page d'accueil publique (2026-09-22) ─────────────
+  // Trois requêtes ont été retirées d'ici car elles échouaient systématiquement
+  // et polluaient la console sans rien apporter à l'affichage :
+  //
+  //  1. GET /homepage-config/   → 404 : les tables du module "page d'accueil
+  //     personnalisable" n'existent pas en base. La fonction retombait déjà sur
+  //     DEFAULT_CONFIG, qui est donc utilisé directement ici.
+  //  2. GET /homepage/slides/   → 404 : même module inachevé. Repli sur [].
+  //
+  // Les fonctions du client API (fetchHomepageConfig / fetchSlides) sont
+  // conservées : elles restent utilisées par l'espace connecté et
+  // l'administration, et permettront de recâbler ici lorsque le module page
+  // d'accueil sera terminé.
+  const config = DEFAULT_CONFIG;
+  const slides: HomepageSlide[] = [];
 
   const { data: activeDirectionsCount, isLoading: dirCountLoading } = useQuery({
     queryKey: ["public-directions-count"],
@@ -883,11 +651,6 @@ function Home() {
 
       {/* ══════ CARROUSEL D'ACCUEIL — slides personnalisables par l'admin ══════ */}
       {slides.length > 0 && <SlidesCarousel slides={slides} />}
-
-      {/* ══════ PUBLICATIONS PUBLIQUES — carrousel animé ══════ */}
-      {publicAnnouncements.length > 0 && (
-        <AnnouncementsCarousel items={publicAnnouncements} />
-      )}
 
       {/* ══════ SECTIONS DYNAMIQUES — ordre et visibilité décidés par l'admin ══════ */}
       {visibleSections.map((s) => renderSection(s, config.missionText))}
