@@ -2620,3 +2620,72 @@ la signature du traitant et l'émargement portent maintenant la marque
 Le PV n'atteste donc plus « signature à apposer » mais « validation effectuée
 dans l'application » — **à confirmer côté métier** si ce document a une valeur
 probante.
+
+---
+
+## Session 2026-09-28 — Suppression des statuts `qualified`, `pending` et `escalated`
+
+### Contrôle préalable
+
+| Statut | Tickets porteurs | Atteignable |
+| --- | --- | --- |
+| `qualified` | 0 | non (retiré du workflow le 2026-09-26) |
+| `pending` | 0 | non |
+| `escalated` | 0 | non |
+
+Aucun ticket concerné : la précaution qui les gardait comme *sources* dans la
+matrice de transitions n'avait plus d'objet.
+
+### Backend
+
+| Fichier | Modification |
+| --- | --- |
+| `core/ticket_actions.py` | Retirés de `ALLOWED_TRANSITIONS` (cibles **et** sources), de `COLLABORATIVE_STATUSES`, de `QUALIFIABLE_STATUSES` ; alias `escaladed` supprimé |
+| `repositories/RepositoryRequest.py` | `_ACTIVE_STATUSES`, `_QUALIFIABLE_STATUSES` |
+| `services/ServiceRequest.py` | Entrées mortes de `_STATUS_EVENT_MAP`, `_STATUS_LABEL_MAP` et du tableau de notifications par statut |
+| `services/ServiceReport.py` | `ACTIVE_STATUS_CODES`, `BACKLOG_STATUS_CODES`, listes SQL `IN (...)`, compteurs |
+| `tests/api/test_ticket_actions.py` | Les 3 statuts passent des transitions **valides** aux transitions **refusées** ; assertion sur l'alias supprimée |
+
+`pending` a été **conservé partout où il désigne une tâche** (`TaskStatusEnum`,
+`ModelTask`, `RepositoryTask`) et `pending_validation`, statut distinct, est
+intact. Les compteurs d'agrégat des rapports (`escalated_total`, `pending_total`)
+sont laissés en place : les retirer impose de modifier les schémas de réponse et
+les écrans qui les affichent — ils renvoient désormais 0.
+
+### Frontend
+
+| Fichier | Modification |
+| --- | --- |
+| `lib/mock-data.ts` | Type `RequestStatus`, `statusOrder`, `statusLabels` ; données de démonstration réaffectées (`pending`/`escalated` → `in_progress`, `qualified` → `assigned`) |
+| `lib/capabilities.ts` | `TICKET_ACTION_STATUSES` ; **action `resume` supprimée** — elle ne s'appliquait qu'à `pending`, elle était devenue inatteignable |
+| `routes/app.requests.$id.tsx` | Mutation, drapeau, branches et bouton « Reprendre le traitement » |
+| `routes/app.index.tsx` | Listes de statuts actifs, tuiles « En attente » |
+| `routes/app.supervision.tsx` | Champ `pending` de `AgentStats`, colonne et carte « En attente » |
+| `routes/app.dg.tsx` | Onglet « En validation », compteur |
+| `app.my-tickets`, `app.sla-center`, `app.requests.index`, `status-badge` | Listes et libellés |
+
+Le retrait du type TypeScript a servi de **filet** : le compilateur a listé les
+45 usages restants, aucun n'a pu être oublié.
+
+Non touché — faux positifs de recherche : `escalation-progress-bar.tsx`, dont le
+`"pending"` désigne une **étape de progression** et non un statut de ticket (le
+composant reste utilisé par `app.requests.index` et `track`).
+
+### Base
+
+Les trois lignes de `request_status` sont **archivées** (soft-delete), après
+contrôle programmatique qu'aucun ticket ne les portait. Le seed ne les créait
+déjà plus depuis le 2026-09-26.
+
+### Vérification
+
+- `tsc` : **45 erreurs, exactement le niveau d'origine** — aucune ajoutée. Passé
+  par un pic à 90 (les usages révélés), ramené à 45.
+- `npm run build` : succès.
+- Tests : `test_ticket_actions`, `test_transmit_treatment`, `test_distribution`,
+  `test_reopen_queue`, `test_pv_intervention`, `test_field_check`,
+  `test_qualify_narrowing` → **146 réussis, 0 échec**. `test_ticket_actions`
+  passe de 57 à **62 réussis** : l'échec préexistant `[in_progress-pending]` est
+  réglé par la suppression elle-même.
+- Application vérifiée après archivage : file d'attente et listes répondent
+  normalement.

@@ -102,13 +102,10 @@ function totalStats(stats: RequestStats | undefined): number {
 const PERSONAL_ACTIVE_STATUSES = new Set<RequestItem["status"]>([
   "new",
   "qualifying",
-  "qualified",
   "assigned",
   "in_progress",
-  "pending",
   "resolved",
   "reopened",
-  "escalated",
 ]);
 
 function isActivePersonalRequest(request: RequestItem): boolean {
@@ -381,7 +378,6 @@ function AgentDashboard() {
   const queued = queueData?.items ?? [];
   const myRequests = myRequestsData?.items ?? [];
   const inProgress = assigned.filter((r) => r.status === "in_progress").length;
-  const pendingCount = assigned.filter((r) => r.status === "pending").length;
   const reopenedCount = assigned.filter((r) => r.status === "reopened").length;
 
   return (
@@ -395,7 +391,6 @@ function AgentDashboard() {
       </div>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <Stat label="En cours" value={inProgress} icon={Clock} tone="accent" loading={loadAssigned} hint="Mes tickets actifs" />
-        <Stat label="En attente" value={pendingCount} icon={MessageSquareWarning} tone="warning" loading={loadAssigned} hint="Attente demandeur" />
         <Stat label="Réouverts" value={reopenedCount} icon={ArrowUpRight} tone="warning" loading={loadAssigned} />
       </div>
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.55fr)]">
@@ -474,10 +469,9 @@ function ChiefDashboard() {
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
 
-  const ACTIVE_ST = ["new", "qualifying", "qualified", "assigned", "in_progress", "pending", "reopened"];
+  const ACTIVE_ST = ["new", "qualifying", "assigned", "in_progress", "reopened"];
   const open         = items.filter((r) => ACTIVE_ST.includes(r.status)).length;
   const inProgress   = items.filter((r) => r.status === "in_progress").length;
-  const pendingCount = items.filter((r) => r.status === "pending").length;
   const reopened     = items.filter((r) => r.status === "reopened").length;
   const critical     = items.filter((r) => r.priority === "critical" && ACTIVE_ST.includes(r.status)).length;
 
@@ -487,7 +481,6 @@ function ChiefDashboard() {
         <Stat label="Total service"   value={total}        icon={Inbox}               tone="primary"      loading={isLoading} hint={serviceId ? `Service ${serviceId}` : undefined} />
         <Stat label="Ouvertes"        value={open}         icon={Clock}               tone="accent"        loading={isLoading} />
         <Stat label="En cours"        value={inProgress}   icon={Clock}               tone="accent"       loading={isLoading} />
-        <Stat label="En attente"      value={pendingCount} icon={MessageSquareWarning} tone="warning"     loading={isLoading} />
         <Stat label="CSAT service"    value={(csat?.global ?? 0) > 0 ? `${csat!.global}/5` : "—"} icon={Star} tone="primary" />
       </div>
       <div className="grid grid-cols-2 gap-4">
@@ -508,7 +501,7 @@ function ChiefDashboard() {
   );
 }
 
-const GLOBAL_ACTIVE = new Set(["new", "qualifying", "qualified", "assigned", "in_progress", "pending", "reopened"]);
+const GLOBAL_ACTIVE = new Set(["new", "qualifying", "assigned", "in_progress", "reopened"]);
 
 function GlobalDashboard() {
   const { data: stats, isLoading } = useQuery({ queryKey: ["req-stats"], queryFn: fetchRequestStats, staleTime: 30_000 });
@@ -520,7 +513,7 @@ function GlobalDashboard() {
   });
 
   const total    = totalStats(stats);
-  const open     = sumStats(stats, ["new", "qualifying", "qualified", "assigned", "in_progress", "pending", "reopened"]);
+  const open     = sumStats(stats, ["new", "qualifying", "assigned", "in_progress", "reopened"]);
   const resolved = sumStats(stats, ["resolved", "closed"]);
 
   const allItems = allReqData?.items ?? [];
@@ -571,7 +564,7 @@ function AdminDashboard() {
   });
 
   const total  = totalStats(stats);
-  const open   = sumStats(stats, ["new", "qualifying", "qualified", "assigned", "in_progress", "pending", "reopened"]);
+  const open   = sumStats(stats, ["new", "qualifying", "assigned", "in_progress", "reopened"]);
 
   return (
     <>

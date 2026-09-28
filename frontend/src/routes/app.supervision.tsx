@@ -102,7 +102,6 @@ type AgentStats = {
   availability?: string;
   open: number;
   inProgress: number;
-  pending: number;
   slaBreached: number;
   critical: number;
 };
@@ -110,8 +109,7 @@ type AgentStats = {
 // ── Constantes ────────────────────────────────────────────────────────────────
 
 const ACTIVE_STATUSES = new Set([
-  "new", "qualifying", "qualified", "assigned",
-  "in_progress", "pending", "escalated", "reopened",
+  "new", "qualifying", "assigned", "in_progress", "reopened",
 ]);
 
 // ── Composant principal ────────────────────────────────────────────────────────
@@ -223,7 +221,6 @@ function SupervisionPage() {
         availability: agent.availability,
         open: openTickets.length,
         inProgress: openTickets.filter((t) => t.status === "in_progress").length,
-        pending: openTickets.filter((t) => t.status === "pending").length,
         slaBreached: openTickets.filter((t) => t.slaElapsed > t.slaHours).length,
         critical: openTickets.filter((t) => t.priority === "critical").length,
       };
@@ -379,7 +376,6 @@ function SupervisionPage() {
                   <th className="px-5 py-3 text-left font-semibold">Agent</th>
                   <th className="px-5 py-3 text-right font-semibold">Ouverts</th>
                   <th className="px-5 py-3 text-right font-semibold">En cours</th>
-                  <th className="px-5 py-3 text-right font-semibold">En attente</th>
                   <th className="px-5 py-3 text-right font-semibold">Critiques</th>
                   <th className="px-5 py-3 text-right font-semibold">Disponibilité</th>
                 </tr>
@@ -407,7 +403,6 @@ function SupervisionPage() {
                     </td>
                     <td className="px-5 py-3.5 text-right font-semibold">{a.open}</td>
                     <td className="px-5 py-3.5 text-right text-muted-foreground">{a.inProgress}</td>
-                    <td className="px-5 py-3.5 text-right text-muted-foreground">{a.pending}</td>
                     <td className="px-5 py-3.5 text-right">
                       {a.critical > 0
                         ? <span className="font-semibold text-destructive">{a.critical}</span>
@@ -454,7 +449,6 @@ function SupervisionPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-1 text-xs text-muted-foreground">
                   <span>En cours : <strong className="text-foreground">{a.inProgress}</strong></span>
-                  <span>En attente : <strong className="text-foreground">{a.pending}</strong></span>
                 </div>
               </GlassCard>
             ))}
@@ -751,7 +745,6 @@ function DirectorSupervisionCenter({
         <DirectorMetricCard label="À qualifier" value={(statusCount.qualifying ?? 0) + tickets.filter((t) => t.inTriage).length} icon={ListFilter} tone="warning" loading={loading} />
         <DirectorMetricCard label="Affectés" value={statusCount.assigned ?? 0} icon={UserCheck} tone="primary" loading={loading} />
         <DirectorMetricCard label="En cours" value={statusCount.in_progress ?? 0} icon={Activity} tone="primary" loading={loading} />
-        <DirectorMetricCard label="En attente" value={statusCount.pending ?? 0} icon={Timer} tone="warning" loading={loading} />
         <DirectorMetricCard label="Validés" value={statusCount.qualified ?? 0} icon={CheckCircle2} tone="success" loading={loading} />
         <DirectorMetricCard label="Résolus" value={statusCount.resolved ?? 0} icon={ClipboardList} tone="success" loading={loading} />
         <DirectorMetricCard label="Fermés" value={statusCount.closed ?? 0} icon={Flag} tone="success" loading={loading} />

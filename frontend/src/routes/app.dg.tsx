@@ -77,7 +77,7 @@ const PIE_COLORS = [
 ];
 
 const ACTIVE_STATUSES = new Set([
-  "new", "qualifying", "qualified", "assigned", "in_progress", "pending", "reopened",
+  "new", "qualifying", "assigned", "in_progress", "reopened",
 ]);
 
 const ALL_DIRECTIONS_VALUE = "all";
@@ -87,7 +87,6 @@ const STATUS_BUCKETS = [
   { key: "qualifying", label: "À qualifier", hint: "Dans la file d'orientation", tone: "border-warning/40 bg-warning/15 text-warning-foreground dark:text-warning" },
   { key: "assigned", label: "Affectés", hint: "Orientés ou assignés", tone: "border-primary/30 bg-primary/10 text-primary" },
   { key: "inProgress", label: "En traitement", hint: "Traitement actif ou rouvert", tone: "border-accent/30 bg-accent/10 text-accent-foreground" },
-  { key: "pending", label: "En validation", hint: "Attente de validation", tone: "border-muted-foreground/30 bg-muted/20 text-muted-foreground" },
   { key: "resolved", label: "Résolus", hint: "Résolution proposée", tone: "border-success/30 bg-success/10 text-success" },
   { key: "closed", label: "Fermés", hint: "Clôture confirmée", tone: "border-success/40 bg-success/15 text-success" },
 ] as const;
@@ -155,7 +154,6 @@ function GlobalView() {
       qualifying: 0,
       assigned: 0,
       inProgress: 0,
-      pending: 0,
       resolved: 0,
       closed: 0,
     };
@@ -163,9 +161,8 @@ function GlobalView() {
     items.forEach((r) => {
       if (r.status === "closed") summary.closed += 1;
       else if (r.status === "resolved") summary.resolved += 1;
-      else if (r.status === "pending") summary.pending += 1;
       else if (r.status === "in_progress" || r.status === "reopened") summary.inProgress += 1;
-      else if (r.status === "assigned" || r.status === "qualified") summary.assigned += 1;
+      else if (r.status === "assigned") summary.assigned += 1;
       else if (r.inTriage || r.status === "qualifying") summary.qualifying += 1;
       else if (r.status === "new") summary.new += 1;
     });

@@ -35,8 +35,7 @@ import { getUser } from "@/lib/session";
 import { prefetch } from "@/lib/prefetch";
 
 const ACTIVE_STATUSES: RequestStatus[] = [
-  "new", "qualifying", "qualified", "assigned",
-  "in_progress", "pending", "escalated", "reopened",
+  "new", "qualifying", "assigned", "in_progress", "reopened",
 ];
 const TERMINAL_STATUSES = "resolved,closed,cancelled,rejected";
 
@@ -188,14 +187,11 @@ function MyTicketsPage() {
 
   const onlyMyAssignedTickets = (items?: RequestItem[]) =>
     (items ?? []).filter((r) => r.assigneeId === currentUserId);
-  const mergeTickets = (assignedItems?: RequestItem[], scopedItems?: RequestItem[]) => {
+  // Le second paramètre servait aux escalades de périmètre, retirées avec le
+  // statut "escalated" (2026-09-28) ; la signature est conservée pour les appelants.
+  const mergeTickets = (assignedItems?: RequestItem[], _scopedItems?: RequestItem[]) => {
     const byId = new Map<string, RequestItem>();
     for (const item of onlyMyAssignedTickets(assignedItems)) byId.set(item.id, item);
-    if (includeScopedEscalations) {
-      for (const item of scopedItems ?? []) {
-        if (item.status === "escalated") byId.set(item.id, item);
-      }
-    }
     return Array.from(byId.values()).sort((a, b) => {
       const aDate = new Date(a.updatedAt ?? a.createdAt).getTime();
       const bDate = new Date(b.updatedAt ?? b.createdAt).getTime();

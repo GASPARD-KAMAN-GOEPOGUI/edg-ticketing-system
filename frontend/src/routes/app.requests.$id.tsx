@@ -247,7 +247,6 @@ export type RequestDetailContext = keyof typeof DETAIL_CONTEXTS;
 type DetailTab = "description" | "files" | "sla" | "treatment";
 type DirectTreatmentAction =
   | "selfAssign"
-  | "resume"
   | "close";
 
 // BR-TRANSMIT-001 — rôles pouvant devenir/rester "intervenant actuel" d'un ticket
@@ -1285,26 +1284,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     onSettled: () => invalidate(),
   });
 
-  const resumeMut = useMutation({
-    mutationFn: () => updateRequest(id, { request_status: "in_progress" }),
-    onMutate: async () => {
-      await qc.cancelQueries({ queryKey: requestQueryKey });
-      const previous = qc.getQueryData<RequestItem>(requestQueryKey);
-      qc.setQueryData<RequestItem>(requestQueryKey, (old) =>
-        old ? { ...old, status: "in_progress" } : old,
-      );
-      return { previous };
-    },
-    onSuccess: () => {
-      toast.success("Traitement repris.");
-      setDirectTreatmentAction(null);
-    },
-    onError: (err, _vars, context) => {
-      if (context?.previous) qc.setQueryData(requestQueryKey, context.previous);
-      toast.error(err instanceof Error ? err.message : "Impossible de reprendre le traitement.");
-    },
-    onSettled: () => invalidate(),
-  });
 
   const changePriorityMut = useMutation({
     mutationFn: (priority: string) => changeRequestPriority(id, priority),
@@ -1609,7 +1588,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   // traite aussi des tickets et doit avoir le même accès une fois assigné.
   const ownsTicket = !iAmRequester && isAssignedToMe && (role === "chief-service" || role === "technicien" || role === "chef-division-support" || role === "admin");
   const canRequestInfo = !isArchived && ownsTicket && canTicketAction(role, "request_info", r.status, ownershipOptions);
-  const canResumeTreatment = !isArchived && isAgentOnly && canTicketAction(role, "resume", r.status, ownershipOptions);
   // Escalade retirée le 2026-09-26 avec le statut "escalated" : l'endpoint
   // backend, le service et les modales n'existent plus. Les drapeaux
   // `canEscalateTicket` / `canEscalateToDirector` ont disparu avec eux.
@@ -1678,7 +1656,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const hasTreatmentActions = !isRequesterView && (
     (r.status === "reopened" && !r.assigneeId) ||
     canSelfAssign ||
-    canResumeTreatment ||
     canAssignTicket ||
     canChangePriority ||
     canRejectTicket ||
@@ -1706,14 +1683,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
           confirmLabel: "M'assigner",
           isPending: selfAssignMut.isPending,
         };
-      case "resume":
-        return {
-          icon: RotateCcw,
-          title: "Reprendre le traitement",
-          description: "Le ticket quittera l'attente et repassera en cours de traitement.",
-          confirmLabel: "Reprendre",
-          isPending: resumeMut.isPending,
-        };
       default:
         return null;
     }
@@ -1722,9 +1691,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     switch (directTreatmentAction) {
       case "selfAssign":
         selfAssignMut.mutate();
-        break;
-      case "resume":
-        resumeMut.mutate();
         break;
     }
   };
@@ -1929,23 +1895,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
         {/* C2 — Demander des informations : IN_PROGRESS, agent seulement.
             Volontairement indépendant de hasVisibleComments — c'est justement
             l'action qui crée le tout premier message de la conversation. */}
-        {/* C3 — Reprendre le traitement : PENDING, agent seulement */}
-        {canResumeTreatment && (
-          <button
-            type="button"
-            className="flex items-start gap-3 rounded-xl border border-info/40 bg-info/10 p-3 text-left transition hover:bg-info/15 disabled:opacity-60"
-            onClick={() => setDirectTreatmentAction("resume")}
-            disabled={resumeMut.isPending}
-          >
-            {resumeMut.isPending
-              ? <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-info" />
-              : <RotateCcw className="mt-0.5 h-4 w-4 shrink-0 text-info" />}
-            <span>
-              <span className="block text-sm font-semibold text-info">Reprendre le traitement</span>
-              <span className="text-xs text-muted-foreground">Sortir de l'attente</span>
-            </span>
-          </button>
-        )}
         {/* C6 — Assigner / réassigner : chef et admin seulement */}
         {canAssignTicket && (
           <button

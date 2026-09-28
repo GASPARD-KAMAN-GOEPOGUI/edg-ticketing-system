@@ -82,11 +82,8 @@ const priorityDotClass: Record<Priority, string> = {
 const PERSONAL_ACTIVE_STATUSES: RequestStatus[] = [
   "new",
   "qualifying",
-  "qualified",
   "assigned",
   "in_progress",
-  "pending",
-  "escalated",
   "resolved",
   "reopened",
 ];

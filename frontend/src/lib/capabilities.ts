@@ -71,7 +71,6 @@ export type TicketAction =
   | "requester_edit"
   | "self_assign"
   | "request_info"
-  | "resume"
   | "assign"
   | "resolve"
   | "transmit_treatment"
@@ -97,7 +96,6 @@ const TICKET_ACTION_ROLES: Record<TicketAction, Role[]> = {
   requester_edit: AUTHENTICATED_ROLES,
   self_assign: ["chief-service", "technicien", "chef-division-support"],
   request_info: ["chief-service", "technicien", "chef-division-support", "admin"],
-  resume: ["chief-service", "technicien", "chef-division-support", "admin"],
   assign: ["chief-service", "technicien", "chef-division-support", "admin"],
   // BR-TRANSMIT-001 (remplace Lot 3.2) : "Terminer le traitement" est réservé à
   // l'intervenant actuel (isAssignedToMe, voir canTicketAction ci-dessous) — chief-
@@ -132,7 +130,6 @@ const TICKET_ACTION_STATUSES: Record<TicketAction, RequestStatus[]> = {
   requester_edit: ["new", "qualifying"],
   self_assign: ["new", "qualifying", "reopened"],
   request_info: ["in_progress", "assigned"],
-  resume: ["pending"],
   assign: ["new", "qualifying", "reopened"],
   resolve: ["assigned", "in_progress"],
   transmit_treatment: ["assigned", "in_progress"],
