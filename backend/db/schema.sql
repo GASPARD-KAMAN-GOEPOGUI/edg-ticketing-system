@@ -82,6 +82,15 @@ CREATE TABLE IF NOT EXISTS request_status (
 CREATE INDEX idx_rs_order ON request_status (sort_order);
 CREATE INDEX idx_rs_status ON request_status (status, deleted_at);
 
+-- Table `revoked_token`
+CREATE TABLE IF NOT EXISTS revoked_token (
+	token_hash CHAR(64) NOT NULL, 
+	revoked_at DATETIME NOT NULL, 
+	expires_at DATETIME NOT NULL, 
+	PRIMARY KEY (token_hash)
+);
+CREATE INDEX idx_revoked_token_expires_at ON revoked_token (expires_at);
+
 -- Table `sla_policy`
 CREATE TABLE IF NOT EXISTS sla_policy (
 	category VARCHAR(50) NOT NULL, 

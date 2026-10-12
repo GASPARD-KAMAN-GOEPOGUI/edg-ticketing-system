@@ -40,8 +40,9 @@ from .ModelActivityLog import ActivityLog
 # ── Communication & CSAT (4) ─────────────────────────────────────────────────
 from .ModelAppreciation import Appreciation
 
-# ── Technique (1) ────────────────────────────────────────────────────────────
+# ── Technique (2) ────────────────────────────────────────────────────────────
 from .ModelAppLock import AppLock
+from .ModelRevokedToken import RevokedToken
 
 __all__ = [
     "RequestStatus", "RequestCategory", "PriorityDefinition",
@@ -49,5 +50,5 @@ __all__ = [
     "Request", "Attachment", "Workflow",
     "Task", "WorkflowDetail", "SlaPolicy",
     "RoutingRule", "Notification", "ActivityLog",
-    "Appreciation", "AppLock",
+    "Appreciation", "AppLock", "RevokedToken",
 ]

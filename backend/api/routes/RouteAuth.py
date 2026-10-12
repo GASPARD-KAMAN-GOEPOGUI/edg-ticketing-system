@@ -39,7 +39,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.core import central_auth, mailer, session_registry
+from api.core import central_auth, mailer, session_registry, token_revocation
 from api.core.client_ip import client_ip
 from api.core.exceptions import ValidationException
 from api.dependencies import (
@@ -506,6 +506,10 @@ async def accept_consent(
     summary="Obtenir un nouveau access token depuis le refresh token (relais central)",
 )
 async def refresh_token(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
+    # Refresh token révoqué par une déconnexion : refusé AVANT tout appel au
+    # central, qui l'accepterait jusqu'à son expiration.
+    if await token_revocation.is_revoked(db, body.refresh_token):
+        raise session_registry.SessionRevokedException(None)
     # Le central ignore les révocations locales : sans ce contrôle, un refresh
     # token antérieur à un changement de rôle ou à une désactivation produirait
     # un access token neuf et contournerait la révocation.
@@ -562,6 +566,9 @@ async def logout(
     # jusqu'à l'expiration de son entrée alors que l'utilisateur se déconnecte.
     if bearer_token:
         invalidate_central_auth_cache(bearer_token)
+    # Révocation côté serveur (access ET refresh), vue par tous les processus :
+    # le central, lui, accepterait ces jetons jusqu'à leur expiration.
+    await token_revocation.revoke_tokens(db, bearer_token, body.access_token, body.refresh_token)
 
     if current_user is not None:
         await _log_auth_event(

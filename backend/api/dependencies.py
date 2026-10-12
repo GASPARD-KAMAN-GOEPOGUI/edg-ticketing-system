@@ -40,7 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.configs.Database import AsyncSessionLocal
 from api.configs.Environment import get_environment
-from api.core import central_auth, session_registry
+from api.core import central_auth, session_registry, token_revocation
 from api.core.exceptions import EDGException
 from api.core.rbac import Permission, ROLE_GROUP_ALIASES, ROLE_PERMISSIONS, normalize_role
 
@@ -265,6 +265,10 @@ async def resolve_central_account(token: str, db: AsyncSession):
     (RouteSSE.py) — comportement strict inchangé, voir
     resolve_or_provision_login_account() pour le cas login.
     """
+    # Jeton révoqué par une déconnexion : refusé avant tout appel au central
+    # (et avant le cache des scopes, propre à chaque processus).
+    if await token_revocation.is_revoked(db, token):
+        raise session_registry.SessionRevokedException(None)
     scopes, groups = await _fetch_scopes_and_groups(token)
 
     central_user_id = scopes.get("user_id")
