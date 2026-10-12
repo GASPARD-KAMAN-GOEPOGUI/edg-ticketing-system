@@ -42,6 +42,15 @@ CREATE TABLE IF NOT EXISTS priority_definition (
 CREATE INDEX idx_prio_order ON priority_definition (sort_order);
 CREATE INDEX idx_prio_status ON priority_definition (status, deleted_at);
 
+-- Table `rate_limit_counter`
+CREATE TABLE IF NOT EXISTS rate_limit_counter (
+	key_hash CHAR(64) NOT NULL, 
+	count INTEGER NOT NULL, 
+	expires_at DATETIME NOT NULL, 
+	PRIMARY KEY (key_hash)
+)ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE INDEX idx_rate_limit_counter_expires_at ON rate_limit_counter (expires_at);
+
 -- Table `request_category`
 CREATE TABLE IF NOT EXISTS request_category (
 	code VARCHAR(50) NOT NULL, 
@@ -90,6 +99,16 @@ CREATE TABLE IF NOT EXISTS revoked_token (
 	PRIMARY KEY (token_hash)
 )ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE INDEX idx_revoked_token_expires_at ON revoked_token (expires_at);
+
+-- Table `session_binding`
+CREATE TABLE IF NOT EXISTS session_binding (
+	token_hash CHAR(64) NOT NULL, 
+	account_id INTEGER NOT NULL, 
+	version INTEGER NOT NULL, 
+	expires_at DATETIME NOT NULL, 
+	PRIMARY KEY (token_hash)
+)ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE INDEX idx_session_binding_expires_at ON session_binding (expires_at);
 
 -- Table `sla_policy`
 CREATE TABLE IF NOT EXISTS sla_policy (

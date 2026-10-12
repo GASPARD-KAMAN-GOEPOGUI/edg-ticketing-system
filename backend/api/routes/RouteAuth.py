@@ -387,8 +387,8 @@ async def login(
 
     # Nouvelle session : liée à la version courante du compte. Une révocation
     # ultérieure (rôle, désactivation) la rendra inutilisable.
-    await session_registry.bind_token(bearer_token, account)
-    await session_registry.bind_token(tokens.get("refresh_token"), account)
+    await session_registry.bind_token(bearer_token, account, db=db)
+    await session_registry.bind_token(tokens.get("refresh_token"), account, db=db)
 
     await _log_auth_event(
         db, actor=account.email, actor_id=account.id, actor_role=account.role,
@@ -482,8 +482,8 @@ async def accept_consent(
         )
 
     _ensure_account_active(account)
-    await session_registry.bind_token(bearer_token, account)
-    await session_registry.bind_token(body.refresh_token, account)
+    await session_registry.bind_token(bearer_token, account, db=db)
+    await session_registry.bind_token(body.refresh_token, account, db=db)
     await _log_auth_event(
         db, actor=account.email, actor_id=account.id, actor_role=account.role,
         action="consent_accept", target=f"account:{account.id}", ip_address=_client_ip(request),
@@ -514,7 +514,7 @@ async def refresh_token(body: RefreshRequest, db: AsyncSession = Depends(get_db)
     # token antérieur à un changement de rôle ou à une désactivation produirait
     # un access token neuf et contournerait la révocation.
     account = None
-    binding = await session_registry.get_binding(body.refresh_token)
+    binding = await session_registry.get_binding(body.refresh_token, db=db)
     if binding is not None:
         account = await AccountRepository(db).get_by_id(binding[0], include_deleted=True)
         if account is None:
@@ -538,8 +538,8 @@ async def refresh_token(body: RefreshRequest, db: AsyncSession = Depends(get_db)
         )
 
     if account is not None:
-        await session_registry.bind_token(tokens["bearer_token"], account)
-        await session_registry.bind_token(tokens.get("refresh_token"), account)
+        await session_registry.bind_token(tokens["bearer_token"], account, db=db)
+        await session_registry.bind_token(tokens.get("refresh_token"), account, db=db)
 
     return {
         "access_token": tokens["bearer_token"],

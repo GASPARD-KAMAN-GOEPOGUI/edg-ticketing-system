@@ -10,6 +10,7 @@ Stratégie :
 """
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncGenerator
 
 import pytest
@@ -17,7 +18,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.support import Base, FakeCentral, TestSession, _engine
+from tests.support import Base, FakeCentral, TestSession, _engine, use_mysql_state
 from api.main import app
 from api import dependencies
 from api.core import central_auth, session_registry
@@ -70,6 +71,10 @@ async def _isolated(monkeypatch):
     # Le client de test (ASGITransport) se connecte depuis 127.0.0.1 : déclaré
     # proxy de confiance pour que `login()` varie l'IP via X-Forwarded-For.
     monkeypatch.setattr(dependencies._env, "TRUSTED_PROXIES", ["127.0.0.1"])
+    # EDG_TEST_STATE_BACKEND=mysql : toute la suite tourne avec l'état partagé
+    # en base (session_binding, rate_limit_counter) — celui de la production cPanel.
+    if os.environ.get("EDG_TEST_STATE_BACKEND") == "mysql":
+        use_mysql_state(monkeypatch)
     session_registry.reset_for_tests()
     # Liaisons en mémoire, même si le .env local déclare REDIS_URL.
     session_registry._store._redis_checked = True

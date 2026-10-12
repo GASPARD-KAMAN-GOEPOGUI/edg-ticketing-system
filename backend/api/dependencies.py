@@ -40,7 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.configs.Database import AsyncSessionLocal
 from api.configs.Environment import get_environment
-from api.core import central_auth, session_registry, token_revocation
+from api.core import central_auth, session_registry
 from api.core.exceptions import EDGException
 from api.core.rbac import Permission, ROLE_GROUP_ALIASES, ROLE_PERMISSIONS, normalize_role
 
@@ -71,15 +71,32 @@ if _env.APP_ENV == "production" and not _env.DISABLE_AUTH and (
         "(APP_ENV=production) — configurez l'intégration manager-user dans votre .env de production."
     )
 
-# ── Garde REDIS_URL absent en production ───────────────────────────────────────
-# Sans Redis, le rate-limiter (RateLimitMiddleware) retombe en mode mémoire —
-# non partagé entre les workers gunicorn.
-if _env.APP_ENV == "production" and not _env.REDIS_URL:
-    raise RuntimeError(
-        "REDIS_URL est requis en production (APP_ENV=production). "
-        "Sans Redis, le rate-limiter n'est pas partagé entre les workers — "
-        "configurez REDIS_URL dans votre .env de production."
-    )
+# ── Garde état partagé en production ──────────────────────────────────────────
+# Sans stockage partagé, le rate-limiter (RateLimitMiddleware) et les liaisons
+# de session (session_registry) retombent en mémoire — non partagés entre les
+# workers/processus : limite multipliée, et un token révoqué serait accepté
+# par un processus qui ne l'a jamais vu. Production : REDIS_URL OU
+# STATE_BACKEND=mysql (cPanel sans Redis). Aucun autre assouplissement.
+def check_state_backend_config(env) -> None:
+    from api.core.state_backend import VALID_STATE_BACKENDS
+
+    backend = (env.STATE_BACKEND or "auto").strip().lower()
+    if backend not in VALID_STATE_BACKENDS:
+        raise RuntimeError(
+            f"STATE_BACKEND={env.STATE_BACKEND!r} invalide (valeurs : auto, redis, mysql)."
+        )
+    if backend == "redis" and not env.REDIS_URL:
+        raise RuntimeError("STATE_BACKEND=redis exige REDIS_URL.")
+    if env.APP_ENV == "production" and not env.REDIS_URL and backend != "mysql":
+        raise RuntimeError(
+            "REDIS_URL ou STATE_BACKEND=mysql est requis en production (APP_ENV=production). "
+            "Sans stockage partagé, la limitation des tentatives et la révocation de session "
+            "ne sont pas partagées entre les processus — configurez l'un des deux dans votre "
+            ".env de production."
+        )
+
+
+check_state_backend_config(_env)
 
 # OAuth2 scheme — tokenUrl utilisé par OpenAPI/Swagger uniquement
 oauth2_scheme = OAuth2PasswordBearer(
@@ -266,8 +283,10 @@ async def resolve_central_account(token: str, db: AsyncSession):
     resolve_or_provision_login_account() pour le cas login.
     """
     # Jeton révoqué par une déconnexion : refusé avant tout appel au central
-    # (et avant le cache des scopes, propre à chaque processus).
-    if await token_revocation.is_revoked(db, token):
+    # (et avant le cache des scopes, propre à chaque processus). La liaison de
+    # session est lue dans la même requête (STATE_BACKEND=mysql : une seule).
+    revoked, binding = await session_registry.load_token_state(db, token)
+    if revoked:
         raise session_registry.SessionRevokedException(None)
     scopes, groups = await _fetch_scopes_and_groups(token)
 
@@ -288,10 +307,10 @@ async def resolve_central_account(token: str, db: AsyncSession):
     # Contrôlé AVANT la synchro de groupes : les groupes d'un ancien token sont
     # en cache (CENTRAL_AUTH_CACHE_TTL) et reflètent l'ancien rôle — les laisser
     # synchroniser réécrirait en base le rôle que l'admin vient de changer.
-    await session_registry.ensure_token_current(token, account)
+    binding = await session_registry.ensure_token_current(token, account, db=db, binding=binding)
     account = await _sync_role_from_groups(account, groups, repo)
     # Rôle changé côté central par cette synchro : cette session est révoquée aussi.
-    await session_registry.ensure_token_current(token, account)
+    await session_registry.ensure_token_current(token, account, db=db, binding=binding)
     return account
 
 

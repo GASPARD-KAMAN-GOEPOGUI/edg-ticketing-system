@@ -29,6 +29,11 @@ class Environment(BaseSettings):
     # Redis — rate limiting distribué (optionnel)
     REDIS_URL: str = ""
 
+    # Stockage de l'état partagé entre processus (liaisons de session,
+    # limitation des tentatives) : auto | redis | mysql — voir
+    # api/core/state_backend.py. Production sans Redis : mysql.
+    STATE_BACKEND: str = "auto"
+
     # ClamAV — antivirus pour les pièces jointes (optionnel)
     CLAMAV_HOST: str = "localhost"
     CLAMAV_PORT: int = 3310

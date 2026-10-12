@@ -19,6 +19,7 @@ import api.models  # noqa: F401 — enregistre toutes les tables dans Base.metad
 from api.bootstrap import initialize
 from api.configs.Environment import get_environment
 from api.core import central_auth, register_exception_handlers
+from api.core import rate_limit_store, state_backend
 from api.core.client_ip import client_ip
 from api.core.event_bus import event_bus
 from api.core.middleware import RequestLoggingMiddleware, ResponseWrapperMiddleware
@@ -138,6 +139,19 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             logger.warning("RateLimitMiddleware Redis erreur : %s", exc)
             return False  # fail-open plutôt que bloquer en cas de panne Redis
 
+    async def _check_mysql(self, key: str, max_req: int, window_sec: int) -> bool:
+        """STATE_BACKEND=mysql : compteur partagé en base (rate_limit_counter).
+        Erreur de base -> passage autorisé, exactement comme le chemin Redis
+        (fail-open), mais journalisé en WARNING à chaque occurrence."""
+        from api.configs import Database
+
+        try:
+            count = await rate_limit_store.hit(Database.AsyncSessionLocal, key, window_sec)
+        except Exception as exc:
+            logger.warning("RateLimitMiddleware MySQL erreur (passage autorisé) : %s", exc)
+            return False
+        return count > max_req
+
     async def _check_memory(self, key: str, max_req: int, window_sec: int) -> bool:
         now = datetime.utcnow()
         cutoff = now - timedelta(seconds=window_sec)
@@ -161,12 +175,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         ip = client_ip(request) or "unknown"
         key = f"rl:{ip}:{path}"
 
-        redis_used = await self._get_redis() is not None
-        limited = (
-            await self._check_redis(key, max_req, window_sec)
-            if redis_used
-            else await self._check_memory(key, max_req, window_sec)
-        )
+        if state_backend.use_mysql():
+            limited = await self._check_mysql(key, max_req, window_sec)
+        else:
+            redis_used = await self._get_redis() is not None
+            limited = (
+                await self._check_redis(key, max_req, window_sec)
+                if redis_used
+                else await self._check_memory(key, max_req, window_sec)
+            )
 
         if limited:
             return JSONResponse(

@@ -19,11 +19,16 @@ Mécanisme (version de session) :
      y compris après une réactivation. Seule une nouvelle connexion produit un
      token valide.
 
-Stockage des liaisons : Redis si REDIS_URL est configuré (obligatoire en
-production, partagé entre workers), sinon mémoire du processus (développement).
-En mode mémoire, un redémarrage oublie les liaisons : les tokens existants sont
-re-liés à la version courante à leur prochaine utilisation. La vérification
-`account_status`/rôle en base, elle, reste appliquée à chaque requête.
+Stockage des liaisons (STATE_BACKEND, voir api/core/state_backend.py) :
+  - mysql : table `session_binding`, partagée entre processus, via la
+    session de la requête ; aucun repli en mémoire ;
+  - redis : Redis (REDIS_URL), partagé entre workers ;
+  - memory : mémoire du processus (développement monoprocessus). Un
+    redémarrage oublie les liaisons : les tokens existants sont re-liés à la
+    version courante à leur prochaine utilisation — INACCEPTABLE avec
+    plusieurs processus (un token révoqué serait accepté par un processus qui
+    ne l'a jamais vu), d'où la garde de production.
+La vérification `account_status`/rôle en base reste appliquée à chaque requête.
 """
 from __future__ import annotations
 
@@ -31,13 +36,19 @@ import hashlib
 import json
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
+from sqlalchemy import literal, select, union_all
+from sqlalchemy.exc import IntegrityError
+
 from api.configs.Environment import get_environment
+from api.core import state_backend, token_revocation
 from api.core.error_codes import ErrorCode
 from api.core.event_bus import AppEvent, queue_after_commit
 from api.core.exceptions import UnauthorizedException
+from api.models.ModelRevokedToken import RevokedToken
+from api.models.ModelSessionBinding import SessionBinding
 
 logger = logging.getLogger(__name__)
 _env = get_environment()
@@ -173,6 +184,10 @@ def _token_key(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 class _BindingStore:
     def __init__(self) -> None:
         self._memory: dict[str, tuple[float, int, int]] = {}
@@ -194,7 +209,47 @@ class _BindingStore:
             self._redis = None
         return self._redis
 
-    async def get(self, key: str) -> Optional[tuple[int, int]]:
+    # ── MySQL (STATE_BACKEND=mysql) ──────────────────────────────────────────
+
+    @staticmethod
+    def _require_db(db):
+        if db is None:
+            raise RuntimeError("session_registry : STATE_BACKEND=mysql exige la session de base de la requête.")
+        return db
+
+    async def _mysql_get(self, key: str, db) -> Optional[tuple[int, int]]:
+        row = (await self._require_db(db).execute(
+            select(SessionBinding.account_id, SessionBinding.version)
+            .where(SessionBinding.token_hash == key, SessionBinding.expires_at > _utcnow())
+        )).first()
+        return (int(row[0]), int(row[1])) if row else None
+
+    async def _mysql_set(self, key: str, account_id: int, version: int, *, only_if_absent: bool, db) -> None:
+        db = self._require_db(db)
+        expires_at = _utcnow() + timedelta(seconds=_BINDING_TTL_SECONDS)
+        if not only_if_absent:
+            await db.merge(SessionBinding(token_hash=key, account_id=account_id, version=version, expires_at=expires_at))
+            await db.flush()
+            return
+        # Insertion atomique « si absent » : la clé primaire arbitre entre deux
+        # processus concurrents ; le savepoint évite d'invalider la transaction
+        # de la requête en cas de doublon. Une liaison expirée est remplacée.
+        existing = await db.get(SessionBinding, key)
+        if existing is not None:
+            if existing.expires_at > _utcnow():
+                return
+            existing.account_id, existing.version, existing.expires_at = account_id, version, expires_at
+            await db.flush()
+            return
+        try:
+            async with db.begin_nested():
+                db.add(SessionBinding(token_hash=key, account_id=account_id, version=version, expires_at=expires_at))
+        except IntegrityError:
+            pass  # lié entre-temps par un autre processus : sa liaison fait foi
+
+    async def get(self, key: str, db=None) -> Optional[tuple[int, int]]:
+        if state_backend.use_mysql():
+            return await self._mysql_get(key, db)
         redis = await self._get_redis()
         if redis is not None:
             try:
@@ -211,7 +266,10 @@ class _BindingStore:
             return None
         return entry[1], entry[2]
 
-    async def set(self, key: str, account_id: int, version: int, *, only_if_absent: bool = False) -> None:
+    async def set(self, key: str, account_id: int, version: int, *, only_if_absent: bool = False, db=None) -> None:
+        if state_backend.use_mysql():
+            await self._mysql_set(key, account_id, version, only_if_absent=only_if_absent, db=db)
+            return
         redis = await self._get_redis()
         if redis is not None:
             try:
@@ -245,31 +303,58 @@ class _BindingStore:
 _store = _BindingStore()
 
 
-async def bind_token(token: str | None, account) -> None:
+async def bind_token(token: str | None, account, *, db=None) -> None:
     """Lie un token relayé par EDG Connect à la version courante du compte."""
     if not token or account is None:
         return
-    await _store.set(_token_key(token), int(account.id), session_version(account))
+    await _store.set(_token_key(token), int(account.id), session_version(account), db=db)
 
 
-async def get_binding(token: str) -> Optional[tuple[int, int]]:
-    return await _store.get(_token_key(token))
+async def get_binding(token: str, *, db=None) -> Optional[tuple[int, int]]:
+    return await _store.get(_token_key(token), db=db)
 
 
-async def ensure_token_current(token: str, account) -> None:
+async def load_token_state(db, token: str) -> tuple[bool, Optional[tuple[int, int]]]:
+    """(révoqué par une déconnexion ?, liaison) pour un token.
+
+    STATE_BACKEND=mysql : UNE seule requête (UNION ALL revoked_token +
+    session_binding) — c'est le surcoût par requête authentifiée. Autres
+    modes : contrôle de révocation en base, liaison en Redis/mémoire."""
+    if not state_backend.use_mysql():
+        return await token_revocation.is_revoked(db, token), await get_binding(token, db=db)
+    key, now = _token_key(token), _utcnow()
+    revoked_q = select(literal("r").label("kind"), literal(0).label("a"), literal(0).label("v")).where(
+        RevokedToken.token_hash == key, RevokedToken.expires_at > now,
+    )
+    binding_q = select(
+        literal("b").label("kind"), SessionBinding.account_id.label("a"), SessionBinding.version.label("v"),
+    ).where(SessionBinding.token_hash == key, SessionBinding.expires_at > now)
+    rows = (await db.execute(union_all(revoked_q, binding_q))).all()
+    revoked = any(r.kind == "r" for r in rows)
+    binding = next(((int(r.a), int(r.v)) for r in rows if r.kind == "b"), None)
+    return revoked, binding
+
+
+_UNKNOWN: Any = object()
+
+
+async def ensure_token_current(token: str, account, *, db=None, binding=_UNKNOWN) -> Optional[tuple[int, int]]:
     """Refuse un token lié à une version antérieure du compte (ou à un autre
-    compte). Un token inconnu est lié à la version courante."""
-    binding = await get_binding(token)
+    compte). Un token inconnu est lié à la version courante. `binding` : valeur
+    déjà lue (load_token_state) pour éviter une requête. Retourne la liaison."""
+    if binding is _UNKNOWN:
+        binding = await get_binding(token, db=db)
     if binding is None:
         await _store.set(
-            _token_key(token), int(account.id), session_version(account), only_if_absent=True,
+            _token_key(token), int(account.id), session_version(account), only_if_absent=True, db=db,
         )
-        binding = await get_binding(token)
+        binding = await get_binding(token, db=db)
         if binding is None:
-            return
+            return None
     bound_account_id, bound_version = binding
     if bound_account_id != int(account.id) or bound_version != session_version(account):
         raise SessionRevokedException(revoked_reason(account))
+    return binding
 
 
 def reset_for_tests() -> None:

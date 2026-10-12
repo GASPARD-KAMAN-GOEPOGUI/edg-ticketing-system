@@ -73,7 +73,7 @@ async def run_cycle(*, session_factory=None, drain_emails: bool = True) -> int:
     """Un cycle complet sous verrou. Retourne 0 aussi quand le verrou est déjà
     pris (cycle précédent en cours) : ce n'est pas une erreur pour le cron."""
     from api.configs import Database
-    from api.core import app_lock
+    from api.core import app_lock, state_cleanup
     from api.core.scheduler import _job_auto_close, _job_auto_validation
     from api.services.NotificationEmitter import drain_background_emails
 
@@ -89,6 +89,8 @@ async def run_cycle(*, session_factory=None, drain_emails: bool = True) -> int:
         # PV avant la fermeture J+4.
         await _job_auto_validation()
         await _job_auto_close()
+        purged = await state_cleanup.purge_expired(session_factory)
+        logger.info("Purge des entrées expirées : %s", purged)
         if drain_emails:
             unfinished = await drain_background_emails(EMAIL_DRAIN_TIMEOUT_SECONDS)
             if unfinished:

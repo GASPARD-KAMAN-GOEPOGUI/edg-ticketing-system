@@ -133,3 +133,12 @@ def drain(q) -> list[dict]:
     while not q.empty():
         items.append(q.get_nowait())
     return items
+
+
+def use_mysql_state(monkeypatch) -> None:
+    """STATE_BACKEND=mysql sur la base de test : liaisons de session et
+    compteurs de tentatives en tables, sans aucune mémoire de processus."""
+    from api.configs import Database, Environment
+
+    monkeypatch.setattr(Environment.get_environment(), "STATE_BACKEND", "mysql")
+    monkeypatch.setattr(Database, "AsyncSessionLocal", TestSession)
