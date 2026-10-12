@@ -164,12 +164,18 @@ export async function fetchMe(): Promise<AccountUser> {
   return mapAccount(raw);
 }
 
+export async function checkPhone(phone: string, excludeId?: string): Promise<boolean> {
+  const params = new URLSearchParams({ phone });
+  if (excludeId) params.set("exclude_id", excludeId);
+  const result = await apiFetch<{ phone?: boolean }>(`/accounts/check-duplicate?${params}`);
+  return result.phone === true;
+}
+
 export async function updateMe(
   data: Partial<{
     name: string;
     firstname: string;
     phone: string;
-    email: string;
     avatar_url: string;
     job: string;
     matricule: string;

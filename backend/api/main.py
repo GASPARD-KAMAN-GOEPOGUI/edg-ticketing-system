@@ -20,6 +20,7 @@ from api.configs.Database import engine, AsyncSessionLocal
 from api.configs.Environment import get_environment
 from api.models.base import Base
 from api.core import central_auth, register_exception_handlers
+from api.core.event_bus import event_bus
 from api.core.middleware import RequestLoggingMiddleware, ResponseWrapperMiddleware
 from api.core.scheduler import start_scheduler, stop_scheduler
 from api.seed_references import seed_references
@@ -201,9 +202,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await seed_references(session)
         await seed_admin(session)
         await session.commit()
+    await event_bus.start(env.REDIS_URL)
     start_scheduler(interval_minutes=10)
     yield
     stop_scheduler()
+    await event_bus.stop()
     # Libère les connexions keep-alive vers la plateforme centrale.
     await central_auth.close_central_client()
     logger.info("Arrêt de %s", env.APP_NAME)

@@ -7,7 +7,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.core.event_bus import AppEvent, emit as emit_event
+from api.core.event_bus import AppEvent, emit as emit_event, queue_after_commit
 from api.repositories.RepositoryNotification import NotificationRepository
 
 logger = logging.getLogger(__name__)
@@ -127,7 +127,7 @@ async def emit(
                     "action_url": action_url,
                     "visibility": visibility,
                 }, commit=commit)
-                await emit_event(AppEvent(
+                notification_event = AppEvent(
                     type="notification.created",
                     payload={
                         "id": obj.id,
@@ -136,7 +136,11 @@ async def emit(
                         "type": type,
                     },
                     target={"user_ids": [recipient_id_int]},
-                ))
+                )
+                if commit:
+                    await emit_event(notification_event)
+                else:
+                    queue_after_commit(session, notification_event)
 
                 # Email automatique, sauf opt-out explicite de l'appelant
                 # (send_email=False, BR-NOTIFICATION-WORKFLOW-001 §22 — App-only
@@ -257,11 +261,15 @@ async def emit_bulk(
         for rid in ids
     ], commit=commit)
 
-    await emit_event(AppEvent(
+    notification_event = AppEvent(
         type="notification.created",
         payload={"title": title, "type": type, "request_id": request_id},
         target={"user_ids": ids},
-    ))
+    )
+    if commit:
+        await emit_event(notification_event)
+    else:
+        queue_after_commit(session, notification_event)
 
     if send_email:
         try:

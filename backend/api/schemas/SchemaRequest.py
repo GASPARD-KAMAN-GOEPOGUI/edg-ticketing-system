@@ -244,6 +244,12 @@ class RequestResponse(_RequestCommonFields):
     # l'y ajouter obligerait à effacer le champ à chacun d'eux, et le premier
     # endpoint ajouté ensuite fuirait. Il est donc servi par un endpoint dédié et
     # gardé, `GET /requests/{id}/proposed-solution`.
+    # BR-DISTRIBUTION-001 — chef de division support à qui le ticket a été
+    # imputé. Nécessaire au frontend pour savoir que le ticket vit dans la file
+    # « Distribution » de cette personne, et l'ouvrir depuis ce menu-là quand
+    # elle clique sur la notification qui le concerne. Absent des schémas de
+    # liste : seule la fiche a besoin de cette décision.
+    distributor_id: Optional[int] = None
     timelines: list[WorkflowDetailResponse] = []
     appreciation: Optional[AppreciationResponse] = None
     sla_cycles: list[SlaCycleResponse] = []

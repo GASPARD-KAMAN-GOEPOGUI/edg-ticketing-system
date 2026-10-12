@@ -322,6 +322,22 @@ Le tableau de bord devra afficher :
 - performance agents ;
 - statistiques SLA.
 
+**Ma boîte de traitement** (2026-10-06) — chaque intervenant dispose de cinq
+indicateurs personnels, calculés par le serveur à partir des données réelles des
+tickets, et toujours égaux au nombre de tickets de la liste qu'ils résument :
+
+| Indicateur | Définition |
+| --- | --- |
+| À démarrer | Tickets qui me sont assignés, traitement pas encore démarré |
+| En cours | Tickets qui me sont assignés, traitement démarré |
+| Total résolus | Tickets dont je suis l'intervenant, résolus ou clôturés |
+| Transmis | Tickets que j'ai cédés et dont je ne suis plus l'intervenant |
+| Retransmis | Parmi les transmis : tickets revenus à moi puis cédés de nouveau |
+
+À démarrer + En cours = le contenu de la boîte. Un ticket n'est jamais compté
+dans deux indicateurs (Retransmis est un sous-ensemble de Transmis). Les
+indicateurs se mettent à jour à chaque transition du ticket.
+
 ### 10.3 Notifications
 
 Notifications par :
@@ -493,6 +509,17 @@ Le système devra garantir :
 - sauvegarde des données ;
 - gestion des sessions.
 
+**Révocation immédiate des sessions (2026-10-06).** Toute modification critique
+d'un compte par un administrateur — changement de rôle, désactivation,
+suppression — invalide sur-le-champ les sessions ouvertes de ce compte, côté
+serveur : l'ancien jeton (et son jeton de rafraîchissement) est refusé, même
+après une réactivation. L'utilisateur connecté est déconnecté en temps réel,
+redirigé vers la page de connexion avec un message explicite (« Votre rôle a
+été modifié… », « Votre compte a été désactivé… »), et retrouve à la
+reconnexion son rôle et son espace actuels. Un compte désactivé ne peut plus se
+connecter. Les écrans d'administration des comptes se synchronisent en temps
+réel entre administrateurs. Les autres utilisateurs ne sont pas affectés.
+
 ---
 
 ## 14. Rapports & Statistiques
@@ -577,3 +604,6 @@ La mise en place de cette application de Ticketing/Support permettra à la DSI d
 | 2026-09-24 | Retrait de la table **`communication_setting`** (migration Alembic `027`), table vide et singleton dont seules 3 colonnes sur 9 étaient consommées (`email_on`, `sms_on`, `sender_sms`). Les gardes étaient en *fail-open* : le comportement d'envoi est **inchangé**. Conséquence assumée : plus de coupe-circuit en base pour les mails et SMS — la coupure passe désormais par `SMTP_HOST` / `SMS_GATEWAY_URL` vides dans `.env`, donc un redémarrage. Écran `/app/admin/communication` supprimé (il n'était lié à aucun menu). **`activity_log` est conservée** — exigence §10.5 et §13 sur la journalisation des connexions — détails techniques dans `docs/mise-a-jour-backend.md`. |
 | 2026-09-24 | Retrait des fonctionnalités **Base de connaissance** (§11.3) et **Annonces institutionnelles** (§11.4), ainsi que du référentiel *Statuts de compte*. Huit tables supprimées (migration Alembic `026`), aucune donnée métier perdue (`announcement` et `knowledge_article` étaient vides). La colonne `account.account_status` est conservée mais n'est plus validée contre un référentiel. Rouvre l'écart CDC **DG5** (panneau « Annonce globale » de l'espace DG), retrait assumé — détails techniques dans `docs/mise-a-jour-backend.md`. |
 | 2026-09-22 | Figeage des identités organisationnelles (§10.5) : celles du demandeur à la création, celles de l'organisation traitante à la qualification. Une mutation de personnel ou une réorganisation de l'organigramme ne réécrit plus rétroactivement l'historique des tickets. Complète le figeage des intervenants (BR-TRACE-001) déjà en place — détails techniques dans `docs/mise-a-jour-backend.md`. |
+| 2026-10-06 | Fiabilisation des indicateurs de **Ma boîte de traitement** (§10.2) : source de vérité unique calculée par le serveur, ajout de l'indicateur « À démarrer », correction de « Total résolus » (toujours à 0) et redéfinition de « Retransmis » (ticket revenu puis cédé de nouveau) — détails techniques dans `docs/mise-a-jour-backend.md`. |
+| 2026-10-06 | Révocation immédiate des sessions après changement de rôle, désactivation ou suppression d'un compte (§13) : déconnexion forcée en temps réel du seul compte concerné, ancien jeton refusé côté serveur, synchronisation temps réel du Backoffice entre administrateurs — détails techniques dans `docs/mise-a-jour-backend.md`. |
+| 2026-10-08 | Accueil connecté (`/app`) mis à jour en temps réel, compteurs calculés côté serveur (exacts sans plafond) ; portail public et accueil allégés (animations CSS, graphique sans librairie) — exigences §15 « performances optimisées » — détails techniques dans `docs/mise-a-jour-backend.md`. |

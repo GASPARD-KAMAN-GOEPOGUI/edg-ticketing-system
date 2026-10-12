@@ -14,6 +14,8 @@
  *  ["sla-center"]     → centre SLA
  */
 
+import type { QueryClient } from "@tanstack/react-query";
+
 export type QueryKeyPrefix = readonly unknown[];
 
 /** Toutes les listes de tickets de l'application.
@@ -35,14 +37,16 @@ const TICKET_LISTS: QueryKeyPrefix[] = [
   ["pv-tracking"],          // Suivi des interventions
   ["requests-history"],     // Historique
   ["tickets-supervision"],  // Supervision
+  ["my-requests"],          // Accueil /app — tickets récents
 ];
 
 /** Compteurs, badges et statistiques dérivés des tickets : ils vieillissent
  *  exactement au même rythme que les listes ci-dessus. */
 const TICKET_COUNTERS: QueryKeyPrefix[] = [
+  // Les KPIs de Ma boîte vivent sous ["my-tickets", "kpis", …] : couverts par
+  // ["my-tickets"] ci-dessus, ils se rafraîchissent toujours avec la liste.
   ["my-tickets-stats"],
-  ["my-tickets-transmitted-count"],
-  ["my-tickets-retransmitted-count"],
+  ["my-requests-stats"],    // Accueil /app — compteurs et répartition
   ["my-stats"],
   ["stats"],
   ["dashboard-stats"],
@@ -50,6 +54,31 @@ const TICKET_COUNTERS: QueryKeyPrefix[] = [
 ];
 
 const TICKET_TOUCHED: QueryKeyPrefix[] = [...TICKET_LISTS, ...TICKET_COUNTERS];
+
+/** À appeler après TOUTE action qui modifie un ticket.
+ *
+ *  Le SSE invalide déjà ces clés, mais seulement quand la connexion temps réel
+ *  est active : sans cet appel local, une coupure SSE laissait l'auteur de
+ *  l'action devant des listes et des KPIs périmés. Même liste que le temps
+ *  réel — une seule définition de « ce qu'une action sur un ticket périme ». */
+export function invalidateTicketQueries(qc: Pick<QueryClient, "invalidateQueries">): void {
+  for (const queryKey of TICKET_TOUCHED) {
+    qc.invalidateQueries({ queryKey });
+  }
+}
+
+/** Écrans dérivés des comptes utilisateurs. La page Backoffice lit
+ *  ["admin", "users", …] : absente d'ici jusqu'au 2026-10-06, elle ne se
+ *  synchronisait pas entre administrateurs. */
+const USER_TOUCHED: QueryKeyPrefix[] = [
+  ["admin", "users"],       // Backoffice : liste, filtres, organigramme
+  ["users"],                // annuaire / lots d'utilisateurs
+  ["user"],                 // fiche d'un compte
+  ["users-audit"],          // audit des comptes
+  ["me"],                   // profil de l'utilisateur concerné
+  ["agents-supervision"],
+  ["chiefs-supervision"],
+];
 
 export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
   // ── Demandes ────────────────────────────────────────────────────────────────
@@ -126,11 +155,17 @@ export const INVALIDATION_MAP: Record<string, QueryKeyPrefix[]> = {
   "notification.read": [
     ["notifications"],
   ],
+  "notification.restored": [
+    ["notifications"],
+  ],
 
   // ── Utilisateurs ─────────────────────────────────────────────────────────────
-  "user.created": [["users"], ["agents-supervision"], ["chiefs-supervision"]],
-  "user.updated": [["users"], ["agents-supervision"], ["chiefs-supervision"]],
-  "user.deleted": [["users"], ["agents-supervision"], ["chiefs-supervision"]],
+  // Émis après commit par ServiceAccount vers tous les admins (Backoffices
+  // ouverts simultanément) et vers le compte concerné (son propre profil). Le
+  // payload ne porte que l'id : les écrans refetch, la base reste la référence.
+  "user.created": USER_TOUCHED,
+  "user.updated": USER_TOUCHED,
+  "user.deleted": USER_TOUCHED,
 
   // ── Référentiels ─────────────────────────────────────────────────────────────
   "reference.updated": [["references"]],

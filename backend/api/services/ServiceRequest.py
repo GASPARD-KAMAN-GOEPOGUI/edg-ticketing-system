@@ -821,6 +821,10 @@ class RequestService(BaseService):
         )
         return self.paginate(self._serialize(items), total, page, limit)
 
+    async def my_kpis(self, actor_id: str) -> dict[str, int]:
+        """KPIs de « Ma boîte de traitement » (voir `RequestRepository.my_kpis`)."""
+        return await self.repo.my_kpis(actor_id)
+
     async def list_queue(
         self,
         *,
@@ -4139,6 +4143,11 @@ class RequestService(BaseService):
 
     async def count_by_status(self) -> dict[str, int]:
         return await self.repo.count_by_status()
+
+    async def my_requests_stats(self, actor_id: int) -> dict[str, Any]:
+        """Compteurs de l'accueil : tickets dont l'acteur est le demandeur."""
+        by_status = await self.repo.count_by_status_for_requester(actor_id)
+        return {"by_status": by_status, "total": sum(by_status.values())}
 
     async def workload_by_unit(self, unity_ids: list[int]) -> list[dict[str, Any]]:
         """Charge actuelle (tickets non terminaux) par agent, pour le Centre de répartition."""

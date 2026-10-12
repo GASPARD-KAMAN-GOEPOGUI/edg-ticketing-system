@@ -102,7 +102,16 @@ class NotificationService(BaseService):
 
     async def restore(self, id: str):
         """Restaure une notification archivée — visible à nouveau dans la vue active."""
-        ok = await self.repo.restore(id)
+        notification_id = int(id)
+        ok = await self.repo.restore(notification_id)
         if not ok:
             raise self.not_found("Notification introuvable")
-        return await self.repo.get_by_id(id)
+        obj = await self.repo.get_by_id(notification_id)
+        if obj is None:
+            raise self.not_found("Notification introuvable")
+        await emit_event(AppEvent(
+            type="notification.restored",
+            payload={"id": obj.id, "title": obj.title},
+            target={"user_ids": [obj.recipient_id]},
+        ))
+        return obj

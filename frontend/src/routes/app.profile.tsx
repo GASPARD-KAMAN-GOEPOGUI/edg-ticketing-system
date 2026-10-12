@@ -14,16 +14,23 @@ import {
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useRole, useUser, roleLabels, setUser, clearUser } from "@/lib/session";
 import { useTheme } from "@/lib/use-theme";
-import { fetchDirections, fetchUnits } from "@/lib/api/directions-units";
+import { fetchDepartments, fetchDirections, fetchUnits } from "@/lib/api/directions-units";
 import { ApiError } from "@/lib/api/client";
 import { toast } from "sonner";
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchMe, updateMe, uploadAvatar, deleteAvatar, buildAvatarUrl } from "@/lib/api/accounts";
+import {
+  checkPhone,
+  fetchMe,
+  updateMe,
+  uploadAvatar,
+  deleteAvatar,
+  buildAvatarUrl,
+} from "@/lib/api/accounts";
 import { changeMyPassword } from "@/lib/api/auth";
 import { fetchRequests } from "@/lib/api/requests";
 import { cn } from "@/lib/utils";
-import { PHONE_FORMAT_HINT } from "@/lib/phone";
+import { isValidGuineaPhone, normalizeGuineaPhone, PHONE_FORMAT_HINT } from "@/lib/phone";
 import { usePhoneInput } from "@/hooks/use-phone-input";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -121,20 +128,46 @@ function ProfilePage() {
   const sessionUser = useUser();
   const queryClient = useQueryClient();
 
-  const { data: me } = useQuery({
+  const {
+    data: me,
+    isPending: isMePending,
+    isError: isMeError,
+    refetch: refetchMe,
+  } = useQuery({
     queryKey: ["me"],
     queryFn: () => fetchMe(),
   });
 
-  const { data: directionsData = [] } = useQuery({
+  const {
+    data: directionsData = [],
+    isPending: areDirectionsPending,
+    isError: areDirectionsError,
+    refetch: refetchDirections,
+  } = useQuery({
     queryKey: ["directions"],
     queryFn: () => fetchDirections(),
     staleTime: 10 * 60_000,
   });
 
-  const { data: unitsData = [] } = useQuery({
+  const {
+    data: unitsData = [],
+    isPending: areUnitsPending,
+    isError: areUnitsError,
+    refetch: refetchUnits,
+  } = useQuery({
     queryKey: ["units"],
     queryFn: () => fetchUnits(),
+    staleTime: 10 * 60_000,
+  });
+
+  const {
+    data: departmentsData = [],
+    isPending: areDepartmentsPending,
+    isError: areDepartmentsError,
+    refetch: refetchDepartments,
+  } = useQuery({
+    queryKey: ["departments"],
+    queryFn: () => fetchDepartments(),
     staleTime: 10 * 60_000,
   });
 
@@ -241,36 +274,18 @@ function ProfilePage() {
     }
   }, [me]);
 
-  // ── Stats rapides (propres à l'utilisateur connecté) ──────────────────────
-  const _statsOpts = {
-    enabled: !!sessionUser?.id,
-    staleTime: 60_000,
-    refetchInterval: 60_000,
-  } as const;
-
-  const { data: statTotal } = useQuery({
-    queryKey: ["profile-stats", "total", sessionUser?.id],
-    queryFn: () => fetchRequests({ requester_id: sessionUser!.id, limit: 1 }),
-    ..._statsOpts,
-  });
-  const { data: statResolved } = useQuery({
-    queryKey: ["profile-stats", "resolved", sessionUser?.id],
-    queryFn: () =>
-      fetchRequests({ requester_id: sessionUser!.id, request_status: "resolved", limit: 1 }),
-    ..._statsOpts,
-  });
-  const { data: statSlaOk } = useQuery({
-    queryKey: ["profile-stats", "sla-ok", sessionUser?.id],
-    queryFn: () => fetchRequests({ requester_id: sessionUser!.id, sla_breached: false, limit: 1 }),
-    ..._statsOpts,
-  });
-
-  const totalRequests = statTotal?.total ?? 0;
-  const totalResolved = statResolved?.total ?? 0;
-  const slaPercent =
-    totalRequests > 0 ? Math.round(((statSlaOk?.total ?? 0) / totalRequests) * 100) : 100;
-
-  const fullDisplayName = me ? [me.firstname, me.name].filter(Boolean).join(" ") : "Démo EDG";
+  const fullDisplayName = me
+    ? [me.firstname, me.name].filter(Boolean).join(" ")
+    : sessionUser
+      ? [sessionUser.firstname, sessionUser.name].filter(Boolean).join(" ")
+      : "Mon profil";
+  const profileAvatar = avatarPreview ?? me?.avatar ?? sessionUser?.avatar;
+  const profileUnit = unitsData.find((unit) => unit.id === me?.unit_id);
+  const profileDepartment =
+    departmentsData.find((department) => department.id === profileUnit?.department_id) ??
+    departmentsData.find((department) => department.id === me?.unit_id);
+  const profileDirectionId =
+    profileUnit?.direction_id ?? profileDepartment?.direction_id ?? me?.direction_id;
   const parts = fullDisplayName.split(" ");
   const initials = parts
     .map((p) => p[0])
@@ -321,6 +336,18 @@ function ProfilePage() {
   const [email, setEmail] = useState("");
   const phoneInput = usePhoneInput();
   const [lang, setLang] = useState("fr");
+  const currentPhone = normalizeGuineaPhone(me?.phone);
+  const shouldCheckPhone =
+    !!me?.id &&
+    isValidGuineaPhone(phoneInput.value) &&
+    normalizeGuineaPhone(phoneInput.value) !== currentPhone;
+  const phoneDuplicateQuery = useQuery({
+    queryKey: ["profile-phone-duplicate", me?.id, phoneInput.value],
+    queryFn: () => checkPhone(phoneInput.value, me!.id),
+    enabled: shouldCheckPhone,
+    staleTime: 30_000,
+    retry: false,
+  });
 
   useEffect(() => {
     if (!me) return;
@@ -404,9 +431,9 @@ function ProfilePage() {
           <div className="flex items-end gap-4 px-6 pb-5 -mt-10">
             {/* Avatar */}
             <div className="relative shrink-0">
-              {avatarPreview ? (
+              {profileAvatar ? (
                 <img
-                  src={buildAvatarUrl(avatarPreview)}
+                  src={buildAvatarUrl(profileAvatar)}
                   alt={fullDisplayName}
                   className="h-20 w-20 rounded-2xl border-4 border-background object-cover shadow-lg"
                 />
@@ -466,42 +493,6 @@ function ProfilePage() {
                 </span>
               </div>
               <p className="text-sm text-muted-foreground">{email}</p>
-            </div>
-          </div>
-
-          {/* Stats */}
-          <div className="grid grid-cols-3 divide-x divide-border/40 border-t border-border/40 text-center">
-            <div className="py-4">
-              <div className="text-2xl font-bold">
-                {statTotal ? (
-                  totalRequests
-                ) : (
-                  <span className="text-base text-muted-foreground">—</span>
-                )}
-              </div>
-              <div className="mt-0.5 text-[11px] font-medium text-muted-foreground">Tickets</div>
-            </div>
-            <div className="py-4">
-              <div className="text-2xl font-bold text-success">
-                {statResolved ? (
-                  totalResolved
-                ) : (
-                  <span className="text-base text-muted-foreground">—</span>
-                )}
-              </div>
-              <div className="mt-0.5 text-[11px] font-medium text-muted-foreground">Résolues</div>
-            </div>
-            <div className="py-4">
-              <div className="text-2xl font-bold text-primary">
-                {statTotal ? (
-                  `${slaPercent}%`
-                ) : (
-                  <span className="text-base text-muted-foreground">—</span>
-                )}
-              </div>
-              <div className="mt-0.5 text-[11px] font-medium text-muted-foreground">
-                Respect délai
-              </div>
             </div>
           </div>
         </GlassCard>
@@ -577,6 +568,32 @@ function ProfilePage() {
                 desc="Modifiez vos données de contact"
               />
 
+              {!me && isMePending && (
+                <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Chargement de vos informations…
+                </p>
+              )}
+              {!me && isMeError && (
+                <div
+                  role="alert"
+                  className="flex items-center justify-between gap-3 text-sm text-destructive"
+                >
+                  <span>
+                    Impossible de charger votre compte. Aucune modification ne peut être
+                    enregistrée.
+                  </span>
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="h-auto shrink-0 p-0"
+                    onClick={() => refetchMe()}
+                  >
+                    Réessayer
+                  </Button>
+                </div>
+              )}
+
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="grid gap-2">
                   <Label htmlFor="fname">Prénom</Label>
@@ -607,9 +624,12 @@ function ProfilePage() {
                   id="email"
                   type="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  disabled
                   placeholder="votre@email.com"
                 />
+                <p className="text-xs text-muted-foreground">
+                  Adresse gérée par la plateforme centrale EDG.
+                </p>
               </div>
 
               <div className="grid gap-2">
@@ -631,19 +651,46 @@ function ProfilePage() {
                     Format invalide. Attendu : {PHONE_FORMAT_HINT}.
                   </p>
                 )}
+                {shouldCheckPhone && phoneDuplicateQuery.isFetching && (
+                  <p className="text-xs text-muted-foreground">Vérification du numéro…</p>
+                )}
+                {shouldCheckPhone && phoneDuplicateQuery.isError && (
+                  <div className="flex items-center justify-between gap-2 text-xs text-destructive">
+                    <span>Impossible de vérifier ce numéro.</span>
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto p-0 text-xs"
+                      onClick={() => phoneDuplicateQuery.refetch()}
+                    >
+                      Réessayer
+                    </Button>
+                  </div>
+                )}
+                {shouldCheckPhone && phoneDuplicateQuery.data && (
+                  <p className="text-xs text-destructive">
+                    Ce numéro est déjà associé à un autre compte.
+                  </p>
+                )}
               </div>
 
               <div className="flex justify-end border-t border-border/40 pt-4">
                 <Button
                   className="rounded-xl gradient-primary text-background shadow-md shadow-primary/30"
-                  disabled={updateMeMut.isPending || phoneInput.hasError}
+                  disabled={
+                    !me ||
+                    updateMeMut.isPending ||
+                    phoneInput.hasError ||
+                    phoneDuplicateQuery.isFetching ||
+                    (shouldCheckPhone &&
+                      (phoneDuplicateQuery.isError || phoneDuplicateQuery.data === true))
+                  }
                   onClick={() =>
                     updateMeMut.mutate(
                       {
                         firstname: fName.trim() || undefined,
                         name: lName.trim() || fName.trim(),
                         phone: phoneInput.value || undefined,
-                        email: email.trim() || undefined,
                       },
                       { onSuccess: () => setModalOpen(false) },
                     )
@@ -668,13 +715,30 @@ function ProfilePage() {
                 iconColor="text-info"
               />
 
-              <div className="flex items-start gap-2 rounded-xl border border-info/20 bg-info/5 p-3 text-sm text-info">
-                <Info className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>
-                  Ces informations sont en lecture seule. Contactez les Ressources Humaines pour
-                  toute modification.
-                </span>
-              </div>
+              {(areDirectionsPending || areDepartmentsPending || areUnitsPending) && (
+                <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Chargement de votre rattachement professionnel…
+                </p>
+              )}
+              {(areDirectionsError || areDepartmentsError || areUnitsError) && (
+                <div
+                  role="alert"
+                  className="flex items-center justify-between gap-3 text-sm text-destructive"
+                >
+                  <span>Certains rattachements n’ont pas pu être chargés.</span>
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="h-auto shrink-0 p-0"
+                    onClick={() => {
+                      void Promise.all([refetchDirections(), refetchDepartments(), refetchUnits()]);
+                    }}
+                  >
+                    Réessayer
+                  </Button>
+                </div>
+              )}
 
               <div className="space-y-2">
                 {[
@@ -683,16 +747,25 @@ function ProfilePage() {
                   {
                     label: "Direction",
                     value: (
-                      directionsData.find((d) => d.id === me?.direction_id)?.name ??
-                      me?.direction_id ??
+                      directionsData.find((direction) => direction.id === profileDirectionId)
+                        ?.name ??
+                      profileDepartment?.direction_name ??
+                      profileUnit?.direction_name ??
+                      profileDirectionId ??
                       "—"
                     ).toUpperCase(),
                     icon: Building2,
                     mono: false,
                   },
                   {
+                    label: "Département",
+                    value: profileDepartment?.name ?? profileUnit?.department_name ?? "—",
+                    icon: Building2,
+                    mono: false,
+                  },
+                  {
                     label: "Service",
-                    value: unitsData.find((u) => u.id === me?.unit_id)?.name ?? me?.unit_id ?? "—",
+                    value: profileUnit?.name ?? "—",
                     icon: Zap,
                     mono: false,
                   },

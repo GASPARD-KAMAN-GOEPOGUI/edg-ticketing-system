@@ -23,7 +23,7 @@ def _req_svc(db: AsyncSession = Depends(get_db)) -> RequestService:
     return RequestService(db)
 
 
-def _check_attachment_access(actor, req) -> None:
+async def _check_attachment_access(actor, req, db: AsyncSession) -> None:
     """Délègue à la politique d'accès des demandes.
 
     La copie locale qui existait ici avait divergé du modèle : elle lisait
@@ -33,9 +33,13 @@ def _check_attachment_access(actor, req) -> None:
     d'attente. Une pièce jointe suit la demande qui la porte : une seule
     politique, celle de `RouteRequest`, évite toute nouvelle dérive.
     """
-    from api.routes.RouteRequest import _check_request_access
+    from api.routes.RouteRequest import _resolve_access
 
-    _check_request_access(actor, req)
+    # Les deux appelants sont des GET : `read_only=True` donne les mêmes motifs
+    # de lecture que la fiche du ticket (File d'attente, Distribution, ticket
+    # que j'ai transmis). Sans ça, un ticket lisible affichait des pièces
+    # jointes en erreur — incohérence visible sur la même page.
+    await _resolve_access(actor, req, db, read_only=True)
 
 
 @router.get("/by-request/{request_id}", response_model=PaginatedResponse)
@@ -46,10 +50,11 @@ async def list_by_request(
     actor=Depends(get_current_user),
     svc: AttachmentService = Depends(_svc),
     req_svc: RequestService = Depends(_req_svc),
+    db: AsyncSession = Depends(get_db),
 ):
     """C-N°4 — ownership check avant de lister les pièces jointes d'une demande."""
     req = await req_svc.get_by_id(request_id)
-    _check_attachment_access(actor, req)
+    await _check_attachment_access(actor, req, db)
     return await svc.list_by_request(request_id, page=page, limit=limit)
 
 
@@ -79,11 +84,12 @@ async def get_attachment(
     actor=Depends(get_current_user),
     svc: AttachmentService = Depends(_svc),
     req_svc: RequestService = Depends(_req_svc),
+    db: AsyncSession = Depends(get_db),
 ):
     """C-N°4 — ownership check avant de retourner les métadonnées d'une pièce jointe."""
     att = await svc.get_by_id(id)
     req = await req_svc.get_by_id(str(att.request_id))
-    _check_attachment_access(actor, req)
+    await _check_attachment_access(actor, req, db)
     return att
 
 

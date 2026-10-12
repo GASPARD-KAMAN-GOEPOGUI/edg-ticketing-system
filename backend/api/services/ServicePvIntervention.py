@@ -60,6 +60,38 @@ def _checkbox(selected: bool) -> str:
     return _CHECKED if selected else _UNCHECKED
 
 
+# Statut d'intervenant — libellés du formulaire papier EDG/PS-GSI/PV-01, dans
+# l'ordre où il les imprime. `_STATUS_SEP` sépare les cases ; il sert AUSSI à
+# mesurer la position de la coche, d'où sa définition unique ici.
+_STATUS_BOXES: tuple[tuple[str, str], ...] = (
+    ("is_titulaire", "Titulaire"),
+    ("is_prestataire", "Prestataire"),
+    ("is_stagiaire", "Stagiaire"),
+)
+_STATUS_SEP = "    "
+
+
+def _status_line() -> str:
+    """Les trois cases, toujours vides — la coche est surimprimée."""
+    return _STATUS_SEP.join(f"{_UNCHECKED} {label}" for _, label in _STATUS_BOXES)
+
+
+def _status_check_offset(pdf, safe, d: dict[str, Any]) -> Optional[float]:
+    """Décalage horizontal de la case à cocher, ou None si aucun statut.
+
+    Mesuré sur le texte réellement imprimé plutôt que deviné : la largeur des
+    libellés change avec la police, une constante se décalerait au premier
+    ajustement typographique.
+    """
+    prefix = ""
+    for key, label in _STATUS_BOXES:
+        if d.get(key):
+            # Le ✓ se pose juste après le crochet ouvrant, dans la case.
+            return pdf.get_string_width(safe(prefix)) + pdf.get_string_width("[")
+        prefix += f"{_UNCHECKED} {label}{_STATUS_SEP}"
+    return None
+
+
 def _as_datetime(value: Any) -> Optional[datetime]:
     """Accepte un datetime OU une chaîne ISO.
 
@@ -335,11 +367,13 @@ class PvInterventionService(BaseService):
             # aucun sens sur le document imprimé.
             f"Departement : {d['handler_department'] or '.' * 22}",
             f"Service : {d['handler_service'] or '.' * 26}",
-            # Les trois cases restent vides quand le traitant n'a aucun statut
-            # renseigné : on ne présume pas d'un statut sur un document signé.
-            f"{_checkbox(d['is_titulaire'])} Titulaire    "
-            f"{_checkbox(d['is_prestataire'])} Prestataire    "
-            f"{_checkbox(d['is_stagiaire'])} Stagiaire",
+            # Les trois cases sont TOUJOURS imprimées vides ; la coche du statut
+            # retenu est surimprimée plus bas. Raison : le ✓ (ZapfDingbats) et le
+            # libellé (Helvetica) ne peuvent pas cohabiter dans un même `cell()`,
+            # exactement comme pour la marque d'émargement.
+            # Aucun statut renseigné => les trois restent vides : on ne présume
+            # pas d'un statut sur un document destiné à être signé.
+            _status_line(),
             f"Badge : {d['badge'] or '.' * 26}",
             # Signature du traitant : remplacée par la marque électronique dès
             # qu'il a terminé son intervention. Tant que ce n'est pas le cas, la
@@ -347,10 +381,19 @@ class PvInterventionService(BaseService):
             "Signature : " if d["it_signed"] else "Signature : ______________________",
         ]
         signature_row = len(left_lines) - 1
+        status_row = left_lines.index(_status_line())
         for i, text in enumerate(left_lines):
             y = top + 2 + i * 5.5
             pdf.set_xy(pdf.l_margin + 2, y)
             pdf.cell(left_w - 4, 5, safe(text))
+            if i == status_row:
+                # Statut d'intervenant : ✓ dans la case correspondante. Même
+                # technique que l'émargement — surimpression ZapfDingbats sur des
+                # cases Helvetica laissées vides.
+                offset = _status_check_offset(pdf, safe, d)
+                if offset is not None:
+                    self._sign_mark(pdf, safe, pdf.l_margin + 2 + offset - 3, y - 1.5, 5,
+                                    signed=True)
             if i == signature_row and d["it_signed"]:
                 # Surimpression : le ✓ vient de ZapfDingbats, le libellé reste en
                 # Helvetica — deux polices ne peuvent pas cohabiter dans un

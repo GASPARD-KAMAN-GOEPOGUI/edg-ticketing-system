@@ -1,5 +1,119 @@
 # Changelog Codex
 
+## 2026-10-08 - Accueil temps reel et pages d'accueil allegees
+
+Demande: affichage en temps reel des elements de la page d'accueil et allegement des composants lourds (portail public et accueil connecte).
+
+Diagnostic: `/app` lisait `["my-requests"]`/`["my-cancelled"]`, absents de la carte d'invalidation (aucun temps reel) ; il telechargeait 100 tickets pour 4 compteurs (faux au-dela de 100) ; Recharts charge pour un camembert ; 4 tableaux de bord morts. `/` animait deux halos flous de 480-520 px et une lueur en JavaScript a chaque image, et masquait le texte du heros jusqu'a l'hydratation.
+
+Correction: endpoint `GET /requests/my-requests-stats` (SQL, perimetre force sur l'acteur), tickets recents filtres serveur (limit 3), cles temps reel ajoutees, anneau SVG natif, squelettes, code mort retire ; animations continues et apparition du heros en CSS, survols en CSS.
+
+Fichiers modifies: `backend/api/repositories/RepositoryRequest.py`, `backend/api/services/ServiceRequest.py`, `backend/api/routes/RouteRequest.py`, `backend/tests/test_my_requests_stats.py` (nouveau), `frontend/src/routes/app.index.tsx`, `frontend/src/lib/home-dashboard.ts` (nouveau), `frontend/src/lib/home-dashboard.test.ts` (nouveau), `frontend/src/lib/api/requests.ts`, `frontend/src/lib/realtime/invalidation-map.ts`, `frontend/src/routes/index.tsx`, `frontend/src/styles.css`, docs.
+
+Verifications: `pytest tests -q` — 26 passes ; `vitest run` — 135/136, seul echec preexistant `mobile-shortcuts.test.ts` ; `tsc --noEmit` — 40 erreurs (45 avant, aucune dans les fichiers modifies) ; `npm run build` — OK, utilitaires CSS generees, Recharts absent du chunk de l'accueil. Parcours non rejoue dans un navigateur.
+
+## 2026-10-06 - Fiabilisation des KPI de Ma boîte de traitement
+
+Demande: rendre tous les KPI de la boîte de traitement exacts, cohérents avec la base et le workflow, sans double comptage ni donnée périmée, après un audit préalable de chaque KPI.
+
+Diagnostic (audit): « Total résolus » valait toujours 0 (comptage de resolved/closed dans une liste qui les exclut) ; « En cours » ne comptait que `in_progress`, laissant les tickets assignés non démarrés hors de tout KPI ; « Retransmis » comptait une simple correction d'assignation A → B comme un retour ; comptages calculés côté client sur une liste plafonnée à 1000 ; « Démarrer le traitement » ne rafraîchissait pas les compteurs hors SSE.
+
+Correction: endpoint unique `GET /requests/my-kpis` calculé en SQL avec les critères exacts des listes (BR-KPI-MYBOX-001) ; nouvelle carte « À démarrer » (À démarrer + En cours = la boîte) ; BR-RETRANSMIT-001 redéfini (revenu puis cédé de nouveau), appliqué aussi au filtre de « Tickets transmis » ; clé des KPI sous `["my-tickets"]` et helper `invalidateTicketQueries()` appelé par toutes les actions de la page détail. Choix des définitions validés par l'utilisateur.
+
+Fichiers modifiés: `backend/api/repositories/RepositoryRequest.py`, `backend/api/services/ServiceRequest.py`, `backend/api/routes/RouteRequest.py`, `backend/tests/test_my_kpis.py` (nouveau), `frontend/src/lib/api/requests.ts`, `frontend/src/lib/realtime/invalidation-map.ts`, `frontend/src/routes/app.my-tickets.tsx`, `frontend/src/routes/app.requests.$id.tsx`, `docs/codex/BUSINESS_RULES.md`, `docs/codex/FEATURE_INDEX.md`, `docs/codex/API_INDEX.md`, `docs/codex/CHANGELOG_CODEX.md`, `docs/mise-a-jour-backend.md`, `docs/cahier-des-charges.md`.
+
+Vérifications: `pytest tests/test_my_kpis.py` — 4 passés ; suite backend complète — 24 passés, 0 échec (deux exécutions) ; `tsc --noEmit` — aucune erreur dans les fichiers modifiés (erreurs `directions: unknown` préexistantes ailleurs) ; `vitest run` — 127/128, échec préexistant `mobile-shortcuts.test.ts` (rôle directeur retiré). Non vérifié sur MySQL réel (service `wampmysqld64` arrêté).
+
+## 2026-10-06 - Revocation des sessions et Backoffice temps reel
+
+Demande: deconnexion immediate d'un utilisateur connecte quand un admin change son role ou desactive son compte, refus des anciennes sessions cote backend, Backoffice synchronise entre admins sans F5.
+
+Diagnostic: le token central est opaque et le central ignore les changements de role locaux. Le role et le statut etaient bien relus en base a chaque requete, mais aucun mecanisme ne revoquait l'ancien token ni le refresh token ; le flux SSE gardait le role de connexion (fuite d'evenements « admin » apres retrogradation) ; `account.deactivated` partait avant commit ; `user.updated` n'etait jamais emis et la cle `["admin","users"]` n'etait pas invalidee ; `PUT /users/{id}` pouvait desactiver sans revocation et reecrire `infos`.
+
+Correction: version de session dans `account.infos` (sans migration) et liaison token -> version (Redis/memoire) verifiee dans `resolve_central_account` et `/auth/refresh` ; evenements `user.session_revoked` (cible) et `user.*` (admins) apres commit ; fermeture du flux SSE et revalidation en base a chaque keepalive ; frontend : sortie unique `forced-logout.ts`, 401 type sans refresh, revalidation `/auth/me` au retour reseau/onglet/SSE, motif affiche sur `/login`. Correctif de securite annexe (preexistant, prouve par test) : la synchro de role depuis les groupes centraux s'executait avant tout controle, avec les groupes en cache de l'ancien token — une requete de l'ancien token reecrivait en base l'ancien role juste change par l'admin ; le controle de version passe desormais avant la synchro. Correctif annexe : import local redondant de `AccountRepository` dans `login()` retire (il rendait le nom local a toute la fonction).
+
+Fichiers modifies: `backend/api/core/session_registry.py` (nouveau), `backend/api/core/error_codes.py`, `backend/api/dependencies.py`, `backend/api/services/ServiceAccount.py`, `backend/api/routes/RouteAuth.py`, `backend/api/routes/RouteSSE.py`, `backend/tests/` (nouveau, minimal), `frontend/src/lib/forced-logout.ts` (nouveau), `frontend/src/lib/forced-logout.test.ts` (nouveau), `frontend/src/lib/api/client.ts`, `frontend/src/providers/realtime-provider.tsx`, `frontend/src/routes/login.tsx`, `frontend/src/lib/realtime/invalidation-map.ts`, docs.
+
+Verifications: `pytest tests -q` (interpreteur `~/.virtualenvs/backend-vyqcM7r1`, `backend/venv` absent) — 24 passes (stables sur executions repetees ; le test de regression echoue bien avec l'ancien ordre) ; `vitest run` — 127/128, seul echec preexistant `mobile-shortcuts.test.ts` (role directeur retire le 2026-09-25) ; `tsc --noEmit` — 45 erreurs, toutes preexistantes, aucune dans les fichiers modifies. Parcours non rejoue dans un navigateur.
+
+## 2026-09-29 - Notifications temps réel après actions
+
+Demande: garantir l'actualisation temps réel des notifications après les actions.
+
+Diagnostic: le badge, le panneau et la page étaient déjà reliés aux invalidations SSE. Deux lacunes empêchaient une garantie de bout en bout : le bus était local à chaque worker en production multi-processus, et `NotificationEmitter` publiait `notification.created` immédiatement même lorsque l'écriture était `commit=False`, avant la visibilité transactionnelle. La restauration n'émettait également aucun événement.
+
+Correction: relais Redis Pub/Sub inter-workers au démarrage FastAPI (avec reconnexion et repli local), file des événements de notification publiée après commit ou supprimée au rollback, et nouvel événement ciblé `notification.restored` invalidé par le frontend. Les événements utilisent toujours le bus SSE existant ; pas de nouveau canal applicatif.
+
+Fichiers modifiés: `backend/api/core/event_bus.py`, `backend/api/main.py`, `backend/api/dependencies.py`, `backend/api/services/NotificationEmitter.py`, `backend/api/services/ServiceNotification.py`, `backend/tests/core/test_event_bus.py`, `frontend/src/lib/realtime/invalidation-map.ts`, `docs/codex/BUSINESS_RULES.md`, `docs/codex/FEATURE_INDEX.md`, `docs/codex/CHANGELOG_CODEX.md`.
+
+Vérifications: `pytest tests/core/test_event_bus.py tests/api/test_notification_workflow.py -q` — 15 passes ; compilation Python — OK ; diagnostics frontend sur `invalidation-map.ts` — aucune erreur. Le test complet a affiché un avertissement de transport SSL asynchrone à la fermeture après les passes.
+
+## 2026-09-29 - Libellé mobile « Notifications »
+
+Demande: remplacer « Alertes » par un libellé conforme à la page Notifications dans la barre mobile.
+
+Correction: le raccourci vers `/app/notifications` est nommé « Notifications » pour tous les rôles ; les intitulés « Alertes délais » métier ne changent pas. Le test des raccourcis vérifie maintenant le libellé explicite.
+
+Vérification: `vitest run src/components/mobile-shortcuts.test.ts -t 'Notifications et Profil'` — 5 tests passés.
+
+## 2026-09-29 - Compteur notifications sur le menu Alertes
+
+Demande: afficher le nombre de notifications non lues sur la cloche du menu Alertes après retrait de la cloche du header.
+
+Correction: le badge basé sur le compteur existant est affiché sur l'icône Notifications de la sidebar desktop et du tiroir mobile. La navigation basse mobile conserve son badge existant ; la page et le calcul des notifications restent inchangés.
+
+Vérification: aucun diagnostic VS Code sur `app-layout.tsx` ; `git diff --check` sans erreur de patch.
+
+## 2026-09-29 - Retrait de l'icône Notifications du header
+
+Demande: masquer l'icône de notification uniquement dans le header après connexion.
+
+Correction: retrait du bouton cloche du header dans `frontend/src/components/app-layout.tsx`. La page Notifications, son entrée de navigation et le panneau de notifications restent inchangés.
+
+Vérification: diagnostics VS Code sur `app-layout.tsx` — aucune erreur.
+
+## 2026-09-29 - Fiabilisation du chargement Profil & Paramètres
+
+Demande: vérifier le chargement des sections Informations personnelles et Profil professionnel ainsi que leurs actions.
+
+Correction: la section personnelle indique le chargement et permet de relancer `GET /users/me` en cas d'erreur ; l'enregistrement reste désactivé tant qu'aucune donnée de compte n'est disponible. Les rattachements professionnels affichent un état de chargement, une erreur partielle et une relance des trois référentiels direction/département/service. Les données déjà présentes en cache restent utilisables pendant un rafraîchissement en échec.
+
+Vérification: lint cible de `app.profile.tsx` — aucune erreur ; `pytest tests/core/test_phone.py tests/api/test_directions_units_hierarchy.py -q` — 17 passes. Aucun test automatisé dédié à `/users/me` ou au composant Profil trouvé ; le parcours authentifié n'a pas été rejoué dans un navigateur pendant cette vérification.
+
+## 2026-09-29 - Repli nom et avatar du profil
+
+Demande: la carte Profil affichait les initiales « DE » à la place de la photo pendant le chargement.
+
+Correction: `app.profile.tsx` utilise désormais le nom et l'avatar de la session comme repli, au lieu du nom de démonstration « Démo EDG ». Les données `/users/me` restent prioritaires dès leur chargement.
+
+Vérification: lint ciblé de `app.profile.tsx` — aucune erreur.
+
+## 2026-09-29 - Retrait du message dans le profil professionnel
+
+Demande: masquer le message indiquant que les informations professionnelles sont en lecture seule et de contacter les ressources humaines.
+
+Correction: suppression du bandeau informatif dans `frontend/src/routes/app.profile.tsx`. Les informations restent affichées sans modification de leur comportement.
+
+Vérification: lint ciblé de la page profil — aucune erreur, un avertissement préexistant sur une directive eslint inutilisée.
+
+## 2026-09-29 - Profil personnel et professionnel
+
+Demande: rendre l'adresse email non modifiable dans le profil, prevenir la reutilisation d'un numero deja attribue et afficher badge, poste, direction, departement et service.
+
+Correction: email desactive dans le formulaire et exclu de l'allowlist `PUT /users/me` (les mutations admin et leur synchronisation centrale restent intactes). Le profil verifie un numero complet different via l'endpoint authentifie existant `/accounts/check-duplicate`; le backend possedait deja la verification d'unicite bloquante avant l'appel central. Le profil professionnel derive departement et direction des references d'unite/departement existantes, sans modifier le schema partage.
+
+Fichiers modifies: `frontend/src/routes/app.profile.tsx`, `frontend/src/lib/api/accounts.ts`, `backend/api/routes/RouteUsers.py`, `docs/codex/BUSINESS_RULES.md`, `docs/codex/CHANGELOG_CODEX.md`.
+
+Verifications: `backend/venv/Scripts/python.exe -m pytest tests/core/test_phone.py -q` — 16 passes ; lint cible de `app.profile.tsx` — 0 erreur (un avertissement preexistant sur une directive eslint inutilisee) ; diagnostics VS Code — aucune erreur sur les fichiers modifies. Le typecheck global reste bloque par 45 erreurs dans d'autres routes ; le lint complet des fichiers inclut des erreurs de format et `any` preexistantes dans `accounts.ts`/`app.profile.tsx`.
+
+## 2026-09-29 - Masquage des statistiques sur le profil
+
+Demande: retirer de la carte Profil les indicateurs Tickets, Résolues et Respect délai.
+
+Correction: suppression de la rangée de statistiques et des requêtes dédiées dans `frontend/src/routes/app.profile.tsx`.
+
+Vérification: lint ciblé non exécuté, le terminal partagé est resté dans l'état interrompu d'une commande `npx` lancée depuis la racine.
+
 ## 2026-09-21 - File « Distribution » du chef de division support (BR-DISTRIBUTION-001)
 
 Demande: insérer un niveau de répartition entre le chef de service (CSSHF) et les techniciens. Quand le chef de service oriente un ticket vers un chef de division support (CDS), celui-ci ne doit pas devenir automatiquement le traitant : le ticket arrive dans une file personnelle « Distribution » d'où le CDS choisit soit de le prendre en charge lui-même, soit de l'assigner à un technicien de sa division.

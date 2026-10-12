@@ -354,6 +354,16 @@ async def central_login(email: str, password: str) -> dict[str, Any]:
     # password"), 401 gardé pour compatibilité avec la doc générique du README.
     if response.status_code in (401, 403):
         raise CentralInvalidCredentials("Identifiant ou mot de passe incorrect.")
+    # 404 — la plateforme repond "Not Found" quand l'EMAIL est inconnu d'elle.
+    # Mesure du 2026-09-28 : un email inexistant produisait un HTTPStatusError
+    # brut, donc « Une erreur interne s'est produite » a l'ecran. L'utilisateur
+    # qui se trompait simplement d'adresse concluait que la connexion etait en
+    # panne.
+    #
+    # Meme message que pour un mot de passe errone, deliberement : cela evite
+    # aussi de reveler quels emails possedent un compte (enumeration de comptes).
+    if response.status_code == 404:
+        raise CentralInvalidCredentials("Identifiant ou mot de passe incorrect.")
     # 400/422 — la plateforme centrale REFUSE la requête sur le fond (politique de
     # mot de passe, format d'email…). Sans ce cas, `raise_for_status()` laissait
     # remonter un `HTTPStatusError` brut jusqu'au middleware, et l'utilisateur
@@ -508,6 +518,28 @@ def _raise_for_mutation_status(response: httpx.Response) -> None:
         except Exception:
             message = None
         raise CentralValidationError(message or "Requête rejetée par le central.")
+    # 405 — la plateforme signale un CONFLIT MÉTIER avec un code « méthode non
+    # autorisée ». Mesure du 2026-09-28 sur PUT /v1/client-app-users/{uuid} :
+    #   {"detail": {"msg": "Duplicates are not possible", ...}}
+    # Le verbe est pourtant le bon : l'en-tête `Allow` du central répond « PUT »,
+    # et le même appel avec un email non dupliqué renvoie 200. Sans ce cas,
+    # `raise_for_status()` laissait remonter un HTTPStatusError brut et
+    # l'administrateur lisait « Une erreur interne s'est produite » là où le
+    # central disait simplement que l'adresse était déjà prise.
+    if response.status_code == 405:
+        detail = ""
+        try:
+            body = response.json()
+            raw = body.get("detail") if isinstance(body, dict) else None
+            detail = (raw.get("msg") if isinstance(raw, dict) else raw) or ""
+        except Exception:
+            detail = ""
+        if "duplicate" in str(detail).lower():
+            raise CentralIdentityConflict(
+                "Un compte existe déjà avec cet email ou ce téléphone sur la "
+                "plateforme centrale."
+            )
+        raise CentralValidationError(str(detail) or "Requête rejetée par le central.")
     if response.status_code >= 500:
         raise CentralUnavailableError(f"Le central a répondu {response.status_code}.")
     response.raise_for_status()

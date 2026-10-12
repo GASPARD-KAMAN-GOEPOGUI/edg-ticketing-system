@@ -10,6 +10,7 @@ import { loginUser } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
 import { setUser, setTokens, clearSession, getDefaultRouteForRole, isAuthenticated, getRole, setPendingConsent } from "@/lib/session";
 import type { Role } from "@/lib/mock-data";
+import { LOGOUT_MESSAGES, consumeLogoutReason } from "@/lib/forced-logout";
 
 export const Route = createFileRoute("/login")({
   // SSR désactivé : isAuthenticated() lit localStorage, invisible côté serveur
@@ -34,6 +35,12 @@ function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Motif d'une déconnexion forcée (rôle modifié, compte désactivé…), lu une
+  // seule fois : un rechargement de /login ne le réaffiche pas.
+  const [logoutNotice, setLogoutNotice] = useState<string | null>(() => {
+    const reason = consumeLogoutReason();
+    return reason ? LOGOUT_MESSAGES[reason] : null;
+  });
 
   const canSubmit = identifier.trim().length > 0 && password.length > 0;
 
@@ -43,6 +50,7 @@ function Login() {
 
     setIsLoading(true);
     setError(null);
+    setLogoutNotice(null);
 
     try {
       const result = await loginUser({ identifier: identifier.trim(), password });
@@ -88,7 +96,7 @@ function Login() {
       if (err instanceof ApiError) {
         if (err.status === 401) {
           if (err.errorCode === "ACCOUNT_DISABLED") {
-            setError("Ce compte est désactivé. Contactez l'administration EDG.");
+            setError(LOGOUT_MESSAGES.disabled);
           } else {
             setError("Identifiant ou mot de passe incorrect. Vérifiez vos informations.");
           }
@@ -171,6 +179,16 @@ function Login() {
                 </button>
               </div>
             </div>
+
+            {/* Motif de la déconnexion forcée */}
+            {logoutNotice && !error && (
+              <div
+                role="status"
+                className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300"
+              >
+                {logoutNotice}
+              </div>
+            )}
 
             {/* Message d'erreur */}
             {error && (

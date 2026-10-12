@@ -40,7 +40,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.configs.Database import AsyncSessionLocal
 from api.configs.Environment import get_environment
-from api.core import central_auth
+from api.core import central_auth, session_registry
+from api.core.exceptions import EDGException
 from api.core.rbac import Permission, ROLE_GROUP_ALIASES, ROLE_PERMISSIONS, normalize_role
 
 logger = logging.getLogger(__name__)
@@ -94,9 +95,15 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         try:
             yield session
             await session.commit()
+            from api.core.event_bus import publish_pending
+
+            await publish_pending(session)
             logger.debug("db: COMMIT OK")
         except Exception:
             await session.rollback()
+            from api.core.event_bus import discard_pending
+
+            discard_pending(session)
             logger.debug("db: ROLLBACK (exception dans le handler)")
             raise
 
@@ -104,16 +111,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 # ── Authentification centrale (manager-user) ──────────────────────────────────
 
 def _ensure_account_active(account) -> None:
-    if (
-        not account.status
-        or account.deleted_at is not None
-        or (account.account_status or "").strip().lower() != "active"
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Compte désactivé ou supprimé. Contactez l'administration.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    # 401 typé ACCOUNT_DISABLED : le frontend affiche le motif au lieu d'un 401 brut.
+    session_registry.ensure_account_active(account)
 
 
 async def _sync_role_from_groups(account, groups: list[dict], repo):
@@ -122,8 +121,16 @@ async def _sync_role_from_groups(account, groups: list[dict], repo):
     mapped_role = central_auth.role_from_groups(groups)
     current_role = normalize_role(account.role)
     if mapped_role and current_role in _ROLE_SYNC_SPACE and mapped_role != current_role:
-        updated = await repo.update(account.id, {"role": mapped_role})
+        # Changement de rôle venu du central : même conséquence qu'un changement
+        # fait dans le Backoffice — les sessions ouvertes sont révoquées.
+        reason = session_registry.REASON_ROLE_CHANGED
+        updated = await repo.update(account.id, {
+            "role": mapped_role,
+            "infos": session_registry.revoked_infos(account, reason),
+        })
         if updated is not None:
+            session_registry.queue_session_revoked(repo.session, updated.id, reason)
+            session_registry.queue_user_changed(repo.session, updated.id)
             return updated
     return account
 
@@ -271,8 +278,16 @@ async def resolve_central_account(token: str, db: AsyncSession):
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    account = await _sync_role_from_groups(account, groups, repo)
     _ensure_account_active(account)
+    # Rôle modifié / compte désactivé puis réactivé depuis l'émission du token :
+    # le token appartient à une session révoquée (voir api.core.session_registry).
+    # Contrôlé AVANT la synchro de groupes : les groupes d'un ancien token sont
+    # en cache (CENTRAL_AUTH_CACHE_TTL) et reflètent l'ancien rôle — les laisser
+    # synchroniser réécrirait en base le rôle que l'admin vient de changer.
+    await session_registry.ensure_token_current(token, account)
+    account = await _sync_role_from_groups(account, groups, repo)
+    # Rôle changé côté central par cette synchro : cette session est révoquée aussi.
+    await session_registry.ensure_token_current(token, account)
     return account
 
 
@@ -394,7 +409,7 @@ async def get_current_user_optional(
         return None
     try:
         return await get_current_user(token=token, db=db)
-    except HTTPException:
+    except (HTTPException, EDGException):
         return None
 
 

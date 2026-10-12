@@ -135,6 +135,15 @@ def _check_request_access(
     if read_only and role == "chief-service" and getattr(req, "in_triage", False):
         return
 
+    # Distribution — le ticket impute a un chef de division support figure dans
+    # sa file « Distribution » (BR-DISTRIBUTION-001, `distributor_id = lui`)
+    # avant qu'il ne l'assigne : il doit pouvoir l'ouvrir depuis cette file
+    # comme depuis une notification. Lecture seule, meme raisonnement que la
+    # File d'attente ci-dessus.
+    distributor_id = getattr(req, "distributor_id", None)
+    if read_only and actor_id is not None and distributor_id is not None             and str(distributor_id) == str(actor_id):
+        return
+
     if role in {"chief-service", "technicien", "chef-division-support"}:
         allowed_ids = set(allowed_dir_unity_ids or set())
         if actor.unity_id is not None:
@@ -156,7 +165,21 @@ async def _resolve_access(actor, req, db: AsyncSession, *, read_only: bool = Fal
     # Les deux seuls roles qui beneficiaient d'un perimetre elargi
     # (chief-departement, director) ont ete retires le 2026-09-25 : les roles
     # operationnels restants sont bornes a leur propre unite.
-    _check_request_access(actor, req, None, read_only=read_only)
+    try:
+        _check_request_access(actor, req, None, read_only=read_only)
+    except HTTPException:
+        # Dernier recours, en LECTURE seulement : ai-je transmis ce ticket ?
+        # Transmettre le fait sortir de mon unite, donc aucun motif synchrone ne
+        # peut plus l'autoriser — alors que « Tickets transmis » continue de me
+        # le montrer, et qu'une notification peut m'y renvoyer. Place en dernier
+        # parce que c'est le seul motif qui coute une requete.
+        actor_id = getattr(actor, "id", None)
+        if not read_only or actor_id is None:
+            raise
+        from api.repositories.RepositoryRequest import RequestRepository
+
+        if not await RequestRepository(db).is_handover_actor(req.id, actor_id):
+            raise
 
 
 async def _check_unity_access(actor, unity_id: str, db: AsyncSession) -> None:
@@ -559,7 +582,7 @@ async def list_transmitted_by_me(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     search: Optional[str] = Query(None, min_length=1),
-    retransmitted_only: bool = Query(False, description="BR-RETRANSMIT-001 — ne garder que les tickets transmis au moins 2 fois par l'acteur"),
+    retransmitted_only: bool = Query(False, description="BR-RETRANSMIT-001 — ne garder que les tickets revenus à l'acteur puis cédés de nouveau par lui"),
     actor=_staff,
     svc: RequestService = Depends(_svc),
 ):
@@ -575,9 +598,29 @@ async def list_transmitted_by_me(
     )
 
 
+@router.get("/my-kpis")
+async def my_kpis(actor=_staff, svc: RequestService = Depends(_svc)):
+    """KPIs de « Ma boîte de traitement » — source de vérité unique.
+
+    Calculés en SQL avec exactement les critères des listes qu'ils résument :
+    `to_start` + `in_progress` = Ma boîte, `resolved` = « Tickets résolus »,
+    `transmitted` / `retransmitted` = « Tickets transmis » (BR-TRANSMIT-001,
+    BR-RETRANSMIT-001). Périmètre forcé sur l'acteur authentifié : aucun
+    paramètre client ne permet de lire les compteurs de quelqu'un d'autre."""
+    return await svc.my_kpis(str(actor.id))
+
+
 @router.get("/stats/by-status")
 async def stats_by_status(_=_staff, svc: RequestService = Depends(_svc)):
     return await svc.count_by_status()
+
+
+@router.get("/my-requests-stats")
+async def my_requests_stats(actor=Depends(get_current_user), svc: RequestService = Depends(_svc)):
+    """Compteurs de l'accueil (`/app`) : {by_status, total} des tickets dont
+    l'utilisateur est le demandeur, calculés en SQL. Périmètre forcé sur
+    l'acteur authentifié — aucun paramètre client."""
+    return await svc.my_requests_stats(int(actor.id))
 
 
 _workload_staff = Depends(require_roles("admin"))
@@ -833,7 +876,7 @@ async def get_by_ref(
 ):
     """H-07 — ownership check : un user ne voit que ses propres demandes."""
     req = await svc.get_by_ref(ref)
-    await _resolve_access(actor, req, db)
+    await _resolve_access(actor, req, db, read_only=True)
     return await _request_response_for_actor(req, svc, actor)
 
 
@@ -847,7 +890,7 @@ async def get_request(
 ):
     """H-07 — ownership check : un user ne voit que ses propres demandes."""
     req = await svc.get_by_id(id, include_deleted=include_deleted and actor.role == "admin")
-    await _resolve_access(actor, req, db)
+    await _resolve_access(actor, req, db, read_only=True)
     return await _request_response_for_actor(req, svc, actor)
 
 
@@ -885,7 +928,7 @@ async def get_proposed_solution(
             detail="Accès réservé aux intervenants du support.",
         )
     req = await svc.get_by_id(id)
-    await _resolve_access(actor, req, db)
+    await _resolve_access(actor, req, db, read_only=True)
     # Un intervenant peut être par ailleurs le demandeur d'un autre ticket ; sur
     # CE ticket-ci, s'il est le demandeur, il n'y a pas accès. L'admin, lui,
     # garde sa visibilité globale de supervision.
@@ -971,7 +1014,7 @@ async def download_pv_intervention(
     Lecture seule : aucun changement de statut, aucune notification, aucun
     événement métier."""
     req = await svc.get_by_id(id)
-    await _resolve_access(actor, req, db)
+    await _resolve_access(actor, req, db, read_only=True)
     content, filename = await pv_svc.build(id)
     return build_response(content, "pdf", filename)
 
@@ -1494,7 +1537,7 @@ async def list_timeline(
     req = await svc.get_by_id(request_id)
     if req is None:
         raise HTTPException(status_code=404, detail="Demande introuvable")
-    await _resolve_access(actor, req, db)
+    await _resolve_access(actor, req, db, read_only=True)
     return await repo.list_by_request(request_id)
 
 
@@ -1544,7 +1587,7 @@ async def list_attachments(
 ):
     """C-N°4 — ownership check avant de lister les pièces jointes."""
     req = await req_svc.get_by_id(request_id)
-    await _resolve_access(actor, req, db)
+    await _resolve_access(actor, req, db, read_only=True)
     result = await svc.list_by_request(request_id, page=1, limit=100)
     items = result.items if hasattr(result, "items") else []
     responses = []
@@ -1748,7 +1791,7 @@ async def download_file(
         request_id_from_path = parts[1]
         try:
             req = await req_svc.get_by_id(request_id_from_path)
-            await _resolve_access(actor, req, db)
+            await _resolve_access(actor, req, db, read_only=True)
         except HTTPException:
             raise
         except Exception:

@@ -1,5 +1,178 @@
 # Journal des mises à jour — EDG Connect
 
+## Session 2026-10-08 — Accueil temps réel et allègement des pages d'accueil
+
+**Accueil connecté `/app`** (`frontend/src/routes/app.index.tsx`)
+- Nouvel endpoint `GET /requests/my-requests-stats` → `{by_status, total}` des
+  tickets dont l'utilisateur authentifié est le demandeur, calculés en SQL
+  (`RepositoryRequest.count_by_status_for_requester`). Périmètre forcé sur
+  l'acteur, aucun paramètre client. Remplace le téléchargement de 100 tickets
+  complets (+ liste des annulés) pour afficher 4 compteurs : les comptes
+  étaient faux au-delà de 100 tickets.
+- Tickets récents : `GET /requests/?requester_id=…&exclude_status=…&limit=3`
+  (filtrage côté serveur).
+- **Temps réel** : clés `["my-requests-stats"]` et `["my-requests"]` ajoutées à
+  la carte d'invalidation — tout événement SSE `request.*` rafraîchit
+  l'accueil. Elles n'y figuraient pas : l'accueil ne se mettait pas à jour.
+- Camembert Recharts remplacé par un anneau SVG natif (`lib/home-dashboard.ts`) :
+  Recharts n'est plus chargé par l'accueil (chunk 7 kB / 2,7 kB gzip).
+- Squelettes aux dimensions finales, données précédentes conservées pendant un
+  rafraîchissement (pas de clignotement).
+- Code mort retiré : tableaux de bord Agent/Chef/Global/Admin, jamais rendus,
+  qui embarquaient des requêtes de 200 à 500 tickets.
+
+**Portail public `/`** (`frontend/src/routes/index.tsx`, `styles.css`)
+- Halos d'arrière-plan, lueur et flottement de la maquette : animations CSS
+  composées (transform/opacity) au lieu de framer-motion recalculé en
+  JavaScript à chaque image, à l'infini.
+- Héros (titre, texte, boutons, chiffres) : apparition en CSS, visible dès le
+  HTML rendu côté serveur au lieu d'attendre l'hydratation.
+- Survols « ressort » JS remplacés par des transitions CSS.
+- `prefers-reduced-motion` respecté (règle globale existante).
+
+**Tests** : `backend/tests/test_my_requests_stats.py` (2),
+`frontend/src/lib/home-dashboard.test.ts` (8).
+
+## Session 2026-10-06 — KPIs de « Ma boîte de traitement » : source de vérité unique
+
+**Nouvel endpoint** `GET /api/v1/requests/my-kpis` (chief-service, technicien,
+chef-division-support, admin — garde `_staff`), périmètre forcé sur l'acteur :
+
+```json
+{ "to_start": 3, "in_progress": 2, "resolved": 2, "transmitted": 4, "retransmitted": 1 }
+```
+
+Chaque valeur est un `COUNT` SQL reprenant exactement les critères de la liste
+qu'elle résume (`RequestRepository.my_kpis`) :
+
+| KPI | Liste résumée | Critère |
+| --- | --- | --- |
+| `to_start` | Ma boîte | `assignee_id` = moi, statut non terminal, ≠ `in_progress`, demandeur ≠ moi |
+| `in_progress` | Ma boîte | idem, statut `in_progress` |
+| `resolved` | Tickets résolus | `assignee_id` = moi, statut `resolved` ou `closed` |
+| `transmitted` | Tickets transmis | cession par moi, `assignee_id` actuel ≠ moi |
+| `retransmitted` | Tickets transmis (`retransmitted_only`) | revenu à moi puis cédé de nouveau par moi |
+
+**BR-RETRANSMIT-001 redéfini** : `HAVING COUNT(*) >= 2` est remplacé par
+« il existe une cession faite alors que le ticket était entre mes mains, qui
+n'est pas ma première cession sur ce ticket ». S'appuie sur
+`infos.previous_assignee_id` (transmission) et `infos.old_assignee_id`
+(assignation), déjà écrits par les services — aucun changement de schéma.
+Une réassignation A → B par un chef non traitant n'est plus un « retransmis ».
+La sous-requête est partagée (`_transmitted_grouped_sql`) entre la liste
+`GET /requests/transmitted` et les KPIs.
+
+**Frontend** : `fetchMyKpis()` remplace les comptages calculés côté client
+(dont « Total résolus », qui valait toujours 0). Nouvelle carte « À démarrer ».
+Clé `["my-tickets", "kpis", userId]` ; `invalidateTicketQueries()` (même liste
+que le SSE) est appelé par toutes les actions de la page détail.
+
+Aucun changement de schéma, aucune migration. Tests : `backend/tests/test_my_kpis.py`.
+
+## Session 2026-10-06 — Révocation des sessions et synchronisation temps réel des comptes
+
+**Problème.** Le token est émis par la plateforme centrale (opaque, non
+décodable, sans claim modifiable). Elle ignore les changements de rôle locaux :
+après un changement de rôle, l'ancien token restait valable (avec le nouveau
+rôle, relu en base), le refresh token aussi, et le flux SSE gardait le rôle
+figé à la connexion — un admin rétrogradé continuait à recevoir les événements
+« admin ». Le Backoffice ne se synchronisait pas (`user.updated` jamais émis ;
+clé `["admin","users"]` absente de la carte d'invalidation).
+
+**Mécanisme — version de session** (`backend/api/core/session_registry.py`, nouveau)
+- `account.infos.session_version` (+ `session_revoked_reason`,
+  `session_revoked_at`). **Aucune migration** : stocké dans `infos`, comme
+  `intervenant_status`, la table `account` étant partagée avec le central.
+- Chaque token relayé (`/auth/login`, `/auth/refresh`, `/auth/consent/accept`)
+  est lié à `(account_id, version)` par empreinte SHA-256 — Redis
+  (`edg:session-binding:*`, TTL 24 h) si `REDIS_URL`, sinon mémoire du
+  processus. Un token jamais vu est lié à sa première utilisation.
+- `resolve_central_account()` refuse un token lié à une autre version :
+  401 `SESSION_REVOKED` (`value` = `role_changed`) ou `ACCOUNT_DISABLED`
+  (`value` = `disabled` | `deleted`), avec un message lisible.
+- `POST /auth/refresh` refuse un refresh token révoqué **avant** d'appeler le
+  central.
+- Incrément de version : changement de rôle (`PUT /users/{id}`,
+  `PUT /users/{id}/role`, synchro de groupe central), désactivation
+  (`POST /users/{id}/deactivate` **et** `PUT /users/{id}` avec
+  `status=false` / `account_status≠active`), suppression. La réactivation
+  n'incrémente pas : les anciens tokens restent refusés, seule une nouvelle
+  connexion est acceptée.
+- Un `infos` fourni par le client ne peut plus réécrire les clés de session.
+- **Bug préexistant corrigé** : la synchro de rôle depuis les groupes centraux
+  s'exécutait avant tout contrôle, avec les groupes **en cache** de l'ancien
+  token (`CENTRAL_AUTH_CACHE_TTL`) : une requête de l'ancien token réécrivait
+  en base l'ancien rôle que l'admin venait de changer. Le contrôle de version
+  passe désormais avant la synchro.
+- Login d'un compte désactivé : quand le central refuse les identifiants, le
+  compte local donne le vrai motif (401 `ACCOUNT_DISABLED`).
+
+**Temps réel** (bus SSE existant, événements publiés **après commit**)
+- `user.session_revoked` `{user_id, reason, timestamp}` → `target.user_ids =
+  [id]` uniquement. Remplace `account.deactivated` (émis avant commit).
+- `user.created` / `user.updated` / `user.deleted` `{id, timestamp}` →
+  `roles: ["admin"]` + le compte concerné.
+- `RouteSSE` : à réception de `user.session_revoked`, l'événement est transmis
+  puis le flux est **fermé**. À chaque keepalive (25 s), le compte est relu en
+  base ; flux fermé si désactivé, supprimé, version ou rôle changés (filet si
+  un événement est perdu, ou si la table partagée est modifiée directement).
+
+**Frontend**
+- `src/lib/forced-logout.ts` (nouveau) : point unique de sortie — ferme le
+  SSE, efface la session, mémorise le motif, navigation `/login` via le router
+  (pas de rechargement) et vidage du cache React Query.
+- `client.ts` : 401 typé → pas de refresh, déconnexion forcée ; refresh refusé
+  → motif du backend ou « session expirée » ; panne réseau pendant le refresh
+  → la session n'est plus détruite.
+- `realtime-provider.tsx` : écoute `user.session_revoked` ; revalide
+  `/auth/me` au retour du réseau, de l'onglet et du flux SSE (rôle différent →
+  déconnexion). Aucun polling.
+- `login.tsx` : affiche le motif de la déconnexion.
+- `invalidation-map.ts` : `user.*` invalide `["admin","users"]`, `["me"]`,
+  `["user"]`, `["users"]`, `["users-audit"]`, supervision.
+
+**Tests** : `backend/tests/test_session_revocation.py` (24 tests, nouveau
+`backend/tests/` minimal — l'ancienne suite n'est plus sur le disque),
+`frontend/src/lib/forced-logout.test.ts` (14 tests).
+
+## Session 2026-10-06 — Profil : email verrouillé, unicité du téléphone, rattachement professionnel
+
+**Informations personnelles** (`frontend/src/routes/app.profile.tsx`)
+- Le champ email est grisé (`disabled`) : l'adresse est gérée par la plateforme
+  centrale. Côté serveur, `PUT /users/me` ignorait déjà `email` (absent de
+  `_SELF_UPDATE_ALLOWED`, `RouteUsers.py`).
+- Pendant la saisie d'un nouveau numéro, le frontend interroge
+  `GET /accounts/check-duplicate?phone=…&exclude_id=<mon id>` dès que le format
+  guinéen est valide et que le numéro diffère du numéro actuel. Si le numéro
+  appartient déjà à un autre compte, un message s'affiche et l'enregistrement
+  est bloqué (aussi pendant la vérification, ou si elle échoue).
+- Le serveur reste l'arbitre : `AccountService.update` normalise le numéro et
+  appelle `_check_phone_unique(exclude_id=id)` → 409 `PHONE_ALREADY_EXISTS`.
+
+**Profil professionnel** — lecture seule : Badge (`matricule`), Poste (`job`),
+Direction, Département, Service. Département et direction sont déduits du
+service de rattachement (`unit.department_id`, `direction_id`), avec repli sur
+`direction_id` du compte.
+
+Aucun changement de schéma ni de route backend.
+
+## Session 2026-09-29 — Notifications SSE après actions
+
+Le bus temps réel `backend/api/core/event_bus.py` relaie désormais les
+`AppEvent` entre workers via Redis Pub/Sub (`edg:realtime-events`) lorsque
+`REDIS_URL` est configuré. Le listener retente sa connexion après une coupure ;
+en l'absence de Redis, le mode mémoire mono-processus reste disponible.
+
+Les événements de notification créés via `NotificationEmitter` avec
+`commit=False` sont mis en attente dans la session et ne sont diffusés qu'après
+le commit de `get_db()` ; un rollback supprime les événements en attente. La
+restauration d'une notification émet maintenant `notification.restored`, que le
+frontend utilise pour invalider ses caches `notifications` (page, panneau,
+compteur). Les événements `created` et `read` conservent leur flux existant.
+
+Tests ciblés : `tests/core/test_event_bus.py` et
+`tests/api/test_notification_workflow.py` — **15 réussis**.
+
 ## Session 2026-06-24 — Implémentations CDC
 
 ### Points implémentés (tous validés)
@@ -2886,3 +3059,130 @@ arrivent tels quels à l'écran.
 
 Tests : `test_auth`, `test_change_password`, `test_central_group_mapping` →
 **74 réussis, 0 échec**.
+
+## Session 2026-09-28 (suite) — Notifications : ouvrir le ticket dans le menu qui le contient
+
+### Le symptôme
+
+Cliquer sur « Nouveau ticket à qualifier » affichait **« Ticket introuvable —
+Retour à la file d'attente »**. Le ticket existait, la file l'affichait ; seule
+sa fiche était refusée.
+
+### Cause 1 — le périmètre d'unité ne peut pas autoriser un ticket sans unité
+
+Un ticket en file d'attente n'a par construction ni unité traitante ni assigné
+(c'est ce que la qualification décide) :
+
+```
+id  ref            in_triage  unity_id  assignee_id
+8   EDG-26-00007   1          NULL      NULL
+```
+
+`RouteRequest._check_request_access` n'autorisait un `chief-service` que si
+`req.unity_id` tombait dans son périmètre → `403` sur `GET /requests/8`, que le
+frontend rend comme « Ticket introuvable » (même écran pour l'erreur et
+l'absence). Or `_queue_manage_guard` ouvre déjà la **liste de triage** et la
+**qualification** au chef de service sans aucune borne d'unité : seule la
+lecture de la fiche était restée fermée.
+
+**Correctif — motifs de LECTURE, ajoutés à `_check_request_access` :**
+
+| Motif | Menu correspondant | Coût |
+| --- | --- | --- |
+| `in_triage` + rôle `chief-service` | File d'attente | aucun |
+| `distributor_id = moi` | Distribution (BR-DISTRIBUTION-001) | aucun |
+| j'ai transmis ce ticket (`RequestRepository.is_handover_actor`) | Tickets transmis | 1 requête, en dernier recours |
+
+Le troisième motif reprend le critère d'appartenance de
+`list_transmitted_by_actor` (émetteur dans `workflow_detail.infos.actor_id`) :
+transmettre un ticket le fait sortir de son unité, donc aucun motif synchrone ne
+peut plus l'autoriser — alors que « Tickets transmis » continue de le montrer.
+
+⚠️ **`read_only=True` est indispensable.** `_resolve_access` garde aussi les
+mutations (`PUT /requests/{id}`). Sans le drapeau, tout ticket étant créé
+`in_triage=True`, n'importe quel chef de service **hors périmètre** pouvait le
+modifier — le verrou du Lot 2.1. Régression effectivement attrapée par
+`test_patch_blocks_staff_outside_perimeter` lors du premier jet. Le drapeau
+n'est posé que sur les 7 routes de consultation ; les 3 routes d'écriture
+restent bornées à l'unité.
+
+### Cause 2 — `_check_attachment_access` avait divergé du modèle
+
+La copie locale de la politique d'accès dans `RouteAttachment.py` lisait
+`req.unit_id`, **attribut absent de `Request`** (la colonne est `unity_id`) :
+`AttributeError`, donc `500`, pour tout `chief-service` / `technicien` /
+`chef-division-support`. Elle ignorait aussi les bypass demandeur/assigné. Elle
+délègue désormais à `_resolve_access(read_only=True)` — une seule politique.
+
+### La demande de fond — contrôler les redirections
+
+`notification.action_url` est **figé à l'émission**. Entre l'envoi et le clic, le
+ticket a pu être qualifié, imputé, transmis, résolu : suivre cette URL dépose
+l'utilisateur dans un espace qui ne le contient plus.
+
+Nouveau `ticketMenuRoute(ticket, role, meId)` dans
+`frontend/src/lib/ticket-navigation.ts` — la destination est déduite de **l'état
+courant du ticket**, lu au clic (même `queryKey` que la page détail : la fiche
+est déjà en cache à l'arrivée, pas de second appel). Ordre retenu, le menu le
+plus actionnable d'abord :
+
+1. **File d'attente** — `in_triage`, rôle chief-service/admin
+2. **Distribution** — `distributor_id = moi`, pas encore assigné, rôle CDS
+3. **Ma boîte de traitement** — j'en suis l'intervenant actuel
+4. **Tickets résolus** (`resolved`) / **Historique** (`closed`, `cancelled`, `rejected`)
+5. **Tickets transmis** — je m'en suis dessaisi
+6. **Mes tickets** — je suis le requérant
+7. **Espace admin** — admin sans menu plus précis
+8. Repli `/app/requests/:id`
+
+Chaque destination est filtrée par `MENU_ROLES`, vérifié un à un contre les
+gardes réelles des routes `app.*_.tickets.$id.tsx`. **Supervision, DG et Centre
+SLA sont exclus par construction** (type `NotificationDestination`) : leurs
+menus sont commentés dans la barre latérale, y déposer quelqu'un le laisserait
+sans retour. Ils restent atteignables en destination explicite (`detailTo` du
+tableau de bord). `/app/resolved/tickets/:id` **manquait** à la table alors que
+la route existait : aucune notification ne pouvait atterrir dans « Tickets
+résolus ».
+
+Les deux points d'entrée (cloche `notification-panel.tsx` et page
+`app.notifications.tsx`) partagent cette décision, pour qu'ils ne divergent
+plus. La navigation étant devenue asynchrone, le test « y a-t-il quelque chose à
+ouvrir ? » est séparé dans `canNavigateNotification()` — sinon le toast d'échec
+ne se déclenchait plus jamais (une promesse est toujours vraie).
+
+### Champ ajouté
+
+`RequestResponse.distributor_id` (`Optional[int]`) — **schéma détail
+uniquement**, absent des schémas de liste : seule la fiche a besoin de cette
+décision. Côté frontend : `RawRequest.distributor_id` → `RequestItem.distributorId`.
+
+### Entrée dans la file depuis la fiche
+
+Un ticket encore en file n'a ni catégorie, ni priorité, ni organisation
+traitante : la seule action qui le concerne est sa qualification, et le
+formulaire vit dans la File d'attente. La fiche ouverte en contexte `queue`
+propose donc « **Qualifier ce ticket** » → `/app/queue?ticket=<id>`, nouveau lien
+profond qui déplie la carte visée, la surligne et l'amène sous les yeux. Si le
+ticket a été qualifié entre-temps, un message le dit au lieu de laisser chercher
+une carte qui n'existe plus. Le formulaire n'est pas dupliqué.
+
+### Vérification — égalité stricte des ensembles d'échecs
+
+A/B sur `backend/tests/api`, code HEAD puis code corrigé, mêmes 18 fichiers
+couvrant l'accès aux requêtes, la file, la distribution et la transmission :
+
+| | Échecs |
+| --- | --- |
+| Référence HEAD (sous-ensemble) | **23** |
+| Après corrections | **23** |
+| Nouveaux échecs | **aucun** |
+| Échecs disparus | aucun |
+
+Suite complète `tests/api` : 63 échecs préexistants sur HEAD (407 réussis) —
+inchangés. Le premier jet en produisait 64, d'où l'identification puis la
+correction de `test_patch_blocks_staff_outside_perimeter`.
+
+Typecheck frontend : aucune erreur sur les fichiers touchés (les erreurs
+restantes appartiennent à la famille `directions`/`unknown` préexistante,
+présente aussi dans des fichiers non modifiés).
+

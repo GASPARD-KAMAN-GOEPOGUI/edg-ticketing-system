@@ -388,6 +388,110 @@ class RequestRepository(BaseRepository[Request]):
             load_options=_SKIP_UNUSED_RELS,
         )
 
+    # ── Cessions de traitement (Transmis / Retransmis) ────────────────────────
+    #
+    # BR-TRANSMIT-HANDOVER-001 — assigner EST transmettre. Un chef qui confie
+    # le ticket à quelqu'un d'autre s'en dessaisit, exactement comme une
+    # transmission de traitement : ses envois doivent donc figurer dans
+    # « Tickets transmis ».
+    #   treatment_transmitted   — transmission de traitement (tout traitant)
+    #   distributed_to_division — le chef de service impute au chef de division
+    #                             depuis la file d'attente
+    #   distribution_assigned   — le chef de division confie à un technicien
+    #                             depuis sa file Distribution
+    # Ne PAS inclure `distribution_taken` : le chef de division se l'assigne à
+    # lui-même, il ne transmet rien.
+    #
+    # `assigned` (assignation directe depuis la File d'attente, ou endpoint
+    # assign() dedie) est traite a part : ce meme type d'evenement sert aussi
+    # a l'AUTO-assignation (« Prendre le ticket »), qui ne transmet rien. On
+    # ne le retient donc que si le destinataire differe de l'emetteur.
+    #
+    # `agent_id` porte le destinataire (create_event ecrit dest_id dedans).
+    # Il est NULL sur les assignations anterieures a BR-TRANSMIT-HANDOVER-001
+    # etendue (2026-09-28), qui n'enregistraient pas la destination : ces
+    # evenements-la restent donc exclus, faute de pouvoir distinguer une
+    # auto-assignation d'une assignation a un tiers. Choix conservateur,
+    # assume — mieux vaut un historique incomplet qu'un faux « j'ai transmis ».
+    _HANDOVER_CLAUSE = """
+                  AND (
+                    wd.event_type IN (
+                      'treatment_transmitted', 'distributed_to_division', 'distribution_assigned'
+                    )
+                    OR (
+                      wd.event_type = 'assigned'
+                      AND wd.agent_id IS NOT NULL
+                      AND CAST(wd.agent_id AS CHAR) != :actor_id
+                    )
+                  )
+    """
+
+    # BR-RETRANSMIT-001 (redéfini le 2026-10-06) — une cession suit un RETOUR
+    # quand, au moment où l'acteur cède, le ticket était de nouveau entre ses
+    # mains :
+    #   - treatment_transmitted : il en était le traitant (`previous_assignee_id`) ;
+    #   - assigned              : le ticket n'avait pas de traitant (file
+    #     d'attente) ou c'était lui (`old_assignee_id` vide ou égal à lui).
+    #     Une réassignation A -> B par un chef qui n'est pas le traitant est une
+    #     correction de pilotage, pas un retour : elle est exclue ;
+    #   - distributed_to_division / distribution_assigned : toujours vrai, les
+    #     préconditions serveur l'imposent (ticket dans la file d'attente, ou
+    #     dans SA file Distribution sans traitant).
+    # NULLIF(..., 'null') : MySQL rend la chaîne 'null' pour une valeur JSON null.
+    _HELD_AT_HANDOVER = """(
+            wd.event_type IN ('distributed_to_division', 'distribution_assigned')
+            OR (
+              wd.event_type = 'treatment_transmitted'
+              AND NULLIF(CAST(JSON_UNQUOTE(JSON_EXTRACT(wd.infos, '$.previous_assignee_id')) AS CHAR), 'null') = :actor_id
+            )
+            OR (
+              wd.event_type = 'assigned'
+              AND COALESCE(
+                NULLIF(CAST(JSON_UNQUOTE(JSON_EXTRACT(wd.infos, '$.old_assignee_id')) AS CHAR), 'null'),
+                :actor_id
+              ) = :actor_id
+            )
+          )"""
+
+    def _transmitted_grouped_sql(
+        self, *, search_clause: str = "", retransmitted_only: bool = False,
+    ) -> str:
+        """Sous-requête unique de « Tickets transmis » : une ligne par ticket.
+
+        Partagée par la liste (`list_transmitted_by_actor`) et par les KPIs de
+        Ma boîte (`my_kpis`) : le chiffre affiché et la liste qu'il résume ne
+        peuvent pas diverger.
+
+        Retransmis : il existe une cession faite alors que le ticket était
+        revenu entre les mains de l'acteur (`_HELD_AT_HANDOVER`) ET qui n'est
+        pas sa toute première cession sur ce ticket — « cédé, revenu, cédé à
+        nouveau ». `wd.id` (auto-incrément) fixe l'ordre chronologique.
+        """
+        having_clause = (
+            f"HAVING MAX(CASE WHEN {self._HELD_AT_HANDOVER} THEN wd.id END) > MIN(wd.id)"
+            if retransmitted_only else ""
+        )
+        return f"""
+                SELECT wf.request_id AS request_id, MAX(wd.created_at) AS last_transmitted_at
+                FROM workflow_detail wd
+                JOIN workflow wf ON wf.id = wd.workflow_id
+                JOIN request r   ON r.id = wf.request_id AND r.deleted_at IS NULL
+                WHERE wd.deleted_at IS NULL
+                  {self._HANDOVER_CLAUSE}
+                  AND JSON_UNQUOTE(JSON_EXTRACT(wd.infos, '$.actor_id')) = :actor_id
+                  AND (r.assignee_id IS NULL OR r.assignee_id != :actor_id)
+                  {search_clause}
+                GROUP BY wf.request_id
+                {having_clause}
+        """
+
+    async def count_transmitted_by_actor(
+        self, actor_id: str, *, retransmitted_only: bool = False,
+    ) -> int:
+        grouped = self._transmitted_grouped_sql(retransmitted_only=retransmitted_only)
+        stmt = text(f"SELECT COUNT(*) FROM ({grouped}) t")
+        return (await self.session.execute(stmt, {"actor_id": str(actor_id)})).scalar_one() or 0
+
     async def list_transmitted_by_actor(
         self, actor_id: str, *, search: str | None = None, page: int = 1, limit: int = 20,
         retransmitted_only: bool = False,
@@ -411,45 +515,9 @@ class RequestRepository(BaseRepository[Request]):
         utilisé par ServiceStats.py (escalation_stats/global_kpis).
 
         retransmitted_only=True (BR-RETRANSMIT-001) — ne garde que les tickets
-        où `actor_id` a transmis AU MOINS DEUX FOIS (`HAVING COUNT(*) >= 2`) :
-        pour transmettre deux fois le même ticket, il faut nécessairement qu'il
-        lui soit revenu entre-temps (réassignation/réouverture) — pas besoin de
-        modéliser ce "retour" séparément, le comptage des transmissions suffit.
-        """
-        # BR-TRANSMIT-HANDOVER-001 — assigner EST transmettre. Un chef qui confie
-        # le ticket à quelqu'un d'autre s'en dessaisit, exactement comme une
-        # transmission de traitement : ses envois doivent donc figurer dans
-        # « Tickets transmis ».
-        #   treatment_transmitted   — transmission de traitement (tout traitant)
-        #   distributed_to_division — le chef de service impute au chef de division
-        #                             depuis la file d'attente
-        #   distribution_assigned   — le chef de division confie à un technicien
-        #                             depuis sa file Distribution
-        # Ne PAS inclure `distribution_taken` : le chef de division se l'assigne à
-        # lui-même, il ne transmet rien.
-        _HANDOVER_EVENTS = (
-            "'treatment_transmitted', 'distributed_to_division', 'distribution_assigned'"
-        )
-        # `assigned` (assignation directe depuis la File d'attente, ou endpoint
-        # assign() dedie) est traite a part : ce meme type d'evenement sert aussi
-        # a l'AUTO-assignation (« Prendre le ticket »), qui ne transmet rien. On
-        # ne le retient donc que si le destinataire differe de l'emetteur.
-        #
-        # `agent_id` porte le destinataire (create_event ecrit dest_id dedans).
-        # Il est NULL sur les assignations anterieures a BR-TRANSMIT-HANDOVER-001
-        # etendue (2026-09-28), qui n'enregistraient pas la destination : ces
-        # evenements-la restent donc exclus, faute de pouvoir distinguer une
-        # auto-assignation d'une assignation a un tiers. Choix conservateur,
-        # assume — mieux vaut un historique incomplet qu'un faux « j'ai transmis ».
-        _HANDOVER_CLAUSE = f"""
-                  AND (
-                    wd.event_type IN ({_HANDOVER_EVENTS})
-                    OR (
-                      wd.event_type = 'assigned'
-                      AND wd.agent_id IS NOT NULL
-                      AND CAST(wd.agent_id AS CHAR) != :actor_id
-                    )
-                  )
+        revenus à l'acteur puis cédés de nouveau par lui (voir
+        `_transmitted_grouped_sql`). Deux cessions sans retour (un chef qui
+        corrige une assignation A -> B) ne suffisent plus depuis le 2026-10-06.
         """
         params = {"actor_id": str(actor_id)}
         search_clause = ""
@@ -465,39 +533,17 @@ class RequestRepository(BaseRepository[Request]):
                     OR LOWER(COALESCE(r.meter_number, '')) LIKE :search_like
                   )
             """
-        having_clause = "HAVING COUNT(*) >= 2" if retransmitted_only else ""
+        grouped = self._transmitted_grouped_sql(
+            search_clause=search_clause, retransmitted_only=retransmitted_only,
+        )
 
-        count_stmt = text(f"""
-            SELECT COUNT(*) FROM (
-                SELECT wf.request_id
-                FROM workflow_detail wd
-                JOIN workflow wf ON wf.id = wd.workflow_id
-                JOIN request r   ON r.id = wf.request_id AND r.deleted_at IS NULL
-                WHERE wd.deleted_at IS NULL
-                  {_HANDOVER_CLAUSE}
-                  AND JSON_UNQUOTE(JSON_EXTRACT(wd.infos, '$.actor_id')) = :actor_id
-                  AND (r.assignee_id IS NULL OR r.assignee_id != :actor_id)
-                  {search_clause}
-                GROUP BY wf.request_id
-                {having_clause}
-            ) t
-        """)
+        count_stmt = text(f"SELECT COUNT(*) FROM ({grouped}) t")
         total = (await self.session.execute(count_stmt, params)).scalar_one() or 0
         if not total:
             return [], 0
 
         ids_stmt = text(f"""
-            SELECT wf.request_id AS request_id, MAX(wd.created_at) AS last_transmitted_at
-            FROM workflow_detail wd
-            JOIN workflow wf ON wf.id = wd.workflow_id
-            JOIN request r   ON r.id = wf.request_id AND r.deleted_at IS NULL
-            WHERE wd.deleted_at IS NULL
-              {_HANDOVER_CLAUSE}
-              AND JSON_UNQUOTE(JSON_EXTRACT(wd.infos, '$.actor_id')) = :actor_id
-              AND (r.assignee_id IS NULL OR r.assignee_id != :actor_id)
-              {search_clause}
-            GROUP BY wf.request_id
-            {having_clause}
+            {grouped}
             ORDER BY last_transmitted_at DESC
             LIMIT :limit OFFSET :offset
         """)
@@ -522,6 +568,100 @@ class RequestRepository(BaseRepository[Request]):
         by_id = {item.id: item for item in items}
         ordered_items = [by_id[i] for i in ordered_ids if i in by_id]
         return ordered_items, total
+
+    async def my_kpis(self, actor_id: str | int) -> dict[str, int]:
+        """KPIs de « Ma boîte de traitement » — source de vérité unique.
+
+        Chaque valeur reprend EXACTEMENT les critères de la liste qu'elle
+        résume, avec un COUNT SQL (aucun plafond, aucun calcul côté client) :
+          - to_start / in_progress : la liste de Ma boîte (`assignee_id` = moi,
+            statut non terminal, jamais un ticket dont je suis le demandeur —
+            BR-REQUESTER-NO-SELF-TREATMENT-001). in_progress = traitement
+            démarré ; to_start = tout le reste de la boîte. Leur somme est donc
+            toujours le nombre de tickets de la liste.
+          - resolved : la liste « Tickets résolus » (`list_resolved_by`).
+          - transmitted / retransmitted : la liste « Tickets transmis ».
+        Ma boîte et Résolus portent sur les tickets dont je suis l'intervenant,
+        Transmis sur ceux dont je ne le suis plus : aucun double comptage.
+        Retransmis est un sous-ensemble de Transmis.
+        """
+        actor_int = int(actor_id)
+        status_stmt = (
+            select(RequestStatus.code, func.count(Request.id))
+            .join(RequestStatus, Request.request_status_id == RequestStatus.id)
+            .where(Request.deleted_at.is_(None))
+        )
+        status_stmt = self._apply_filters(status_stmt, {
+            "assignee_id": actor_int,
+            "exclude_request_status": self._INACTIVE_STATUSES,
+            "exclude_requester_id": actor_int,
+        }).group_by(RequestStatus.code)
+        active_total = 0
+        in_progress = 0
+        for code, count in (await self.session.execute(status_stmt)).all():
+            active_total += count
+            if normalize_status(str(code)) == "in_progress":
+                in_progress += count
+
+        resolved_stmt = (
+            select(func.count(Request.id))
+            .where(Request.deleted_at.is_(None))
+            .where(Request.assignee_id == actor_int)
+        )
+        resolved_stmt = self._apply_filters(resolved_stmt, {"request_status": ["resolved", "closed"]})
+        resolved = (await self.session.execute(resolved_stmt)).scalar_one() or 0
+
+        return {
+            "to_start": active_total - in_progress,
+            "in_progress": in_progress,
+            "resolved": resolved,
+            "transmitted": await self.count_transmitted_by_actor(str(actor_int)),
+            "retransmitted": await self.count_transmitted_by_actor(
+                str(actor_int), retransmitted_only=True,
+            ),
+        }
+
+    async def is_handover_actor(self, request_id: str, actor_id: str) -> bool:
+        """`actor_id` a-t-il personnellement transmis ce ticket a un moment ?
+
+        Meme critere d'appartenance que « Tickets transmis »
+        (`list_transmitted_by_actor`), reduit a un seul ticket : l'emetteur ne
+        vit que dans `workflow_detail.infos.actor_id`.
+
+        Sert de motif de LECTURE (RouteRequest._resolve_access) : un ticket
+        transmis quitte l'unite de celui qui l'a transmis, et le perimetre
+        d'unite ne peut donc plus l'autoriser — alors que « Tickets transmis »
+        le lui montre toujours. Sans ce motif, ouvrir depuis cette liste ou
+        depuis une notification affichait « Ticket introuvable ».
+
+        Contrairement a la liste, la clause `assignee_id != actor_id` est
+        volontairement absente : redevenir l'intervenant du ticket ne doit pas
+        faire perdre le droit de le lire (ce cas passe de toute facon par le
+        bypass assignee, ce qui rend la condition inutile ici).
+        """
+        stmt = text("""
+            SELECT 1
+            FROM workflow_detail wd
+            JOIN workflow wf ON wf.id = wd.workflow_id
+            WHERE wd.deleted_at IS NULL
+              AND wf.request_id = :request_id
+              AND (
+                wd.event_type IN (
+                  'treatment_transmitted', 'distributed_to_division', 'distribution_assigned'
+                )
+                OR (
+                  wd.event_type = 'assigned'
+                  AND wd.agent_id IS NOT NULL
+                  AND CAST(wd.agent_id AS CHAR) != :actor_id
+                )
+              )
+              AND JSON_UNQUOTE(JSON_EXTRACT(wd.infos, '$.actor_id')) = :actor_id
+            LIMIT 1
+        """)
+        row = (await self.session.execute(
+            stmt, {"request_id": str(request_id), "actor_id": str(actor_id)},
+        )).first()
+        return row is not None
 
     async def list_by_requester(
         self, requester_id: str, *, page: int = 1, limit: int = 20
@@ -590,6 +730,18 @@ class RequestRepository(BaseRepository[Request]):
             select(RequestStatus.code, func.count(Request.id))
             .join(RequestStatus, Request.request_status_id == RequestStatus.id)
             .where(Request.deleted_at.is_(None))
+            .group_by(RequestStatus.code)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return {row[0]: row[1] for row in rows}
+
+    async def count_by_status_for_requester(self, requester_id: int) -> dict[str, int]:
+        """{status_code: count} des tickets dont `requester_id` est le demandeur —
+        compteurs de l'accueil, calculés en SQL plutôt que sur une page de tickets."""
+        stmt = (
+            select(RequestStatus.code, func.count(Request.id))
+            .join(RequestStatus, Request.request_status_id == RequestStatus.id)
+            .where(Request.deleted_at.is_(None), Request.requester_id == requester_id)
             .group_by(RequestStatus.code)
         )
         rows = (await self.session.execute(stmt)).all()

@@ -277,6 +277,9 @@ export type RequestItem = {
   smsLog?: SmsLogEntry[];
   assigneeId?: string;
   assigneeName?: string;
+  /** BR-DISTRIBUTION-001 — chef de division support à qui le ticket a été
+   *  imputé. Servi par la fiche seule (pas par les listes). */
+  distributorId?: string;
   isExternal: boolean;
   createdAt: string;
   updatedAt: string;

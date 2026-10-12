@@ -380,12 +380,19 @@ export function AppLayout({ children }: { children: ReactNode }) {
                               : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground",
                           )}
                         >
-                          <item.icon
-                            className={cn(
-                              "h-4 w-4 shrink-0 transition-colors",
-                              active ? "text-background" : "text-muted-foreground group-hover:text-foreground/80",
+                          <span className="relative grid h-4 w-4 shrink-0 place-items-center">
+                            <item.icon
+                              className={cn(
+                                "h-4 w-4 transition-colors",
+                                active ? "text-background" : "text-muted-foreground group-hover:text-foreground/80",
+                              )}
+                            />
+                            {item.to === "/app/notifications" && unreadCount > 0 && (
+                              <span className="absolute -right-2 -top-2 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-0.5 text-[8px] font-bold text-white ring-1 ring-sidebar">
+                                {unreadCount > 9 ? "9+" : unreadCount}
+                              </span>
                             )}
-                          />
+                          </span>
                           {/* Label: only rendered when not collapsed; hidden on md–xl */}
                           {!collapsed && (
                             <span className="hidden xl:block truncate">{item.label}</span>
@@ -468,12 +475,19 @@ export function AppLayout({ children }: { children: ReactNode }) {
                                       : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground",
                                   )}
                                 >
-                                  <item.icon
-                                    className={cn(
-                                      "h-4 w-4 shrink-0",
-                                      active ? "text-background" : "text-muted-foreground",
+                                  <span className="relative grid h-4 w-4 shrink-0 place-items-center">
+                                    <item.icon
+                                      className={cn(
+                                        "h-4 w-4",
+                                        active ? "text-background" : "text-muted-foreground",
+                                      )}
+                                    />
+                                    {item.to === "/app/notifications" && unreadCount > 0 && (
+                                      <span className="absolute -right-2 -top-2 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-0.5 text-[8px] font-bold text-white ring-1 ring-sidebar">
+                                        {unreadCount > 9 ? "9+" : unreadCount}
+                                      </span>
                                     )}
-                                  />
+                                  </span>
                                   {item.label}
                                 </Link>
                               )}
@@ -586,26 +600,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
                         : "Connexion temps réel inactive"}
                   </TooltipContent>
                 </Tooltip>
-
-                {/* Notifications */}
-                <button
-                  onClick={() => setNotifPanelOpen(true)}
-                  className="relative flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  aria-label={unreadCount > 0 ? `${unreadCount} notifications non lues` : "Notifications"}
-                >
-                  <Bell className="h-4 w-4" />
-                  {unreadCount > 0 && (
-                    unreadCount > 9 ? (
-                      <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-bold text-white ring-2 ring-background">
-                        9+
-                      </span>
-                    ) : (
-                      <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[9px] font-bold text-white ring-2 ring-background">
-                        {unreadCount}
-                      </span>
-                    )
-                  )}
-                </button>
 
                 <span className="mx-0.5 h-5 w-px bg-border md:mx-1" />
 

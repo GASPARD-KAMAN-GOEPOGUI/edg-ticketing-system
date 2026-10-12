@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { fetchRequests, fetchTransmittedByMe } from "@/lib/api/requests";
+import { fetchRequests, fetchMyKpis } from "@/lib/api/requests";
 import { priorityLabels, statusLabels } from "@/lib/mock-data";
 import type { RequestItem, RequestStatus, Priority } from "@/lib/mock-data";
 import {
@@ -138,52 +138,23 @@ function MyTicketsPage() {
     enabled: !!currentUserId && showScopedEscalations,
   });
 
-  // Requête stats : workload affectée à l'agent connecté, indépendamment des
-  // filtres appliqués à la liste affichée (les KPI doivent refléter la charge
-  // totale, pas la vue filtrée). Quand aucun filtre n'est actif, `baseFilters`/
-  // `scopedEscalationFilters` sont déjà identiques à ces requêtes stats — on
-  // réutilise alors `data`/`scopedEscalationsData` au lieu de refaire le même
-  // appel réseau une seconde fois.
-  const mainFiltersNeutral = filterPriority === "all" && filterStatus === "all" && !debouncedSearch;
-  // Ne réutiliser scopedEscalationsData que s'il a effectivement été fetché
-  // avec exactement les mêmes filtres (showScopedEscalations=false → non fetché).
-  const scopedFiltersNeutral = filterPriority === "all" && !debouncedSearch && showScopedEscalations;
-
-  const { data: statsDataFetched } = useQuery({
-    queryKey: ["my-tickets-stats", currentUserId],
-    queryFn: () => fetchRequests({ assignee_id: currentUserId, exclude_status: TERMINAL_STATUSES, limit: 1000 }),
-    staleTime: 60_000,
-    enabled: !!currentUserId && !mainFiltersNeutral,
-  });
-  const statsData = mainFiltersNeutral ? data : statsDataFetched;
-
-  const { data: scopedEscalationsStatsDataFetched } = useQuery({
-    queryKey: ["my-tickets-stats", "scoped-escalations", currentUserId, role],
-    queryFn: () => fetchRequests({ request_status: "escalated", limit: 1000 }),
-    staleTime: 60_000,
-    enabled: !!currentUserId && includeScopedEscalations && !scopedFiltersNeutral,
-  });
-  const scopedEscalationsStatsData = scopedFiltersNeutral
-    ? scopedEscalationsData
-    : scopedEscalationsStatsDataFetched;
-
-  // KPI "Transmis"/"Retransmis" — comptages issus de /requests/transmitted
-  // (BR-TRANSMIT-001/BR-RETRANSMIT-001), indépendants de assignee_id puisqu'un
-  // ticket transmis n'est plus assigné à l'agent : besoin d'une requête dédiée.
-  const { data: transmittedCountData } = useQuery({
-    queryKey: ["my-tickets-transmitted-count", currentUserId],
-    queryFn: () => fetchTransmittedByMe({ limit: 1 }),
-    staleTime: 60_000,
+  // KPIs — source de vérité unique : GET /requests/my-kpis, calculés en SQL par
+  // le serveur avec exactement les critères des listes qu'ils résument (Ma boîte,
+  // Tickets résolus, Tickets transmis). Indépendants des filtres de la liste :
+  // ils reflètent la charge réelle, pas la vue filtrée.
+  // Clé sous ["my-tickets"] : toute invalidation de la boîte (action locale ou
+  // événement SSE) rafraîchit aussi ses KPIs — ils ne peuvent pas diverger.
+  const { data: kpis } = useQuery({
+    queryKey: ["my-tickets", "kpis", currentUserId],
+    queryFn: fetchMyKpis,
+    staleTime: 30_000,
     enabled: !!currentUserId,
   });
-  const { data: retransmittedCountData } = useQuery({
-    queryKey: ["my-tickets-retransmitted-count", currentUserId],
-    queryFn: () => fetchTransmittedByMe({ limit: 1, retransmitted_only: true }),
-    staleTime: 60_000,
-    enabled: !!currentUserId,
-  });
-  const kpiTransmitted = transmittedCountData?.total ?? 0;
-  const kpiRetransmitted = retransmittedCountData?.total ?? 0;
+  const kpiToStart = kpis?.toStart ?? 0;
+  const kpiInProgress = kpis?.inProgress ?? 0;
+  const kpiResolved = kpis?.resolved ?? 0;
+  const kpiTransmitted = kpis?.transmitted ?? 0;
+  const kpiRetransmitted = kpis?.retransmitted ?? 0;
 
   const onlyMyAssignedTickets = (items?: RequestItem[]) =>
     (items ?? []).filter((r) => r.assigneeId === currentUserId);
@@ -219,14 +190,6 @@ function MyTicketsPage() {
   const requesterAvatarById = new Map(
     (requesterProfiles ?? []).map((u) => [String(u.id), u]),
   );
-
-  const assignedTickets = useMemo(
-    () => mergeTickets(statsData?.items, scopedEscalationsStatsData?.items),
-    [statsData?.items, scopedEscalationsStatsData?.items, includeScopedEscalations, currentUserId],
-  );
-  const resolvedTickets = assignedTickets.filter((r) => r.status === "resolved" || r.status === "closed");
-  const kpiInProgress = assignedTickets.filter((r) => r.status === "in_progress").length;
-  const kpiResolved = resolvedTickets.length;
 
   const listLoading = isLoading || (showScopedEscalations && scopedEscalationsLoading);
   const listError = isError || (showScopedEscalations && scopedEscalationsError);
@@ -273,13 +236,25 @@ function MyTicketsPage() {
         <LayoutToggle layout={layout} onChange={setLayout} />
       </motion.header>
 
-      {/* ── KPI row — parcours de traitement (en cours -> résolu -> transmis -> retransmis) ── */}
+      {/* ── KPI row — parcours de traitement (à démarrer -> en cours -> résolu -> transmis -> retransmis) ── */}
       <motion.div
         initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.04 }}
-        className="grid grid-cols-2 gap-3 sm:grid-cols-4"
+        className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5"
       >
+        {/* À démarrer + En cours = nombre de tickets de la boîte (BR-TRAITEMENT-PROGRESSIF-001 :
+            une assignation désigne un intervenant, le traitement démarre à son geste). */}
+        <GlassCard className="flex items-center gap-3 p-4">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-warning/10">
+            <Clock className="h-4 w-4 text-warning-foreground dark:text-warning" />
+          </span>
+          <div>
+            <div className="text-2xl font-bold leading-none">{kpiToStart}</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">À démarrer</div>
+          </div>
+        </GlassCard>
+
         <GlassCard className="flex items-center gap-3 p-4">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10">
             <Ticket className="h-4 w-4 text-primary" />

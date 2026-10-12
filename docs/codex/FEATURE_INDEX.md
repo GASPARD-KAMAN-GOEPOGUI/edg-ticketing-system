@@ -36,6 +36,7 @@ Route frontend: `/app/my-tickets`, `/app/my-tickets/tickets/$id`.
 Page principale: `frontend/src/routes/app.my-tickets.tsx`, `frontend/src/routes/app.my-tickets_.tickets.$id.tsx`.
 Service frontend: `frontend/src/lib/api/requests.ts`.
 Endpoint backend: `GET /api/v1/requests?assignee_id={actor_id}`, `GET /api/v1/requests/by-assignee/{assignee_id}`, `POST /api/v1/requests/{id}/resolve`, `POST /api/v1/requests/{id}/escalate`.
+KPI (2026-10-06, BR-KPI-MYBOX-001): `GET /api/v1/requests/my-kpis` — À démarrer, En cours, Total résolus, Transmis, Retransmis, calculés en SQL avec les critères exacts des listes résumées (`fetchMyKpis`, clé `["my-tickets", "kpis", userId]`).
 Backend: `RouteRequest.py`, `ServiceRequest.py`, `ticket_actions.py`.
 Tables: `request`, `workflow_detail`, `task`.
 Permissions: agent dans `ACTION_ALLOWED_ROLES`.
@@ -244,18 +245,32 @@ Chemins probables: `ServiceRequest.py`, `ModelRequest.py`, `ServiceReport.py`, `
 Identifiant: FEATURE-NOTIFICATIONS
 Nom: Notifications personnelles et workflow
 Module: MOD-NOTIF
-Description: page et panneau de notifications, avec destinataire unique selon le prochain acteur du workflow ticket.
+Description: page et panneau de notifications, avec destinataire unique selon le prochain acteur du workflow ticket. Les créations, lectures et restaurations invalident en temps réel les caches page/panneau/badge ; événements transactionnels après commit et relais Redis Pub/Sub inter-workers quand `REDIS_URL` est configuré.
 Roles concernes: user, agent, chief, director, admin.
 Route frontend: `/app/notifications`.
 Composants: `frontend/src/components/notification-panel.tsx`.
 Service frontend: `frontend/src/lib/api/notifications.ts`, `frontend/src/lib/realtime/invalidation-map.ts`.
 Endpoint backend: `GET/PUT/POST /api/v1/notifications/*`, actions ticket qui appellent `NotificationEmitter.py`.
 Route backend: `backend/api/routes/RouteNotification.py`, `backend/api/routes/RouteSSE.py`.
-Service backend: `backend/api/services/ServiceNotification.py`, `backend/api/services/NotificationEmitter.py`.
+Service backend: `backend/api/services/ServiceNotification.py`, `backend/api/services/NotificationEmitter.py`, `backend/api/core/event_bus.py`.
 Email backend: `backend/api/core/mailer.py`, templates HTML dans `backend/templates/`.
 Tables: `notification`, `workflow_detail`, `request`, `account`.
 Regles metier: BR-NOTIF-001, BR-NAV-001.
 Chemins probables: `notification-panel.tsx`, `notifications.ts`, `NotificationEmitter.py`, `ServiceRequest.py`, `RouteNotification.py`, `RepositoryNotification.py`, `event_bus.py`.
+
+## FEATURE-SESSION-REVOCATION
+
+Identifiant: FEATURE-SESSION-REVOCATION
+Nom: Revocation des sessions et synchronisation temps reel des comptes
+Module: MOD-AUTH
+Description: un changement de role, une desactivation ou une suppression par un admin deconnecte immediatement le seul compte concerne (ancien token refuse cote serveur, flux SSE ferme, message explicite sur /login) ; le Backoffice des comptes se synchronise en temps reel entre administrateurs.
+Roles concernes: admin (emetteur), tous les roles authentifies (cible).
+Route frontend: `/app/admin/users`, `/login`.
+Service frontend: `frontend/src/lib/forced-logout.ts`, `frontend/src/lib/api/client.ts`, `frontend/src/providers/realtime-provider.tsx`, `frontend/src/lib/realtime/invalidation-map.ts`.
+Endpoint backend: `PUT /api/v1/users/{id}`, `PUT /api/v1/users/{id}/role`, `POST /api/v1/users/{id}/activate|deactivate`, `DELETE /api/v1/users/{id}`, `POST /api/v1/auth/login|refresh`, `GET /api/v1/events`.
+Service backend: `backend/api/core/session_registry.py`, `backend/api/services/ServiceAccount.py`, `backend/api/dependencies.py`.
+Tables: `account` (`infos.session_version`).
+Regles metier: BR-AUTH-SESSION-REVOCATION-001, BR-AUTH-ACCOUNT-STATUS-001.
 
 ## FEATURE-REPORTS
 

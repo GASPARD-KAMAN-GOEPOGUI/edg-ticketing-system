@@ -39,7 +39,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.core import central_auth, mailer
+from api.core import central_auth, mailer, session_registry
 from api.core.exceptions import ValidationException
 from api.dependencies import (
     get_db,
@@ -301,7 +301,6 @@ async def login(
 
     if "@" not in email:
         # Identifiant non-email (matricule) : résolution locale, le central n'accepte que l'email
-        from api.repositories import AccountRepository
         local = await AccountRepository(db).find_by_matricule(email)
         if local is None:
             await _log_auth_event(
@@ -321,6 +320,12 @@ async def login(
             db, actor=email, actor_id=None, actor_role="unknown",
             action="login_failed", target="auth", ip_address=ip, log_status="error",
         )
+        # Un compte désactivé est aussi désactivé côté central, qui refuse alors
+        # la connexion comme un mauvais mot de passe. Le compte local donne le
+        # vrai motif — sinon la personne croit s'être trompée de mot de passe.
+        local = await AccountRepository(db).find_by_email(email)
+        if local is not None and not session_registry.is_account_active(local):
+            raise session_registry.SessionRevokedException(session_registry.REASON_DISABLED)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Identifiant ou mot de passe incorrect.",
@@ -380,6 +385,11 @@ async def login(
             suggested_phone=identity["phone"],
             consent_version=_CONSENT_VERSION,
         )
+
+    # Nouvelle session : liée à la version courante du compte. Une révocation
+    # ultérieure (rôle, désactivation) la rendra inutilisable.
+    await session_registry.bind_token(bearer_token, account)
+    await session_registry.bind_token(tokens.get("refresh_token"), account)
 
     await _log_auth_event(
         db, actor=account.email, actor_id=account.id, actor_role=account.role,
@@ -473,6 +483,8 @@ async def accept_consent(
         )
 
     _ensure_account_active(account)
+    await session_registry.bind_token(bearer_token, account)
+    await session_registry.bind_token(body.refresh_token, account)
     await _log_auth_event(
         db, actor=account.email, actor_id=account.id, actor_role=account.role,
         action="consent_accept", target=f"account:{account.id}", ip_address=_client_ip(request),
@@ -494,7 +506,20 @@ async def accept_consent(
     response_model=AccessTokenResponse,
     summary="Obtenir un nouveau access token depuis le refresh token (relais central)",
 )
-async def refresh_token(body: RefreshRequest):
+async def refresh_token(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
+    # Le central ignore les révocations locales : sans ce contrôle, un refresh
+    # token antérieur à un changement de rôle ou à une désactivation produirait
+    # un access token neuf et contournerait la révocation.
+    account = None
+    binding = await session_registry.get_binding(body.refresh_token)
+    if binding is not None:
+        account = await AccountRepository(db).get_by_id(binding[0], include_deleted=True)
+        if account is None:
+            raise session_registry.SessionRevokedException(session_registry.REASON_DELETED)
+        session_registry.ensure_account_active(account)
+        if binding[1] != session_registry.session_version(account):
+            raise session_registry.SessionRevokedException(session_registry.revoked_reason(account))
+
     try:
         tokens = await central_auth.central_refresh(body.refresh_token)
     except central_auth.CentralInvalidCredentials:
@@ -508,6 +533,10 @@ async def refresh_token(body: RefreshRequest):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=_CENTRAL_DOWN_MESSAGE,
         )
+
+    if account is not None:
+        await session_registry.bind_token(tokens["bearer_token"], account)
+        await session_registry.bind_token(tokens.get("refresh_token"), account)
 
     return {
         "access_token": tokens["bearer_token"],

@@ -102,7 +102,11 @@ frontend/src/providers/realtime-provider.tsx
 -> GET /api/v1/events
 -> backend/api/routes/RouteSSE.py
 -> backend/api/core/event_bus.py
--> events `notification.created` cibles par `target.user_ids`
+-> Redis Pub/Sub `edg:realtime-events` entre workers si `REDIS_URL` est configuré
+-> événements `notification.created` / `notification.read` / `notification.restored` ciblés par `target.user_ids`
+-> `user.session_revoked` ciblé sur le compte révoqué (flux SSE fermé ensuite) ; `user.created|updated|deleted` vers les admins + le compte
+-> frontend/src/lib/forced-logout.ts (sortie unique : SSE, 401 typé via client.ts, revalidation /auth/me)
+-> backend/api/core/session_registry.py (liaisons token -> version de session, Redis `edg:session-binding:*`)
 ```
 
 ## Admin configuration

@@ -439,19 +439,45 @@ function AdminUsers() {
       toast.error(error);
       return;
     }
-    updateMut.mutate({
-      id: editUser.id,
-      data: {
-        name: form.name.trim() || undefined,
-        firstname: form.firstname.trim() || undefined,
-        email: form.email.trim() || undefined,
-        role: form.role,
-        matricule: form.matricule || undefined,
-        job: form.job || undefined,
-        intervenant_status: form.intervenant_status || undefined,
-        ...buildOrgPayload(form),
-      },
-    });
+    // N'envoyer QUE ce qui a réellement changé. Renvoyer tout le formulaire
+    // faisait croire au backend que l'identité changeait à chaque
+    // enregistrement, ce qui déclenchait une synchronisation vers la plateforme
+    // centrale — deux appels réseau, 13 s mesurées sur liaison lente — pour un
+    // simple changement de badge. Au-delà du délai d'attente du navigateur,
+    // l'écran affichait « erreur de mise à jour » alors que l'enregistrement
+    // avait abouti côté serveur.
+    const candidate: Record<string, unknown> = {
+      name: form.name.trim() || undefined,
+      firstname: form.firstname.trim() || undefined,
+      email: form.email.trim() || undefined,
+      role: form.role,
+      matricule: form.matricule || undefined,
+      job: form.job || undefined,
+      intervenant_status: form.intervenant_status || undefined,
+      ...buildOrgPayload(form),
+    };
+    const before = resolveAssignment(editUser.unit_id, editUser.direction_id);
+    const current: Record<string, unknown> = {
+      name: editUser.name ?? undefined,
+      firstname: editUser.firstname ?? undefined,
+      email: editUser.email ?? undefined,
+      role: editUser.role,
+      matricule: editUser.matricule ?? undefined,
+      job: editUser.job ?? undefined,
+      intervenant_status: editUser.intervenant_status ?? undefined,
+      ...buildOrgPayload({ ...form, ...before } as FormData),
+    };
+    const data = Object.fromEntries(
+      Object.entries(candidate).filter(([key, value]) => value !== current[key]),
+    );
+
+    if (Object.keys(data).length === 0) {
+      toast.info("Aucune modification à enregistrer.");
+      setEditUser(null);
+      return;
+    }
+
+    updateMut.mutate({ id: editUser.id, data });
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -685,6 +711,7 @@ function AdminUsers() {
             departments={departments}
             units={units}
             showEmail
+            showPassword
           />
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>Annuler</Button>
@@ -713,6 +740,7 @@ function AdminUsers() {
             departments={departments}
             units={units}
             showEmail={true}
+            showPassword={false}
           />
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditUser(null)}>Annuler</Button>
@@ -883,6 +911,7 @@ function UserForm({
   departments,
   units,
   showEmail,
+  showPassword,
 }: {
   form: FormData;
   setForm: (f: FormData) => void;
@@ -890,6 +919,11 @@ function UserForm({
   departments: Department[];
   units: Unit[];
   showEmail: boolean;
+  /** Mot de passe : CREATION uniquement. En edition, `submitEdit` ne l'envoie
+   *  pas — le champ etait donc affiche mais inerte, ce qui laissait croire a
+   *  l'administrateur qu'il changeait le mot de passe alors que rien ne partait.
+   *  La reinitialisation a son action dediee. */
+  showPassword: boolean;
 }) {
   const target = orgTargetForRole(form.role);
   const requiresDepartment = target === "department" || target === "unit";
@@ -944,7 +978,7 @@ function UserForm({
             <Input type="email" value={form.email} onChange={(e) => field("email", e.target.value)} placeholder="adresse@edg.gn" />
           </div>
         )}
-        {showEmail && (
+        {showPassword && (
           <div className="space-y-1.5 sm:col-span-2">
             <Label>Mot de passe <span className="text-destructive">*</span></Label>
             <Input

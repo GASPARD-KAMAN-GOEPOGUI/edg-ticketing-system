@@ -15,9 +15,9 @@ import {
   markAllNotificationsRead,
 } from "@/lib/api/notifications";
 import type { NotifItem } from "@/lib/api/notifications";
-import { closeRequest, reopenRequest } from "@/lib/api/requests";
+import { closeRequest, reopenRequest, fetchRequest } from "@/lib/api/requests";
 import type { Role } from "@/lib/mock-data";
-import { ticketDetailRouteForNotification } from "@/lib/ticket-navigation";
+import { ticketMenuRoute } from "@/lib/ticket-navigation";
 import {
   Bell, BellOff, Mail, MailOpen, ArrowRight,
   AlertTriangle, CheckCircle2, MessageSquare,
@@ -201,12 +201,31 @@ export function NotificationPanel({
     markAllReadMut.mutate();
   };
 
-  const openTicketFromNotification = (n: PanelNotif) => {
+  // La destination ne peut pas être déduite de la notification seule : son
+  // `action_url` a été figé à l'émission, et le ticket a pu bouger depuis
+  // (qualifié, imputé, transmis, résolu). On lit donc son état courant, puis on
+  // ouvre le menu qui le contient vraiment. Même queryKey que la page détail :
+  // la fiche est déjà en cache à l'arrivée, pas de second appel.
+  const openTicketFromNotification = async (n: PanelNotif) => {
     if (!n.requestId) return;
+    const requestId = n.requestId;
     onClose();
+    let to = ticketMenuRoute({}, role, meId);
+    try {
+      const ticket = await queryClient.ensureQueryData({
+        queryKey: ["request", requestId, "active"],
+        queryFn: () => fetchRequest(requestId, { includeDeleted: false }),
+        staleTime: 15_000,
+      });
+      to = ticketMenuRoute(ticket, role, meId);
+    } catch {
+      // Ticket illisible (supprimé, ou hors périmètre) : on ouvre quand même la
+      // fiche personnelle, qui sait afficher son propre message — plutôt que de
+      // laisser le clic sans effet.
+    }
     navigate({
-      to: ticketDetailRouteForNotification(n.actionUrl, role),
-      params: { id: n.requestId },
+      to,
+      params: { id: requestId },
       // Ouvre sur le panneau d'actions : une notification appelle un geste,
       // pas la relecture du descriptif. (L'onglet "comments" visé auparavant
       // a disparu avec la messagerie, ce lien profond ne menait plus nulle part.)
@@ -220,7 +239,7 @@ export function NotificationPanel({
     // la file d'attente entiere, ou il fallait le retrouver soi-meme. Le repli
     // sur la liste ne joue que si le `request_id` manque.
     if (n.requestId) {
-      openTicketFromNotification(n);
+      void openTicketFromNotification(n);
       return;
     }
     if (isQualificationNotification(n)) {

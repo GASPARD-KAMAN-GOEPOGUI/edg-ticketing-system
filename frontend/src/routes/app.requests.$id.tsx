@@ -66,6 +66,7 @@ import {
   startTreatment,
   type RawAttachment,
 } from "@/lib/api/requests";
+import { invalidateTicketQueries } from "@/lib/realtime/invalidation-map";
 import { fetchRequestCategories } from "@/lib/api/admin-config";
 import { buildAvatarUrl, fetchUser, fetchUsers, fetchUsersByIds, type AccountUser } from "@/lib/api/accounts";
 import { fetchDirections, fetchDepartments, fetchUnits, fetchUnit } from "@/lib/api/directions-units";
@@ -862,6 +863,9 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   };
 
   const invalidate = () => {
+    // Toutes les listes de tickets et leurs compteurs (dont les KPIs de Ma boîte,
+    // Tickets transmis/résolus, Distribution) — même liste que le temps réel.
+    invalidateTicketQueries(qc);
     // Détail du ticket (et sous-queries via préfixe)
     qc.invalidateQueries({ queryKey: requestQueryKey });
     qc.invalidateQueries({ queryKey: attachmentsQueryKey });
@@ -1011,9 +1015,9 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
       toast.success("Traitement démarré.");
       setShowStartForm(false);
       setStartLocation("");
-      qc.invalidateQueries({ queryKey: requestQueryKey });
-      qc.invalidateQueries({ queryKey: ["requests"] });
-      qc.invalidateQueries({ queryKey: ["my-tickets"] });
+      // Le ticket passe de « À démarrer » à « En cours » : tous les compteurs
+      // doivent suivre, pas seulement la liste.
+      invalidate();
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Impossible de démarrer le traitement.");

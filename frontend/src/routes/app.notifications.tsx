@@ -22,14 +22,14 @@ import {
   markNotificationRead,
   markAllNotificationsRead,
 } from "@/lib/api/notifications";
-import { closeRequest, reopenRequest } from "@/lib/api/requests";
+import { closeRequest, reopenRequest, fetchRequest } from "@/lib/api/requests";
 import { cn } from "@/lib/utils";
 import { PaginationBar, usePagination } from "@/components/pagination-bar";
 import { LayoutToggle, type LayoutMode } from "@/components/layout-toggle";
 import { toast } from "sonner";
 import type { Role } from "@/lib/mock-data";
 import { useRole, useUser } from "@/lib/session";
-import { ticketDetailRouteForNotification } from "@/lib/ticket-navigation";
+import { ticketMenuRoute } from "@/lib/ticket-navigation";
 
 export const Route = createFileRoute("/app/notifications")({
   head: () => ({ meta: [{ title: "Notifications — EDG Support" }] }),
@@ -125,32 +125,47 @@ function isQualificationNotification(n: Notif): boolean {
   );
 }
 
+/** Y a-t-il quelque chose a ouvrir ? Teste separement de la navigation, qui est
+ *  asynchrone (elle lit l'etat du ticket avant de choisir sa destination) et ne
+ *  peut donc plus repondre a temps pour declencher le toast d'echec. */
+function canNavigateNotification(n: Notif): boolean {
+  return Boolean(n.requestId) || isQualificationNotification(n);
+}
+
 /** Une notification designe TOUJOURS un ticket precis : on ouvre sa fiche, sur
- *  le panneau d'actions.
+ *  le panneau d'actions, DANS LE MENU QUI LE CONTIENT.
  *
- *  Les notifications de qualification renvoyaient auparavant vers la file
- *  d'attente entiere (`/app/queue`) : il fallait y retrouver le bon ticket,
- *  le deplier, puis chercher l'action — alors que la notification portait deja
- *  son `request_id`. Le repli sur la liste ne subsiste que si ce dernier
- *  manque, ce qui ne devrait pas arriver.
+ *  Ce menu est deduit de l'etat courant du ticket, pas de son `action_url` :
+ *  cette URL est figee a l'emission, et entre l'envoi et le clic le ticket a pu
+ *  etre qualifie, impute, transmis ou resolu. La suivre deposait l'utilisateur
+ *  dans un espace ne contenant plus le ticket — « Ticket introuvable ».
  *
- *  `actionUrl` continue de choisir l'ESPACE de destination (file d'attente,
- *  Distribution, Ma boite...) pour que le fil d'Ariane et le bouton Retour
- *  restent coherents avec l'endroit d'ou vient le ticket. */
-function navigateNotification(n: Notif, navigate: ReturnType<typeof useNavigate>, role: Role): boolean {
-  if (n.requestId) {
-    navigate({
-      to: ticketDetailRouteForNotification(n.actionUrl, role),
-      params: { id: n.requestId },
-      search: { tab: "treatment" },
+ *  Meme queryKey que la page detail : la fiche est deja en cache a l'arrivee. */
+async function navigateNotification(
+  n: Notif,
+  navigate: ReturnType<typeof useNavigate>,
+  role: Role,
+  meId: string | undefined,
+  qc: ReturnType<typeof useQueryClient>,
+): Promise<void> {
+  if (!n.requestId) {
+    if (isQualificationNotification(n)) navigate({ to: "/app/queue", search: {} });
+    return;
+  }
+  const requestId = n.requestId;
+  let to = ticketMenuRoute({}, role, meId);
+  try {
+    const ticket = await qc.ensureQueryData({
+      queryKey: ["request", requestId, "active"],
+      queryFn: () => fetchRequest(requestId, { includeDeleted: false }),
+      staleTime: 15_000,
     });
-    return true;
+    to = ticketMenuRoute(ticket, role, meId);
+  } catch {
+    // Ticket illisible : on ouvre la fiche personnelle, qui affiche son propre
+    // message — plutot que de laisser le clic sans effet.
   }
-  if (isQualificationNotification(n)) {
-    navigate({ to: "/app/queue", search: { tab: "qualify" } });
-    return true;
-  }
-  return false;
+  navigate({ to, params: { id: requestId }, search: { tab: "treatment" } });
 }
 
 // ── Composant carte — mode LISTE ───────────────────────────────────────────
@@ -161,6 +176,8 @@ function NotifListCard({
   archived,
   navigate,
   role,
+  meId,
+  qc,
   onActionToast,
   onClose,
   onReopen,
@@ -171,6 +188,8 @@ function NotifListCard({
   archived: boolean;
   navigate: ReturnType<typeof useNavigate>;
   role: Role;
+  meId?: string;
+  qc: ReturnType<typeof useQueryClient>;
   onActionToast: (msg: string) => void;
   onClose: (id: string) => void;
   onReopen: (id: string) => void;
@@ -232,7 +251,9 @@ function NotifListCard({
               onClick={() => {
                 onToggleRead(n.id);
                 if (a.action === "navigate") {
-                  if (!navigateNotification(n, navigate, role)) {
+                  if (canNavigateNotification(n)) {
+                    void navigateNotification(n, navigate, role, meId, qc);
+                  } else {
                     toast.info("Aucun ticket lié à cette notification.");
                   }
                 } else if (a.action === "close") {
@@ -276,6 +297,8 @@ function NotifGridCard({
   archived,
   navigate,
   role,
+  meId,
+  qc,
   onActionToast,
   onClose,
   onReopen,
@@ -286,6 +309,8 @@ function NotifGridCard({
   archived: boolean;
   navigate: ReturnType<typeof useNavigate>;
   role: Role;
+  meId?: string;
+  qc: ReturnType<typeof useQueryClient>;
   onActionToast: (msg: string) => void;
   onClose: (id: string) => void;
   onReopen: (id: string) => void;
@@ -363,7 +388,9 @@ function NotifGridCard({
               onClick={() => {
                 onToggleRead(n.id);
                 if (a.action === "navigate") {
-                  if (!navigateNotification(n, navigate, role)) {
+                  if (canNavigateNotification(n)) {
+                    void navigateNotification(n, navigate, role, meId, qc);
+                  } else {
                     toast.info("Aucun ticket lié à cette notification.");
                   }
                 } else if (a.action === "close") {
@@ -470,7 +497,7 @@ function Notifications() {
 
   const handleCardClick = (n: Notif) => {
     markRead(n.id);
-    navigateNotification(n, navigate, role);
+    void navigateNotification(n, navigate, role, meId, qc);
   };
 
   const handleActionToast = (msg: string) => toast.success(msg);
@@ -506,6 +533,8 @@ function Notifications() {
     archived: isArchivedView,
     navigate,
     role,
+    meId,
+    qc,
     onActionToast: handleActionToast,
     onClose: (id: string) => closeMut.mutate(id),
     onReopen: (id: string) => reopenMut.mutate(id),

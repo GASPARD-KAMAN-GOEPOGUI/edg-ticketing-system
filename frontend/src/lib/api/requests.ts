@@ -86,6 +86,7 @@ export type RawRequest = {
   direction_id?: number | string | null; // réservé (null depuis le backend)
   assignee_id?: number | string | null;
   assignee_name?: string;
+  distributor_id?: number | string | null;
   in_triage: boolean;
   is_external: boolean;
   requester_type?: string;
@@ -268,6 +269,7 @@ export function mapRequest(raw: RawRequest): RequestItem {
     inTriage: raw.in_triage,
     assigneeId: raw.assignee_id != null ? String(raw.assignee_id) : undefined,
     assigneeName: raw.assignee_name ?? undefined,
+    distributorId: raw.distributor_id != null ? String(raw.distributor_id) : undefined,
     isExternal: raw.is_external,
     createdAt: raw.created_at,
     updatedAt: raw.updated_at,
@@ -458,6 +460,49 @@ export async function fetchTransmittedByMe(
     pages: raw.pages,
     pageSize: raw.page_size,
   };
+}
+
+/** KPIs de « Ma boîte de traitement » — source de vérité unique, calculée en
+ *  SQL par le serveur avec exactement les critères des listes résumées
+ *  (GET /requests/my-kpis). Aucun comptage côté client, aucun plafond.
+ *  `toStart + inProgress` = nombre de tickets de Ma boîte. */
+export interface MyKpis {
+  toStart: number;
+  inProgress: number;
+  resolved: number;
+  transmitted: number;
+  retransmitted: number;
+}
+
+export async function fetchMyKpis(): Promise<MyKpis> {
+  const raw = await apiFetch<{
+    to_start: number;
+    in_progress: number;
+    resolved: number;
+    transmitted: number;
+    retransmitted: number;
+  }>("/requests/my-kpis");
+  return {
+    toStart: raw.to_start,
+    inProgress: raw.in_progress,
+    resolved: raw.resolved,
+    transmitted: raw.transmitted,
+    retransmitted: raw.retransmitted,
+  };
+}
+
+/** Compteurs de l'accueil `/app` : tickets dont je suis le demandeur, par
+ *  statut, calculés en SQL (GET /requests/my-requests-stats) — sans plafond. */
+export interface MyRequestsStats {
+  byStatus: Record<string, number>;
+  total: number;
+}
+
+export async function fetchMyRequestsStats(): Promise<MyRequestsStats> {
+  const raw = await apiFetch<{ by_status: Record<string, number>; total: number }>(
+    "/requests/my-requests-stats",
+  );
+  return { byStatus: raw.by_status ?? {}, total: raw.total ?? 0 };
 }
 
 export async function fetchRequest(

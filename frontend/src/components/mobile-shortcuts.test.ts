@@ -41,9 +41,13 @@ describe("barre mobile — composition par rôle", () => {
     expect(routes).toContain(PERSONAL_SPACE_ROUTE);
   });
 
-  it.each(ROLES)("%s — Alertes et Profil ferment la barre", (role) => {
-    const routes = MOBILE_SHORTCUTS[role].map((i) => i.to);
+  it.each(ROLES)("%s — Notifications et Profil ferment la barre", (role) => {
+    const shortcuts = MOBILE_SHORTCUTS[role];
+    const routes = shortcuts.map((item) => item.to);
     expect(routes.slice(-2)).toEqual(["/app/notifications", "/app/profile"]);
+    expect(shortcuts.find((item) => item.to === "/app/notifications")?.label).toBe(
+      "Notifications",
+    );
   });
 
   it.each(ROLES)("%s — exactement une entrée mise en avant", (role) => {

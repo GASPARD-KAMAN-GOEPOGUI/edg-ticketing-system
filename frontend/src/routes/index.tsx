@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { PublicLayout } from "@/components/public-layout";
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/glass-card";
-import { motion, Reveal, Floating, fadeUp, stagger } from "@/components/motion-primitives";
+import { motion, Reveal, fadeUp, stagger } from "@/components/motion-primitives";
 import { DEFAULT_CONFIG } from "@/lib/homepage-config";
 import type { SectionConfig } from "@/lib/homepage-config";
 // Décâblage 2026-09-22 : fetchHomepageConfig / fetchSlides ne sont plus appelés
@@ -127,21 +127,12 @@ function ServicesSection() {
             to: "/track",
           },
         ].map((s) => (
-          <motion.div
-            key={s.title}
-            variants={fadeUp}
-            whileHover={{ y: -8, scale: 1.02 }}
-            transition={{ type: "spring", stiffness: 280, damping: 22 }}
-            className="h-full"
-          >
-              <GlassCard className="group flex h-full flex-col gap-4 transition-shadow duration-300 hover:shadow-2xl">
-                <motion.div
-                  className="flex h-12 w-12 items-center justify-center rounded-2xl gradient-accent text-white shadow-lg shadow-accent/30"
-                  whileHover={{ rotate: 8, scale: 1.1 }}
-                  transition={{ type: "spring", stiffness: 300 }}
-                >
+          <motion.div key={s.title} variants={fadeUp} className="h-full">
+              {/* Survol en CSS (transition composée) plutôt qu'en ressort JS. */}
+              <GlassCard className="group flex h-full flex-col gap-4 transition-[transform,box-shadow] duration-300 ease-out hover:-translate-y-2 hover:scale-[1.02] hover:shadow-2xl">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl gradient-accent text-white shadow-lg shadow-accent/30 transition-transform duration-300 group-hover:rotate-[8deg] group-hover:scale-110">
                   <s.icon className="h-5 w-5" />
-                </motion.div>
+                </div>
                 <div>
                   <h3 className="text-lg font-semibold">{s.title}</h3>
                   <p className="mt-1.5 text-sm text-muted-foreground">{s.desc}</p>
@@ -259,17 +250,13 @@ function TrustSection() {
               traçabilité complète et un suivi en temps réel à chaque étape.
               Chaque employé sait à tout moment où en est son dossier — et qui en a la charge.
             </p>
-            <motion.div
-              whileHover={{ scale: 1.04 }}
-              whileTap={{ scale: 0.97 }}
-              className="mt-6 inline-block"
-            >
+            <div className="mt-6 inline-block transition-transform duration-200 hover:scale-[1.04] active:scale-[0.97]">
               <Button asChild className="rounded-full gradient-primary shadow-lg shadow-primary/30">
                 <Link to="/login">
                   Ouvrir un ticket <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
               </Button>
-            </motion.div>
+            </div>
           </div>
           <motion.ul
             className="grid gap-4 sm:grid-cols-2"
@@ -282,8 +269,7 @@ function TrustSection() {
               <motion.li
                 key={f.t}
                 variants={fadeUp}
-                whileHover={{ x: 4 }}
-                className="flex gap-3 rounded-2xl border border-border/40 bg-background/50 p-4"
+                className="flex gap-3 rounded-2xl border border-border/40 bg-background/50 p-4 transition-transform duration-200 hover:translate-x-1"
               >
                 <f.icon className="h-5 w-5 shrink-0 text-primary" />
                 <div>
@@ -495,50 +481,34 @@ function Home() {
   return (
     <PublicLayout>
 
-      {/* ── Fond animé ambiant ── */}
-      <motion.div
-        aria-hidden
-        className="pointer-events-none fixed inset-0 -z-10 overflow-hidden"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 1.2 }}
-      >
-        <motion.div
-          className="absolute -top-32 -left-32 h-[480px] w-[480px] rounded-full bg-primary/15 blur-3xl"
-          animate={{ x: [0, 60, 0], y: [0, 40, 0] }}
-          transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }}
-        />
-        <motion.div
-          className="absolute -bottom-32 -right-32 h-[520px] w-[520px] rounded-full bg-accent/15 blur-3xl"
-          animate={{ x: [0, -50, 0], y: [0, -30, 0] }}
-          transition={{ duration: 22, repeat: Infinity, ease: "easeInOut" }}
-        />
-      </motion.div>
+      {/* ── Fond animé ambiant ──
+          Deux halos flous déplacés en CSS (compositeur) : avant, framer-motion
+          recalculait leur position en JavaScript à chaque image, à l'infini. */}
+      <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden animate-fade-in">
+        <div className="absolute -top-32 -left-32 h-[480px] w-[480px] rounded-full bg-primary/15 blur-3xl animate-drift-a" />
+        <div className="absolute -bottom-32 -right-32 h-[520px] w-[520px] rounded-full bg-accent/15 blur-3xl animate-drift-b" />
+      </div>
 
       {/* ══════ HERO — toujours affiché ══════ */}
       <section className="relative px-4 pt-8 sm:px-8 sm:pt-16 lg:px-12 lg:pt-24">
         <div className="mx-auto max-w-screen-2xl">
           <div className="grid items-center gap-10 md:gap-14 lg:grid-cols-2">
-            <motion.div initial="hidden" animate="show" variants={stagger}>
-              <motion.h1
-                variants={fadeUp}
-                className="text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl xl:text-6xl"
-              >
+            {/* Apparition en CSS : le texte du héros (élément principal de la
+                page) s'affiche dès le HTML serveur, sans attendre le JavaScript. */}
+            <div className="[&>*]:animate-rise-in">
+              <h1 className="text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl xl:text-6xl">
                 La gestion collaborative de vos tickets{" "}
                 <span className="text-gradient">de bout en bout</span>.
-              </motion.h1>
+              </h1>
 
-              <motion.p
-                variants={fadeUp}
-                className="mt-5 max-w-xl text-sm text-muted-foreground sm:text-base lg:text-lg"
-              >
+              <p className="mt-5 max-w-xl text-sm text-muted-foreground sm:text-base lg:text-lg" style={{ animationDelay: "80ms" }}>
                 Créez un ticket, suivez chaque étape de son traitement et
                 collaborez avec les équipes de la Direction des Systèmes
                 d'Information. Une traçabilité complète, de la création à la clôture.
-              </motion.p>
+              </p>
 
-              <motion.div variants={fadeUp} className="mt-8 flex flex-row flex-wrap gap-3">
-                <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}>
+              <div className="mt-8 flex flex-row flex-wrap gap-3" style={{ animationDelay: "160ms" }}>
+                <div className="transition-transform duration-200 hover:scale-[1.04] active:scale-[0.97]">
                   <Button
                     asChild
                     size="lg"
@@ -548,8 +518,8 @@ function Home() {
                       Ouvrir un ticket <ArrowRight className="ml-2 h-4 w-4" />
                     </Link>
                   </Button>
-                </motion.div>
-                <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}>
+                </div>
+                <div className="transition-transform duration-200 hover:scale-[1.04] active:scale-[0.97]">
                   <Button
                     asChild
                     size="lg"
@@ -561,38 +531,31 @@ function Home() {
                       Suivre un ticket
                     </Link>
                   </Button>
-                </motion.div>
-              </motion.div>
+                </div>
+              </div>
 
-              <motion.div variants={stagger} className="mt-10 grid grid-cols-3 gap-3 sm:gap-8">
+              <div className="mt-10 grid grid-cols-3 gap-3 sm:gap-8" style={{ animationDelay: "240ms" }}>
                 {[
                   { v: "Temps réel", l: "Notifications" },
                   { v: "Traçable", l: "Historique complet" },
                   { v: dirCountLoading ? "…" : activeDirectionsCount != null ? String(activeDirectionsCount) : "—", l: "Directions actives" },
                 ].map((s) => (
-                  <motion.div key={s.l} variants={fadeUp}>
-                    <div className="text-2xl font-bold sm:text-3xl">{s.v}</div>
+                  <div key={s.l}>
+                    <div className="text-2xl font-bold sm:text-3xl tabular-nums">{s.v}</div>
                     <div className="text-[11px] sm:text-xs text-muted-foreground">{s.l}</div>
-                  </motion.div>
+                  </div>
                 ))}
-              </motion.div>
-            </motion.div>
+              </div>
+            </div>
 
             {/* Maquette flottante — masquée sur mobile pour éviter un héro trop long */}
-            <motion.div
-              className="relative hidden lg:block"
-              initial={{ opacity: 0, scale: 0.92, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1], delay: 0.2 }}
-            >
-              <motion.div
+            <div className="relative hidden lg:block animate-rise-in" style={{ animationDelay: "200ms" }}>
+              <div
                 aria-hidden
-                className="pointer-events-none absolute -inset-6 sm:-inset-10 bg-gradient-to-br from-primary/30 via-accent/20 to-success/20 blur-3xl rounded-full"
-                animate={{ scale: [1, 1.08, 1], opacity: [0.6, 0.9, 0.6] }}
-                transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
+                className="pointer-events-none absolute -inset-6 sm:-inset-10 bg-gradient-to-br from-primary/30 via-accent/20 to-success/20 blur-3xl rounded-full animate-glow"
               />
-              <Floating>
-                <motion.div whileHover={{ y: -4 }} transition={{ type: "spring", stiffness: 300 }}>
+              <div className="animate-float">
+                <div className="transition-transform duration-300 hover:-translate-y-1">
                   <GlassCard strong className="relative space-y-4">
                     {/* En-tête ticket */}
                     <div className="flex items-start justify-between gap-2">
@@ -622,13 +585,13 @@ function Home() {
                         { t: "Ticket en traitement",      d: "08 jan. 2025 · 14h30", done: true },
                         { t: "Ticket clôturé", d: "09 jan. 2025 · 11h20", done: true },
                       ].map((step, i) => (
-                        <motion.div key={i} variants={fadeUp} className="flex items-start gap-3">
+                        <div key={i} className="flex items-start gap-3">
                           <div className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full bg-success ring-4 ring-success/20" />
                           <div className="flex-1 min-w-0">
                             <div className="text-xs font-medium">{step.t}</div>
                             <div className="text-[10px] text-muted-foreground">{step.d}</div>
                           </div>
-                        </motion.div>
+                        </div>
                       ))}
                     </div>
 
@@ -642,9 +605,9 @@ function Home() {
                       </div>
                     </div>
                   </GlassCard>
-                </motion.div>
-              </Floating>
-            </motion.div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </section>

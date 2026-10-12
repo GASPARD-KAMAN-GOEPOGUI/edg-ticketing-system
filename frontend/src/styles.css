@@ -458,6 +458,58 @@
   & > *:nth-child(6) { animation-delay: 0.24s; }
 }
 
+/* ── Animations continues du portail public ─────────────────────────────────
+   En CSS (transform/opacity uniquement) plutôt qu'en framer-motion : le
+   navigateur les exécute sur le compositeur, sans JavaScript à chaque image,
+   et elles démarrent dès le HTML rendu côté serveur, avant l'hydratation. */
+@keyframes edg-drift-a {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50%      { transform: translate3d(60px, 40px, 0); }
+}
+
+@keyframes edg-drift-b {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50%      { transform: translate3d(-50px, -30px, 0); }
+}
+
+@keyframes edg-float {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50%      { transform: translate3d(0, -10px, 0); }
+}
+
+@keyframes edg-glow {
+  0%, 100% { transform: scale(1);    opacity: 0.6; }
+  50%      { transform: scale(1.08); opacity: 0.9; }
+}
+
+@keyframes edg-rise-in {
+  from { opacity: 0; transform: translate3d(0, 20px, 0) scale(0.96); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@utility animate-drift-a {
+  animation: edg-drift-a 18s ease-in-out infinite;
+  will-change: transform;
+}
+
+@utility animate-drift-b {
+  animation: edg-drift-b 22s ease-in-out infinite;
+  will-change: transform;
+}
+
+@utility animate-float {
+  animation: edg-float 6s ease-in-out infinite;
+}
+
+@utility animate-glow {
+  animation: edg-glow 5s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+@utility animate-rise-in {
+  animation: edg-rise-in 0.65s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

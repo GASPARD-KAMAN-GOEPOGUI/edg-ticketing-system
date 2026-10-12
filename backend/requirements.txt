@@ -2,8 +2,10 @@ alembic>=1.13.0
 pymysql>=1.1.0
 fastapi==0.99.1
 starlette==0.27.0
-uvicorn[standard]>=0.32.0
-gunicorn>=26.0.0
+uvicorn[standard]>=0.34.0
+gunicorn>=23.0.0
+# Adaptateur ASGI -> WSGI pour l'hébergement cPanel (Passenger) — utilisé par passenger_wsgi.py
+a2wsgi>=1.10.0
 sqlalchemy[asyncio]>=2.0.0
 aiomysql>=0.3.2
 pydantic>=1.7.4,<2.0.0

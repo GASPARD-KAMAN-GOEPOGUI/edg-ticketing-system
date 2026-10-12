@@ -5,9 +5,8 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.core import central_auth, mailer
+from api.core import central_auth, mailer, session_registry
 from api.core.error_codes import ErrorCode
-from api.core.event_bus import AppEvent, emit as emit_event
 from api.core.logger import get_logger
 from api.core.phone import normalize_phone
 from api.core.rbac import normalize_role
@@ -433,6 +432,7 @@ class AccountService(BaseService):
         obj = await self.repo.create(data)
         self._logger.info(f"✅ Compte créé — id={obj.id} central_user_id={obj.central_user_id}")
         self._notify_account_created(obj)
+        session_registry.queue_user_changed(self.session, obj.id, "user.created")
 
         if actor_bearer_token:
             await central_auth.log_central_event(
@@ -566,8 +566,18 @@ class AccountService(BaseService):
             )
 
         # ── Synchronisation centrale (README §12) ────────────────────────────
+        # On compare les VALEURS, pas la simple présence des clés. Le formulaire
+        # d'édition renvoie tout le formulaire à chaque enregistrement : changer
+        # un badge déclenchait donc une synchronisation centrale complète
+        # (jeton machine + mise à jour), mesurée à 13 s sur liaison lente, pour
+        # des champs d'identité pourtant identiques — au point de dépasser le
+        # délai d'attente du navigateur et d'afficher « erreur de mise à jour »
+        # sur une opération qui, elle, avait réussi.
         identity_keys = {"email", "phone", "name", "firstname"}
-        touches_identity = bool(identity_keys & data.keys())
+        touches_identity = any(
+            key in data and data[key] != getattr(current, key, None)
+            for key in identity_keys
+        )
         touches_role = "role" in data and data["role"] != current.role
 
         if touches_identity or touches_role:
@@ -596,12 +606,38 @@ class AccountService(BaseService):
                     await central_auth.add_group_membership(current.central_user_uuid, new_group, machine_token)
                     await central_auth.remove_group_membership(current.central_user_uuid, old_group, machine_token)
 
+        audit_data = dict(data)
+        if isinstance(data.get("infos"), dict):
+            data["infos"] = session_registry.preserve_session_keys(current, data["infos"])
+        elif "infos" in data:
+            data.pop("infos")
+
+        # Changement de rôle ou désactivation (PUT /users/{id} accepte aussi
+        # status/account_status) : toute session ouverte est révoquée, dans la
+        # même écriture (voir api.core.session_registry). La personne se
+        # reconnecte et obtient son nouvel état depuis la base.
+        deactivating = session_registry.is_account_active(current) and (
+            ("status" in data and not data["status"])
+            or ("account_status" in data and (data["account_status"] or "").strip().lower() != "active")
+        )
+        revoke_reason = (
+            session_registry.REASON_DISABLED if deactivating
+            else session_registry.REASON_ROLE_CHANGED if touches_role
+            else None
+        )
+        if revoke_reason:
+            data["infos"] = session_registry.revoked_infos(current, revoke_reason, base=data.get("infos"))
+
         obj = await self.repo.update(id, data)
+
+        if revoke_reason:
+            session_registry.queue_session_revoked(self.session, id, revoke_reason)
+        session_registry.queue_user_changed(self.session, id)
 
         if actor_bearer_token:
             await central_auth.log_central_event(
                 actor_bearer_token, object_id=str(id), action="update", status="success",
-                message=f"Compte mis à jour : {obj.email}", after=data,
+                message=f"Compte mis à jour : {obj.email}", after=audit_data,
             )
         return obj
 
@@ -618,12 +654,12 @@ class AccountService(BaseService):
             actor_bearer_token, object_id=str(id), action="delete", status="success",
             message=f"Compte supprimé : {current.email}",
         )
+        await self.repo.update(id, {
+            "infos": session_registry.revoked_infos(current, session_registry.REASON_DELETED),
+        })
         result = await self.repo.delete(id)
-        await emit_event(AppEvent(
-            type="account.deactivated",
-            payload={"id": id},
-            target={"user_ids": [id]},
-        ))
+        session_registry.queue_session_revoked(self.session, id, session_registry.REASON_DELETED)
+        session_registry.queue_user_changed(self.session, id, "user.deleted")
         return result
 
     async def set_availability(self, id: int, availability: str):
@@ -662,10 +698,15 @@ class AccountService(BaseService):
         else:
             await central_auth.deactivate_central_account(current.central_user_uuid, machine_token)
 
-        obj = await self.repo.update(id, {
+        changes: dict = {
             "status": active,
             "account_status": "active" if active else "inactive",
-        })
+        }
+        if not active:
+            # Révoque les sessions ouvertes : même réactivé plus tard, un ancien
+            # token reste refusé — seule une nouvelle connexion est acceptée.
+            changes["infos"] = session_registry.revoked_infos(current, session_registry.REASON_DISABLED)
+        obj = await self.repo.update(id, changes)
         if actor_bearer_token:
             await central_auth.log_central_event(
                 actor_bearer_token, object_id=str(id),
@@ -674,16 +715,12 @@ class AccountService(BaseService):
             )
         if not active:
             # Déconnexion immédiate — sans ça, la personne ne serait rejetée qu'à
-            # son prochain appel API (dependencies.py revérifie account_status à
-            # chaque requête), mais resterait "connectée" en apparence si elle
-            # n'interagit plus (page ouverte, flux SSE déjà établi). Un seul
-            # événement ciblé suffit à couvrir tous ses onglets/appareils ouverts
-            # (event_bus fan-out vers chaque connexion SSE abonnée à cet user_id).
-            await emit_event(AppEvent(
-                type="account.deactivated",
-                payload={"id": id},
-                target={"user_ids": [id]},
-            ))
+            # son prochain appel API, mais resterait "connectée" en apparence si
+            # elle n'interagit plus (page ouverte, flux SSE déjà établi). Un seul
+            # événement ciblé couvre tous ses onglets/appareils ouverts, et n'est
+            # publié qu'après commit (le client relit alors l'état définitif).
+            session_registry.queue_session_revoked(self.session, id, session_registry.REASON_DISABLED)
+        session_registry.queue_user_changed(self.session, id)
         return obj
 
     async def reset_password(self, id: int, *, actor_bearer_token: str | None = None) -> str:

@@ -6,7 +6,8 @@
  *  - Injection automatique du JWT dans Authorization: Bearer
  *  - Désencapsulation { success, message, data } → data
  *  - Refresh automatique du token sur 401 (une seule tentative)
- *  - Redirection vers /login si le refresh échoue
+ *  - Session révoquée (401 SESSION_REVOKED / ACCOUNT_DISABLED) : pas de refresh,
+ *    déconnexion forcée avec motif (voir lib/forced-logout.ts)
  */
 
 import {
@@ -17,6 +18,7 @@ import {
   isTokenExpired,
   updateAccessToken,
 } from "../session";
+import { forceLogout, revocationReasonFromBody } from "../forced-logout";
 
 const API_BASE =
   import.meta.env.VITE_API_URL ??
@@ -26,7 +28,17 @@ const API_BASE =
 // /api/v1 dans main.py — voir CLAUDE.md), d'où ce base URL dédié.
 const API_ROOT = API_BASE.replace(/\/api\/v1$/, "");
 
-const REQUEST_TIMEOUT_MS = 15_000;
+// Relevé de 15 s à 45 s le 2026-09-28. Les opérations de compte (création,
+// changement d'identité) enchaînent jusqu'à trois appels à la plateforme
+// centrale ; une modification complète a été mesurée à 13 s sur liaison lente,
+// et une création davantage. À 15 s, le navigateur abandonnait une requête que
+// le serveur menait à bien : l'écran affichait « erreur de mise à jour » sur une
+// opération réussie, le pire des deux mondes.
+//
+// Ce délai n'est qu'un filet : le vrai correctif est de n'envoyer que les champs
+// modifiés, pour ne plus déclencher d'appel central quand l'identité est
+// inchangée.
+const REQUEST_TIMEOUT_MS = 45_000;
 
 export class ApiError extends Error {
   constructor(
@@ -65,10 +77,10 @@ async function _attemptRefresh(): Promise<string | null> {
       });
 
       if (!res.ok) {
-        clearSession();
-        if (typeof window !== "undefined") {
-          window.location.href = "/login";
-        }
+        // Refresh refusé : session révoquée (motif fourni par le backend) ou
+        // simplement expirée côté plateforme centrale.
+        const body = await res.json().catch(() => null);
+        forceLogout(revocationReasonFromBody(body) ?? "expired");
         return null;
       }
 
@@ -81,10 +93,8 @@ async function _attemptRefresh(): Promise<string | null> {
       updateAccessToken(access_token, expires_in);
       return access_token;
     } catch {
-      clearSession();
-      if (typeof window !== "undefined") {
-        window.location.href = "/login";
-      }
+      // Panne réseau pendant le refresh : la session n'est PAS invalidée pour
+      // autant. Elle sera revalidée au retour de la connexion.
       return null;
     } finally {
       _refreshPromise = null;
@@ -92,6 +102,17 @@ async function _attemptRefresh(): Promise<string | null> {
   })();
 
   return _refreshPromise;
+}
+
+/** 401 typé du backend = session révoquée : un refresh serait refusé lui aussi.
+ *  Déclenche la déconnexion forcée et renvoie true. */
+async function _handleRevocation(res: Response): Promise<boolean> {
+  if (res.status !== 401) return false;
+  const body = await res.clone().json().catch(() => null);
+  const reason = revocationReasonFromBody(body);
+  if (!reason) return false;
+  forceLogout(reason);
+  return true;
 }
 
 // ── Fetch principal ───────────────────────────────────────────────────────────
@@ -156,7 +177,7 @@ export async function apiFetch<T>(
   }
 
   // ── Retry automatique sur 401 ─────────────────────────────────────────────
-  if (res.status === 401 && !skipAuth) {
+  if (res.status === 401 && !skipAuth && !(await _handleRevocation(res))) {
     const newToken = await _attemptRefresh();
     if (newToken) {
       // Retry la requête originale avec le nouveau token
@@ -177,6 +198,7 @@ export async function apiFetch<T>(
       } finally {
         clearTimeout(retryTimer);
       }
+      await _handleRevocation(res);
     }
   }
 
@@ -260,13 +282,14 @@ export async function apiFetchBlob(
     clearTimeout(timer);
   }
 
-  if (res.status === 401 && !skipAuth) {
+  if (res.status === 401 && !skipAuth && !(await _handleRevocation(res))) {
     const newToken = await _attemptRefresh();
     if (newToken) {
       res = await fetch(url, {
         headers: { ...headers, Authorization: `Bearer ${newToken}` },
         ...rest,
       });
+      await _handleRevocation(res);
     }
   }
 
