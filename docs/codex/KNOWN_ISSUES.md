@@ -151,3 +151,72 @@ Correction: HORS PERIMETRE du chantier de deploiement cPanel (decision du 2026-1
 Fichiers modifies: aucun (constat documentaire).
 Test: recherche dans le code (`grep` sur `sla_breached`, `escalat`, `ticket_alerte_sla`, `sla_warning_sent_at`).
 Statut: ouvert.
+
+## KI-ROLES-001
+
+Identifiant: KI-ROLES-001
+Titre: Code mort lie aux roles supprimes (director, chief-departement, dg, chief)
+Date: 2026-10-12
+Symptome: aucune erreur visible (verifie : GET /users/?role=<role supprime> repond 200 avec 0 resultat, pour admin et chief-service) ; affichages incomplets.
+Resultat actuel:
+- Organigramme admin (`frontend/src/components/admin/direction-org-chart.tsx`, `routes/app.admin.directions.$id.tsx:374-414`) : filtres `role === "director"` / `"chief"` jamais satisfaits -> cases « Directeur » et « Chef » toujours vides.
+- Formulaire de transmission (`routes/app.requests.$id.tsx:1467, 1471`) : choisir un departement ou une direction SANS recherche par nom interroge `role=chief-departement` / `role=director` -> liste vide (la recherche par nom fonctionne).
+- `TREATING_ROLES` et libelle `"chief-departement"` (`app.requests.$id.tsx:256, 288, 736`) : entrees jamais atteintes.
+- Backend : `RepositoryAccount.find_chiefs_by_unit` / `find_directors_by_direction` / `find_chief_for_unity` renvoient toujours vide (circuit d'approbation `ServiceWorkflow` sans etape) ; commentaires dans rbac.py, ticket_actions.py, dependencies.py, ModelAccount.py, RouteReports.py, ServiceRequest.py, accounts.ts, session.ts.
+- ENUM `account.role` / `activity_log.actor_role` (code, schema.sql, base locale) : public, user, chief-service, technicien, chef-division-support, admin — conforme au modele de roles officiel.
+Cause: retrait volontaire des roles (migration 028, 2026-09-25) sans nettoyage des references.
+Correction: aucune dans le chantier de deploiement (aucune erreur visible). Nettoyage a planifier apres la mise en ligne.
+Statut: ouvert.
+
+## KI-CLAMAV-001
+
+Identifiant: KI-CLAMAV-001
+Titre: attachment.scan_status peut recevoir "scan_error", valeur hors ENUM
+Date: 2026-10-12
+Symptome: si ClamAV est ACTIVE et qu'une analyse echoue, `RouteRequest.py:1669-1681` ecrit `scan_status = "scan_error"` (ServiceClamAV.py:62, 65, 125), absent de l'ENUM (pending_scan, clean, quarantined, deleted) : MySQL strict -> upload en 500 ; non strict -> '' stocke, relecture en erreur. La route admin `PUT /attachments/{id}/scan-result` accepte aussi une valeur libre (documentee « clean | quarantined | error »).
+Resultat actuel: inatteignable en production cPanel (CLAMAV_ENABLED=False -> toujours "clean", ServiceClamAV.py:50) ; route admin non utilisee par le frontend.
+Correction: A CORRIGER AVANT TOUTE ACTIVATION DE CLAMAV (faire correspondre les valeurs ecrites a l'ENUM, ou etendre l'ENUM).
+Statut: ouvert.
+
+## KI-ENUM-001
+
+Identifiant: KI-ENUM-001
+Titre: Champs ENUM alimentes par des chaines libres non validees
+Date: 2026-10-12
+Symptome: une valeur hors ENUM forgee est refusee (MySQL strict -> 500 sur la seule requete forgee) ou stockee '' (MySQL non strict -> toute relecture de la ligne en 500 : liste des utilisateurs, listes de tickets).
+Resultat actuel: aucune valeur hors ENUM n'est envoyee par le frontend. Tout utilisateur connecte : `PUT /users/me/availability` (non utilise par le frontend), `POST /requests` (`submission_mode`, `requester_type`, non envoyes par le frontend), `POST /appreciations` (`author_type`). Admin uniquement : `POST /activity-logs`, `POST /notifications` (non utilises par le frontend), comptes, regles de routage, priorites (valeurs valides via l'interface).
+Correction: decision apres `SELECT @@GLOBAL.sql_mode;` sur le serveur cPanel (decision du 2026-10-12) : serveur strict -> rien ; serveur non strict -> validation 422 des 4 champs ouverts a tout utilisateur. Le mode strict force par session a ete ecarte pour l'instant.
+Statut: ouvert.
+
+## KI-ROUTES-001
+
+Identifiant: KI-ROUTES-001
+Titre: Trois routes GET repondent 500 dans tous les modes SQL (non utilisees par le frontend)
+Date: 2026-10-12
+Symptome (mesure sur MySQL temporaire, sql_mode vide, strict et defaut MySQL 8, 98 routes GET appelees en admin) :
+- `GET /accounts/available-agents` : `AccountRepository.list_agents()` recoit un argument `direction_id` qu'il n'accepte pas (TypeError).
+- `GET /requests/items/` : `'PaginatedResponse' object has no attribute 'get'`.
+- `GET /stats/csat/by-category` : `RequestCategory.name` n'existe pas (RepositoryAppreciation.py:184, 194). La fonction frontend `fetchCsatByCategory` existe mais aucun ecran ne l'appelle.
+Resultat actuel: aucun ecran n'appelle ces routes : pas d'erreur visible.
+Correction: hors perimetre du deploiement ; a corriger ou supprimer apres la mise en ligne.
+Statut: ouvert.
+
+## KI-TEST-001
+
+Identifiant: KI-TEST-001
+Titre: La plateforme centrale simulee des tests ne remplace pas get_profile
+Date: 2026-10-12
+Symptome: un test qui passe par le consentement ou l'auto-provisionnement appelle reellement `central_auth.get_profile` (requete vers CENTRAL_AUTH_BASE_URL) ; son client HTTP partage, cree dans la boucle asyncio d'un test precedent, peut lever « Event loop is closed » (reponse 500 dans le test).
+Resultat actuel: aucun test du depot ne fait d'appel reseau (suite complete verifiee avec tout appel HTTP sortant interdit : 74 tests passes) ; `test_auth_log_role.py` simule `get_profile` lui-meme.
+Correction: ajouter `get_profile` a la fixture `central` (tests/conftest.py) lors d'un prochain travail sur les tests.
+Statut: ouvert.
+
+## KI-AUTHLOG-001
+
+Identifiant: KI-AUTHLOG-001
+Titre: _log_auth_event laisse la session de la requete inutilisable en cas d'echec d'ecriture
+Date: 2026-10-12
+Symptome: `RouteAuth._log_auth_event` attrape l'exception d'ecriture du journal mais ne fait pas de rollback : la suite de la requete peut echouer en 500.
+Resultat actuel: la seule cause connue (actor_role "unknown" hors ENUM) est corrigee (commit 93f0a82, role "public").
+Correction: non necessaire pour le deploiement ; a durcir (savepoint) lors d'un prochain travail sur l'authentification.
+Statut: ouvert.
