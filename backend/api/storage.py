@@ -15,9 +15,13 @@ from api.configs.Environment import get_environment
 
 _env = get_environment()
 
-# Répertoire local de stockage (relatif au backend/)
-_UPLOAD_DIR = Path(__file__).parent.parent / "uploads"
-_UPLOAD_DIR.mkdir(exist_ok=True)
+# Répertoire local de stockage : UPLOADS_DIR (production, hors du dossier de
+# l'app) ou, à défaut, backend/uploads (dev). Point de vérité unique, aussi
+# utilisé par les routes avatars et téléchargement.
+_DEFAULT_UPLOAD_DIR = Path(__file__).parent.parent / "uploads"
+UPLOAD_DIR = Path(_env.UPLOADS_DIR) if _env.UPLOADS_DIR else _DEFAULT_UPLOAD_DIR
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+_UPLOAD_DIR = UPLOAD_DIR
 
 
 def save_file(data: bytes, filename: str, request_id: str) -> tuple[str, str]:

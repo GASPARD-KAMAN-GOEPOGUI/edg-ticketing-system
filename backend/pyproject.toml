@@ -6,11 +6,11 @@ build-backend = "setuptools.backends.legacy:build"
 name = "edg-connect-api"
 version = "0.1.0"
 description = "Backend API pour la plateforme EDG Connect"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 
 [tool.black]
 line-length = 88
-target-version = ["py311"]
+target-version = ["py310"]
 
 [tool.isort]
 profile = "black"

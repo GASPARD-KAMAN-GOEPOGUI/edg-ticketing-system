@@ -1778,7 +1778,7 @@ async def download_file(
     (format : requests/{request_id}/{uuid}_{filename}).
     """
     # Empêcher la traversée de répertoires
-    uploads_dir = Path(__file__).parent.parent.parent / "uploads"
+    uploads_dir = storage.UPLOAD_DIR
     full = (uploads_dir / path).resolve()
     if not str(full).startswith(str(uploads_dir.resolve())):
         raise HTTPException(status_code=400, detail="Chemin invalide.")

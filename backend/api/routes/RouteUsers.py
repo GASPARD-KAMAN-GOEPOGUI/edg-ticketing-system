@@ -14,8 +14,9 @@ from api.schemas.SchemaAccount import AccountCreate, AccountUpdate, AccountRespo
 from api.schemas.base import PaginatedResponse
 from api.services import AccountService
 from api.core.file_validator import validate_file_magic_bytes
+from api.storage import UPLOAD_DIR
 
-_AVATAR_DIR = Path(__file__).parent.parent.parent / "uploads" / "avatars"
+_AVATAR_DIR = UPLOAD_DIR / "avatars"
 _AVATAR_DIR.mkdir(parents=True, exist_ok=True)
 _ALLOWED_IMAGE_MIME = {"image/jpeg", "image/png", "image/webp"}
 _MAX_AVATAR_BYTES = 2 * 1024 * 1024  # 2 Mo

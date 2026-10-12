@@ -79,6 +79,11 @@ class Environment(BaseSettings):
     SMS_API_KEY: str = ""              # clé ou token Bearer
     SMS_SENDER: str = "EDG"            # ID expéditeur des SMS
 
+    # Stockage des fichiers (pièces jointes, avatars). Vide = backend/uploads
+    # (dev). En production : chemin ABSOLU hors du dossier de l'app et de
+    # public_html, ex. /home/<user>/edg-data/uploads.
+    UPLOADS_DIR: str = ""
+
     # Chiffrement des champs sensibles (Fernet/AES-128)
     ENCRYPTION_KEY: str = ""           # clé Fernet base64 32-bytes ; vide = chiffrement désactivé
 
