@@ -127,3 +127,27 @@ Correction: `.gitignore` ignore `.codex/` et motifs `.codex-*`; `role-visual-che
 Fichiers modifies: `.gitignore`, `frontend/role-visual-check.mjs`.
 Test: listing racine cible.
 Statut: corrige/surveillance.
+
+## KI-SLA-001
+
+Identifiant: KI-SLA-001
+Titre: Aucune detection automatique de depassement SLA ni escalade
+Date: 2026-10-12
+Symptome: un ticket dont le delai SLA est depasse n'est ni signale, ni escalade, ni notifie. Les indicateurs "hors SLA" (rapports, supervision) ne comptent que les tickets dont `request.sla_breached` vaut deja 1 en base.
+Resultat actuel (constate dans le code, pas suppose):
+- Taches planifiees existantes (`backend/api/core/scheduler.py`) : `_job_auto_validation` (validation d'office a J+3 des tickets resolus sans reponse du demandeur, BR-AUTO-VALIDATION-001) et `_job_auto_close` (fermeture a J+4). Ce sont les seules ; aucune ne concerne le SLA.
+- Job `auto_escalation` supprime le 2026-09-26 avec le statut `escalated` (commentaire dans `start_scheduler`).
+- Aucune ecriture de `sla_breached = True` dans le backend (recherche de toutes les formes d'affectation) : la colonne n'est que lue (filtres `RepositoryRequest.py:384`, KPI `ServiceReport.py`).
+- Modele d'e-mail `ticket_alerte_sla.html` (cle `"sla"` dans `core/mailer.py`) : present mais jamais envoye.
+- `request.infos.sla_warning_sent_at` : seulement efface (`ServiceRequest.py`), jamais ecrit.
+- Escalade manuelle : aucune route ne l'expose. `assert_escalation_allowed` et `assert_exceptional_escalation_reason` (`core/ticket_actions.py`) sont importees dans `RouteRequest.py` mais jamais appelees ; `GET /stats/escalations` retire le 2026-09-26 ("l'escalade n'existe plus", `RouteStats.py`). Seul l'historique des escalades manuelles anterieures (`event_type='escalation_manual'`) reste lisible dans l'export d'un ticket (`ServiceRequestExport._build_escalations`).
+Resultat attendu: detection automatique du depassement SLA (a partir de `sla_hours`, jamais d'une colonne `sla_deadline`), mise a jour de `sla_breached`, alerte aux personnes concernees (respect de `notif_sla_alerts`), escalade selon une regle a specifier (CDC §6).
+Module: SLA / scheduler / notifications.
+Role concerne: tous les roles de traitement et l'admin (supervision, rapports).
+Regle metier: CDC §6 (SLA et escalade) — ecart connu, non couvert par le code actuel.
+Chemins probables: `backend/api/core/scheduler.py`, `backend/api/services/ServiceRequest.py`, `backend/api/services/NotificationEmitter.py`, `backend/api/core/mailer.py`.
+Cause: retrait volontaire de l'escalade et du statut `escalated` le 2026-09-26 ; aucune detection de depassement n'a ete reintroduite depuis.
+Correction: HORS PERIMETRE du chantier de deploiement cPanel (decision du 2026-10-12). Mise en ligne avec le comportement actuel. Chantier dedie apres la mise en ligne, sur specification (quand le depassement est constate, qui est notifie, frequence, escalade ou non).
+Fichiers modifies: aucun (constat documentaire).
+Test: recherche dans le code (`grep` sur `sla_breached`, `escalat`, `ticket_alerte_sla`, `sla_warning_sent_at`).
+Statut: ouvert.
