@@ -55,7 +55,7 @@ Le secrétaire a l'autorité complète de routage vers n'importe quel niveau —
 **Frontend — libs additionnelles:** Lucide React (icônes), Recharts 2.15 (graphiques), Framer Motion 12 (animations), Sonner (toasts), Vaul (drawer mobile), Embla Carousel, xlsx (exports Excel)
 
 **Backend — dépendances clés (`backend/requirements.txt`):**
-`fastapi==0.99.1`, `starlette==0.27.0`, `sqlalchemy[asyncio]>=2.0`, `aiomysql`, `pymysql`, `alembic` (migrations), `pydantic<2.0`, `python-jose[cryptography]` + `passlib[argon2]` + `argon2-cffi` (auth), `redis[hiredis]` (blacklist/rate-limit optionnel), `sse-starlette<2.0` (SSE), `insightface` + `onnxruntime` + `opencv-python-headless` (biométrie ArcFace), `apscheduler` (escalade auto SLA), `openpyxl` + `fpdf2` (exports rapports Excel/PDF), `cryptography` (Fernet AES-128 champs sensibles), `httpx` (passerelle SMS), `aiosmtplib` (mail)
+`fastapi==0.99.1`, `starlette==0.27.0`, `sqlalchemy[asyncio]>=2.0`, `aiomysql`, `pymysql`, `pydantic<2.0`, `python-jose[cryptography]` + `passlib[argon2]` + `argon2-cffi` (auth), `redis[hiredis]` (blacklist/rate-limit optionnel), `sse-starlette<2.0` (SSE), `insightface` + `onnxruntime` + `opencv-python-headless` (biométrie ArcFace), `apscheduler` (escalade auto SLA), `openpyxl` + `fpdf2` (exports rapports Excel/PDF), `cryptography` (Fernet AES-128 champs sensibles), `httpx` (passerelle SMS), `aiosmtplib` (mail)
 
 **Commandes dev:**
 - Frontend (`frontend/`) : `npm run dev` (Vite), `npm run build`, `npm run lint`, `npm run format`

@@ -33,7 +33,10 @@ frontend/.vite/
 # Ne PAS ignorer docker-compose.yml — il doit être versionné
 
 # ─── Uploads & données ────────────────────────────────────────────────────────
-backend/uploads/
+# uploads : on versionne la structure (.gitkeep), jamais les fichiers des utilisateurs
+backend/uploads/**
+!backend/uploads/**/
+!backend/uploads/**/.gitkeep
 *.tar.gz
 backups/
 

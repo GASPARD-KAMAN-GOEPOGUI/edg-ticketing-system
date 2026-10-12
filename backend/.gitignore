@@ -20,3 +20,8 @@ build/
 .vscode/
 *.swp
 *.swo
+
+# Uploads : structure versionnée (.gitkeep), jamais les fichiers des utilisateurs
+uploads/**
+!uploads/**/
+!uploads/**/.gitkeep
