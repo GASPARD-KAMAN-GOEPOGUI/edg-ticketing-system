@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS app_lock (
 	acquired_at DATETIME NOT NULL, 
 	expires_at DATETIME NOT NULL, 
 	PRIMARY KEY (name)
-);
+)ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- Table `priority_definition`
 CREATE TABLE IF NOT EXISTS priority_definition (
@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS revoked_token (
 	revoked_at DATETIME NOT NULL, 
 	expires_at DATETIME NOT NULL, 
 	PRIMARY KEY (token_hash)
-);
+)ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE INDEX idx_revoked_token_expires_at ON revoked_token (expires_at);
 
 -- Table `sla_policy`

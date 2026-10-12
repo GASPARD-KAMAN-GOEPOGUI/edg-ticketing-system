@@ -8,8 +8,9 @@ Point unique appelé par :
 
 Strictement NON DESTRUCTIF :
   1. contrôle du schéma en LECTURE SEULE, AVANT toute écriture : colonnes
-     attendues par les modèles absentes de la base, ou valeurs ENUM attendues
-     absentes de la colonne réelle → SchemaMismatchError (mode strict) ;
+     attendues par les modèles absentes de la base, valeurs ENUM attendues
+     absentes de la colonne réelle, ou table existante dans un autre moteur /
+     charset / collation que les modèles → SchemaMismatchError (mode strict) ;
   2. create_all : crée uniquement les tables absentes (jamais de ALTER/DROP) ;
   3. seed_references / seed_admin : insèrent uniquement ce qui manque ;
   4. création des dossiers d'uploads.
@@ -66,6 +67,45 @@ def _reflect_columns(sync_conn, table_names: list[str]) -> dict[str, dict[str, f
     return actual
 
 
+def expected_table_options() -> dict[str, tuple[str | None, str | None, str | None]]:
+    """{table: (moteur, charset, collation)} déclarés par les modèles (MYSQL_ARGS)."""
+    options = {}
+    for table in Base.metadata.sorted_tables:
+        mysql = table.dialect_options["mysql"]
+        options[table.name] = (mysql.get("engine"), mysql.get("charset"), mysql.get("collate"))
+    return options
+
+
+def _reflect_table_options(sync_conn) -> dict[str, tuple[str, str]]:
+    """{table: (moteur, collation)} réels — MySQL/MariaDB uniquement (lecture de
+    information_schema) ; vide sur un autre moteur de base (SQLite des tests)."""
+    if sync_conn.dialect.name != "mysql":
+        return {}
+    rows = sync_conn.exec_driver_sql(
+        "SELECT table_name, engine, table_collation FROM information_schema.tables "
+        "WHERE table_schema = DATABASE()"
+    ).all()
+    return {r[0]: (r[1] or "", r[2] or "") for r in rows}
+
+
+def compare_table_options(expected: dict, actual: dict) -> list[str]:
+    """Moteur, charset et collation d'une table existante doivent être ceux des
+    modèles (InnoDB, utf8mb4, utf8mb4_unicode_ci) : un autre moteur (MyISAM :
+    ni transactions ni clés étrangères) ou une autre collation est bloquant."""
+    issues: list[str] = []
+    for table, (engine, charset, collate) in expected.items():
+        if table not in actual:
+            continue
+        real_engine, real_collation = actual[table]
+        if engine and real_engine.lower() != engine.lower():
+            issues.append(f"{table} : moteur {real_engine or '?'} au lieu de {engine}")
+        if charset and not real_collation.lower().startswith(charset.lower() + "_"):
+            issues.append(f"{table} : charset de {real_collation or '?'} au lieu de {charset}")
+        elif collate and real_collation.lower() != collate.lower():
+            issues.append(f"{table} : collation {real_collation or '?'} au lieu de {collate}")
+    return issues
+
+
 def compare_schema(expected: dict, actual: dict) -> list[str]:
     """Écarts bloquants entre les modèles et la base. Une table absente n'en est
     pas un (create_all la créera) ; une colonne ou une valeur ENUM absente, si."""
@@ -92,7 +132,8 @@ async def check_schema(engine) -> list[str]:
     expected = expected_schema()
     async with engine.connect() as conn:
         actual = await conn.run_sync(_reflect_columns, list(expected))
-    return compare_schema(expected, actual)
+        options = await conn.run_sync(_reflect_table_options)
+    return compare_schema(expected, actual) + compare_table_options(expected_table_options(), options)
 
 
 def ensure_upload_dirs() -> None:

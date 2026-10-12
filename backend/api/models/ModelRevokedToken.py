@@ -13,7 +13,7 @@ from datetime import datetime
 from sqlalchemy import CHAR, DateTime, Index
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base
+from .base import MYSQL_ARGS, Base
 
 
 class RevokedToken(Base):
@@ -23,4 +23,4 @@ class RevokedToken(Base):
     revoked_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
-    __table_args__ = (Index("idx_revoked_token_expires_at", "expires_at"),)
+    __table_args__ = (Index("idx_revoked_token_expires_at", "expires_at"), MYSQL_ARGS)

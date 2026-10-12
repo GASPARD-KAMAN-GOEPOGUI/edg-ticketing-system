@@ -13,7 +13,7 @@ from datetime import datetime
 from sqlalchemy import DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base
+from .base import MYSQL_ARGS, Base
 
 
 class AppLock(Base):
@@ -23,3 +23,5 @@ class AppLock(Base):
     holder: Mapped[str] = mapped_column(String(200), nullable=False)
     acquired_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    __table_args__ = (MYSQL_ARGS,)

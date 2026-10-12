@@ -24,6 +24,7 @@ from api import bootstrap, cli, storage
 from api.configs import Database
 from api.core import app_lock, scheduler
 from api.core import mailer
+from api.models.base import Base
 from api.models.ModelAccount import Account
 from api.models.ModelAppLock import AppLock
 from api.models.ModelNotification import Notification
@@ -197,6 +198,61 @@ async def test_check_exit_1_when_database_unreachable():
         assert await cli.run_check(engine=dead) == 1
     finally:
         await dead.dispose()
+
+
+def test_compare_table_options_engine_charset_collation():
+    expected = {"t": ("InnoDB", "utf8mb4", "utf8mb4_unicode_ci")}
+    ok = bootstrap.compare_table_options(expected, {"t": ("InnoDB", "utf8mb4_unicode_ci")})
+    assert ok == []
+    assert bootstrap.compare_table_options(expected, {"t": ("MyISAM", "utf8mb4_unicode_ci")}) == [
+        "t : moteur MyISAM au lieu de InnoDB"]
+    assert bootstrap.compare_table_options(expected, {"t": ("InnoDB", "latin1_swedish_ci")}) == [
+        "t : charset de latin1_swedish_ci au lieu de utf8mb4"]
+    assert bootstrap.compare_table_options(expected, {"t": ("InnoDB", "utf8mb4_0900_ai_ci")}) == [
+        "t : collation utf8mb4_0900_ai_ci au lieu de utf8mb4_unicode_ci"]
+    assert bootstrap.compare_table_options(expected, {}) == []  # table absente : create_all
+
+
+def test_all_models_declare_innodb_utf8mb4():
+    for table, opts in bootstrap.expected_table_options().items():
+        assert opts == ("InnoDB", "utf8mb4", "utf8mb4_unicode_ci"), table
+
+
+def test_technical_tables_index_size_within_767_bytes():
+    """Compatibilité MySQL 5.7 / MariaDB en ROW_FORMAT COMPACT : 767 octets max
+    par clé d'index, en utf8mb4 (4 octets par caractère)."""
+    from sqlalchemy import CHAR, DateTime, Integer, String
+
+    def size(col) -> int:
+        if isinstance(col.type, (String, CHAR)):
+            return col.type.length * 4
+        if isinstance(col.type, DateTime):
+            return 8
+        if isinstance(col.type, Integer):
+            return 4
+        raise AssertionError(f"type non prévu : {col.type!r}")
+
+    tables = {t.name: t for t in Base.metadata.sorted_tables}
+    for name in ("app_lock", "revoked_token", "session_binding", "rate_limit_counter"):
+        if name not in tables:
+            continue
+        t = tables[name]
+        keys = [("PRIMARY", list(t.primary_key.columns))] + [(ix.name, list(ix.columns)) for ix in t.indexes]
+        for key_name, cols in keys:
+            assert sum(size(c) for c in cols) <= 767, f"{name}.{key_name}"
+
+
+async def test_check_and_init_stop_on_myisam_table(monkeypatch):
+    _uploads_tmp(monkeypatch)
+    before = await _counts()
+    monkeypatch.setattr(
+        bootstrap, "_reflect_table_options",
+        lambda sync_conn: {"app_lock": ("MyISAM", "utf8mb4_unicode_ci")},
+    )
+    assert await bootstrap.check_schema(_engine) == ["app_lock : moteur MyISAM au lieu de InnoDB"]
+    assert await cli.run_check(engine=_engine) == 2
+    assert await cli.run_init(engine=_engine, session_factory=TestSession) == 2
+    assert await _counts() == before
 
 
 def test_compare_schema_tolerates_missing_table_and_extra_enum_values():
