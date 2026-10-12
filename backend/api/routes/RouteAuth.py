@@ -113,6 +113,11 @@ async def _log_auth_event(
     ip_address: str | None = None,
     log_status: str = "success",
 ) -> None:
+    # actor_role doit appartenir à l'ENUM activity_log.actor_role : « public »
+    # pour un événement sans compte authentifié (échec de connexion,
+    # consentement en attente). Une valeur hors ENUM est refusée par un MySQL
+    # strict (réponse 500) et stockée '' par un MySQL non strict (le journal
+    # admin ne peut plus être relu).
     try:
         from api.repositories.RepositoryActivityLog import ActivityLogRepository
         await ActivityLogRepository(db).append({
@@ -303,7 +308,7 @@ async def login(
         local = await AccountRepository(db).find_by_matricule(email)
         if local is None:
             await _log_auth_event(
-                db, actor=body.identifier, actor_id=None, actor_role="unknown",
+                db, actor=body.identifier, actor_id=None, actor_role="public",
                 action="login_failed", target="auth", ip_address=ip, log_status="error",
             )
             raise HTTPException(
@@ -316,7 +321,7 @@ async def login(
         tokens = await central_auth.central_login(email, body.password)
     except central_auth.CentralInvalidCredentials:
         await _log_auth_event(
-            db, actor=email, actor_id=None, actor_role="unknown",
+            db, actor=email, actor_id=None, actor_role="public",
             action="login_failed", target="auth", ip_address=ip, log_status="error",
         )
         # Un compte désactivé est aussi désactivé côté central, qui refuse alors
@@ -371,7 +376,7 @@ async def login(
         identity = central_auth.parse_profile_identity(profile)
 
         await _log_auth_event(
-            db, actor=scopes.get("email", email), actor_id=None, actor_role="unknown",
+            db, actor=scopes.get("email", email), actor_id=None, actor_role="public",
             action="login_needs_consent", target="auth", ip_address=ip,
         )
         return ConsentRequiredResponse(
