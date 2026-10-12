@@ -64,15 +64,17 @@ def _fake_reflection(monkeypatch, mutate) -> None:
 
 
 class _Mail:
-    """Remplace l'envoi SMTP : chaque email prend 0,3 s (comme un vrai SMTP)."""
+    """Remplace l'envoi SMTP : chaque email prend `delay` secondes (0,3 s par
+    défaut, comme un vrai SMTP)."""
 
-    def __init__(self) -> None:
+    def __init__(self, delay: float = 0.3) -> None:
+        self.delay = delay
         self.started = 0
         self.sent: list[str] = []
 
     async def send(self, *, to_email, **kwargs):
         self.started += 1
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(self.delay)
         self.sent.append(to_email)
         return True
 
@@ -328,16 +330,18 @@ async def test_background_emails_lost_without_drain_and_sent_with_drain(monkeypa
     def run_process(drain: bool) -> None:
         asyncio.run(cli.run_cycle(session_factory=TestSession, drain_emails=drain))
 
-    lost = _Mail()
+    # Sans attente : un envoi encore en cours à la sortie du processus est
+    # perdu. 30 s garantit qu'il l'est, quelle que soit la charge de la machine
+    # (avec 0,3 s, la purge et la libération du verrou, faites après les
+    # tâches, pouvaient durer plus longtemps sous charge : test instable).
+    lost = _Mail(delay=30)
     monkeypatch.setattr(mailer, "send_notification_email", lost.send)
     await _seed_tickets([4.05])
     await asyncio.to_thread(run_process, False)
-    print(f"SANS attente : lancés={lost.started} envoyés={len(lost.sent)}")
     assert lost.started > 0 and lost.sent == []              # annulés à la sortie
 
     kept = _Mail()
     monkeypatch.setattr(mailer, "send_notification_email", kept.send)
     await _seed_tickets([4.05])
     await asyncio.to_thread(run_process, True)
-    print(f"AVEC attente : lancés={kept.started} envoyés={len(kept.sent)}")
     assert kept.started > 0 and len(kept.sent) == kept.started
