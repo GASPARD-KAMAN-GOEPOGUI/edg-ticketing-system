@@ -162,6 +162,7 @@ Resultat actuel:
 - Organigramme admin (`frontend/src/components/admin/direction-org-chart.tsx`, `routes/app.admin.directions.$id.tsx:374-414`) : filtres `role === "director"` / `"chief"` jamais satisfaits -> cases « Directeur » et « Chef » toujours vides.
 - Formulaire de transmission (`routes/app.requests.$id.tsx:1467, 1471`) : choisir un departement ou une direction SANS recherche par nom interroge `role=chief-departement` / `role=director` -> liste vide (la recherche par nom fonctionne).
 - `TREATING_ROLES` et libelle `"chief-departement"` (`app.requests.$id.tsx:256, 288, 736`) : entrees jamais atteintes.
+- Test frontend obsolete : `src/components/mobile-shortcuts.test.ts` > « le directeur traite dans /app/direction, pas dans /app/my-tickets » echoue (1 sur 143) — deja en echec au commit c1881d6, avant le chantier de deploiement.
 - Backend : `RepositoryAccount.find_chiefs_by_unit` / `find_directors_by_direction` / `find_chief_for_unity` renvoient toujours vide (circuit d'approbation `ServiceWorkflow` sans etape) ; commentaires dans rbac.py, ticket_actions.py, dependencies.py, ModelAccount.py, RouteReports.py, ServiceRequest.py, accounts.ts, session.ts.
 - ENUM `account.role` / `activity_log.actor_role` (code, schema.sql, base locale) : public, user, chief-service, technicien, chef-division-support, admin — conforme au modele de roles officiel.
 Cause: retrait volontaire des roles (migration 028, 2026-09-25) sans nettoyage des references.
