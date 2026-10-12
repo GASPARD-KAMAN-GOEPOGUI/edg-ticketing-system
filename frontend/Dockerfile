@@ -8,15 +8,15 @@ RUN npm ci --frozen-lockfile
 
 COPY . .
 
-ARG VITE_API_URL=/api/v1
-ENV VITE_API_URL=$VITE_API_URL
-
+# VITE_API_URL vient de .env.production (copié ci-dessus) : pas d'ARG/ENV ici,
+# une variable d'environnement (même vide) passerait avant .env.production.
 RUN npm run build
 
 # ── Stage 2 : serve avec nginx ────────────────────────────────────────────────
 FROM nginx:1.25-alpine
 
-COPY --from=builder /app/dist /usr/share/nginx/html
+# Mode SPA : le site déployable (index.html + assets) est dans dist/client/
+COPY --from=builder /app/dist/client /usr/share/nginx/html
 
 # Config nginx pour SPA (toutes routes → index.html)
 RUN printf 'server {\n\
