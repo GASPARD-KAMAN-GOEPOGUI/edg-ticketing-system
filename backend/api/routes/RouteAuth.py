@@ -40,6 +40,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.core import central_auth, mailer, session_registry
+from api.core.client_ip import client_ip
 from api.core.exceptions import ValidationException
 from api.dependencies import (
     get_db,
@@ -97,10 +98,8 @@ def _svc(db: AsyncSession = Depends(get_db)) -> AccountService:
 
 
 def _client_ip(request: Request) -> str | None:
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else None
+    # Même source que la limitation des tentatives (TRUSTED_PROXIES).
+    return client_ip(request)
 
 
 async def _log_auth_event(

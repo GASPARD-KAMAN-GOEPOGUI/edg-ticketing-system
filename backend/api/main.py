@@ -19,6 +19,7 @@ import api.models  # noqa: F401 — enregistre toutes les tables dans Base.metad
 from api.bootstrap import initialize
 from api.configs.Environment import get_environment
 from api.core import central_auth, register_exception_handlers
+from api.core.client_ip import client_ip
 from api.core.event_bus import event_bus
 from api.core.middleware import RequestLoggingMiddleware, ResponseWrapperMiddleware
 from api.core.scheduler import start_scheduler, stop_scheduler
@@ -153,10 +154,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         max_req, window_sec = _RATE_LIMITS[path]
-        ip = (
-            request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-            or (request.client.host if request.client else "unknown")
-        )
+        ip = client_ip(request) or "unknown"
         key = f"rl:{ip}:{path}"
 
         redis_used = await self._get_redis() is not None

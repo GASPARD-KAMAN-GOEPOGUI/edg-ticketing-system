@@ -74,6 +74,11 @@ class Environment(BaseSettings):
     # CORS
     CORS_ORIGINS: List[str] = ["http://localhost:5173"]
 
+    # Proxies de confiance (IP ou plages CIDR, format JSON). X-Forwarded-For
+    # n'est lu que pour une connexion venant de l'un d'eux (api/core/client_ip.py).
+    # Vide = IP de la connexion (REMOTE_ADDR), en-tête ignoré.
+    TRUSTED_PROXIES: List[str] = []
+
     # SMTP
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587

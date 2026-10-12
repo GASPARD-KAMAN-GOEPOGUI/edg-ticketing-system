@@ -67,6 +67,9 @@ def central(monkeypatch) -> FakeCentral:
 async def _isolated(monkeypatch):
     monkeypatch.setattr(dependencies._env, "DISABLE_AUTH", False)
     monkeypatch.setattr(dependencies._env, "CENTRAL_AUTH_CACHE_TTL", 0)
+    # Le client de test (ASGITransport) se connecte depuis 127.0.0.1 : déclaré
+    # proxy de confiance pour que `login()` varie l'IP via X-Forwarded-For.
+    monkeypatch.setattr(dependencies._env, "TRUSTED_PROXIES", ["127.0.0.1"])
     session_registry.reset_for_tests()
     # Liaisons en mémoire, même si le .env local déclare REDIS_URL.
     session_registry._store._redis_checked = True
