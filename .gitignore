@@ -7,6 +7,9 @@ backend/.env
 backend/.env.production
 frontend/.env.development
 frontend/.env.local
+# Exception : le .env.production du frontend ne contient que des VITE_* publics
+# (intégrés au JS livré au navigateur), jamais de secret.
+!frontend/.env.production
 secrets/
 
 # ─── Python ───────────────────────────────────────────────────────────────────

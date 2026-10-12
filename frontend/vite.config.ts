@@ -11,6 +11,10 @@ export default defineConfig({
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
     server: { entry: "server" },
+    // SPA statique pour cPanel : le build prérend uniquement la coquille
+    // dist/client/index.html (pas de serveur Node en production).
+    // Nitro reste désactivé : son preset écrit dans .output/ et casse ce prérendu.
+    spa: { enabled: true, prerender: { outputPath: "/index.html" } },
   },
   vite: {
     server: {

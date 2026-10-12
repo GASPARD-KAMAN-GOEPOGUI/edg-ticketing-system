@@ -1,0 +1,37 @@
+# ─── EDG Connect — frontend SPA statique (cPanel / Apache) ───────────────────
+# Copié tel quel par Vite dans dist/client/ au build.
+
+Options -Indexes
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # 1. Forcer HTTPS (X-Forwarded-Proto couvre un éventuel proxy/CDN devant Apache)
+  RewriteCond %{HTTPS} off
+  RewriteCond %{HTTP:X-Forwarded-Proto} !https
+  RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+  # 2. Fichier ou dossier existant : servi tel quel
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # 3. Asset haché introuvable : vraie 404 (jamais index.html à la place d'un JS/CSS)
+  RewriteRule ^assets/ - [L,R=404]
+
+  # 4. Toute autre route : application React (routage côté client)
+  RewriteRule ^ index.html [L]
+</IfModule>
+
+<IfModule mod_headers.c>
+  # index.html : toujours revalidé, pour charger les nouveaux assets après un déploiement
+  <FilesMatch "^index\.html$">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
+
+  # Assets hachés (nom unique par build) : cache long
+  <If "%{REQUEST_URI} =~ m#^/assets/#">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </If>
+</IfModule>
