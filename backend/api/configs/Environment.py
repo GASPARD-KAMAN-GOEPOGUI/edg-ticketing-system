@@ -65,6 +65,12 @@ class Environment(BaseSettings):
     # restent semees dans les deux cas : ce sont des enums techniques.
     SEED_ORG_STRUCTURE: bool = True
 
+    # Tâches planifiées (validation d'office J+3, fermeture J+4) dans le
+    # processus web. True (dev) : APScheduler démarré par le lifespan. False
+    # (production Passenger, où le lifespan ne tourne pas, et plusieurs
+    # processus) : exécutées par le cron `python -m api.cli cycle`.
+    SCHEDULER_IN_PROCESS: bool = True
+
     # CORS
     CORS_ORIGINS: List[str] = ["http://localhost:5173"]
 

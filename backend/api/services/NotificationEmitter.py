@@ -27,6 +27,20 @@ def _send_email_fire_and_forget(coro) -> None:
     task.add_done_callback(_background_email_tasks.discard)
 
 
+async def drain_background_emails(timeout: float) -> int:
+    """Attend la fin des envois d'email en cours (au plus `timeout` secondes).
+
+    Utile uniquement pour un processus qui va se terminer (commande CLI) : à la
+    sortie d'`asyncio.run`, les tâches encore en cours sont annulées et les
+    emails perdus. Le processus web, lui, n'appelle jamais cette fonction.
+    Retourne le nombre d'envois encore inachevés à l'expiration du délai."""
+    pending = [task for task in _background_email_tasks if not task.done()]
+    if not pending:
+        return 0
+    _, still_pending = await asyncio.wait(pending, timeout=timeout)
+    return len(still_pending)
+
+
 def _display_date(value) -> str:
     if not value:
         return ""

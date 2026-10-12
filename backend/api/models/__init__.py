@@ -40,11 +40,14 @@ from .ModelActivityLog import ActivityLog
 # ── Communication & CSAT (4) ─────────────────────────────────────────────────
 from .ModelAppreciation import Appreciation
 
+# ── Technique (1) ────────────────────────────────────────────────────────────
+from .ModelAppLock import AppLock
+
 __all__ = [
     "RequestStatus", "RequestCategory", "PriorityDefinition",
     "Unity", "Organigram", "Account",
     "Request", "Attachment", "Workflow",
     "Task", "WorkflowDetail", "SlaPolicy",
     "RoutingRule", "Notification", "ActivityLog",
-    "Appreciation",
+    "Appreciation", "AppLock",
 ]

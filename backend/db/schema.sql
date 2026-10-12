@@ -11,6 +11,15 @@
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
+-- Table `app_lock`
+CREATE TABLE IF NOT EXISTS app_lock (
+	name VARCHAR(100) NOT NULL, 
+	holder VARCHAR(200) NOT NULL, 
+	acquired_at DATETIME NOT NULL, 
+	expires_at DATETIME NOT NULL, 
+	PRIMARY KEY (name)
+);
+
 -- Table `priority_definition`
 CREATE TABLE IF NOT EXISTS priority_definition (
 	slug VARCHAR(50) NOT NULL, 
@@ -29,7 +38,7 @@ CREATE TABLE IF NOT EXISTS priority_definition (
 	PRIMARY KEY (id), 
 	UNIQUE (slug), 
 	UNIQUE (uuid)
-)CHARSET=utf8mb4 ENGINE=InnoDB COLLATE utf8mb4_unicode_ci;
+)ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE INDEX idx_prio_order ON priority_definition (sort_order);
 CREATE INDEX idx_prio_status ON priority_definition (status, deleted_at);
 
@@ -49,7 +58,7 @@ CREATE TABLE IF NOT EXISTS request_category (
 	PRIMARY KEY (id), 
 	UNIQUE (code), 
 	UNIQUE (uuid)
-)CHARSET=utf8mb4 ENGINE=InnoDB COLLATE utf8mb4_unicode_ci;
+)ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE INDEX idx_rc_order ON request_category (sort_order);
 CREATE INDEX idx_rc_status ON request_category (status, deleted_at);
 
@@ -69,7 +78,7 @@ CREATE TABLE IF NOT EXISTS request_status (
 	PRIMARY KEY (id), 
 	UNIQUE (code), 
 	UNIQUE (uuid)
-)CHARSET=utf8mb4 ENGINE=InnoDB COLLATE utf8mb4_unicode_ci;
+)ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE INDEX idx_rs_order ON request_status (sort_order);
 CREATE INDEX idx_rs_status ON request_status (status, deleted_at);
 
@@ -90,7 +99,7 @@ CREATE TABLE IF NOT EXISTS sla_policy (
 	PRIMARY KEY (id), 
 	CONSTRAINT uk_sla_cat_prio UNIQUE (category, priority), 
 	UNIQUE (uuid)
-)CHARSET=utf8mb4 ENGINE=InnoDB COLLATE utf8mb4_unicode_ci;
+)ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE INDEX idx_sla_status ON sla_policy (status, deleted_at);
 
 -- Table `unity`
@@ -111,7 +120,7 @@ CREATE TABLE IF NOT EXISTS unity (
 	UNIQUE (codename), 
 	FOREIGN KEY(parent_direction_id) REFERENCES unity (id) ON DELETE SET NULL, 
 	UNIQUE (uuid)
-)CHARSET=utf8mb4 ENGINE=InnoDB COLLATE utf8mb4_unicode_ci;
+)ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE INDEX idx_unity_codename ON unity (codename);
 CREATE INDEX idx_unity_parent_dir ON unity (parent_direction_id);
 CREATE INDEX idx_unity_status ON unity (status, deleted_at);
@@ -156,7 +165,7 @@ CREATE TABLE IF NOT EXISTS account (
 	UNIQUE (phone), 
 	UNIQUE (matricule), 
 	UNIQUE (uuid)
-)CHARSET=utf8mb4 ENGINE=InnoDB COLLATE utf8mb4_unicode_ci;
+)ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE INDEX idx_account_central_user_id ON account (central_user_id);
 CREATE INDEX idx_account_role ON account (`role`);
 CREATE INDEX idx_account_status ON account (status, deleted_at);
@@ -177,7 +186,7 @@ CREATE TABLE IF NOT EXISTS organigram (
 	FOREIGN KEY(unity_id) REFERENCES unity (id), 
 	FOREIGN KEY(parent_id) REFERENCES organigram (id) ON DELETE SET NULL, 
 	UNIQUE (uuid)
-)CHARSET=utf8mb4 ENGINE=InnoDB COLLATE utf8mb4_unicode_ci;
+)ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE INDEX idx_org_parent ON organigram (parent_id);
 CREATE INDEX idx_org_status ON organigram (status, deleted_at);
 CREATE INDEX idx_org_unity ON organigram (unity_id);
@@ -200,7 +209,7 @@ CREATE TABLE IF NOT EXISTS routing_rule (
 	PRIMARY KEY (id), 
 	FOREIGN KEY(target_unity_id) REFERENCES unity (id), 
 	UNIQUE (uuid)
-)CHARSET=utf8mb4 ENGINE=InnoDB COLLATE utf8mb4_unicode_ci;
+)ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE INDEX idx_rr_order ON routing_rule (sort_order);
 CREATE INDEX idx_rr_status ON routing_rule (status, deleted_at);
 
@@ -225,7 +234,7 @@ CREATE TABLE IF NOT EXISTS activity_log (
 	PRIMARY KEY (id), 
 	FOREIGN KEY(actor_id) REFERENCES account (id), 
 	UNIQUE (uuid)
-)CHARSET=utf8mb4 ENGINE=InnoDB COLLATE utf8mb4_unicode_ci;
+)ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE INDEX idx_log_actor ON activity_log (actor_id);
 CREATE INDEX idx_log_cat ON activity_log (category);
 CREATE INDEX idx_log_created ON activity_log (created_at);
@@ -287,7 +296,7 @@ CREATE TABLE IF NOT EXISTS request (
 	UNIQUE (ref), 
 	FOREIGN KEY(merged_into_id) REFERENCES request (id), 
 	UNIQUE (uuid)
-)CHARSET=utf8mb4 ENGINE=InnoDB COLLATE utf8mb4_unicode_ci;
+)ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE INDEX idx_req_assignee ON request (assignee_id);
 CREATE INDEX idx_req_category_id ON request (request_category_id);
 CREATE INDEX idx_req_created ON request (created_at);
@@ -320,7 +329,7 @@ CREATE TABLE IF NOT EXISTS appreciation (
 	UNIQUE (request_id), 
 	FOREIGN KEY(request_id) REFERENCES request (id) ON DELETE CASCADE, 
 	UNIQUE (uuid)
-)CHARSET=utf8mb4 ENGINE=InnoDB COLLATE utf8mb4_unicode_ci;
+)ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE INDEX idx_appr_rating ON appreciation (rating);
 CREATE INDEX idx_appr_status ON appreciation (status, deleted_at);
 
@@ -345,7 +354,7 @@ CREATE TABLE IF NOT EXISTS attachment (
 	FOREIGN KEY(request_id) REFERENCES request (id) ON DELETE CASCADE, 
 	FOREIGN KEY(uploader_id) REFERENCES account (id), 
 	UNIQUE (uuid)
-)CHARSET=utf8mb4 ENGINE=InnoDB COLLATE utf8mb4_unicode_ci;
+)ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE INDEX idx_att_req ON attachment (request_id);
 CREATE INDEX idx_att_status ON attachment (status, deleted_at);
 
@@ -373,7 +382,7 @@ CREATE TABLE IF NOT EXISTS notification (
 	FOREIGN KEY(recipient_id) REFERENCES account (id) ON DELETE CASCADE, 
 	FOREIGN KEY(request_id) REFERENCES request (id), 
 	UNIQUE (uuid)
-)CHARSET=utf8mb4 ENGINE=InnoDB COLLATE utf8mb4_unicode_ci;
+)ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE INDEX idx_notif_recip ON notification (recipient_id);
 CREATE INDEX idx_notif_status ON notification (status, deleted_at);
 CREATE INDEX idx_notif_unread ON notification (recipient_id, is_read);
@@ -402,7 +411,7 @@ CREATE TABLE IF NOT EXISTS task (
 	FOREIGN KEY(from_unit_id) REFERENCES unity (id), 
 	FOREIGN KEY(to_unit_id) REFERENCES unity (id), 
 	UNIQUE (uuid)
-)CHARSET=utf8mb4 ENGINE=InnoDB COLLATE utf8mb4_unicode_ci;
+)ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE INDEX idx_task_req ON task (request_id);
 CREATE INDEX idx_task_status ON task (status, deleted_at);
 CREATE INDEX idx_task_tstatus ON task (task_status);
@@ -421,7 +430,7 @@ CREATE TABLE IF NOT EXISTS workflow (
 	PRIMARY KEY (id), 
 	FOREIGN KEY(request_id) REFERENCES request (id), 
 	UNIQUE (uuid)
-)CHARSET=utf8mb4 ENGINE=InnoDB COLLATE utf8mb4_unicode_ci;
+)ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE INDEX idx_wf_req ON workflow (request_id);
 CREATE INDEX idx_wf_status ON workflow (status, deleted_at);
 
@@ -452,7 +461,7 @@ CREATE TABLE IF NOT EXISTS workflow_detail (
 	FOREIGN KEY(task_id) REFERENCES task (id), 
 	FOREIGN KEY(parent_id) REFERENCES workflow_detail (id), 
 	UNIQUE (uuid)
-)CHARSET=utf8mb4 ENGINE=InnoDB COLLATE utf8mb4_unicode_ci;
+)ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE INDEX idx_wfd_event_type ON workflow_detail (event_type, deleted_at);
 CREATE INDEX idx_wfd_status ON workflow_detail (status, deleted_at);
 CREATE INDEX idx_wfd_wf ON workflow_detail (workflow_id);

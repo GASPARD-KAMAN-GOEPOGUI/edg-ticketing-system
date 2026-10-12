@@ -16,15 +16,12 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 import api.models  # noqa: F401 — enregistre toutes les tables dans Base.metadata
-from api.configs.Database import engine, AsyncSessionLocal
+from api.bootstrap import initialize
 from api.configs.Environment import get_environment
-from api.models.base import Base
 from api.core import central_auth, register_exception_handlers
 from api.core.event_bus import event_bus
 from api.core.middleware import RequestLoggingMiddleware, ResponseWrapperMiddleware
 from api.core.scheduler import start_scheduler, stop_scheduler
-from api.seed_references import seed_references
-from api.seed_admin import seed_admin
 
 # Redis optionnel pour le rate limiting distribué
 try:
@@ -196,14 +193,14 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Gestion du cycle de vie de l'application (startup / shutdown)."""
     logger.info("Démarrage de %s [env=%s]", env.APP_NAME, env.APP_ENV)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    async with AsyncSessionLocal() as session:
-        await seed_references(session)
-        await seed_admin(session)
-        await session.commit()
+    # Même initialisation que `python -m api.cli init` (voir api/bootstrap.py),
+    # non stricte ici : un écart de schéma est journalisé, pas bloquant.
+    await initialize(strict_schema=False)
     await event_bus.start(env.REDIS_URL)
-    start_scheduler(interval_minutes=10)
+    if env.SCHEDULER_IN_PROCESS:
+        start_scheduler(interval_minutes=10)
+    else:
+        logger.info("Scheduler non démarré (SCHEDULER_IN_PROCESS=False) — cron `python -m api.cli cycle`.")
     yield
     stop_scheduler()
     await event_bus.stop()
