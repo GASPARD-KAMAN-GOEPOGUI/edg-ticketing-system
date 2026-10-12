@@ -243,7 +243,14 @@ app = FastAPI(
 register_exception_handlers(app)
 
 # ─── Middlewares ──────────────────────────────────────────────────────────────
-# Ordre d'ajout = ordre inverse d'exécution (le dernier ajouté s'exécute en premier)
+# Ordre d'ajout = ordre inverse d'exécution (le dernier ajouté s'exécute en
+# premier : Starlette insère chaque middleware en tête de pile).
+app.add_middleware(ResponseWrapperMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(RateLimitMiddleware)  # H-02 — anti brute-force auth
+# CORS en DERNIER = le plus externe : toute réponse produite par un middleware
+# ci-dessus (429 de la limitation, erreur…) porte les en-têtes CORS, sinon le
+# navigateur la masque au frontend (support. et appsupport. sont deux origines).
 # Dev  : toutes origines acceptées, credentials désactivés (pas de JWT encore)
 # Prod : restreindre aux origines configurées dans CORS_ORIGINS
 _is_dev = env.APP_ENV != "production"
@@ -254,9 +261,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(ResponseWrapperMiddleware)
-app.add_middleware(RequestLoggingMiddleware)
-app.add_middleware(RateLimitMiddleware)  # H-02 — anti brute-force auth
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 _API = "/api/v1"

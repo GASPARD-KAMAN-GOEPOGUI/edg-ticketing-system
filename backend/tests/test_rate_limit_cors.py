@@ -35,12 +35,6 @@ async def test_preflight_not_counted_and_429_on_eleventh_real_attempt(central, m
     assert 429 not in codes[:10] and codes[10] == 429
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="429 sans en-têtes CORS : RateLimitMiddleware est plus externe que CORSMiddleware "
-           "(Starlette insère chaque middleware en tête de pile). Correction proposée, en attente "
-           "de validation : ajouter CORSMiddleware en dernier.",
-)
 async def test_429_response_carries_cors_headers(central, monkeypatch):
     monkeypatch.setattr(dependencies._env, "TRUSTED_PROXIES", [])
     async with _client("203.0.113.71") as c:
@@ -50,5 +44,20 @@ async def test_429_response_carries_cors_headers(central, monkeypatch):
         resp = await c.post("/api/v1/auth/login", json={"identifier": "x@edg.gn", "password": "x"},
                             headers={"Origin": ORIGIN})
     assert resp.status_code == 429
-    print(f"\n429 en-têtes CORS : ACAO={resp.headers.get('access-control-allow-origin')!r}")
+    assert resp.headers.get("access-control-allow-origin") in (ORIGIN, "*")
+
+
+async def test_500_from_middleware_carries_cors_headers(central):
+    """Exception non gérée dans une route : RequestLoggingMiddleware produit la
+    réponse 500 JSON ; CORS, plus externe, doit y ajouter ses en-têtes."""
+    async def boom():
+        raise RuntimeError("panne simulée")
+
+    app.add_api_route("/__test_boom", boom, methods=["GET"])
+    try:
+        async with _client("203.0.113.72") as c:
+            resp = await c.get("/__test_boom", headers={"Origin": ORIGIN})
+    finally:
+        app.router.routes[:] = [r for r in app.router.routes if getattr(r, "path", "") != "/__test_boom"]
+    assert resp.status_code == 500
     assert resp.headers.get("access-control-allow-origin") in (ORIGIN, "*")
