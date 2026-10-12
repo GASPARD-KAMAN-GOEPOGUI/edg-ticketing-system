@@ -150,7 +150,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        if path not in _RATE_LIMITS:
+        # Requête CORS préalable (OPTIONS) : envoyée par le navigateur avant le
+        # vrai POST quand le frontend est sur un autre domaine. Elle n'atteint
+        # jamais la route (aucun identifiant testé) : ne pas la compter, sinon
+        # chaque tentative réelle coûterait deux coups.
+        if request.method == "OPTIONS" or path not in _RATE_LIMITS:
             return await call_next(request)
 
         max_req, window_sec = _RATE_LIMITS[path]
