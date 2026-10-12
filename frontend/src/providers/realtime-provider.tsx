@@ -11,6 +11,12 @@
  *  6. Session révoquée par un admin (`user.session_revoked`) : déconnexion
  *     forcée immédiate ; revalidation `/auth/me` au retour du réseau, de
  *     l'onglet ou du flux SSE (rattrape un événement manqué pendant la coupure)
+ *
+ * Mode « polling » (VITE_REALTIME_MODE=polling, production cPanel — voir
+ * lib/realtime/polling.ts) : aucun flux SSE n'est ouvert. La cloche est relue
+ * toutes les 30 s (en pause quand l'onglet est caché) ; une nouveauté invalide
+ * les mêmes données que le rattrapage après reconnexion SSE. Une session
+ * révoquée est détectée au prochain appel API (401 typé -> déconnexion forcée).
  */
 
 import {
@@ -22,12 +28,20 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { sseClient } from "@/lib/realtime/sse-client";
 import { INVALIDATION_MAP, type QueryKeyPrefix } from "@/lib/realtime/invalidation-map";
-import { getAccessToken, getRole, normalizeRole } from "@/lib/session";
+import {
+  POLL_INTERVAL_MS,
+  REALTIME_MODE,
+  bellSnapshot,
+  hasNewActivity,
+  type BellSnapshot,
+} from "@/lib/realtime/polling";
+import { getAccessToken, getRole, normalizeRole, useUser } from "@/lib/session";
 import { getMe } from "@/lib/api/auth";
+import { fetchNotifications } from "@/lib/api/notifications";
 import {
   SESSION_REVOKED_EVENT,
   forceLogout,
@@ -51,7 +65,9 @@ const ALL_INVALIDATION_KEYS: QueryKeyPrefix[] = Array.from(
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export type RealtimeStatus = "connecting" | "connected" | "disconnected";
+export type RealtimeStatus = "connecting" | "connected" | "disconnected" | "polling";
+
+const POLLING = REALTIME_MODE === "polling";
 
 interface RealtimeContextValue {
   status: RealtimeStatus;
@@ -72,10 +88,34 @@ export function useRealtimeStatus(): RealtimeStatus {
 export function RealtimeProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const router = useRouter();
-  const [status, setStatus] = useState<RealtimeStatus>("connecting");
+  const [status, setStatus] = useState<RealtimeStatus>(POLLING ? "polling" : "connecting");
   const cleanupFns = useRef<Array<() => void>>([]);
   const hasDroppedRef = useRef(false);
   const lastRevalidateRef = useRef(0);
+
+  // Mode polling : même requête (même clé, même appel) que la cloche de
+  // app-layout — le cache est partagé, la cloche affiche donc le nombre relu
+  // ici. refetchInterval est suspendu quand l'onglet est caché
+  // (refetchIntervalInBackground: false par défaut dans TanStack Query).
+  const sessionUser = useUser();
+  const { data: bellData } = useQuery({
+    queryKey: ["notifications", sessionUser?.id, "badge"],
+    queryFn: () => fetchNotifications({ meId: sessionUser!.id, unread: true, limit: 1 }),
+    enabled: POLLING && !!sessionUser?.id,
+    staleTime: POLL_INTERVAL_MS,
+    refetchInterval: POLLING ? POLL_INTERVAL_MS : false,
+  });
+  const lastBellRef = useRef<BellSnapshot | null>(null);
+  useEffect(() => {
+    if (!POLLING) return;
+    const next = bellSnapshot(bellData);
+    if (hasNewActivity(lastBellRef.current, next)) {
+      for (const key of ALL_INVALIDATION_KEYS) {
+        queryClient.invalidateQueries({ queryKey: key });
+      }
+    }
+    if (next) lastBellRef.current = next;
+  }, [bellData, queryClient]);
 
   const invalidateForEvent = useCallback(
     (eventType: string) => {
@@ -115,6 +155,29 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       router.navigate({ to: "/login", replace: true });
     });
 
+    // Retour du réseau ou de l'onglet (navigateur resté ouvert des heures,
+    // veille…) : l'état de sécurité est relu côté backend.
+    const onOnline = () => { void revalidateSession(); };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void revalidateSession();
+    };
+    window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisible);
+    const offWindow = () => {
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+
+    if (POLLING) {
+      // Aucun flux SSE (voir lib/realtime/polling.ts) : seule la cloche est
+      // relue périodiquement, par la requête déclarée plus haut.
+      cleanupFns.current = [offForced, offWindow];
+      return () => {
+        cleanupFns.current.forEach((off) => off());
+        cleanupFns.current = [];
+      };
+    }
+
     // Démarre la connexion SSE avec un getter de token (appelé à chaque reconnexion)
     sseClient.connect(() => getAccessToken());
 
@@ -151,19 +214,6 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     // seul événement ciblé par user_id atteint tous les onglets/appareils
     // ouverts de cette personne (chacun a son propre abonnement SSE).
     const offRevoked = sseClient.on(SESSION_REVOKED_EVENT, handleSessionRevokedEvent);
-
-    // Retour du réseau ou de l'onglet (navigateur resté ouvert des heures,
-    // veille…) : l'état de sécurité est relu côté backend.
-    const onOnline = () => { void revalidateSession(); };
-    const onVisible = () => {
-      if (document.visibilityState === "visible") void revalidateSession();
-    };
-    window.addEventListener("online", onOnline);
-    document.addEventListener("visibilitychange", onVisible);
-    const offWindow = () => {
-      window.removeEventListener("online", onOnline);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
 
     cleanupFns.current = [offForced, offConnected, offDisconnected, offRevoked, offWindow, ...offHandlers];
 

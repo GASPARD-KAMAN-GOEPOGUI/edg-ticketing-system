@@ -577,14 +577,16 @@ export function AppLayout({ children }: { children: ReactNode }) {
                     <span
                       className={cn(
                         "hidden md:flex h-2 w-2 rounded-full transition-colors",
-                        realtimeStatus === "connected"
+                        realtimeStatus === "connected" || realtimeStatus === "polling"
                           ? "bg-emerald-400"
                           : realtimeStatus === "connecting"
                             ? "bg-amber-300 animate-pulse"
                             : "bg-muted-foreground/30",
                       )}
                       aria-label={
-                        realtimeStatus === "connected"
+                        realtimeStatus === "polling"
+                          ? "Actualisation automatique active"
+                          : realtimeStatus === "connected"
                           ? "Temps réel actif"
                           : realtimeStatus === "connecting"
                             ? "Connexion en cours…"
@@ -593,7 +595,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
                     />
                   </TooltipTrigger>
                   <TooltipContent side="bottom" className="text-xs">
-                    {realtimeStatus === "connected"
+                    {realtimeStatus === "polling"
+                      ? "Notifications actualisées automatiquement (toutes les 30 s)"
+                      : realtimeStatus === "connected"
                       ? "Mises à jour en temps réel actives"
                       : realtimeStatus === "connecting"
                         ? "Connexion temps réel en cours…"

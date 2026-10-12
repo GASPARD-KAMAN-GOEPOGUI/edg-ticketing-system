@@ -220,3 +220,21 @@ Symptome: `RouteAuth._log_auth_event` attrape l'exception d'ecriture du journal 
 Resultat actuel: la seule cause connue (actor_role "unknown" hors ENUM) est corrigee (commit 93f0a82, role "public").
 Correction: non necessaire pour le deploiement ; a durcir (savepoint) lors d'un prochain travail sur l'authentification.
 Statut: ouvert.
+
+## KI-REALTIME-001
+
+Identifiant: KI-REALTIME-001
+Titre: Temps reel en production cPanel par polling (SSE incompatible avec Passenger pour Python)
+Date: 2026-10-12
+Symptome: sous Passenger, un processus Python ne traite qu'une requete a la fois (reference Passenger, PassengerConcurrencyModel : « Multithreading is not supported for Python ») ; un flux SSE ouvert bloque un processus entier (PassengerMaxPoolSize : 6 par defaut, reglable au niveau serveur seulement).
+Resultat actuel: production (VITE_REALTIME_MODE=polling, frontend/.env.production) : aucun flux SSE ; la cloche est relue toutes les 30 s (en pause quand l'onglet est cache) ; une nouveaute (identifiant de la derniere notification non lue plus grand, ou nombre de non-lus en hausse) invalide les memes donnees que le rattrapage apres reconnexion SSE. Developpement : SSE inchange.
+Limites acceptees:
+- une nouveaute apparait dans les 30 s (pas instantanement), et au retour sur un onglet cache, au prochain releve ;
+- une revocation de session est detectee au prochain appel API (401 SESSION_REVOKED -> deconnexion forcee), pas par l'evenement user.session_revoked ;
+- les changements qui ne creent aucune notification pour l'utilisateur (ex. ticket modifie par un autre sans notification) ne rafraichissent les listes qu'a la navigation (staleTime 60 s).
+Mode SSE (developpement uniquement) — non traite :
+- jeton d'acces dans l'URL de /events (journaux serveur) : ticket SSE ephemere reporte ;
+- les evenements emis par les taches planifiees (api.cli cycle, APScheduler) ne sont jamais publies (queue_after_commit sans publish_pending) ;
+- sans Redis, un evenement emis dans un processus n'atteint pas les clients d'un autre.
+Correction: aucune autre dans le chantier de deploiement.
+Statut: ouvert (limites assumees).
