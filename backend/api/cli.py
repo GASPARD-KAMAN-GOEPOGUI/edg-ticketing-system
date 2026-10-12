@@ -1,6 +1,9 @@
 """
 Commandes d'exploitation — EDG Support.
 
+  python -m api.cli check   Contrôle le schéma de la base, en LECTURE SEULE stricte.
+                            Code de sortie 0 si conforme, 2 si écart (liste
+                            affichée), 1 si la base est injoignable.
   python -m api.cli init    Initialise la base (non destructif, voir api/bootstrap.py).
                             Code de sortie 2 si le schéma existant est incompatible.
   python -m api.cli cycle   Exécute UNE fois les tâches planifiées existantes
@@ -28,6 +31,29 @@ CYCLE_LOCK_NAME = "scheduler_cycle"
 CYCLE_LOCK_TTL_SECONDS = 50 * 60
 # Délai maximal laissé aux emails lancés en tâche de fond avant la sortie.
 EMAIL_DRAIN_TIMEOUT_SECONDS = 60
+
+
+async def run_check(*, engine=None) -> int:
+    """Lecture seule : uniquement la réflexion du schéma (aucun create_all,
+    aucun seed, aucune écriture)."""
+    from sqlalchemy.exc import DBAPIError
+
+    from api.bootstrap import check_schema
+    from api.configs import Database
+
+    try:
+        issues = await check_schema(engine or Database.engine)
+    except (DBAPIError, OSError) as exc:
+        logger.error("Base injoignable : %s", exc)
+        return 1
+    if issues:
+        logger.error(
+            "Schéma incompatible avec le code (%d écart(s)) :\n  - %s",
+            len(issues), "\n  - ".join(issues),
+        )
+        return 2
+    logger.info("Schéma conforme au code : 0 écart.")
+    return 0
 
 
 async def run_init(*, engine=None, session_factory=None) -> int:
@@ -77,6 +103,8 @@ async def _main_async(command: str) -> int:
     from api.configs import Database
 
     try:
+        if command == "check":
+            return await run_check()
         if command == "init":
             return await run_init()
         return await run_cycle()
@@ -86,7 +114,7 @@ async def _main_async(command: str) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m api.cli", description="Commandes d'exploitation EDG Support.")
-    parser.add_argument("command", choices=["init", "cycle"])
+    parser.add_argument("command", choices=["check", "init", "cycle"])
     args = parser.parse_args(argv)
     logging.basicConfig(
         level=logging.INFO,

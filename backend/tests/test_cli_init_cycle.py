@@ -24,7 +24,6 @@ from api import bootstrap, cli, storage
 from api.configs import Database
 from api.core import app_lock, scheduler
 from api.core import mailer
-from api.models.base import Base
 from api.models.ModelAccount import Account
 from api.models.ModelAppLock import AppLock
 from api.models.ModelNotification import Notification
@@ -167,6 +166,37 @@ async def test_init_stops_on_incomplete_role_enum(monkeypatch):
     assert issues == ["account.role : valeurs ENUM absentes de la base : technicien"]
     assert await cli.run_init(engine=_engine, session_factory=TestSession) == 2
     assert await _counts() == before
+
+
+# ── check (lecture seule) ─────────────────────────────────────────────────────
+
+async def test_check_is_read_only_and_reports_conformity(monkeypatch):
+    _uploads_tmp(monkeypatch)
+    assert await cli.run_init(engine=_engine, session_factory=TestSession) == 0
+    async with _engine.begin() as conn:
+        await conn.execute(text("DROP TABLE app_lock"))  # init la recréerait
+    before = await _counts()
+
+    assert await cli.run_check(engine=_engine) == 0  # table absente : pas un écart
+    after = await _counts()
+    assert after == before and "app_lock" not in after  # rien écrit, rien créé
+
+
+async def test_check_exit_2_on_mismatch_without_writing(monkeypatch):
+    before = await _counts()
+    _fake_reflection(monkeypatch, lambda a: a["request"].pop("distributor_id"))
+    assert await cli.run_check(engine=_engine) == 2
+    assert await _counts() == before
+
+
+async def test_check_exit_1_when_database_unreachable():
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    dead = create_async_engine("mysql+aiomysql://u:p@127.0.0.1:1/absente", connect_args={"connect_timeout": 2})
+    try:
+        assert await cli.run_check(engine=dead) == 1
+    finally:
+        await dead.dispose()
 
 
 def test_compare_schema_tolerates_missing_table_and_extra_enum_values():
