@@ -25,3 +25,7 @@ build/
 uploads/**
 !uploads/**/
 !uploads/**/.gitkeep
+
+# Dumps SQL : jamais versionnés (données personnelles) — seul le schéma vide l'est
+db/*.sql
+!db/schema.sql
