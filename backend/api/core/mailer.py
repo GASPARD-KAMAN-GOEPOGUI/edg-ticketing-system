@@ -343,7 +343,7 @@ def _notification_context(
         "headline": variant.get("headline") or title,
         "subtitle": variant.get("subtitle") or body,
         "details": details,
-        "action_url": action_url,
+        "action_url": _absolute_app_url(action_url),
         "action_label": action_label,
         "support_email": "support@edg-support.gn",
         "support_phone": "(+224) 153 456 789",
@@ -351,14 +351,36 @@ def _notification_context(
     return str(variant["template"]), context
 
 
-def _app_login_url() -> str | None:
-    """URL de connexion de l'application — dérivée de CORS_ORIGINS (première
-    origine configurée), seule information d'URL publique déjà présente dans
-    la configuration ; pas de variable d'environnement dédiée à ce jour."""
+def _app_base_url() -> str | None:
+    """Adresse publique du frontend — première origine de CORS_ORIGINS, seule
+    information d'URL publique présente dans la configuration ; pas de
+    variable d'environnement dédiée à ce jour."""
     origins = _env.CORS_ORIGINS
     if not origins:
         return None
-    return f"{origins[0].rstrip('/')}/login"
+    return origins[0].rstrip("/")
+
+
+def _app_login_url() -> str | None:
+    """URL de connexion de l'application."""
+    base = _app_base_url()
+    return f"{base}/login" if base else None
+
+
+def _absolute_app_url(url: str | None) -> str | None:
+    """Lien d'un bouton d'e-mail. Les notifications portent des chemins
+    relatifs (`/app/queue`, `/app/requests/42`), corrects dans l'application
+    mais morts dans un client de messagerie, qui n'a pas de site autour : on
+    les préfixe par l'adresse du frontend. Un lien déjà absolu est conservé ;
+    sans adresse configurée, pas de bouton plutôt qu'un bouton inopérant."""
+    if not url:
+        return None
+    if url.startswith(("https://", "http://")):
+        return url
+    base = _app_base_url()
+    if not base or not url.startswith("/") or url.startswith("//"):
+        return None
+    return f"{base}{url}"
 
 
 async def send_account_created_email(to_email: str, name: str = "") -> bool:
