@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { GlassCard } from "@/components/glass-card";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Bell,
   CheckCircle2,
@@ -423,7 +424,7 @@ function Notifications() {
   const isArchivedView = filter === "archived";
 
   /* ── Notifications API — invalidées en temps réel via SSE (notification.*) ── */
-  const { data: apiData } = useQuery({
+  const { data: apiData, isPending: notifsLoading } = useQuery({
     queryKey: ["notifications", meId, isArchivedView],
     queryFn: () => fetchNotifications({ meId, limit: 100, archived: isArchivedView }),
     enabled: !!meId,
@@ -609,7 +610,22 @@ function Notifications() {
       </div>
 
       {/* ── Contenu ── */}
-      {visible.length === 0 ? (
+      {/* Chargement : cartes « squelette » au lieu d'une liste vide, qui faisait
+          croire à « Aucune notification » le temps de la réponse (2026-10-13). */}
+      {notifsLoading && !!meId ? (
+        <div className="space-y-2" aria-busy="true" aria-label="Chargement des notifications">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <GlassCard key={i} className="flex items-start gap-3 p-4">
+              <Skeleton className="h-9 w-9 shrink-0 rounded-full" />
+              <div className="min-w-0 flex-1 space-y-2">
+                <Skeleton className="h-4 w-2/5" />
+                <Skeleton className="h-3 w-4/5" />
+                <Skeleton className="h-3 w-1/4" />
+              </div>
+            </GlassCard>
+          ))}
+        </div>
+      ) : visible.length === 0 ? (
         <GlassCard className="py-20 text-center">
           <BellOff className="mx-auto h-10 w-10 text-muted-foreground/40" />
           <p className="mt-3 font-semibold text-muted-foreground">
