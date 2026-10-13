@@ -368,6 +368,17 @@
     overscroll-behavior: none;
   }
 
+  /* Densité d'affichage : à partir de md (768 px), base 13 px au lieu de 16 px
+     (≈ 81 %, rendu équivalent au zoom navigateur à 80 %). Toutes les tailles en
+     rem (textes, espacements, icônes Tailwind) suivent ; le mobile garde 16 px
+     pour des cibles tactiles confortables. Les tailles en px fixes ne suivent
+     pas : préférer rem pour tout gabarit structurant. */
+  @media (min-width: 768px) {
+    html {
+      font-size: 81.25%;
+    }
+  }
+
   body {
     min-height: 100dvh;
     overscroll-behavior: none;

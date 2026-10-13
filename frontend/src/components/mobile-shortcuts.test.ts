@@ -3,6 +3,7 @@ import {
   MOBILE_SHORTCUTS,
   PERSONAL_SPACE_ROUTE,
   TREATMENT_BOX_ROUTES,
+  bestMatchingRoute,
   mobileShortcutsFor,
 } from "./mobile-shortcuts";
 
@@ -99,5 +100,32 @@ describe("mobileShortcutsFor — repli", () => {
     for (const role of ROLES) {
       expect(mobileShortcutsFor(role)).toBe(MOBILE_SHORTCUTS[role]);
     }
+  });
+});
+
+describe("bestMatchingRoute — même règle de menu actif sur tous les écrans", () => {
+  const routes = ["/app", "/app/requests", "/app/queue", "/app/my-tickets", "/app/new"];
+
+  it("Accueil n'est actif que sur /app exactement", () => {
+    expect(bestMatchingRoute("/app", routes)).toBe("/app");
+    expect(bestMatchingRoute("/app/queue", routes)).toBe("/app/queue");
+  });
+
+  it("une sous-page allume son menu parent", () => {
+    expect(bestMatchingRoute("/app/queue/tickets/12", routes)).toBe("/app/queue");
+  });
+
+  it("frontière « / » : un préfixe sans séparateur ne correspond pas", () => {
+    expect(bestMatchingRoute("/app/requests-archive", routes)).toBeNull();
+  });
+
+  it("la route la plus précise l'emporte", () => {
+    expect(bestMatchingRoute("/app/requests/history", [...routes, "/app/requests/history"])).toBe(
+      "/app/requests/history",
+    );
+  });
+
+  it("aucune correspondance → null", () => {
+    expect(bestMatchingRoute("/app/profile", routes)).toBeNull();
   });
 });

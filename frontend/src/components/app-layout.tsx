@@ -42,11 +42,11 @@ import {
   Search,
   Share2,
 } from "lucide-react";
-import { useState, useRef, useCallback, type ReactNode } from "react";
+import { useState, useRef, useCallback, useEffect, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchNotifications } from "@/lib/api/notifications";
 import { Logo } from "./logo";
-import { mobileShortcutsFor } from "./mobile-shortcuts";
+import { bestMatchingRoute, mobileShortcutsFor } from "./mobile-shortcuts";
 import { NotificationPanel } from "./notification-panel";
 import { cn } from "@/lib/utils";
 import { useRole, useUser, getRefreshToken, clearSession, getInitials, roleLabels, AUTH_DISABLED } from "@/lib/session";
@@ -186,6 +186,9 @@ const navItems: NavItem[] = [
 
   // ── Admin — Audit & Traçabilité ───────────────────────────────────────────
   { to: "/app/admin/ticket-trace", label: "Traçabilité ticket", icon: Search, roles: ["admin"], group: "Audit & Traçabilité" },
+  // Journal des connexions et activités (CDC §10.5) — déjà présent dans la barre
+  // du bas mobile de l'admin, ajouté ici pour la cohérence ordinateur/mobile.
+  { to: "/app/admin/logs",         label: "Journaux",           icon: Activity, roles: ["admin"], group: "Audit & Traçabilité" },
 
   // ── Admin — Système ───────────────────────────────────────────────────────
 
@@ -193,6 +196,44 @@ const navItems: NavItem[] = [
   { to: "/app/notifications", label: "Notifications",       icon: Bell,     roles: ["user", "chief-service", "technicien", "chef-division-support", "admin"], group: "Ressources" },
   { to: "/app/profile",       label: "Profil",              icon: Settings, roles: ["user", "chief-service", "technicien", "chef-division-support", "admin"], group: "Ressources" },
 ];
+
+/** Largeur (px) à partir de laquelle la barre est dépliée par défaut (palier xl). */
+const SIDEBAR_DEFAULT_EXPANDED_MIN_WIDTH = 1280;
+const SIDEBAR_STORAGE_KEY = "edg.sidebar.expanded";
+
+/**
+ * État déplié/replié de la barre latérale (md+).
+ * Dépliée ou repliée, elle reste fixe et le contenu se décale d'autant.
+ * Par défaut : dépliée sur xl+, repliée en dessous ; le choix de l'utilisateur
+ * est ensuite mémorisé dans le navigateur.
+ * Initialisé à `false` côté serveur puis résolu au montage (pas d'écart d'hydratation).
+ */
+function useSidebarExpanded() {
+  const [expanded, setExpandedState] = useState(false);
+
+  useEffect(() => {
+    let stored: string | null = null;
+    try {
+      stored = window.localStorage.getItem(SIDEBAR_STORAGE_KEY);
+    } catch {
+      /* stockage indisponible */
+    }
+    setExpandedState(
+      stored !== null ? stored === "1" : window.innerWidth >= SIDEBAR_DEFAULT_EXPANDED_MIN_WIDTH,
+    );
+  }, []);
+
+  const setExpanded = useCallback((value: boolean) => {
+    setExpandedState(value);
+    try {
+      window.localStorage.setItem(SIDEBAR_STORAGE_KEY, value ? "1" : "0");
+    } catch {
+      /* stockage indisponible */
+    }
+  }, []);
+
+  return [expanded, setExpanded] as const;
+}
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const [role, setRole] = useRole();
@@ -205,7 +246,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const currentSearch = useRouterState({ select: (s) => s.location.search }) as Record<string, unknown>;
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  const [expanded, setExpanded] = useSidebarExpanded();
+  const collapsed = !expanded;
   const [dark, toggleDark, mounted] = useTheme();
   const [showScrollTop, setShowScrollTop] = useState(false);
   const mainRef = useRef<HTMLElement>(null);
@@ -249,13 +291,11 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
   // Sélectionne uniquement l'item le plus spécifique qui correspond au pathname
   // (évite que /app/requests soit actif en même temps que /app/requests/history).
-  const bestTo = items.reduce<string | null>((best, item) => {
-    const matches =
-      pathname === item.to ||
-      (item.to !== "/app" && pathname.startsWith(item.to + "/"));
-    if (!matches) return best;
-    return !best || item.to.length > best.length ? item.to : best;
-  }, null);
+  // Règle partagée avec la barre du bas mobile (voir bestMatchingRoute).
+  const bestTo = bestMatchingRoute(
+    pathname,
+    items.map((i) => i.to),
+  );
 
   // Plusieurs items ("Escalades"…) pointent volontairement
   // vers la même route qu'un autre item (deep-link ?tab=/?status=/
@@ -273,58 +313,57 @@ export function AppLayout({ children }: { children: ReactNode }) {
     null;
   const activeNavKey = activeItem ? `${activeItem.to}-${activeItem.label}` : null;
 
+  // Barre du bas mobile : même règle de surbrillance que la barre latérale.
+  const mobileShortcuts = mobileShortcutsFor(role);
+  const activeShortcutTo = bestMatchingRoute(
+    pathname,
+    mobileShortcuts.map((s) => s.to),
+  );
+
   return (
     <TooltipProvider delayDuration={120}>
       <div className="h-dvh overflow-hidden">
 
-        {/* ── Sidebar : icon-only on md–xl, expandable on xl+ ── */}
+        {/* ── Sidebar : rail d'icônes (72 px) ou dépliée (264 px) sur md+ ── */}
         <aside
           className={cn(
             "fixed left-0 top-0 z-30 hidden md:flex h-dvh flex-col border-r border-border/40 bg-sidebar transition-[width] duration-200",
-            // md–xl : always 72 px (icon rail)
-            "w-[72px]",
-            // xl+ : 264 px when not collapsed
-            !collapsed && "xl:w-[264px]",
+            expanded ? "w-[16.5rem]" : "w-[4.5rem]",
           )}
         >
           {/* Logo + collapse toggle */}
           <div
             className={cn(
               "flex h-16 shrink-0 items-center border-b border-border/40 bg-sidebar/80 px-3",
-              "justify-center",
-              !collapsed && "xl:justify-between xl:px-4",
+              expanded ? "justify-between px-4" : "justify-center",
             )}
           >
             <Link
               to="/app"
-              className={cn(
-                "shrink-0 overflow-hidden",
-                "max-w-[44px]",
-                !collapsed && "xl:max-w-none",
-              )}
+              className={cn("shrink-0 overflow-hidden", !expanded && "max-w-[2.75rem]")}
             >
-              <Logo showText={!collapsed} />
+              <Logo showText={expanded} />
             </Link>
 
-            {/* Close button — xl+ only */}
-            {!collapsed && (
+            {expanded && (
               <button
-                onClick={() => setCollapsed(true)}
-                className="hidden xl:flex rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                aria-label="Réduire"
+                onClick={() => setExpanded(false)}
+                className="flex rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                aria-label="Réduire le menu"
+                title="Réduire le menu"
               >
                 <PanelLeftClose className="h-4 w-4" />
               </button>
             )}
           </div>
 
-          {/* Open button when collapsed — xl+ only */}
           {collapsed && (
-            <div className="hidden xl:flex justify-center border-b border-border/40 bg-sidebar/80 py-2">
+            <div className="flex justify-center border-b border-border/40 bg-sidebar/80 py-2">
               <button
-                onClick={() => setCollapsed(false)}
+                onClick={() => setExpanded(true)}
                 className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                aria-label="Étendre"
+                aria-label="Déplier le menu"
+                title="Déplier le menu"
               >
                 <PanelLeftOpen className="h-4 w-4" />
               </button>
@@ -340,9 +379,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
                   key={group}
                   className={cn(groupIdx > 0 && "mt-1 border-t border-border/25 pt-3")}
                 >
-                  {/* Group label — visible on xl+ when expanded */}
-                  {!collapsed && (
-                    <div className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/50 hidden xl:block">
+                  {/* Group label — visible when expanded */}
+                  {expanded && (
+                    <div className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/50">
                       {group}
                     </div>
                   )}
@@ -355,15 +394,12 @@ export function AppLayout({ children }: { children: ReactNode }) {
                         <span
                           className={cn(
                             "group relative flex cursor-not-allowed items-center rounded-xl py-2.5 text-sm font-medium opacity-45",
-                            "justify-center px-2",
-                            !collapsed && "xl:justify-start xl:gap-3 xl:px-3",
+                            expanded ? "justify-start gap-3 px-3" : "justify-center px-2",
                             "text-foreground/70",
                           )}
                         >
                           <item.icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                          {!collapsed && (
-                            <span className="hidden xl:block truncate">{item.label}</span>
-                          )}
+                          {expanded && <span className="truncate">{item.label}</span>}
                         </span>
                       ) : (
                         <Link
@@ -371,10 +407,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
                           search={item.search}
                           className={cn(
                             "group relative flex items-center rounded-xl py-2.5 text-sm font-medium transition-colors",
-                            // Default: icon-only centered (md always, xl when collapsed)
-                            "justify-center px-2",
-                            // xl+ expanded: icon + label
-                            !collapsed && "xl:justify-start xl:gap-3 xl:px-3",
+                            expanded ? "justify-start gap-3 px-3" : "justify-center px-2",
                             active
                               ? "bg-primary text-background font-bold"
                               : "text-foreground/70 hover:bg-foreground/5 hover:text-foreground",
@@ -393,12 +426,15 @@ export function AppLayout({ children }: { children: ReactNode }) {
                               </span>
                             )}
                           </span>
-                          {/* Label: only rendered when not collapsed; hidden on md–xl */}
-                          {!collapsed && (
-                            <span className="hidden xl:block truncate">{item.label}</span>
-                          )}
+                          {expanded && <span className="truncate">{item.label}</span>}
                         </Link>
                       );
+
+                      // Libellé déjà visible quand la barre est dépliée : pas d'infobulle,
+                      // sauf pour signaler un élément indisponible.
+                      if (expanded && !item.disabled) {
+                        return <li key={`${item.to}-${item.label}`}>{link}</li>;
+                      }
 
                       return (
                         <li key={`${item.to}-${item.label}`}>
@@ -418,7 +454,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </nav>
 
           {/* User info + role switcher */}
-          <div className="shrink-0 border-t border-border/30 p-2 xl:p-3">
+          <div className={cn("shrink-0 border-t border-border/30", expanded ? "p-3" : "p-2")}>
             <RoleSwitcher role={role} onChange={setRole} collapsed={collapsed} userName={displayName} userEmail={sessionUser?.email} userAvatar={sessionUser?.avatar} />
           </div>
         </aside>
@@ -508,10 +544,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
         <div
           className={cn(
             "flex h-dvh min-w-0 flex-col overflow-x-hidden transition-[padding] duration-200",
-            // Tablet (md–xl): 72 px sidebar always
-            "md:pl-[72px]",
-            // Desktop (xl+): 264 px when sidebar expanded
-            !collapsed && "xl:pl-[264px]",
+            // md+ : le contenu se décale de la largeur de la barre (rail 72 px / dépliée 264 px)
+            expanded ? "md:pl-[16.5rem]" : "md:pl-[4.5rem]",
           )}
         >
           {/* Top header */}
@@ -694,23 +728,30 @@ export function AppLayout({ children }: { children: ReactNode }) {
           {/* ── Mobile bottom nav (< md only) ── */}
           <nav className="fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom))] left-3 right-3 z-30 md:hidden">
             <div className="glass-strong flex items-center justify-around rounded-2xl px-2 py-2">
-              {mobileShortcutsFor(role).map((i) => {
-                const active =
-                  i.to === "/app" ? pathname === i.to : pathname.startsWith(i.to);
+              {mobileShortcuts.map((i) => {
+                const active = i.to === activeShortcutTo;
                 return (
                   <Link
                     key={i.to}
                     to={i.to}
                     className={cn(
                       "flex min-w-0 flex-1 flex-col items-center gap-1 rounded-xl px-1 py-1.5 text-[10px] font-medium transition-colors",
-                      i.primary ? "text-white" : active ? "text-primary" : "text-muted-foreground",
+                      i.primary
+                        ? cn("text-white", active && "font-bold")
+                        : active
+                          ? "text-primary"
+                          : "text-muted-foreground",
                     )}
                   >
                     <span
                       className={cn(
                         "relative grid place-items-center rounded-xl transition-all",
                         i.primary
-                          ? "h-10 w-10 gradient-primary shadow-lg shadow-primary/40"
+                          ? cn(
+                              "h-10 w-10 gradient-primary shadow-lg shadow-primary/40",
+                              // Bouton central : un anneau signale qu'on est sur sa page.
+                              active && "ring-2 ring-primary ring-offset-2 ring-offset-background",
+                            )
                           : active
                             ? "h-8 w-8 bg-primary/12"
                             : "h-8 w-8",
@@ -797,7 +838,7 @@ function RoleSwitcher({
   );
 
   const label = !collapsed && (
-    <div className="hidden xl:flex min-w-0 flex-1 items-center gap-1">
+    <div className="flex min-w-0 flex-1 items-center gap-1">
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{userName || "Utilisateur"}</div>
         <div className="truncate text-[11px] text-muted-foreground">{roleLabels[role]}</div>
@@ -813,8 +854,7 @@ function RoleSwitcher({
         <DropdownMenuTrigger
           className={cn(
             "flex w-full items-center rounded-xl bg-card/60 py-2.5 text-left transition-colors hover:bg-card",
-            "justify-center px-2",
-            !collapsed && "xl:justify-start xl:gap-2.5 xl:px-3",
+            collapsed ? "justify-center px-2" : "justify-start gap-2.5 px-3",
           )}
         >
           {avatar}
@@ -840,13 +880,12 @@ function RoleSwitcher({
       <DropdownMenuTrigger
         className={cn(
           "flex w-full items-center rounded-xl bg-card/60 py-2.5 text-left text-sm transition-colors hover:bg-card",
-          "justify-center px-2",
-          !collapsed && "xl:justify-start xl:gap-2.5 xl:px-3",
+          collapsed ? "justify-center px-2" : "justify-start gap-2.5 px-3",
         )}
       >
         {avatar}
         {!collapsed && (
-          <div className="hidden xl:flex min-w-0 flex-1 items-center gap-1">
+          <div className="flex min-w-0 flex-1 items-center gap-1">
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium">{userName || "Utilisateur"}</div>
                   </div>

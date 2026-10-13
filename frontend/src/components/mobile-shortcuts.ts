@@ -91,3 +91,22 @@ export const MOBILE_SHORTCUTS: Record<string, MobileShortcut[]> = {
 export function mobileShortcutsFor(role: string | undefined): MobileShortcut[] {
   return MOBILE_SHORTCUTS[role ?? ""] ?? MOBILE_SHORTCUTS.user;
 }
+
+/**
+ * Règle de surbrillance du menu actif, commune à la barre latérale, au tiroir et
+ * à la barre du bas : parmi les routes candidates, retient la PLUS PRÉCISE qui
+ * correspond à `pathname`.
+ *   - « /app » (Accueil) n'est actif que sur « /app » exactement ;
+ *   - les autres routes sont actives sur elles-mêmes et sur leurs sous-pages
+ *     (« /app/queue » sur « /app/queue/tickets/12 »), avec une frontière « / » :
+ *     « /app/requests » ne s'allume pas sur un éventuel « /app/requests-archive » ;
+ *   - en cas de chevauchement, la route la plus longue l'emporte.
+ * Retourne `null` si aucune route ne correspond.
+ */
+export function bestMatchingRoute(pathname: string, routes: readonly string[]): string | null {
+  return routes.reduce<string | null>((best, to) => {
+    const matches = pathname === to || (to !== "/app" && pathname.startsWith(to + "/"));
+    if (!matches) return best;
+    return !best || to.length > best.length ? to : best;
+  }, null);
+}
