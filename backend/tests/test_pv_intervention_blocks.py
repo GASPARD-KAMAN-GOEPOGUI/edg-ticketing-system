@@ -69,7 +69,8 @@ def _fake_request(*, distributor_id=None, full_requester=True) -> SimpleNamespac
         requester_department_label=None, requester_service_label=None,
     )
     intervention = {
-        "intervention_id": "req1-c1-i1", "actor_matricule": "EDG-3307", "actor_status": "titulaire",
+        "intervention_id": "req1-c1-i1", "actor_name": "Ibrahima Sow", "actor_matricule": "EDG-3307",
+        "actor_status": "titulaire",
         "started_at": datetime(2026, 10, 12, 9, 0), "ended_at": datetime(2026, 10, 12, 11, 30),
         "work_done": "Remplacement du cable reseau", "solution": "Cable change",
     }
@@ -81,9 +82,9 @@ def _fake_request(*, distributor_id=None, full_requester=True) -> SimpleNamespac
     )
 
 
-def _render(req, chief: dict) -> bytes:
+def _render(req, chief: dict, direction_code: str | None = "DF") -> bytes:
     svc = PvInterventionService.__new__(PvInterventionService)
-    return svc._render(svc._collect(req, chief))
+    return svc._render(svc._collect(req, chief, requester_direction_code=direction_code))
 
 
 def test_requester_reception_and_division_chief_blocks():
@@ -93,22 +94,32 @@ def test_requester_reception_and_division_chief_blocks():
     for expected in (
         "Requerant",
         "Nom : Aissatou Bah", "Badge : EDG-2201", "Fonction : Comptable",
-        "Direction : Direction Financiere", "Departement : Departement Comptabilite",
+        "Direction : DF", "Departement : Departement Comptabilite",
         "Service : Service Paie",
         "Chef de service : Mamadou Diallo", "Badge : EDG-1042",
         "Chef de division", "Service : Division Support Utilisateurs",
         "Nom : Fatoumata Camara", "Badge : EDG-0815",
-        "Technicien", "Badge : EDG-3307",
+        "Technicien", "Nom : Ibrahima Sow", "Badge : EDG-3307",
     ):
         assert expected in text, expected
-    for removed in ("Mail [", "Telephone [", "Responsable :"):
+    for removed in ("Mail [", "Telephone [", "Responsable :", "Direction Financiere"):
         assert removed not in text, removed
     assert _page_count(pdf) == 1
 
 
 def test_direct_to_technician_and_incomplete_requester_print_dots():
-    pdf = _render(_fake_request(distributor_id=None, full_requester=False), {})
+    req = _fake_request(distributor_id=None, full_requester=False)
+    req.interventions[0]["actor_matricule"] = None  # stagiaire sans badge
+    pdf = _render(req, {}, direction_code=None)
     lines = _pdf_lines(pdf)
+
+    # Badge du technicien en pointillés : son nom a sa propre ligne.
+    technician = lines[lines.index("Technicien") + 1:]
+    assert technician[0] == "Nom : Ibrahima Sow"
+    badge = next(line for line in technician if line.startswith("Badge : "))
+    assert set(badge.split(" : ")[1]) == {"."}, badge
+    direction = next(line for line in lines if line.startswith("Direction : "))
+    assert set(direction.split("     ")[0].split(" : ")[1]) == {"."}, direction
 
     assert "Chef de division" in lines
     chief_block = lines[lines.index("Chef de division") + 1: lines.index("Chef de division") + 4]
@@ -139,6 +150,38 @@ async def _make_chief(session, *, name="Camara", firstname="Fatoumata") -> Accou
     session.add(chief)
     await session.flush()
     return chief
+
+
+async def test_requester_direction_codename_from_frozen_direction_id():
+    async with TestSession() as session:
+        direction = Unity(label="Direction Financiere", codename="DF")
+        session.add(direction)
+        await session.flush()
+        svc = PvInterventionService(session)
+        assert await svc._requester_direction_code(SimpleNamespace(requester_direction_id=direction.id)) == "DF"
+        assert await svc._requester_direction_code(SimpleNamespace(requester_direction_id=None)) is None
+
+
+def test_logo_fits_inside_its_frame():
+    from fpdf import FPDF
+
+    from api.services.ServiceExport import get_logo_path, pdf_safe_text
+
+    pdf = FPDF(orientation="L", unit="mm", format="A4")
+    pdf.add_page()
+    placed: dict = {}
+    real_image = pdf.image
+    pdf.image = lambda path, **kw: placed.update(kw) or real_image(path, **kw)
+    top = pdf.get_y()
+    PvInterventionService._header(pdf, pdf_safe_text, get_logo_path(), pdf.w - pdf.l_margin - pdf.r_margin)
+
+    left, width, frame_w, frame_h = pdf.l_margin, placed["w"], 40.0, 20.0
+    x, y, height = placed["x"], placed["y"], placed["h"]
+    assert left <= x and x + width <= left + frame_w           # dans le cadre
+    assert top <= y and y + height <= top + frame_h            # ne touche plus la ligne du bas
+    assert abs((x - left) - (left + frame_w - x - width)) < 0.01  # centré horizontalement
+    assert abs((y - top) - (top + frame_h - y - height)) < 0.01   # centré verticalement
+    assert abs(height / width - 780 / 720) < 0.01              # proportions conservées
 
 
 async def test_division_chief_frozen_identity_else_live_account():

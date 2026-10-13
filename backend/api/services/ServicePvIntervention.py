@@ -167,7 +167,11 @@ class PvInterventionService(BaseService):
                 field="id",
                 value=request_id,
             )
-        data = self._collect(req, await self._division_chief(req))
+        data = self._collect(
+            req,
+            await self._division_chief(req),
+            requester_direction_code=await self._requester_direction_code(req),
+        )
         content = self._render(data)
         stamp = datetime.now().strftime("%Y%m%d_%H%M")
         return content, f"PV_{req.ref}_{stamp}"
@@ -206,16 +210,36 @@ class PvInterventionService(BaseService):
 
         return await RequestService(self.session)._division_chief_snapshot(distributor_id)
 
-    def _collect(self, req, division_chief: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    async def _requester_direction_code(self, req) -> Optional[str]:
+        """Codename de la direction du demandeur (bloc « Requérant », décision
+        du 2026-10-13), lu dans l'organigramme depuis l'identifiant figé à la
+        création. Ticket sans cet identifiant : aucun — pointillés."""
+        direction_id = getattr(req, "requester_direction_id", None)
+        if not direction_id:
+            return None
+        from sqlalchemy import select
+
+        from api.models.ModelUnity import Unity
+
+        row = await self.session.execute(select(Unity.codename).where(Unity.id == int(direction_id)))
+        return row.scalar_one_or_none()
+
+    def _collect(
+        self,
+        req,
+        division_chief: Optional[dict[str, Any]] = None,
+        *,
+        requester_direction_code: Optional[str] = None,
+    ) -> dict[str, Any]:
         frozen = req.infos if isinstance(req.infos, dict) else {}
         chief = division_chief or {}
         iv = self._last_intervention(req)
         fc = self._field_check(req)
 
-        # Badge de l'intervenant, ou son nom complet à défaut : un prestataire ou
-        # un stagiaire n'a pas forcément de badge EDG, et la case ne doit jamais
-        # rester vide sur un document destiné à être signé.
-        badge = iv.get("actor_matricule") or iv.get("actor_name") or ""
+        # Badge de l'intervenant. Son nom complet a sa propre ligne depuis le
+        # 2026-10-13 : sans badge (prestataire, stagiaire), la case reste en
+        # pointillés au lieu de répéter le nom.
+        badge = iv.get("actor_matricule") or ""
         status = (iv.get("actor_status") or "").lower()
 
         appreciation = req.appreciation
@@ -227,7 +251,7 @@ class PvInterventionService(BaseService):
             "requester_name": req.requester_name or "",
             "requester_badge": req.employee_matricule or "",
             "requester_job": req.requester_job or "",
-            "requester_direction": req.requester_direction_label or "",
+            "requester_direction": requester_direction_code or "",
             "requester_department": req.requester_department_label or "",
             "requester_service": req.requester_service_label or "",
             # Bloc « Réception » — le chef de service qui a qualifié le ticket.
@@ -248,6 +272,7 @@ class PvInterventionService(BaseService):
             "is_titulaire": status == "titulaire",
             "is_prestataire": status == "prestataire",
             "is_stagiaire": status == "stagiaire",
+            "technician_name": iv.get("actor_name") or "",
             "badge": badge,
             "assignment_date": _date(iv.get("started_at")),
             "sla_hours": req.sla_hours or 0,
@@ -325,7 +350,23 @@ class PvInterventionService(BaseService):
         pdf.rect(pdf.l_margin + logo_w + mid_w, top, ref_w, h)
 
         if logo:
-            pdf.image(str(logo), x=pdf.l_margin + 12, y=top + 4, w=16)
+            # Logo inscrit dans son cadre avec 2 mm de marge, proportions
+            # conservées, centré. Avant : 16 mm de large pour une image plus
+            # haute que large, il dépassait le bas du cadre (coupé par la ligne).
+            from PIL import Image
+
+            with Image.open(logo) as img:
+                px_w, px_h = img.size
+            pad = 2.0
+            scale = min((logo_w - 2 * pad) / px_w, (h - 2 * pad) / px_h)
+            img_w, img_h = px_w * scale, px_h * scale
+            pdf.image(
+                str(logo),
+                x=pdf.l_margin + (logo_w - img_w) / 2,
+                y=top + (h - img_h) / 2,
+                w=img_w,
+                h=img_h,
+            )
 
         pdf.set_xy(pdf.l_margin + logo_w, top + 3)
         pdf.set_font("Helvetica", "B", 11)
@@ -422,6 +463,7 @@ class PvInterventionService(BaseService):
             ],
             [
                 _TECHNICIAN_HEADING,
+                f"Nom : {d['technician_name'] or '.' * 30}",
                 # Les trois cases sont TOUJOURS imprimées vides ; la coche du
                 # statut retenu est surimprimée plus bas. Raison : le ✓
                 # (ZapfDingbats) et le libellé (Helvetica) ne peuvent pas

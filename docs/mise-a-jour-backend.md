@@ -36,6 +36,11 @@
 - Le PV tient toujours sur **une page** ; un traitement très long fait passer le
   tableau d'émargement **entier** en page 2 (il s'éparpillait sur plusieurs).
 - Tests : `test_pv_intervention_blocks.py` (5).
+- Retouches (même jour) : Requérant → `Direction : <codename>` (lu dans
+  l'organigramme depuis `requester_direction_id` figé ; pointillés sinon) ;
+  Technicien → ligne `Nom :` (nom figé de l'intervention), case Badge en
+  pointillés sans badge (n'imprime plus le nom à la place) ; logo inscrit et
+  centré dans son cadre (il dépassait de 1,3 mm sous la ligne). Tests : 7.
 
 **Boutons des e-mails fonctionnels** (« Voir le ticket », « Ouvrir la file d'attente »…)
 - Backend (`core/mailer.py`, `_absolute_app_url`) : les notifications portent des
