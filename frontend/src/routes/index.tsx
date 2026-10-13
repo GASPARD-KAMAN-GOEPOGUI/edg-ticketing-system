@@ -156,30 +156,32 @@ function ServicesSection() {
 }
 
 function HowSection() {
+  // Textes par rôle (requérant, chef de service, chef de division, technicien),
+  // procédure EDG/PS-GSI/Pro-02 — décision du 2026-10-13 ; 4 étapes inchangées.
   const steps = [
     {
       n: "01",
       icon: FilePlus,
       title: "Création",
-      desc: "Connectez-vous avec votre compte EDG et décrivez votre besoin. Une référence de suivi est générée et votre ticket rejoint la file d'attente.",
+      desc: "Le requérant se connecte avec son compte EDG et décrit son besoin. Une référence de suivi est générée et le ticket rejoint la file d'attente du chef de service.",
     },
     {
       n: "02",
       icon: Users,
       title: "Prise en charge",
-      desc: "Un chef de service prend le ticket depuis la file d'attente et le traite ; il peut le transmettre à un autre intervenant si nécessaire.",
+      desc: "Le chef de service qualifie le ticket et l'oriente vers le chef de division, qui le confie à un technicien, ou directement au technicien si besoin.",
     },
     {
       n: "03",
       icon: CheckCircle2,
       title: "Résolution & validation",
-      desc: "Une fois la solution apportée, vous confirmez que la résolution répond bien à votre besoin.",
+      desc: "Le technicien vérifie l'état réel de la requête, consigne son constat et résout le ticket ; le requérant confirme que la résolution répond à son besoin.",
     },
     {
       n: "04",
       icon: ShieldCheck,
       title: "Fermeture ou réouverture",
-      desc: "Le ticket est officiellement clôturé. Si le besoin persiste, vous pouvez le rouvrir pour relancer le traitement.",
+      desc: "Le ticket est clôturé et le chef de division archive le PV d'intervention. Si le besoin persiste, le requérant peut rouvrir le ticket.",
     },
   ] as const;
 
