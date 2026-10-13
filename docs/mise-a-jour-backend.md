@@ -2,6 +2,17 @@
 
 ## Session 2026-10-13 — PV d'intervention : aperçu avant téléchargement, logo en production
 
+**Sécurité — route de diagnostic publique supprimée**
+- `POST /auth/debug/source-token` (« TEMPORAIRE — À SUPPRIMER », 2026-08) était
+  restée publique : sans connexion, elle échangeait `CLIENT_APP_CODE` /
+  `CLIENT_APP_SECRET` contre un `source_token` de la plateforme centrale et
+  renvoyait la réponse brute (jeton compris). Route et
+  `central_auth.debug_source_token_exchange` supprimées. **Rotation du secret
+  client à décider avec le responsable de la plateforme centrale.**
+- Garde-fou `tests/test_public_routes.py` : liste fermée des routes sans session
+  (7 écritures d'authentification, 8 lectures) ; toute nouvelle route publique
+  fait échouer la suite tant qu'elle n'y est pas ajoutée après revue.
+
 **Suivi public `/track` fiabilisé et sécurisé**
 - Backend `GET /requests/track` : limité à **10 essais / minute / adresse**
   (`_RATE_LIMITS`, `main.py`) ; réponse réduite à ce que la page affiche (le

@@ -33,10 +33,9 @@ import hashlib
 import logging
 import secrets
 from datetime import datetime, timedelta
-from typing import NoReturn, Optional, Union
+from typing import NoReturn, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.core import central_auth, mailer, session_registry, token_revocation
@@ -156,27 +155,6 @@ async def register(
         action="register", target=f"account:{account.id}", ip_address=_client_ip(request),
     )
     return account
-
-
-# ── TEMPORAIRE (2026-08) — diagnostic public "CLIENT_APP_CODE/SECRET rejetés" ──
-# Investigation d'un rejet du couple client_code/client_secret par le central
-# alors que les valeurs sont censées être correctes — volontairement PUBLIC
-# (aucune authentification), pour pouvoir tester avant même qu'un login central
-# fonctionne. Ne renvoie jamais le secret utilisé, seulement le client_code et
-# la réponse brute (code + corps) de la plateforme centrale.
-# ⚠️ RAPPEL : à supprimer (cette route + central_auth.debug_source_token_exchange)
-# une fois le diagnostic terminé — ne doit jamais rester en production.
-class _DebugSourceTokenBody(BaseModel):
-    client_code: Optional[str] = None
-    client_secret: Optional[str] = None
-
-
-@router.post(
-    "/debug/source-token",
-    summary="[TEMPORAIRE — À SUPPRIMER] Diagnostic brut de l'échange source_token avec le central",
-)
-async def debug_source_token(body: _DebugSourceTokenBody = _DebugSourceTokenBody()):
-    return await central_auth.debug_source_token_exchange(body.client_code, body.client_secret)
 
 
 # ── Mot de passe oublié ──────────────────────────────────────────────────────

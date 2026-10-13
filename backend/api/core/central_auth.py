@@ -240,49 +240,6 @@ async def get_source_token() -> str:
     return response.json()["source_token"]
 
 
-# ── TEMPORAIRE (2026-08) — diagnostic public du rejet CLIENT_APP_CODE/SECRET ──
-# À SUPPRIMER avec la route qui l'utilise (RouteAuth.py::debug_source_token) une
-# fois l'investigation terminée. Ne masque rien de la réponse centrale (sauf le
-# secret, jamais renvoyé) pour permettre de voir la cause exacte du rejet.
-async def debug_source_token_exchange(
-    client_code: str | None = None, client_secret: str | None = None,
-) -> dict[str, Any]:
-    env = get_environment()
-    code = client_code or env.CLIENT_APP_CODE
-    secret = client_secret or env.CLIENT_APP_SECRET
-    if not code or not secret:
-        return {
-            "ok": False,
-            "error": "CLIENT_APP_CODE/CLIENT_APP_SECRET non configurés (et non fournis en paramètre).",
-        }
-    try:
-        async with _client() as client:
-            response = await client.post(
-                "/v1/client-app-auth/source-token",
-                json={"client_code": code, "client_secret": secret},
-            )
-    except httpx.HTTPError as exc:
-        return {
-            "ok": False,
-            "error": f"Service central indisponible : {exc}",
-            "client_code_used": code,
-            "central_base_url": env.CENTRAL_AUTH_BASE_URL,
-        }
-
-    try:
-        body: Any = response.json()
-    except Exception:
-        body = response.text
-
-    return {
-        "ok": response.status_code < 400,
-        "status_code": response.status_code,
-        "client_code_used": code,
-        "central_base_url": env.CENTRAL_AUTH_BASE_URL,
-        "response_body": body,
-    }
-
-
 async def get_machine_token() -> str:
     """POST /v1/client-app-auth/token — token machine pour les opérations d'administration
     de comptes (update/activate/deactivate/reset-password/groupes). Pas de cache : refetch
