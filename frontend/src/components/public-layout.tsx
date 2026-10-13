@@ -190,7 +190,7 @@ export function PublicLayout({ children }: { children: ReactNode }) {
       <footer className="border-t border-border/40 bg-card">
         {/* Corps principal du footer */}
         <div className="mx-auto max-w-screen-2xl px-4 py-10 sm:py-14 sm:px-8 lg:px-12">
-          <div className="grid gap-8 lg:grid-cols-[2fr_1fr_1fr_1fr_1.6fr] lg:gap-10">
+          <div className="grid gap-8 lg:grid-cols-[2fr_1fr_1fr_1.6fr] lg:gap-10">
 
             {/* Colonne marque — pleine largeur sur mobile, 1re colonne sur lg */}
             <div className="flex flex-col gap-3">
@@ -200,11 +200,11 @@ export function PublicLayout({ children }: { children: ReactNode }) {
               </p>
             </div>
 
-            {/* Les 4 colonnes de liens :
-                mobile  → 2×2 (Services | Plateforme sur row1, Liens | Contact sur row2)
-                md      → 4 colonnes en une seule rangée
-                lg      → "contents" : les enfants rejoignent directement le grid parent 5 cols */}
-            <div className="grid grid-cols-2 gap-6 md:grid-cols-4 lg:contents">
+            {/* Les 3 colonnes de liens (« Liens utiles » retirée le 2026-10-13) :
+                mobile  → 2 colonnes (Services | Plateforme, puis Contact)
+                md      → 3 colonnes en une seule rangée
+                lg      → "contents" : les enfants rejoignent directement le grid parent 4 cols */}
+            <div className="grid grid-cols-2 gap-6 md:grid-cols-3 lg:contents">
 
               {/* Services */}
               <div>
@@ -213,8 +213,9 @@ export function PublicLayout({ children }: { children: ReactNode }) {
                 </h3>
                 <ul className="space-y-2">
                   {[
+                    // « Suivre un ticket » retiré du pied de page le 2026-10-13
+                    // (le lien du menu du haut reste).
                     { label: "Espace employé", to: "/login" },
-                    { label: "Suivre un ticket", to: "/track" },
                   ].map((l) => (
                     <li key={l.to}>
                       <Link
@@ -238,28 +239,6 @@ export function PublicLayout({ children }: { children: ReactNode }) {
                     { label: "Connexion", to: "/login" },
                     { label: "Notifications", to: "/login" },
                     { label: "Tickets", to: "/login" },
-                  ].map((l) => (
-                    <li key={l.label}>
-                      <Link
-                        to={l.to}
-                        className="text-sm text-muted-foreground transition-colors hover:text-primary"
-                      >
-                        {l.label}
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              {/* Liens utiles */}
-              <div>
-                <h3 className="mb-3 text-xs font-semibold tracking-wider text-foreground uppercase">
-                  Liens utiles
-                </h3>
-                <ul className="space-y-2">
-                  {[
-                    { label: "Conditions", to: "/" },
-                    { label: "Confidentialité", to: "/" },
                   ].map((l) => (
                     <li key={l.label}>
                       <Link
@@ -318,17 +297,7 @@ export function PublicLayout({ children }: { children: ReactNode }) {
             <p className="text-xs text-muted-foreground">
               {new Date().getFullYear()} © Développé par EDG-SA.
             </p>
-            <nav className="flex items-center gap-4">
-              {["Termes", "Confidentialité", "Cookies"].map((item) => (
-                <Link
-                  key={item}
-                  to="/"
-                  className="text-xs text-muted-foreground transition-colors hover:text-primary"
-                >
-                  {item}
-                </Link>
-              ))}
-            </nav>
+            {/* Liens « Termes · Confidentialité · Cookies » retirés le 2026-10-13. */}
           </div>
         </div>
       </footer>
