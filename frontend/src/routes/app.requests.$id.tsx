@@ -131,8 +131,10 @@ import {
   FileSpreadsheet,
   MoreHorizontal,
   SlidersHorizontal,
+  Search,
   type LucideIcon,
 } from "lucide-react";
+import { agentInitials, agentLabel, matchesAgentSearch } from "@/lib/agent-picker";
 import { toast } from "sonner";
 import { copyWithToast } from "@/lib/clipboard";
 import { formatDistanceToNow, format, differenceInDays } from "date-fns";
@@ -744,6 +746,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   });
   const [localAppreciation, setLocalAppreciation] = useState<Appreciation | undefined>(undefined);
   const [showReassign, setShowReassign] = useState(false);
+  const [reassignSearch, setReassignSearch] = useState("");
   const [reopenReason, setReopenReason] = useState("");
   const [showReopenForm, setShowReopenForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
@@ -2975,7 +2978,13 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
           )}
 
           {canAssignTicket && (
-            <Dialog open={showReassign} onOpenChange={setShowReassign}>
+            <Dialog
+              open={showReassign}
+              onOpenChange={(open) => {
+                setShowReassign(open);
+                if (!open) setReassignSearch("");
+              }}
+            >
               <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2">
@@ -2992,25 +3001,52 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                       Aucun agent disponible.
                     </p>
                   ) : (
-                    <div className="max-h-72 space-y-1 overflow-y-auto pr-1">
-                      {agentPool.map((agent) => (
-                        <button
-                          key={agent.id}
-                          type="button"
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-foreground/5"
-                          onClick={() => assignMut.mutate(agent.id)}
-                          disabled={assignMut.isPending}
-                        >
-                          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">
-                            {agent.name.slice(0, 2).toUpperCase()}
-                          </span>
-                          <span className="min-w-0 flex-1 truncate">{agent.name}</span>
-                          {agent.availability && (
-                            <span className="text-[10px] text-muted-foreground">{agent.availability}</span>
-                          )}
-                        </button>
-                      ))}
-                    </div>
+                    <>
+                      {/* Recherche sur le prénom, le nom et le badge (2026-10-13). */}
+                      <div className="relative">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          value={reassignSearch}
+                          onChange={(e) => setReassignSearch(e.target.value)}
+                          placeholder="Rechercher par nom ou badge…"
+                          aria-label="Rechercher un agent"
+                          className="pl-9"
+                        />
+                      </div>
+                      {(() => {
+                        const matches = agentPool.filter((agent) => matchesAgentSearch(agent, reassignSearch));
+                        if (matches.length === 0) {
+                          return (
+                            <p className="px-3 py-4 text-sm text-muted-foreground">
+                              Aucun agent ne correspond à la recherche.
+                            </p>
+                          );
+                        }
+                        return (
+                          <div className="max-h-72 space-y-1 overflow-y-auto pr-1">
+                            {matches.map((agent) => (
+                              <button
+                                key={agent.id}
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-foreground/5"
+                                onClick={() => assignMut.mutate(agent.id)}
+                                disabled={assignMut.isPending}
+                              >
+                                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">
+                                  {agentInitials(agent)}
+                                </span>
+                                {/* Nom complet suivi du badge : le nom seul ne
+                                    distinguait pas deux homonymes. */}
+                                <span className="min-w-0 flex-1 truncate">{agentLabel(agent)}</span>
+                                {agent.availability && (
+                                  <span className="text-[10px] text-muted-foreground">{agent.availability}</span>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                    </>
                   )}
                 </div>
                 <DialogFooter>
@@ -3954,8 +3990,11 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
           sans lecteur PDF intégré (la plupart des mobiles) n'afficheraient
           qu'une zone vide : on y propose directement le téléchargement. */}
       <Dialog open={Boolean(pvPreview)} onOpenChange={(open) => { if (!open) closePvPreview(); }}>
-        <DialogContent className="h-[90dvh] max-w-5xl p-0 sm:max-w-5xl">
-          <DialogHeader className="border-b border-border/40 px-5 py-3 pr-12">
+        {/* flex en colonne (et non la grille par défaut de DialogContent) : avec
+            une hauteur fixe, la grille répartissait l'espace libre entre l'en-tête
+            et l'aperçu, laissant un grand vide blanc sous le titre. */}
+        <DialogContent className="flex h-[90dvh] max-w-5xl flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl sm:p-0">
+          <DialogHeader className="shrink-0 border-b border-border/40 px-5 py-3 pr-12">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <DialogTitle className="flex items-center gap-2 text-base">
                 <FileText className="h-4 w-4 text-primary" />
@@ -3971,7 +4010,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             <iframe
               src={pvPreview.url}
               title={`PV d'intervention ${r.ref}`}
-              className="h-full w-full flex-1 rounded-b-lg border-0 bg-muted"
+              className="min-h-0 w-full flex-1 rounded-b-2xl border-0 bg-muted"
             />
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
