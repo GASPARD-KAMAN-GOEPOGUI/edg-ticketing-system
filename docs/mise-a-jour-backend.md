@@ -1,5 +1,26 @@
 # Journal des mises à jour — EDG Connect
 
+## Session 2026-10-13 — PV d'intervention : aperçu avant téléchargement, logo en production
+
+**Aperçu du PV sur tous les écrans** (`frontend/src/routes/app.requests.$id.tsx`)
+- Le bouton « PV d'intervention » de l'onglet Traitement ouvre désormais
+  **toujours** la fenêtre d'aperçu (avant : téléchargement direct, sauf sur
+  « Tickets résolus » où l'aperçu était sans téléchargement).
+- Bouton **« Télécharger »** dans l'en-tête de l'aperçu, sur tous les écrans y
+  compris « Tickets résolus » : il enregistre le PDF déjà affiché (aucun nouvel
+  appel à `GET /requests/{id}/pv`), même nom de fichier qu'avant.
+- Navigateurs sans lecteur PDF intégré (`navigator.pdfViewerEnabled === false`,
+  la plupart des mobiles) : message « Aperçu indisponible sur cet appareil,
+  utilisez Télécharger » à la place de l'aperçu vide.
+- Inchangé : qui a droit au PV, et le backend.
+
+**Logo EDG absent en production** (`backend/api/assets/edg_logo.png`)
+- Le PV, l'export PDF du dossier et les e-mails lisaient le logo dans
+  `frontend/src/assets/` ; le backend étant déployé seul en production, le
+  fichier n'existait pas et les documents sortaient sans logo. Copie identique
+  dans le backend, utilisée par `ServiceExport.get_logo_path()` et
+  `core/mailer.py`. Un changement de logo = remplacer les deux fichiers.
+
 ## Session 2026-10-08 — Accueil temps réel et allègement des pages d'accueil
 
 **Accueil connecté `/app`** (`frontend/src/routes/app.index.tsx`)

@@ -843,8 +843,12 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const [exportPending, setExportPending] = useState(false);
   const [pvPending, setPvPending] = useState(false);
   // Aperçu du PV : URL d'objet créée à la volée depuis le blob, révoquée à la
-  // fermeture pour ne pas retenir le document en mémoire.
-  const [pvPreviewUrl, setPvPreviewUrl] = useState<string | null>(null);
+  // fermeture pour ne pas retenir le document en mémoire. Le nom de fichier
+  // sert au bouton « Télécharger » de l'aperçu.
+  const [pvPreview, setPvPreview] = useState<{ url: string; filename: string } | null>(null);
+  // false sur les navigateurs sans lecteur PDF intégré (Chrome Android…) ;
+  // absent sur les très anciens navigateurs : on tente alors l'aperçu.
+  const pdfInlineSupported = typeof navigator === "undefined" || navigator.pdfViewerEnabled !== false;
 
   useEffect(() => {
     return () => {
@@ -941,39 +945,19 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
    *  EDG/PS-GSI/PV-01. Depuis le 2026-09-27, les validations faites dans
    *  l'application (traitement terminé, dépannage validé par le demandeur) sont
    *  portées sur le document sous forme d'émargement électronique : il n'y a
-   *  plus de signature manuscrite à recueillir. */
-  const handleDownloadPv = async () => {
+   *  plus de signature manuscrite à recueillir.
+   *
+   *  Sur tous les écrans, le PV s'ouvre d'abord en aperçu ; le téléchargement
+   *  se fait depuis l'aperçu (handleDownloadPvPreview). `GET /requests/{id}/pv`
+   *  est en lecture seule côté serveur : aucun statut, aucune notification. */
+  const handleOpenPv = async () => {
     setPvPending(true);
     try {
       const { blob, filename } = await downloadPvIntervention(id);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = filename.toLowerCase().endsWith(".pdf") ? filename : `${filename}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1_000);
-      toast.success("PV d'intervention généré.");
-    } catch (err) {
-      const message = err instanceof Error ? err.message : undefined;
-      toast.error(message ? `Impossible de générer le PV : ${message}` : "Impossible de générer le PV.");
-    } finally {
-      setPvPending(false);
-    }
-  };
-
-  /** Onglet « Tickets résolus » — consultation seule : le PV s'ouvre dans un
-   *  visualiseur intégré, sans jamais être enregistré sur le poste. Même
-   *  source que le téléchargement (`GET /requests/{id}/pv`), qui est en
-   *  lecture seule côté serveur : aucun statut, aucune notification. */
-  const handlePreviewPv = async () => {
-    setPvPending(true);
-    try {
-      const { blob } = await downloadPvIntervention(id);
-      setPvPreviewUrl((previous) => {
-        if (previous) URL.revokeObjectURL(previous);
-        return URL.createObjectURL(blob);
+      const pdfName = filename.toLowerCase().endsWith(".pdf") ? filename : `${filename}.pdf`;
+      setPvPreview((previous) => {
+        if (previous) URL.revokeObjectURL(previous.url);
+        return { url: URL.createObjectURL(blob), filename: pdfName };
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : undefined;
@@ -983,9 +967,21 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     }
   };
 
+  /** Enregistre le PV déjà affiché (même document, sans nouvel appel). L'URL
+   *  n'est pas révoquée ici : l'aperçu reste ouvert et l'utilise encore. */
+  const handleDownloadPvPreview = () => {
+    if (!pvPreview) return;
+    const link = document.createElement("a");
+    link.href = pvPreview.url;
+    link.download = pvPreview.filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
   const closePvPreview = () => {
-    setPvPreviewUrl((previous) => {
-      if (previous) URL.revokeObjectURL(previous);
+    setPvPreview((previous) => {
+      if (previous) URL.revokeObjectURL(previous.url);
       return null;
     });
   };
@@ -1717,7 +1713,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     <button
       type="button"
       className="flex items-start gap-3 rounded-xl border border-border/60 bg-muted/30 p-3 text-left transition hover:bg-muted/50 disabled:opacity-60"
-      onClick={isReadOnlyTreatment ? handlePreviewPv : handleDownloadPv}
+      onClick={handleOpenPv}
       disabled={pvPending}
     >
       {pvPending
@@ -1729,9 +1725,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
           {/* Plus de signature manuscrite à obtenir : depuis l'émargement
               électronique (2026-09-27), les validations faites dans
               l'application sont portées sur le document lui-même. */}
-          {isReadOnlyTreatment
-            ? "Consulter le PV en aperçu"
-            : "Générer le PV à imprimer et archiver"}
+          Aperçu du PV, à imprimer ou télécharger
         </span>
       </span>
     </button>
@@ -3955,23 +3949,42 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
         </aside>
       </div>
 
-      {/* Aperçu du PV d'intervention — consultation seule, aucun enregistrement
-          sur le poste. Le document est révoqué de la mémoire à la fermeture. */}
-      <Dialog open={Boolean(pvPreviewUrl)} onOpenChange={(open) => { if (!open) closePvPreview(); }}>
+      {/* Aperçu du PV d'intervention, avec téléchargement à la demande. Le
+          document est révoqué de la mémoire à la fermeture. Les navigateurs
+          sans lecteur PDF intégré (la plupart des mobiles) n'afficheraient
+          qu'une zone vide : on y propose directement le téléchargement. */}
+      <Dialog open={Boolean(pvPreview)} onOpenChange={(open) => { if (!open) closePvPreview(); }}>
         <DialogContent className="h-[90dvh] max-w-5xl p-0 sm:max-w-5xl">
-          <DialogHeader className="border-b border-border/40 px-5 py-3">
-            <DialogTitle className="flex items-center gap-2 text-base">
-              <FileText className="h-4 w-4 text-primary" />
-              PV d'intervention — {r.ref}
-            </DialogTitle>
+          <DialogHeader className="border-b border-border/40 px-5 py-3 pr-12">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <DialogTitle className="flex items-center gap-2 text-base">
+                <FileText className="h-4 w-4 text-primary" />
+                PV d'intervention — {r.ref}
+              </DialogTitle>
+              <Button size="sm" onClick={handleDownloadPvPreview} disabled={!pvPreview}>
+                <Download className="mr-1.5 h-4 w-4" />
+                Télécharger
+              </Button>
+            </div>
           </DialogHeader>
-          {pvPreviewUrl && (
+          {pvPreview && (pdfInlineSupported ? (
             <iframe
-              src={pvPreviewUrl}
+              src={pvPreview.url}
               title={`PV d'intervention ${r.ref}`}
               className="h-full w-full flex-1 rounded-b-lg border-0 bg-muted"
             />
-          )}
+          ) : (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+              <FileText className="h-10 w-10 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">
+                Aperçu indisponible sur cet appareil, utilisez Télécharger.
+              </p>
+              <Button onClick={handleDownloadPvPreview}>
+                <Download className="mr-1.5 h-4 w-4" />
+                Télécharger le PV
+              </Button>
+            </div>
+          ))}
         </DialogContent>
       </Dialog>
 
