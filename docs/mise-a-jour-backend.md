@@ -21,6 +21,22 @@
   dans le backend, utilisée par `ServiceExport.get_logo_path()` et
   `core/mailer.py`. Un changement de logo = remplacer les deux fichiers.
 
+**PV : Requérant, Chef de service, Chef de division** (`ServicePvIntervention.py`)
+- Nouveau bloc **Requérant** en tête : nom, badge, fonction, direction,
+  département, service (identité figée à la création) ; information absente =
+  pointillés. Le service du demandeur quitte la ligne Réception.
+- **Réception** : cases Mail / Téléphone retirées ; « Responsable » devient
+  « Chef de service » (chef de service qualifiant, déjà figé : `receiver_*`).
+- **Affectation** sur trois colonnes : organisation traitante + **Chef de
+  division** (service de rattachement, nom, badge) | Technicien | lieu et
+  horaires. Pointillés si le ticket est allé directement au technicien.
+- Chef de division figé à l'orientation (`ServiceRequest._division_chief_snapshot`,
+  dans `request.infos` : `distributor_snapshot_id/name/badge/service_label`) ;
+  ticket orienté avant ce figeage : compte actuel. Aucune migration.
+- Le PV tient toujours sur **une page** ; un traitement très long fait passer le
+  tableau d'émargement **entier** en page 2 (il s'éparpillait sur plusieurs).
+- Tests : `test_pv_intervention_blocks.py` (5).
+
 ## Session 2026-10-08 — Accueil temps réel et allègement des pages d'accueil
 
 **Accueil connecté `/app`** (`frontend/src/routes/app.index.tsx`)

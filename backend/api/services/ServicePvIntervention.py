@@ -48,16 +48,14 @@ _BLUE = (26, 82, 118)
 _BAND = (222, 222, 222)
 _LINE = (120, 120, 120)
 
-_CHECKED = "[X]"
 _UNCHECKED = "[ ]"
 
-# Canal de réception — le formulaire n'offre que Mail et Téléphone.
-_MAIL_SOURCES = {"email"}
-_PHONE_SOURCES = {"telephone"}
-
-
-def _checkbox(selected: bool) -> str:
-    return _CHECKED if selected else _UNCHECKED
+# Sous-titres du bloc « Affectation » (colonne de gauche).
+_CHIEF_HEADING = "Chef de division"
+_TECHNICIAN_HEADING = "Technicien"
+# Interligne du bloc « Affectation » (resserré le 2026-10-13 : le formulaire
+# tient sur une page).
+_AFFECTATION_ROW = 5.0
 
 
 # Statut d'intervenant — libellés du formulaire papier EDG/PS-GSI/PV-01, dans
@@ -169,7 +167,7 @@ class PvInterventionService(BaseService):
                 field="id",
                 value=request_id,
             )
-        data = self._collect(req)
+        data = self._collect(req, await self._division_chief(req))
         content = self._render(data)
         stamp = datetime.now().strftime("%Y%m%d_%H%M")
         return content, f"PV_{req.ref}_{stamp}"
@@ -193,11 +191,26 @@ class PvInterventionService(BaseService):
                 return infos
         return {}
 
-    def _collect(self, req) -> dict[str, Any]:
+    async def _division_chief(self, req) -> dict[str, Any]:
+        """Chef de division vers qui le ticket a été orienté (`distributor_id`).
+        Identité figée à l'orientation ; pour un ticket orienté avant ce
+        figeage, ou figé pour un autre chef de division, compte actuel.
+        Ticket allé directement au technicien : aucun — bloc en pointillés."""
+        distributor_id = getattr(req, "distributor_id", None)
+        if not distributor_id:
+            return {}
         frozen = req.infos if isinstance(req.infos, dict) else {}
+        if str(frozen.get("distributor_snapshot_id") or "") == str(distributor_id):
+            return frozen
+        from api.services.ServiceRequest import RequestService
+
+        return await RequestService(self.session)._division_chief_snapshot(distributor_id)
+
+    def _collect(self, req, division_chief: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+        frozen = req.infos if isinstance(req.infos, dict) else {}
+        chief = division_chief or {}
         iv = self._last_intervention(req)
         fc = self._field_check(req)
-        source = (req.request_source or "").lower()
 
         # Badge de l'intervenant, ou son nom complet à défaut : un prestataire ou
         # un stagiaire n'a pas forcément de badge EDG, et la case ne doit jamais
@@ -208,14 +221,24 @@ class PvInterventionService(BaseService):
         appreciation = req.appreciation
         return {
             "ref": req.ref,
-            "received_by_mail": source in _MAIL_SOURCES,
-            "received_by_phone": source in _PHONE_SOURCES,
-            "requester_service": frozen.get("requester_service_label") or "",
+            # Bloc « Requérant » — identité figée à la création du ticket
+            # (`_requester_identity_snapshot`) ; une information absente reste
+            # en pointillés (décision du 2026-10-13).
             "requester_name": req.requester_name or "",
+            "requester_badge": req.employee_matricule or "",
+            "requester_job": req.requester_job or "",
+            "requester_direction": req.requester_direction_label or "",
+            "requester_department": req.requester_department_label or "",
+            "requester_service": req.requester_service_label or "",
+            # Bloc « Réception » — le chef de service qui a qualifié le ticket.
             "receiver_name": frozen.get("receiver_name") or "",
             "receiver_badge": frozen.get("receiver_badge") or "",
             "handler_department": frozen.get("handler_department_label") or "",
             "handler_service": frozen.get("handler_service_label") or "",
+            # Bloc « Affectation » — chef de division destinataire de l'orientation.
+            "chief_name": chief.get("distributor_name") or "",
+            "chief_badge": chief.get("distributor_badge") or "",
+            "chief_service": chief.get("distributor_service_label") or "",
             # Le lieu est saisi par le TRAITANT au démarrage du traitement
             # (`treatment_location`), depuis la décision produit du 2026-09-27 qui
             # a retiré ce champ du formulaire de création. Le PV lisait encore
@@ -280,6 +303,7 @@ class PvInterventionService(BaseService):
 
         width = pdf.w - pdf.l_margin - pdf.r_margin
         self._header(pdf, pdf_safe_text, logo, width)
+        self._requester(pdf, pdf_safe_text, width, d)
         self._band(pdf, pdf_safe_text, width, "RESERVEE A L'INFORMATIQUE")
         self._reception(pdf, pdf_safe_text, width, d)
         self._affectation(pdf, pdf_safe_text, width, d)
@@ -333,97 +357,127 @@ class PvInterventionService(BaseService):
     def _section(pdf, safe, title: str) -> None:
         pdf.set_font("Helvetica", "BI", 8.5)
         pdf.set_text_color(*_BLUE)
-        pdf.cell(0, 5, safe(title), new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 4.5, safe(title), new_x="LMARGIN", new_y="NEXT")
         pdf.set_text_color(0, 0, 0)
 
-    def _reception(self, pdf, safe, width: float, d: dict[str, Any]) -> None:
-        self._section(pdf, safe, "Reception")
+    @staticmethod
+    def _boxed_lines(pdf, safe, width: float, lines: list[str]) -> None:
+        """Lignes de texte dans un cadre pleine largeur."""
         top = pdf.get_y()
         pdf.set_font("Helvetica", "", 9)
-        pdf.set_xy(pdf.l_margin + 2, top + 2)
-        line = (
-            f"Mail {_checkbox(d['received_by_mail'])}     "
-            f"Telephone {_checkbox(d['received_by_phone'])}     "
-            f"Service : {d['requester_service'] or '.' * 20}     "
-            f"Responsable : {d['receiver_name'] or '.' * 18}     "
-            f"Badge : {d['receiver_badge'] or '.' * 12}     "
-            f"N Fiche : {d['ref']}"
-        )
-        pdf.multi_cell(width - 4, 5, safe(line))
+        pdf.set_y(top + 2)
+        for line in lines:
+            pdf.set_x(pdf.l_margin + 2)
+            pdf.multi_cell(width - 4, 4.5, safe(line), new_x="LMARGIN", new_y="NEXT")
         bottom = pdf.get_y() + 2
         pdf.set_draw_color(*_LINE)
         pdf.rect(pdf.l_margin, top, width, bottom - top)
         pdf.set_y(bottom + 2)
 
+    def _requester(self, pdf, safe, width: float, d: dict[str, Any]) -> None:
+        """Demandeur, en tête du document (décision du 2026-10-13)."""
+        self._section(pdf, safe, "Requerant")
+        self._boxed_lines(pdf, safe, width, [
+            f"Nom : {d['requester_name'] or '.' * 30}     "
+            f"Badge : {d['requester_badge'] or '.' * 12}     "
+            f"Fonction : {d['requester_job'] or '.' * 24}",
+            f"Direction : {d['requester_direction'] or '.' * 24}     "
+            f"Departement : {d['requester_department'] or '.' * 24}     "
+            f"Service : {d['requester_service'] or '.' * 24}",
+        ])
+
+    def _reception(self, pdf, safe, width: float, d: dict[str, Any]) -> None:
+        # Mail / Téléphone retirés et « Responsable » renommé « Chef de service »
+        # (décision du 2026-10-13) ; le service du demandeur est dans « Requérant ».
+        self._section(pdf, safe, "Reception")
+        self._boxed_lines(pdf, safe, width, [
+            f"Chef de service : {d['receiver_name'] or '.' * 30}     "
+            f"Badge : {d['receiver_badge'] or '.' * 12}     "
+            f"N Fiche : {d['ref']}",
+        ])
+
     def _affectation(self, pdf, safe, width: float, d: dict[str, Any]) -> None:
+        """Trois colonnes, dans l'ordre de la procédure (2026-10-13) :
+        organisation traitante et chef de division | technicien | lieu et
+        horaires. Sur deux colonnes, l'ajout du chef de division faisait
+        déborder le formulaire — qui tient sur une page — sur une seconde."""
         self._section(pdf, safe, "Affectation")
         top = pdf.get_y()
-        left_w = width * 0.55
-        pdf.set_font("Helvetica", "", 9)
+        widths = (width * 0.36, width * 0.29, width * 0.35)
+        lefts = (pdf.l_margin, pdf.l_margin + widths[0], pdf.l_margin + widths[0] + widths[1])
 
-        left_lines = [
-            # Département et Service sont des INFORMATIONS, pas des options : ils
-            # portaient une case cochée dès que la valeur existait, ce qui n'avait
-            # aucun sens sur le document imprimé.
-            f"Departement : {d['handler_department'] or '.' * 22}",
-            f"Service : {d['handler_service'] or '.' * 26}",
-            # Les trois cases sont TOUJOURS imprimées vides ; la coche du statut
-            # retenu est surimprimée plus bas. Raison : le ✓ (ZapfDingbats) et le
-            # libellé (Helvetica) ne peuvent pas cohabiter dans un même `cell()`,
-            # exactement comme pour la marque d'émargement.
-            # Aucun statut renseigné => les trois restent vides : on ne présume
-            # pas d'un statut sur un document destiné à être signé.
-            _status_line(),
-            f"Badge : {d['badge'] or '.' * 26}",
-            # Signature du traitant : remplacée par la marque électronique dès
-            # qu'il a terminé son intervention. Tant que ce n'est pas le cas, la
-            # ligne à signer au stylo demeure.
-            "Signature : " if d["it_signed"] else "Signature : ______________________",
+        columns = [
+            [
+                # Département et Service sont des INFORMATIONS, pas des options :
+                # ils portaient une case cochée dès que la valeur existait, ce qui
+                # n'avait aucun sens sur le document imprimé.
+                f"Departement : {d['handler_department'] or '.' * 22}",
+                f"Service : {d['handler_service'] or '.' * 26}",
+                # Chef de division (décision du 2026-10-13) : en pointillés quand
+                # le ticket est allé directement du chef de service au technicien.
+                _CHIEF_HEADING,
+                f"Service : {d['chief_service'] or '.' * 26}",
+                f"Nom : {d['chief_name'] or '.' * 30}",
+                f"Badge : {d['chief_badge'] or '.' * 12}",
+            ],
+            [
+                _TECHNICIAN_HEADING,
+                # Les trois cases sont TOUJOURS imprimées vides ; la coche du
+                # statut retenu est surimprimée plus bas. Raison : le ✓
+                # (ZapfDingbats) et le libellé (Helvetica) ne peuvent pas
+                # cohabiter dans un même `cell()`, exactement comme pour la marque
+                # d'émargement. Aucun statut renseigné => les trois restent vides :
+                # on ne présume pas d'un statut sur un document destiné à être signé.
+                _status_line(),
+                f"Badge : {d['badge'] or '.' * 26}",
+                # Signature du traitant : remplacée par la marque électronique dès
+                # qu'il a terminé son intervention. Tant que ce n'est pas le cas,
+                # la ligne à signer au stylo demeure.
+                "Signature : " if d["it_signed"] else "Signature : ______________________",
+            ],
+            [
+                f"Lieu : {d['place'] or '.' * 30}",
+                f"Date : {d['assignment_date'] or '.' * 14}     "
+                # Durée réelle de l'intervention (début → fin). Le SLA contractuel
+                # reste disponible dans `sla_hours` mais n'est pas ce que le
+                # formulaire demande ici.
+                f"Delai d'execution : {d['intervention_duration'] or '.' * 8}",
+                f"Date Debut : {d['start_date'] or '..........'}     "
+                f"Heure Debut : {d['start_time'] or '.....'}",
+                f"Date Fin : {d['end_date'] or '..........'}     "
+                f"Heure Fin : {d['end_time'] or '.....'}",
+            ],
         ]
-        signature_row = len(left_lines) - 1
-        status_row = left_lines.index(_status_line())
-        for i, text in enumerate(left_lines):
-            y = top + 2 + i * 5.5
-            pdf.set_xy(pdf.l_margin + 2, y)
-            pdf.cell(left_w - 4, 5, safe(text))
-            if i == status_row:
-                # Statut d'intervenant : ✓ dans la case correspondante. Même
-                # technique que l'émargement — surimpression ZapfDingbats sur des
-                # cases Helvetica laissées vides.
-                offset = _status_check_offset(pdf, safe, d)
-                if offset is not None:
-                    self._sign_mark(pdf, safe, pdf.l_margin + 2 + offset - 3, y - 1.5, 5,
-                                    signed=True)
-            if i == signature_row and d["it_signed"]:
-                # Surimpression : le ✓ vient de ZapfDingbats, le libellé reste en
-                # Helvetica — deux polices ne peuvent pas cohabiter dans un
-                # `cell()`. On le place juste après le texte, dont on mesure la
-                # largeur réelle plutôt que de la deviner.
+
+        for col, lines in enumerate(columns):
+            x = lefts[col] + 2
+            for i, text in enumerate(lines):
+                y = top + 2 + i * _AFFECTATION_ROW
+                pdf.set_xy(x, y)
+                is_heading = text in (_CHIEF_HEADING, _TECHNICIAN_HEADING)
+                pdf.set_font("Helvetica", "BU" if is_heading else "", 9)
+                pdf.cell(widths[col] - 4, 5, safe(text))
                 pdf.set_font("Helvetica", "", 9)
-                offset = pdf.get_string_width(safe(text))
-                self._sign_mark(pdf, safe, pdf.l_margin + 2 + offset - 3, y - 1.5, 5,
-                                signed=True)
+                if text == _status_line():
+                    # Statut d'intervenant : ✓ dans la case correspondante. Même
+                    # technique que l'émargement — surimpression ZapfDingbats sur
+                    # des cases Helvetica laissées vides.
+                    offset = _status_check_offset(pdf, safe, d)
+                    if offset is not None:
+                        self._sign_mark(pdf, safe, x + offset - 3, y - 1.5, 5, signed=True)
+                if text.startswith("Signature : ") and d["it_signed"]:
+                    # Surimpression : le ✓ vient de ZapfDingbats, le libellé reste
+                    # en Helvetica — deux polices ne peuvent pas cohabiter dans un
+                    # `cell()`. On le place juste après le texte, dont on mesure la
+                    # largeur réelle plutôt que de la deviner.
+                    offset = pdf.get_string_width(safe(text))
+                    self._sign_mark(pdf, safe, x + offset - 3, y - 1.5, 5, signed=True)
 
-        right_lines = [
-            f"Lieu : {d['place'] or '.' * 30}",
-            f"Date : {d['assignment_date'] or '.' * 14}     "
-            # Durée réelle de l'intervention (début → fin). Le SLA contractuel
-            # reste disponible dans `sla_hours` mais n'est pas ce que le
-            # formulaire demande ici.
-            f"Delai d'execution : {d['intervention_duration'] or '.' * 8}",
-            f"Date Debut : {d['start_date'] or '..........'}     "
-            f"Heure Debut : {d['start_time'] or '.....'}",
-            f"Date Fin : {d['end_date'] or '..........'}     "
-            f"Heure Fin : {d['end_time'] or '.....'}",
-        ]
-        for i, text in enumerate(right_lines):
-            pdf.set_xy(pdf.l_margin + left_w + 2, top + 2 + i * 5.5)
-            pdf.cell(width - left_w - 4, 5, safe(text))
-
-        height = 2 + max(len(left_lines), len(right_lines)) * 5.5 + 2
+        height = 2 + max(len(lines) for lines in columns) * _AFFECTATION_ROW + 2
         pdf.set_draw_color(*_LINE)
         pdf.rect(pdf.l_margin, top, width, height)
-        pdf.line(pdf.l_margin + left_w, top, pdf.l_margin + left_w, top + height)
+        for x in lefts[1:]:
+            pdf.line(x, top, x, top + height)
         pdf.set_y(top + height + 2)
 
     def _traitement(self, pdf, safe, width: float, d: dict[str, Any]) -> None:
@@ -494,10 +548,15 @@ class PvInterventionService(BaseService):
     def _emargement(self, pdf, safe, width: float, d: dict[str, Any]) -> None:
         """Émargement et appréciations — un ✓ marque chaque validation acquise
         dans l'application ; la zone reste vierge tant qu'elle ne l'est pas."""
-        top = pdf.get_y()
         label_w = width * 0.18
         col_w = (width - label_w) / 2
         row_h = 12.0
+        # Le tableau est dessiné à positions fixes : coupé par un saut de page
+        # automatique, il s'éparpillait sur plusieurs pages. Un traitement très
+        # long le fait donc passer, entier, sur la page suivante.
+        if pdf.get_y() + 6 + 3 * row_h > pdf.page_break_trigger:
+            pdf.add_page()
+        top = pdf.get_y()
 
         pdf.set_draw_color(*_LINE)
         pdf.set_font("Helvetica", "BI", 8.5)

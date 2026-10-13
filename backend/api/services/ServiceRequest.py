@@ -401,6 +401,29 @@ class RequestService(BaseService):
             "direction_id": direction.id if direction else None,
         })
 
+    async def _division_chief_snapshot(self, account_id: Optional[int | str]) -> dict[str, Any]:
+        """Identité du chef de division vers qui le chef de service oriente le
+        ticket (`distributor_id`) — PV d'intervention, bloc « Affectation ».
+        Figée à l'orientation, comme `receiver_*` pour le chef de service : un
+        chef de division qui change de service ne réécrit pas ses anciens PV.
+        `distributor_snapshot_id` dit à quel compte se rapporte ce figeage : une
+        nouvelle orientation vers un autre chef de division le remplace."""
+        if not account_id:
+            return {}
+        from api.repositories.RepositoryAccount import AccountRepository
+
+        account = await AccountRepository(self.session).get_by_id(int(account_id))
+        if account is None:
+            return {}
+        org = await self._org_labels_for_unity(getattr(account, "unity_id", None))
+        return self._clean_infos({
+            "distributor_snapshot_id": str(account.id),
+            "distributor_name": self._account_display_name(account),
+            "distributor_badge": getattr(account, "matricule", None),
+            # Service de rattachement du chef de division : son unité propre.
+            "distributor_service_label": org.get("service_label"),
+        })
+
     async def _requester_identity_snapshot(self, account_id: Optional[int | str]) -> dict[str, Any]:
         """Identité organisationnelle FIGÉE du demandeur, écrite dans
         `request.infos` à la création de la demande et jamais recalculée ensuite.
@@ -967,12 +990,18 @@ class RequestService(BaseService):
                 "receiver_name": actor_name or self._account_display_name(actor),
                 "receiver_badge": getattr(actor, "matricule", None),
             })
-        if handler_identity or receiver_identity:
+        # Même bloc « Affectation » : le chef de division destinataire, figé ici
+        # pour la même raison (voir `_division_chief_snapshot`).
+        division_chief_identity: dict[str, Any] = (
+            await self._division_chief_snapshot(assignee_id) if target_is_division_chief else {}
+        )
+        if handler_identity or receiver_identity or division_chief_identity:
             current_infos = getattr(current, "infos", None)
             patch["infos"] = {
                 **(current_infos if isinstance(current_infos, dict) else {}),
                 **handler_identity,
                 **receiver_identity,
+                **division_chief_identity,
             }
 
         obj = await self.update(
