@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { GlassCard } from "@/components/glass-card";
@@ -10,7 +10,6 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  Eye,
   GitBranch,
   Layers,
   Search,
@@ -193,14 +192,9 @@ function DirectionNode({
           </div>
         </button>
         <div className="flex shrink-0 items-center gap-2">
+          {/* Bouton « Voir » retiré le 2026-10-13 (décision produit) : la fiche
+              de la direction reste accessible par le menu « Directions ». */}
           <StatusIcon active={direction.status} />
-          <Link
-            to={`/app/admin/directions/${direction.id}` as never}
-            className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border px-3 text-xs font-medium hover:bg-muted"
-          >
-            <Eye className="h-3.5 w-3.5" />
-            Voir
-          </Link>
         </div>
       </div>
 
