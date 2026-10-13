@@ -26,7 +26,7 @@ export const Route = createFileRoute("/app")({
   // /app/*), le serveur ne fait plus tourner beforeLoad du tout ; seule la
   // vérification côté client (où localStorage est disponible) décide.
   ssr: false,
-  beforeLoad: () => requireAuth(),
+  beforeLoad: ({ location }) => requireAuth(location.href),
   component: AppRoute,
 });
 

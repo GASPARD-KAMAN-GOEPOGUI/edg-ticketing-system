@@ -11,6 +11,7 @@ import { ApiError } from "@/lib/api/client";
 import { setUser, setTokens, clearSession, getDefaultRouteForRole, isAuthenticated, getRole, setPendingConsent } from "@/lib/session";
 import type { Role } from "@/lib/mock-data";
 import { LOGOUT_MESSAGES, consumeLogoutReason } from "@/lib/forced-logout";
+import { consumePostLoginTarget } from "@/lib/post-login-redirect";
 
 export const Route = createFileRoute("/login")({
   // SSR désactivé : isAuthenticated() lit localStorage, invisible côté serveur
@@ -21,6 +22,8 @@ export const Route = createFileRoute("/login")({
   head: () => ({ meta: [{ title: "Connexion — EDG Support" }] }),
   beforeLoad: () => {
     if (isAuthenticated()) {
+      const target = consumePostLoginTarget();
+      if (target) throw redirect({ href: target });
       throw redirect({ to: getDefaultRouteForRole(getRole()) as "/" });
     }
   },
@@ -91,7 +94,10 @@ function Login() {
 
       // isLoading reste true pendant toute la navigation — le composant se démontera,
       // donc pas besoin de le remettre à false sur le chemin succès.
-      navigate({ to: getDefaultRouteForRole(role) as "/", replace: true });
+      // Page demandée avant la connexion (bouton d'un e-mail), sinon l'accueil du rôle.
+      const target = consumePostLoginTarget();
+      if (target) navigate({ href: target, replace: true });
+      else navigate({ to: getDefaultRouteForRole(role) as "/", replace: true });
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 401) {

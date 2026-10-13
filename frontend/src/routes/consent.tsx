@@ -18,6 +18,7 @@ import {
 } from "@/lib/session";
 import { usePhoneInput } from "@/hooks/use-phone-input";
 import type { Role } from "@/lib/mock-data";
+import { consumePostLoginTarget } from "@/lib/post-login-redirect";
 
 export const Route = createFileRoute("/consent")({
   // SSR désactivé : le consentement en attente vit en sessionStorage, invisible
@@ -81,7 +82,10 @@ function ConsentScreen() {
         unit_id: result.user.unit_id ?? undefined,
       });
 
-      navigate({ to: getDefaultRouteForRole(role) as "/", replace: true });
+      // Page demandée avant la connexion (bouton d'un e-mail), sinon l'accueil du rôle.
+      const target = consumePostLoginTarget();
+      if (target) navigate({ href: target, replace: true });
+      else navigate({ to: getDefaultRouteForRole(role) as "/", replace: true });
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 401) {

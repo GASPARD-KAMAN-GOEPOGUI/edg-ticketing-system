@@ -15,14 +15,17 @@ import {
   getDefaultRouteForRole,
 } from "./session";
 import type { Role } from "./mock-data";
+import { rememberPostLoginTarget } from "./post-login-redirect";
 
 /**
  * Exige uniquement que l'utilisateur soit authentifié.
  * Aucune contrainte de rôle.
  */
-export function requireAuth(): void {
+export function requireAuth(target?: string): void {
   if (AUTH_DISABLED) return;
   if (!isAuthenticated()) {
+    // Page demandée (ex. bouton d'un e-mail) : rouverte après la connexion.
+    rememberPostLoginTarget(target);
     throw redirect({ to: "/login" });
   }
 }

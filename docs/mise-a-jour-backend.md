@@ -37,6 +37,19 @@
   tableau d'émargement **entier** en page 2 (il s'éparpillait sur plusieurs).
 - Tests : `test_pv_intervention_blocks.py` (5).
 
+**Boutons des e-mails fonctionnels** (« Voir le ticket », « Ouvrir la file d'attente »…)
+- Backend (`core/mailer.py`, `_absolute_app_url`) : les notifications portent des
+  chemins relatifs (`/app/queue`), morts dans un client de messagerie. Le lien du
+  bouton devient l'adresse complète du frontend (première origine de
+  `CORS_ORIGINS`, comme le bouton « Se connecter ») ; un lien déjà absolu est
+  conservé ; sans adresse configurée, pas de bouton. Les notifications de
+  l'application gardent leurs chemins relatifs. Tests : `test_email_action_links.py` (5).
+- Frontend (`lib/post-login-redirect.ts`, `auth-guard.ts`, `login.tsx`,
+  `consent.tsx`) : sans session, la page demandée est retenue (sessionStorage de
+  l'onglet) et rouverte après la connexion / le consentement, au lieu de
+  l'accueil du rôle. Seuls les chemins internes `/app…` sont acceptés (pas de
+  redirection vers un autre site).
+
 ## Session 2026-10-08 — Accueil temps réel et allègement des pages d'accueil
 
 **Accueil connecté `/app`** (`frontend/src/routes/app.index.tsx`)
