@@ -26,7 +26,9 @@ from api.configs.Environment import get_environment
 logger = logging.getLogger(__name__)
 _env = get_environment()
 _templates_dir = Path(__file__).resolve().parents[2] / "templates"
-_logo_path = Path(__file__).resolve().parents[3] / "frontend" / "src" / "assets" / "edg_logo.png"
+# Logo dans le backend (copie de l'asset frontend) : le backend est déployé
+# seul en production, sans dossier frontend/ — voir ServiceExport.get_logo_path.
+_logo_path = Path(__file__).resolve().parents[1] / "assets" / "edg_logo.png"
 _LOGO_CID = "edg_logo"
 
 _EMAIL_VARIANTS = {

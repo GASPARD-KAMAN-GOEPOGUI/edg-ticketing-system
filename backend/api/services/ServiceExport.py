@@ -41,9 +41,13 @@ def pdf_safe_text(value: Any) -> str:
 
 
 def get_logo_path() -> Path | None:
-    """Chemin du logo EDG — réutilise l'asset frontend existant (même pattern
-    que core/mailer.py pour l'en-tête des emails), aucune copie dupliquée."""
-    path = Path(__file__).resolve().parents[3] / "frontend" / "src" / "assets" / "edg_logo.png"
+    """Chemin du logo EDG (même fichier que core/mailer.py pour les emails).
+
+    Copie de frontend/src/assets/edg_logo.png DANS le backend : en production,
+    le backend est déployé seul (dépôt edg-connect-backend), sans dossier
+    frontend/ à côté — l'ancien chemin vers l'asset frontend n'y existait pas
+    et les PDF sortaient sans logo. Un changement de logo = remplacer les deux."""
+    path = Path(__file__).resolve().parents[1] / "assets" / "edg_logo.png"
     return path if path.exists() else None
 
 
