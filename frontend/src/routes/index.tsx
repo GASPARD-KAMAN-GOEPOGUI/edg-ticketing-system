@@ -563,7 +563,7 @@ function Home() {
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Ticket</div>
-                        <div className="font-mono text-sm font-semibold">EDG-2025-0178</div>
+                        <div className="font-mono text-sm font-semibold">EDG-2012-0001</div>
                       </div>
                       <span className="shrink-0 rounded-full bg-success/15 px-3 py-1 text-xs font-semibold text-success ring-1 ring-success/30">
                         Résolu
@@ -572,20 +572,21 @@ function Home() {
 
                     {/* Carte ticket */}
                     <div className="rounded-2xl border border-border/40 p-3.5 glass-subtle">
-                      <div className="text-sm font-semibold leading-snug">Compteur défectueux — Ratoma</div>
+                      <div className="text-sm font-semibold leading-snug">Mon ordinateur ne s'allume pas</div>
+                      <div className="mt-0.5 text-[11px] text-muted-foreground">Gaspard Kaman Goépogui</div>
                       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                        <span className="rounded-full bg-muted/60 px-2 py-0.5 text-[10px] text-muted-foreground">Dir. Commerciale</span>
-                        <span className="rounded-full bg-orange-500/10 px-2 py-0.5 text-[10px] font-medium text-orange-500">Haute priorité</span>
+                        <span className="rounded-full bg-muted/60 px-2 py-0.5 text-[10px] text-muted-foreground">Direction : DSI</span>
+                        <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive">Critique</span>
                       </div>
                     </div>
 
                     {/* Historique */}
                     <div className="space-y-2.5">
                       {[
-                        { t: "Ticket créé",        d: "08 jan. 2025 · 09h14", done: true },
-                        { t: "Prise en charge",         d: "08 jan. 2025 · 10h02", done: true },
-                        { t: "Ticket en traitement",      d: "08 jan. 2025 · 14h30", done: true },
-                        { t: "Ticket clôturé", d: "09 jan. 2025 · 11h20", done: true },
+                        { t: "Ticket créé",        d: "09 jan. 2012 · 09h14", done: true },
+                        { t: "Prise en charge",         d: "09 jan. 2012 · 10h02", done: true },
+                        { t: "Ticket en traitement",      d: "09 jan. 2012 · 14h30", done: true },
+                        { t: "Ticket clôturé", d: "09 jan. 2012 · 11h20", done: true },
                       ].map((step, i) => (
                         <div key={i} className="flex items-start gap-3">
                           <div className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full bg-success ring-4 ring-success/20" />
