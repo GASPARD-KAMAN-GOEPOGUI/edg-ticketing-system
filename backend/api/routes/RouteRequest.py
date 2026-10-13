@@ -319,7 +319,36 @@ async def _request_response_for_actor(req, svc: RequestService, actor=None, *, p
     schema = schema.copy(update={
         "timelines": [e for e in schema.timelines if e.event_type != "comment_added"],
     })
+    if public_only:
+        # Suivi public (GET /requests/track, sans connexion) : seulement ce que la
+        # page /track affiche — statut, titre, description, priorité, libellés
+        # et dates de l'historique, appréciation. Jamais le JSON technique
+        # `infos` (identités internes, constat…), les interventions, l'organisation
+        # traitante ni les coordonnées : la seule protection est le couple
+        # référence + e-mail / téléphone.
+        return schema.copy(update={
+            **{field: None for field in _PUBLIC_TRACK_HIDDEN_FIELDS},
+            "interventions": [],
+            "sla_cycles": [],
+            "participant_avatars": {},
+            "timelines": [
+                event.copy(update={"comment": None, "infos": None, "agent_id": None, "unity_id": None})
+                for event in schema.timelines
+            ],
+        })
     return await _attach_participant_avatars(schema, svc)
+
+
+# Champs du ticket masqués en suivi public (voir `_request_response_for_actor`).
+_PUBLIC_TRACK_HIDDEN_FIELDS = (
+    "infos", "unity_id", "unit_id", "direction_id", "on_behalf_unity_id",
+    "assignee_id", "assignee_name", "distributor_id", "requester_id", "requester_unit_id",
+    "requester_job", "employee_matricule", "requester_direction_id",
+    "requester_direction_label", "requester_department_label", "requester_service_label",
+    "handler_direction_label", "handler_department_label", "handler_service_label",
+    "requester_phone", "requester_email", "requester_address", "meter_number",
+    "client_ref", "lat", "lng", "location_label",
+)
 
 
 @router.get("/", response_model=PaginatedResponse[RequestListItemResponse])

@@ -83,6 +83,10 @@ env = get_environment()
 #   /api/v1/auth/forgot-password  → 3  req / 60 s
 #   /api/v1/auth/reset-password   → 3  req / 60 s
 #   /api/v1/auth/consent/accept   → 5  req / 60 s (crée un compte, même tier que register)
+#   /api/v1/requests/track        → 10 req / 60 s (suivi public sans connexion : référence
+#                                   + e-mail/téléphone ; sans limite, les références
+#                                   séquentielles et les e-mails devinables permettaient
+#                                   d'essayer des combinaisons à volonté)
 
 _RATE_LIMITS: dict[str, tuple[int, int]] = {
     "/api/v1/auth/login":            (10, 60),
@@ -90,6 +94,7 @@ _RATE_LIMITS: dict[str, tuple[int, int]] = {
     "/api/v1/auth/forgot-password":  (3,  60),
     "/api/v1/auth/reset-password":   (3,  60),
     "/api/v1/auth/consent/accept":   (5,  60),
+    "/api/v1/requests/track":        (10, 60),
 }
 
 

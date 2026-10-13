@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -1948,12 +1947,15 @@ class RequestService(BaseService):
             actual_email = (obj.requester_email or "").strip().lower()
             actual_phone = (obj.requester_phone or "").strip()
 
-        _strip_phone = lambda s: re.sub(r"[\s\-\(\)\.]", "", s)
+        # Numéros comparés une fois normalisés (+224XXXXXXXXX) : « 626 11 11 11 »,
+        # « +224 626… » et « 00224 626… » désignent le même téléphone. Avant, seule
+        # l'écriture exacte du compte (aux espaces près) était reconnue.
+        from api.core.phone import normalize_phone
 
         credential_ok = False
         if email and actual_email and email.strip().lower() == actual_email:
             credential_ok = True
-        if phone and actual_phone and _strip_phone(phone) == _strip_phone(actual_phone):
+        if phone and actual_phone and normalize_phone(phone) == normalize_phone(actual_phone):
             credential_ok = True
 
         if not credential_ok:
