@@ -2,6 +2,17 @@
 
 ## Session 2026-10-13 — PV d'intervention : aperçu avant téléchargement, logo en production
 
+**Suivi public `/track` fiabilisé et sécurisé**
+- Backend `GET /requests/track` : limité à **10 essais / minute / adresse**
+  (`_RATE_LIMITS`, `main.py`) ; réponse réduite à ce que la page affiche (le
+  paramètre `public_only` était ignoré : `infos`, interventions, organisation
+  traitante et coordonnées sortaient) ; téléphone comparé normalisé
+  (`core/phone.normalize_phone`). Tests : `test_public_track.py` (10).
+- Frontend `routes/track.tsx` : formulaire d'appréciation retiré (l'API exige une
+  session, l'envoi échouait en 401) au profit de « Connectez-vous pour donner
+  votre appréciation » ; « Se connecter pour interagir » rouvre le ticket après
+  la connexion ; modèle de référence corrigé (`EDG-26-00042`).
+
 **Aperçu du PV sur tous les écrans** (`frontend/src/routes/app.requests.$id.tsx`)
 - Le bouton « PV d'intervention » de l'onglet Traitement ouvre désormais
   **toujours** la fenêtre d'aperçu (avant : téléchargement direct, sauf sur

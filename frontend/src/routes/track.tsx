@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { PublicLayout } from "@/components/public-layout";
 import { GlassCard } from "@/components/glass-card";
@@ -6,15 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
-import type { RequestStatus, Appreciation } from "@/lib/mock-data";
+import type { RequestStatus } from "@/lib/mock-data";
 import {
   EscalationProgressBar,
 } from "@/components/escalation-progress-bar";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { AppreciationForm } from "@/components/appreciation-form";
 import { trackRequest } from "@/lib/api/requests";
-import { submitAppreciation, updateRequestAppreciation } from "@/lib/api/csat";
+import { rememberPostLoginTarget } from "@/lib/post-login-redirect";
 import type { RequestItem } from "@/lib/mock-data";
 
 export const Route = createFileRoute("/track")({
@@ -44,8 +43,8 @@ function externalProgressSteps(status: RequestStatus) {
 function Track() {
   const [ref, setRef] = useState("");
   const [credential, setCredential] = useState("");
+  const navigate = useNavigate();
   const [found, setFound] = useState<RequestItem | null>(null);
-  const [appreciation, setAppreciation] = useState<Appreciation | undefined>(undefined);
   const [searched, setSearched] = useState(false);
   const [loading, setLoading] = useState(false);
   const [notFound, setNotFound] = useState(false);
@@ -70,6 +69,13 @@ function Track() {
     }
   };
 
+  // L'appréciation et toute autre action exigent une session : on retient le
+  // ticket pour l'ouvrir directement après la connexion.
+  const loginToTicket = () => {
+    if (found) rememberPostLoginTarget(`/app/requests/${found.id}`);
+    navigate({ to: "/login" });
+  };
+
   const isExternal = found?.requesterType === "external" || (found && found.isExternal && !found.requesterType);
 
   return (
@@ -90,7 +96,7 @@ function Track() {
               <Label>Numéro de ticket</Label>
               <Input
                 className="mt-1.5 h-12 font-mono"
-                placeholder="EDG-2026-XXXX"
+                placeholder="EDG-26-00042"
                 value={ref}
                 onChange={(e) => setRef(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && search()}
@@ -228,31 +234,18 @@ function Track() {
                   <CheckCircle2 className="h-5 w-5 text-success" />
                   <span className="font-semibold text-success">Ticket résolu</span>
                 </div>
-                <AppreciationForm
-                  requestId={found.id}
-                  authorType="external"
-                  existing={appreciation ?? found.appreciation}
-                  isClosed={found.status === "closed"}
-                  onSubmit={(appr) => setAppreciation(appr)}
-                  onReopen={() => {
-                    setFound({ ...found, status: "reopened" });
-                    toast.info("Ticket réouvert. Un agent vous contactera prochainement.");
-                  }}
-                  onSave={async (data) => {
-                    const hasExisting = !!(appreciation ?? found.appreciation);
-                    if (hasExisting) {
-                      await updateRequestAppreciation(found.id, data);
-                    } else {
-                      await submitAppreciation(found.id, { ...data, authorType: "external" });
-                    }
-                  }}
-                />
+                {/* Formulaire d'appréciation retiré de cette page le 2026-10-13 :
+                    l'API d'appréciation exige une session, l'envoi échouait
+                    (401) pour un visiteur non connecté. */}
+                <p className="text-sm text-muted-foreground">
+                  Connectez-vous pour donner votre appréciation sur le traitement de ce ticket.
+                </p>
               </div>
             )}
 
             <div className="flex justify-end">
-              <Button asChild variant="outline" className="rounded-full">
-                <Link to="/login">Se connecter pour interagir</Link>
+              <Button variant="outline" className="rounded-full" onClick={loginToTicket}>
+                Se connecter pour interagir
               </Button>
             </div>
           </GlassCard>
