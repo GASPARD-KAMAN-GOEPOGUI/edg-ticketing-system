@@ -26,6 +26,7 @@ import { formatDistanceToNow } from "date-fns";
 import { fr } from "date-fns/locale";
 import { cn, formatElapsedHours } from "@/lib/utils";
 import type { RequestItem } from "@/lib/mock-data";
+import { labelOf, useQualificationOptions } from "@/lib/qualification-options";
 
 // BR-DISTRIBUTION-001 — espace propre au chef de division support. L'admin y accède
 // aussi (rôle bypass habituel), comme sur les autres espaces opérationnels.
@@ -46,6 +47,8 @@ export const Route = createFileRoute("/app/distribution")({
 
 function DistributionPage() {
   const queryClient = useQueryClient();
+  // Catégorie affichée par son libellé (« Réseau »), pas par son code (`reseau`).
+  const { categories } = useQualificationOptions();
   const [expanded, setExpanded] = useState<string | null>(null);
   const [technicianByTicket, setTechnicianByTicket] = useState<Record<string, string>>({});
 
@@ -166,7 +169,7 @@ function DistributionPage() {
                           <StatusBadge status={req.status} />
                           {req.category && (
                             <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-                              {req.category}
+                              {labelOf(categories, req.category)}
                             </span>
                           )}
                         </div>
