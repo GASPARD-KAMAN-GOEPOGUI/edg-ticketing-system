@@ -101,3 +101,26 @@ async def test_qualification_without_target_stays_in_qualification():
         )
         await s.commit()
     assert await _status(ids["req"]) == "qualifying"
+
+
+async def test_orientation_without_proposed_solution_is_accepted_by_the_api(client, central):
+    """Solution proposée facultative depuis le 2026-10-14, y compris pour orienter
+    vers un chef de division (l'API répondait 422)."""
+    from tests.support import bearer, login, make_account
+
+    ids = await _seed()
+    chief_id = await make_account(central, email="chef.api@edg.gn", role="chief-service", central_id=501)
+    async with TestSession() as s:
+        chief = await _account(s, chief_id)
+        cds = await _account(s, ids["cds"])
+        chief.unity_id = cds.unity_id
+        await s.commit()
+
+    token = (await login(client, "chef.api@edg.gn"))["body"]["data"]["access_token"]
+    resp = await client.post(
+        f"/api/v1/requests/{ids['req']}/qualify",
+        json={"category": "reseau", "priority": "high", "assignee_id": str(ids["cds"])},
+        headers=bearer(token),
+    )
+    assert resp.status_code == 200, resp.text
+    assert await _status(ids["req"]) == "qualified"

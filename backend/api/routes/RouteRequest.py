@@ -809,18 +809,10 @@ async def qualify_triage(
     svc: RequestService = Depends(_svc),
 ):
     """Qualifie une demande de triage — reservee a la File d'attente (chief-service/admin)."""
-    is_imputation = await _assert_queue_target_allowed(actor, body.assignee_id, db)
-    # Procedure tache 1.3 — le descriptif de solution proposee est le point de
-    # controle de l'imputation a un chef de division support. Exige uniquement
-    # dans ce cas : une prise pour son propre traitement n'est pas une imputation.
-    if is_imputation and not (body.proposed_solution or "").strip():
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                "Décrivez la solution proposée avant d'orienter ce ticket vers un "
-                "chef de division support."
-            ),
-        )
+    await _assert_queue_target_allowed(actor, body.assignee_id, db)
+    # Solution proposee (procedure tache 1.3) FACULTATIVE depuis le 2026-10-14,
+    # y compris pour orienter vers un chef de division : decision produit, ecart
+    # assume a la procedure papier. Elle reste enregistree quand elle est saisie.
     return await svc.qualify_triage(
         id,
         body.dict(exclude_none=True),
