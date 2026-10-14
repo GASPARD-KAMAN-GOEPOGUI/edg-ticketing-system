@@ -20,6 +20,17 @@
 - Tickets déjà passés à tort en « autre » : laissés tels quels (décision du
   2026-10-14), correction manuelle possible.
 
+**Dates en UTC (heure de Guinée)**
+- Production : serveur et MySQL à l'heure de Paris (CEST, UTC+2) — `NOW()` et
+  les valeurs par défaut (`created_at`, `updated_at`, journal) étaient 2 h en
+  avance et incohérentes avec les dates écrites en UTC par l'application.
+- `configs/Database.py` : chaque connexion MySQL exécute
+  `SET time_zone = '+00:00'` (`engine_connect_args`). Le cycle horaire (J+3 / J+4)
+  comparait déjà des dates UTC. Test : `test_db_utc.py`.
+- Données déjà écrites en heure de Paris en production depuis la mise en ligne :
+  correction ponctuelle (-2 h) à faire après identification de la frontière
+  avec les données importées.
+
 **E-mail de création de compte : « Bienvenue »**
 - Objet « Bienvenue sur EDG Support », titre « Bienvenue sur EDG Support ! »,
   message d'accueil présentant la plateforme ; bouton « Se connecter » inchangé.
