@@ -112,3 +112,24 @@ async def test_technician_unknown_value_is_refused():
                 actor=None, actor_id="9", actor_name="Ibrahima Sow", actor_role="technicien",
             )
     assert await _ticket(req_id) == ("autre", "medium")
+
+
+async def test_chief_qualification_is_kept_after_technician_requalification():
+    """La fiche affiche les deux qualifications : celle du chef de service est
+    figée dans `infos` et survit à la requalification par le technicien."""
+    req_id, chief_id = await _seed()
+    await _qualify(req_id, chief_id, {"category": "Réseau", "priority": "Haute"})
+    async with TestSession() as s:
+        await RequestService(s).field_check(
+            str(req_id), conformity="ecart", findings="Carte réseau HS",
+            observed_category="materiel", observed_priority="critical",
+            actor=None, actor_id="9", actor_name="Ibrahima Sow", actor_role="technicien",
+        )
+        await s.commit()
+    async with TestSession() as s:
+        req = (await s.execute(select(Request).where(Request.id == req_id))).scalar_one()
+        assert (req.category, req.priority) == ("materiel", "critical")      # technicien
+        assert req.infos["qualified_category"] == "reseau"                   # chef de service
+        assert req.infos["qualified_priority"] == "high"
+        assert req.infos["qualified_at"]
+        assert req.infos["receiver_name"] == "Mamadou Diallo"

@@ -1029,14 +1029,22 @@ class RequestService(BaseService):
         division_chief_identity: dict[str, Any] = (
             await self._division_chief_snapshot(assignee_id) if target_is_division_chief else {}
         )
-        if handler_identity or receiver_identity or division_chief_identity:
-            current_infos = getattr(current, "infos", None)
-            patch["infos"] = {
-                **(current_infos if isinstance(current_infos, dict) else {}),
-                **handler_identity,
-                **receiver_identity,
-                **division_chief_identity,
-            }
+        # Qualification du chef de service (tâche 1.2) figée telle qu'il l'a
+        # décidée : le constat du technicien peut ensuite requalifier le ticket
+        # (BR-FIELD-CHECK-REQUALIFY-001), la fiche affiche les deux.
+        qualification_snapshot = self._clean_infos({
+            "qualified_category": patch.get("category") or getattr(current, "category", None),
+            "qualified_priority": patch.get("priority") or getattr(current, "priority", None),
+            "qualified_at": datetime.now(timezone.utc).isoformat(),
+        })
+        current_infos = getattr(current, "infos", None)
+        patch["infos"] = {
+            **(current_infos if isinstance(current_infos, dict) else {}),
+            **handler_identity,
+            **receiver_identity,
+            **division_chief_identity,
+            **qualification_snapshot,
+        }
 
         obj = await self.update(
             id,
