@@ -100,6 +100,35 @@ class RequestService(BaseService):
 
     # ── Helper : traduit codes string → IDs FK ────────────────────────────────
 
+    async def _qualification_code(self, kind: str, value: Optional[str]) -> Optional[str]:
+        """Catégorie ou priorité d'une QUALIFICATION (chef de service, constat du
+        technicien) : renvoie le code connu en base, ou lève une erreur 400.
+
+        Le formulaire envoie le code ; un libellé exact est aussi accepté (sans
+        tenir compte de la casse). `_translate_codes` retombe sur « autre » /
+        « medium » pour une valeur inconnue — ce repli silencieux a requalifié en
+        « autre » tous les tickets dont le formulaire envoyait le LIBELLÉ
+        (« Réseau » ≠ code `reseau`). Une qualification ne doit jamais changer
+        de sens sans le dire : valeur inconnue → refus explicite."""
+        if value is None or not str(value).strip():
+            return None
+        wanted = str(value).strip().casefold()
+        if kind == "category":
+            model, key, field, label = RequestCategory, RequestCategory.code, "category", "Catégorie"
+        else:
+            model, key, field, label = PriorityDefinition, PriorityDefinition.slug, "priority", "Priorité"
+        rows = (await self.session.execute(
+            select(key, model.label).where(model.deleted_at.is_(None))
+        )).all()
+        for code, row_label in rows:
+            if wanted in (str(code or "").casefold(), str(row_label or "").casefold()):
+                return code
+        raise self.bad_request(
+            f"{label} inconnue : « {value} ». Choisissez une valeur de la liste.",
+            error_code=ErrorCode.INVALID_FIELD_VALUE,
+            field=field,
+        )
+
     async def _translate_codes(self, data: dict) -> dict:
         out = dict(data)
         if "request_status" in out:
@@ -886,6 +915,12 @@ class RequestService(BaseService):
         Sinon → status=qualifying (la direction prend en charge).
         """
         patch = {k: v for k, v in data.items() if k in {"category", "priority", "proposed_solution"}}
+        # Codes vérifiés AVANT tout enregistrement (voir `_qualification_code`).
+        for ref_field in ("category", "priority"):
+            if ref_field in patch:
+                patch[ref_field] = await self._qualification_code(ref_field, patch[ref_field])
+                if patch[ref_field] is None:
+                    patch.pop(ref_field)
         # Organisation traitante — déterminée par le SERVEUR, pas par le formulaire.
         # Seule la DSI traite les incidents : le service (et donc, par remontée,
         # le département et la direction) qui prend en charge la demande est
@@ -1389,6 +1424,12 @@ class RequestService(BaseService):
         current = await self.get_by_id(id)
         if actor is not None:
             assert_is_current_handler(actor, current)
+
+        # Codes vérifiés (voir `_qualification_code`) : comparer un libellé au
+        # code du ticket concluait toujours à un changement, puis la traduction
+        # retombait sur « autre ».
+        observed_category = await self._qualification_code("category", observed_category)
+        observed_priority = await self._qualification_code("priority", observed_priority)
 
         infos = current.infos if isinstance(current.infos, dict) else {}
         intervention_id = infos.get("current_intervention_id")
