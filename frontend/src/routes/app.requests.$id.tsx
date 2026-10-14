@@ -68,6 +68,7 @@ import {
 } from "@/lib/api/requests";
 import { invalidateTicketQueries } from "@/lib/realtime/invalidation-map";
 import { labelOf, useQualificationOptions } from "@/lib/qualification-options";
+import { chiefQualification } from "@/lib/chief-qualification";
 import { buildAvatarUrl, fetchUser, fetchUsers, fetchUsersByIds, type AccountUser } from "@/lib/api/accounts";
 import { fetchDirections, fetchDepartments, fetchUnits, fetchUnit } from "@/lib/api/directions-units";
 import type { Direction, Unit } from "@/lib/api/directions-units";
@@ -1619,6 +1620,8 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     // antérieurs au suivi par intervention : le dernier constat fait alors foi.
     : fieldChecks.slice(-1)[0];
   const fieldCheckInfos = (lastFieldCheck?.infos ?? {}) as Record<string, unknown>;
+  // Qualification du chef de service telle qu'il l'a décidée (onglet Description).
+  const chiefQualif = chiefQualification(r);
 
   // BR-TRAITEMENT-PROGRESSIF-001 — une seule action progressive à la fois. L'étape
   // est DÉRIVÉE du statut renvoyé par le backend, jamais d'un état local : le
@@ -3172,6 +3175,41 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                 </p>
               </div>
 
+              {/* Procédure tâche 1.2 — qualification du chef de service (catégorie,
+                  priorité), figée à la qualification : le constat du technicien
+                  peut ensuite requalifier le ticket, les deux restent lisibles.
+                  Masquée pour le requérant (décision du 2026-10-14). */}
+              {!isRequesterView && (
+                <div className="mt-3 rounded-2xl border border-primary/25 bg-primary/5 p-4">
+                  <h3 className="mb-2 flex items-center gap-2 font-semibold text-primary">
+                    <SlidersHorizontal className="h-4 w-4" />
+                    Qualification du chef de service
+                    {!chiefQualif.pending && chiefQualif.by && (
+                      <span className="text-xs font-normal text-muted-foreground">— {chiefQualif.by}</span>
+                    )}
+                  </h3>
+                  {chiefQualif.pending ? (
+                    <p className="text-sm text-muted-foreground">En attente de qualification.</p>
+                  ) : (
+                    <dl className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+                      <div>
+                        <dt className="text-xs text-muted-foreground">Catégorie</dt>
+                        <dd className="font-medium">{labelOf(qualificationCategories, chiefQualif.category) || "—"}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-muted-foreground">Priorité</dt>
+                        <dd className="font-medium">{labelOf(qualificationPriorities, chiefQualif.priority) || "—"}</dd>
+                      </div>
+                      {chiefQualif.at && (
+                        <div className="sm:col-span-2 text-xs text-muted-foreground">
+                          Qualifié le {format(new Date(chiefQualif.at), "d MMM yyyy 'à' HH:mm", { locale: fr })}
+                        </div>
+                      )}
+                    </dl>
+                  )}
+                </div>
+              )}
+
               {/* Procédure EDG/PS-GSI/Pro-02 tâche 1.3 — piste de résolution
                   décrite par le chef de service à l'imputation. Réservée aux
                   intervenants du support : jamais rendue pour le requérant
@@ -3204,7 +3242,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                     fieldCheckInfos.conformity === "ecart" ? "text-amber-600 dark:text-amber-400" : "text-success",
                   )}>
                     <ClipboardCheck className="h-4 w-4" />
-                    Constat d'intervention
+                    Qualification du technicien — constat d'intervention
                     {lastFieldCheck.by && (
                       <span className="text-xs font-normal text-muted-foreground">
                         — {lastFieldCheck.by}

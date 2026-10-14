@@ -20,6 +20,19 @@
 - Tickets déjà passés à tort en « autre » : laissés tels quels (décision du
   2026-10-14), correction manuelle possible.
 
+**Onglet Description : les deux qualifications**
+- Backend : `qualify_triage` fige dans `request.infos` la qualification du chef
+  de service — `qualified_category`, `qualified_priority`, `qualified_at` (UTC) —
+  à côté de `receiver_name` ; le constat du technicien peut ensuite requalifier
+  le ticket sans l'effacer. Test ajouté à `test_qualification_codes.py` (8).
+- Frontend : bloc « Qualification du chef de service » (catégorie, priorité,
+  nom, date ; « En attente de qualification » tant que le ticket est en triage),
+  **masqué pour le requérant** ; bloc du technicien renommé « Qualification du
+  technicien — constat d'intervention ». Ordre : Description → Qualification du
+  chef de service → Solution proposée → Qualification du technicien. Tickets
+  qualifiés avant le figeage : valeur d'avant requalification relevée dans le
+  constat, sinon valeurs actuelles (`lib/chief-qualification.ts`, 4 tests).
+
 ## Session 2026-10-13 — PV d'intervention : aperçu avant téléchargement, logo en production
 
 **Sécurité — route de diagnostic publique supprimée**
