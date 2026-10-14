@@ -755,8 +755,8 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   const [cancelReason, setCancelReason] = useState("");
   const [showRequestInfoForm, setShowRequestInfoForm] = useState(false);
   const [infoQuestion, setInfoQuestion] = useState("");
-  // BR-TRANSMIT-001 — "Terminer le traitement" : résumé/solution/travail réalisé
-  // obligatoires pour tout intervenant actuel (remplace l'ancienne note optionnelle).
+  // BR-TRANSMIT-001 — "Terminer le traitement" : solution appliquée obligatoire,
+  // recommandations facultatives (2026-10-14).
   const [showResolveForm, setShowResolveForm] = useState(false);
   // Procédure tâche 2.1 — constat d'intervention (technicien uniquement).
   const [showFieldCheckForm, setShowFieldCheckForm] = useState(false);
@@ -772,9 +772,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   // saisi : date et heure de début sont horodatées par le serveur.
   const [showStartForm, setShowStartForm] = useState(false);
   const [startLocation, setStartLocation] = useState("");
-  const [resolveSummary, setResolveSummary] = useState("");
   const [resolveSolution, setResolveSolution] = useState("");
-  const [resolveWorkDone, setResolveWorkDone] = useState("");
   const [resolveRecommendations, setResolveRecommendations] = useState("");
   // BR-TRANSMIT-001 — "Transmettre le traitement" : annuaire libre (direction/
   // département/service/recherche), motif + travail effectué obligatoires.
@@ -1070,12 +1068,10 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
   });
 
   const resolveMut = useMutation({
-    // BR-TRANSMIT-001 — "Terminer le traitement" : résumé/solution/travail réalisé
-    // obligatoires pour tout intervenant actuel, quel que soit son rôle.
+    // BR-TRANSMIT-001 — "Terminer le traitement" : solution appliquée obligatoire
+    // pour tout intervenant actuel, quel que soit son rôle.
     mutationFn: () => resolveRequest(id, {
-      summary: resolveSummary.trim(),
       solution: resolveSolution.trim(),
-      work_done: resolveWorkDone.trim(),
       recommendations: resolveRecommendations.trim() || undefined,
     }),
     onMutate: async () => {
@@ -1089,9 +1085,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
     onSuccess: () => {
       toast.success("Traitement terminé — le ticket est résolu.");
       setShowResolveForm(false);
-      setResolveSummary("");
       setResolveSolution("");
-      setResolveWorkDone("");
       setResolveRecommendations("");
     },
     onError: (err, _vars, context) => {
@@ -2556,16 +2550,15 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
             </DialogContent>
           </Dialog>
 
-          {/* BR-TRANSMIT-001 — Modal "Terminer le traitement" : résumé/solution/travail
-              réalisé obligatoires, recommandations et pièces jointes facultatives. */}
+          {/* BR-TRANSMIT-001 — Modal "Terminer le traitement" : solution appliquée
+              obligatoire, recommandations facultatives (résumé final et travail
+              réalisé retirés le 2026-10-14). */}
           <Dialog
             open={showResolveForm}
             onOpenChange={(open) => {
               setShowResolveForm(open);
               if (!open) {
-                setResolveSummary("");
                 setResolveSolution("");
-                setResolveWorkDone("");
                 setResolveRecommendations("");
               }
             }}
@@ -2583,18 +2576,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
               </DialogHeader>
               <div className="space-y-3 py-2">
                 <div className="space-y-1.5">
-                  <Label htmlFor="resolve-summary" className="text-sm font-medium">
-                    Résumé final <span className="text-destructive">*</span>
-                  </Label>
-                  <Textarea
-                    id="resolve-summary"
-                    value={resolveSummary}
-                    onChange={(e) => setResolveSummary(e.target.value)}
-                    placeholder="Résumé de la résolution…"
-                    className="min-h-16 bg-background"
-                  />
-                </div>
-                <div className="space-y-1.5">
                   <Label htmlFor="resolve-solution" className="text-sm font-medium">
                     Solution appliquée <span className="text-destructive">*</span>
                   </Label>
@@ -2603,18 +2584,6 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                     value={resolveSolution}
                     onChange={(e) => setResolveSolution(e.target.value)}
                     placeholder="Solution mise en œuvre…"
-                    className="min-h-16 bg-background"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="resolve-work-done" className="text-sm font-medium">
-                    Travail réalisé <span className="text-destructive">*</span>
-                  </Label>
-                  <Textarea
-                    id="resolve-work-done"
-                    value={resolveWorkDone}
-                    onChange={(e) => setResolveWorkDone(e.target.value)}
-                    placeholder="Détail du travail effectué…"
                     className="min-h-16 bg-background"
                   />
                 </div>
@@ -2639,9 +2608,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                 <Button className="rounded-full gradient-primary"
                   disabled={
                     resolveMut.isPending
-                    || !resolveSummary.trim()
                     || !resolveSolution.trim()
-                    || !resolveWorkDone.trim()
                   }
                   onClick={() => resolveMut.mutate()}>
                   {resolveMut.isPending

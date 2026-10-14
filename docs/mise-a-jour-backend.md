@@ -20,6 +20,16 @@
 - Tickets déjà passés à tort en « autre » : laissés tels quels (décision du
   2026-10-14), correction manuelle possible.
 
+**Formulaire « Terminer le traitement » allégé**
+- Champs retirés : « Résumé final » (doublon de la solution, absent du PV) et
+  « Travail réalisé ». Restent « Solution appliquée » (obligatoire) et
+  « Recommandations » (facultatif). Le PV n'affiche plus la rubrique « Travail
+  réalisé » pour les nouvelles résolutions (rubrique déjà conditionnelle).
+- Backend : `ResolveBody` n'exige plus que `solution` (`summary` / `work_done`
+  encore acceptés) ; libellé du journal et notification au requérant reprennent
+  la solution appliquée. Tests : `test_resolve_form.py` (3). Les tickets déjà
+  résolus gardent leur résumé et leur travail réalisé.
+
 **Onglet Description : les deux qualifications**
 - Backend : `qualify_triage` fige dans `request.infos` la qualification du chef
   de service — `qualified_category`, `qualified_priority`, `qualified_at` (UTC) —

@@ -620,10 +620,10 @@ export async function changeRequestPriority(
 
 // BR-TRANSMIT-001 — "Terminer le traitement" : résumé/solution/travail réalisé
 // obligatoires pour tout intervenant actuel, quel que soit son rôle.
+// Formulaire « Terminer le traitement » (2026-10-14) : solution appliquée
+// obligatoire, recommandations facultatives. Résumé et travail réalisé retirés.
 export type ResolveTreatmentData = {
-  summary: string;
   solution: string;
-  work_done: string;
   recommendations?: string;
   attachment_ids?: string[];
 };
