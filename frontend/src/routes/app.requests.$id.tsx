@@ -2664,25 +2664,24 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                     <Label htmlFor="transmit-target" className="text-sm font-medium">
                       Destinataire <span className="text-destructive">*</span>
                     </Label>
-                    <select
-                      id="transmit-target"
-                      value={transmitTargetId}
-                      onChange={(e) => setTransmitTargetId(e.target.value)}
-                      className="w-full rounded-xl border border-border/50 bg-background/60 px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                    >
-                      <option value="">Sélectionner un destinataire</option>
-                      {transmitTargets.map((person) => (
-                        <option key={person.id} value={person.id}>
-                          {[
-                            person.name,
-                            person.matricule,
-                            roleLabels[person.role as keyof typeof roleLabels] ?? person.role,
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </option>
-                      ))}
-                    </select>
+                    <Select value={transmitTargetId} onValueChange={setTransmitTargetId}>
+                      <SelectTrigger id="transmit-target" className="w-full rounded-xl border-border/50 bg-background/60">
+                        <SelectValue placeholder="Sélectionner un destinataire" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {transmitTargets.map((person) => (
+                          <SelectItem key={person.id} value={String(person.id)}>
+                            {[
+                              person.name,
+                              person.matricule,
+                              roleLabels[person.role as keyof typeof roleLabels] ?? person.role,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <p className="text-[11px] text-muted-foreground">
                       {transmitTargets.length === 0
                         ? "Aucun destinataire disponible : ni collègue technicien dans votre service, ni responsable ayant confié ce ticket."
@@ -2711,56 +2710,68 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                 <div className={cn("grid grid-cols-1 gap-2 sm:grid-cols-3", transmitRestricted && "hidden")}>
                   <div className="space-y-1.5">
                     <Label className="text-xs font-medium text-muted-foreground">Direction</Label>
-                    <select
+                    <Select
                       value={transmitDirectionId}
-                      onChange={(e) => {
-                        setTransmitDirectionId(e.target.value);
+                      onValueChange={(v) => {
+                        setTransmitDirectionId(v);
                         setTransmitDepartmentId("");
                         setTransmitUnitId("");
                         setTransmitTargetId("");
                       }}
-                      className="w-full rounded-xl border border-border/50 bg-background/60 px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
                     >
-                      <option value="">Toutes</option>
-                      {transmitDirections.map((d) => (
-                        <option key={d.id} value={d.id}>{d.name}</option>
-                      ))}
-                    </select>
+                      <SelectTrigger className="w-full rounded-xl border-border/50 bg-background/60">
+                        <SelectValue placeholder="Toutes" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">Toutes</SelectItem>
+                        {transmitDirections.map((d) => (
+                          <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-xs font-medium text-muted-foreground">Département</Label>
-                    <select
+                    <Select
                       value={transmitDepartmentId}
-                      onChange={(e) => {
-                        setTransmitDepartmentId(e.target.value);
+                      onValueChange={(v) => {
+                        setTransmitDepartmentId(v);
                         setTransmitUnitId("");
                         setTransmitTargetId("");
                       }}
                       disabled={!transmitDirectionId}
-                      className="w-full rounded-xl border border-border/50 bg-background/60 px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-50"
                     >
-                      <option value="">Tous</option>
-                      {transmitDepartments.map((d) => (
-                        <option key={d.id} value={d.id}>{d.name}</option>
-                      ))}
-                    </select>
+                      <SelectTrigger className="w-full rounded-xl border-border/50 bg-background/60">
+                        <SelectValue placeholder="Tous" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">Tous</SelectItem>
+                        {transmitDepartments.map((d) => (
+                          <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-xs font-medium text-muted-foreground">Service</Label>
-                    <select
+                    <Select
                       value={transmitUnitId}
-                      onChange={(e) => {
-                        setTransmitUnitId(e.target.value);
+                      onValueChange={(v) => {
+                        setTransmitUnitId(v);
                         setTransmitTargetId("");
                       }}
                       disabled={!transmitDepartmentId}
-                      className="w-full rounded-xl border border-border/50 bg-background/60 px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-50"
                     >
-                      <option value="">Tous</option>
-                      {transmitUnits.map((u) => (
-                        <option key={u.id} value={u.id}>{u.name}</option>
-                      ))}
-                    </select>
+                      <SelectTrigger className="w-full rounded-xl border-border/50 bg-background/60">
+                        <SelectValue placeholder="Tous" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">Tous</SelectItem>
+                        {transmitUnits.map((u) => (
+                          <SelectItem key={u.id} value={String(u.id)}>{u.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
                 <div className={cn("space-y-1.5", transmitRestricted && "hidden")}>
@@ -3663,18 +3674,18 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                 <div className="space-y-4 py-2">
                   <div className="space-y-1.5">
                     <Label>Direction cible</Label>
-                    <select
-                      value={transferDirectionId}
-                      onChange={(e) => setTransferDirectionId(e.target.value)}
-                      className="w-full rounded-xl border border-border/50 bg-background/60 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                    >
-                      <option value="">Choisir une direction</option>
-                      {transferDirectionOptions.map((direction) => (
-                        <option key={direction.id} value={direction.id}>
-                          {direction.name}
-                        </option>
-                      ))}
-                    </select>
+                    <Select value={transferDirectionId} onValueChange={setTransferDirectionId}>
+                      <SelectTrigger className="w-full rounded-xl border-border/50 bg-background/60">
+                        <SelectValue placeholder="Choisir une direction" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {transferDirectionOptions.map((direction) => (
+                          <SelectItem key={direction.id} value={String(direction.id)}>
+                            {direction.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-1.5">
                     <Label>
