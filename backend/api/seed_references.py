@@ -31,6 +31,9 @@ _REQUEST_STATUSES = [
     # tant qu'un ticket les porte) ; une installation neuve ne les cree plus.
     {"code": "new",          "label": "Nouvelle",              "sort_order": 0,  "is_builtin": True},
     {"code": "qualifying",   "label": "En qualification",      "sort_order": 2,  "is_builtin": True},
+    # Rétabli le 2026-10-14 : qualifié par le chef de service et orienté vers un
+    # chef de division, en attente de répartition (file Distribution).
+    {"code": "qualified",    "label": "Qualifié",              "sort_order": 3,  "is_builtin": True},
     {"code": "assigned",     "label": "Assignée",              "sort_order": 4,  "is_builtin": True},
     {"code": "in_progress",  "label": "En cours",              "sort_order": 5,  "is_builtin": True},
     {"code": "resolved",     "label": "Résolue",               "sort_order": 8,  "is_builtin": True},

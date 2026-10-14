@@ -34,8 +34,10 @@ class RequestRepository(BaseRepository[Request]):
     _INACTIVE_STATUSES: list[str] = ["resolved", "closed", "cancelled", "rejected"]
     # "qualified", "pending" et "escalated" supprimes le 2026-09-28 (aucun ticket
     # ne les portait, plus aucune transition n'y menait).
+    # "qualified" retabli le 2026-10-14 (ticket oriente vers un chef de division,
+    # en attente de repartition) : actif, sinon il sortirait de la file Distribution.
     _ACTIVE_STATUSES: list[str] = [
-        "new", "qualifying", "assigned", "in_progress", "reopened",
+        "new", "qualifying", "qualified", "assigned", "in_progress", "reopened",
     ]
     _QUALIFIABLE_STATUSES: list[str] = ["new", "qualifying", "reopened"]
 

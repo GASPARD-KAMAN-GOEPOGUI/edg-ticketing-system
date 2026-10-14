@@ -42,6 +42,7 @@ _ESCALATION_EVENTS = {"escalation_manual", "escalation_auto"}
 _EVENT_LABELS: dict[str, str] = {
     "created": "Création de la demande",
     "qualifying": "Mise en qualification",
+    "qualified": "Qualifié",
     "qualified": "Qualification effectuée",
     "assigned": "Affectation",
     "in_progress": "Prise en charge",

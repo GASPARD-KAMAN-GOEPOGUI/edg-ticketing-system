@@ -46,10 +46,11 @@ from api.services.NotificationEmitter import emit as emit_notif, emit_bulk
 from api.services.ServiceCrypto import decrypt_field
 
 # Mapping statut → event_type spécifique (CDC §7 + §8)
-# "pending", "qualified" et "escalated" supprimés du projet (2026-09-28) :
-# plus aucune transition ne les atteint, ils ne sont donc plus cartographiés.
+# "pending" et "escalated" supprimés du projet (2026-09-28). "qualified" rétabli
+# le 2026-10-14 : orienté vers un chef de division, en attente de répartition.
 _STATUS_EVENT_MAP: dict[str, str] = {
     "qualifying":   "qualifying",
+    "qualified":    "qualified",
     "assigned":     "assigned",
     "in_progress":  "in_progress",
     "rejected":     "rejected",
@@ -60,6 +61,7 @@ _FIELD_CHECK_CONFORMITY = frozenset({"conforme", "ecart"})
 
 _STATUS_LABEL_MAP: dict[str, str] = {
     "qualifying":   "Ticket en cours de qualification",
+    "qualified":    "Ticket qualifié — en attente de répartition",
     "assigned":     "Ticket assigné à un agent",
     "in_progress":  "Prise en charge — traitement en cours",
     "rejected":     "Ticket rejeté",
@@ -959,7 +961,9 @@ class RequestService(BaseService):
         if target_is_division_chief:
             patch["distributor_id"] = int(assignee_id)
             # Pas de traitant a ce stade : le ticket attend d'etre reparti.
-            patch["request_status"] = "qualifying"
+            # « Qualifié » (2026-10-14) et non plus « En qualification » : le chef
+            # de service vient justement de le qualifier.
+            patch["request_status"] = "qualified"
         elif assignee_id:
             patch["assignee_id"] = int(assignee_id)
             # BR-TRAITEMENT-PROGRESSIF-001 (2026-09-27) — remplace

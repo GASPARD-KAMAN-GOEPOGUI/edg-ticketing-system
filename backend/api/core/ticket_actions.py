@@ -29,20 +29,26 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     # "Transition invalide : 'qualifying' -> 'qualifying'" et bloquait
     # definitivement tout ticket passe par la file.
     "qualifying": {"qualifying", "new", "reopened", "assigned", "in_progress"},
+    # "qualified" RETABLI le 2026-10-14, avec un sens precis : le chef de service
+    # a qualifie le ticket et l'a oriente vers un chef de division, qui doit le
+    # repartir (file Distribution, BR-DISTRIBUTION-001). Il remplace "qualifying"
+    # sur ce seul chemin, ou "En qualification" etait trompeur. Propre source :
+    # reorienter vers un autre chef de division reste possible.
+    "qualified": {"qualified", "qualifying", "new", "reopened"},
     # BR-TRAITEMENT-PROGRESSIF-001 (2026-09-27) : "assigned" reprend les sources
     # que ciblait "in_progress" du temps du demarrage automatique, sinon toute
     # reassignation d'un ticket deja en cours ou en attente serait refusee.
     # "assigned" est sa propre source : reassigner un ticket deja assigne a
     # quelqu'un d'autre reste un geste legitime.
-    "assigned": {"qualifying", "new", "reopened", "assigned", "in_progress"},
+    "assigned": {"qualifying", "qualified", "new", "reopened", "assigned", "in_progress"},
     # Le traitement ne demarre plus a l'assignation : il demarre au geste
     # explicite du traitant (start_treatment), depuis "assigned".
-    "in_progress": {"assigned", "qualifying", "new", "reopened"},
+    "in_progress": {"assigned", "qualifying", "qualified", "new", "reopened"},
     "resolved": {"in_progress", "assigned"},
     "closed": {"resolved"},
     "reopened": {"resolved", "rejected", "closed"},
-    "rejected": {"new", "qualifying", "assigned", "in_progress"},
-    "cancelled": {"new", "qualifying", "assigned", "in_progress"},
+    "rejected": {"new", "qualifying", "qualified", "assigned", "in_progress"},
+    "cancelled": {"new", "qualifying", "qualified", "assigned", "in_progress"},
 }
 
 BYPASS_TRANSITION_ROLES = frozenset({"admin"})

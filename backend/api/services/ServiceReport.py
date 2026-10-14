@@ -19,10 +19,12 @@ from api.services.base_service import BaseService
 
 logger = logging.getLogger(__name__)
 
-# "qualified", "pending" et "escalated" supprimes le 2026-09-28.
+# "pending" et "escalated" supprimes le 2026-09-28 ; "qualified" retabli le
+# 2026-10-14 (oriente vers un chef de division, en attente de repartition).
 ACTIVE_STATUS_CODES = {
     "new",
     "qualifying",
+    "qualified",
     "assigned",
     "in_progress",
     "pending_validation",
@@ -31,6 +33,7 @@ ACTIVE_STATUS_CODES = {
 BACKLOG_STATUS_CODES = {
     "new",
     "qualifying",
+    "qualified",
     "assigned",
     "pending_validation",
     "reopened",
@@ -318,7 +321,7 @@ class ReportService(BaseService):
                     evt.reopen_reasons,
                     COALESCE(evt.last_activity_at, r.updated_at, r.created_at) AS last_activity_at,
                     TIMESTAMPDIFF(HOUR, COALESCE(evt.last_activity_at, r.updated_at, r.created_at), NOW()) AS last_activity_age_hours,
-                    CASE WHEN rs.code IN ('new','qualifying','assigned','in_progress','reopened')
+                    CASE WHEN rs.code IN ('new','qualifying','qualified','assigned','in_progress','reopened')
                           AND TIMESTAMPDIFF(HOUR, COALESCE(evt.last_activity_at, r.updated_at, r.created_at), NOW()) >= :inactive_hours
                          THEN 1 ELSE 0
                     END AS is_inactive,
@@ -353,7 +356,7 @@ class ReportService(BaseService):
                          )
                     END AS closure_minutes,
                     TIMESTAMPDIFF(HOUR, r.created_at, COALESCE(r.closed_at, r.resolved_at, NOW())) AS ticket_age_hours,
-                    CASE WHEN rs.code IN ('new','qualifying','assigned','in_progress','reopened')
+                    CASE WHEN rs.code IN ('new','qualifying','qualified','assigned','in_progress','reopened')
                          THEN TIMESTAMPDIFF(HOUR, r.created_at, NOW())
                     END AS active_age_hours
                 FROM request r
@@ -1549,7 +1552,7 @@ class ReportService(BaseService):
                     SUM(CASE WHEN rs.code IN ('resolved','closed')  THEN 1 ELSE 0 END) AS resolved_total,
                     SUM(CASE WHEN rs.code = 'pending'               THEN 1 ELSE 0 END) AS pending_total,
                     SUM(CASE WHEN rs.code = 'escalated'             THEN 1 ELSE 0 END) AS escalated_total,
-                    SUM(CASE WHEN rs.code IN ('new','qualifying',
+                    SUM(CASE WHEN rs.code IN ('new','qualifying','qualified',
                              'assigned','in_progress','reopened')
                                                                    THEN 1 ELSE 0 END) AS active,
                     SUM(CASE WHEN r.sla_breached = 1               THEN 1 ELSE 0 END) AS sla_breached,
