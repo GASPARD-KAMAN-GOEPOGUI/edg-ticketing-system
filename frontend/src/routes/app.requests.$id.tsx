@@ -137,7 +137,7 @@ import {
 import { agentInitials, agentLabel, matchesAgentSearch } from "@/lib/agent-picker";
 import { toast } from "sonner";
 import { copyWithToast } from "@/lib/clipboard";
-import { formatDistanceToNow, format, differenceInDays } from "date-fns";
+import { format, differenceInDays } from "date-fns";
 import { fr } from "date-fns/locale";
 import { canTicketAction, isRequester } from "@/lib/capabilities";
 
@@ -329,11 +329,9 @@ function ParticipantRow({ participant }: { participant: Participant }) {
             {participant.detail}
           </span>
         </div>
-        {participant.lastAt && (
-          <div className="mt-0.5 text-[10px] text-muted-foreground">
-            {formatDistanceToNow(new Date(participant.lastAt), { addSuffix: true, locale: fr })}
-          </div>
-        )}
+        {/* Temps écoulé depuis la dernière action (« il y a… ») retiré le
+            2026-10-13 (décision produit) : il affichait aussi « dans environ
+            2 heures » à cause du décalage horaire du serveur de production. */}
       </div>
     </li>
   );
