@@ -20,6 +20,12 @@
 - Tickets déjà passés à tort en « autre » : laissés tels quels (décision du
   2026-10-14), correction manuelle possible.
 
+**E-mail de création de compte : « Bienvenue »**
+- Objet « Bienvenue sur EDG Support », titre « Bienvenue sur EDG Support ! »,
+  message d'accueil présentant la plateforme ; bouton « Se connecter » inchangé.
+  L'e-mail de rattachement d'un compte existant (consentement) est inchangé.
+  Test : `test_welcome_email.py`.
+
 **File d'attente : boutons « Prendre le ticket » / « Assigner »**
 - « Prendre le ticket » : catégorie + priorité ; « Assigner » (orientation vers
   un chef de division) : catégorie + priorité + chef de division. La **solution

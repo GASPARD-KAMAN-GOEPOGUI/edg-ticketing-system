@@ -394,19 +394,21 @@ async def send_account_created_email(to_email: str, name: str = "") -> bool:
         logger.warning("SMTP non configuré — email de création de compte non envoyé à %r", to_email)
         return False
 
-    subject = "Votre compte a été créé avec succès"
-    greeting = f"Bonjour {name}, v" if name else "V"
+    # Ton « Bienvenue » (décision du 2026-10-14).
+    subject = "Bienvenue sur EDG Support"
+    greeting = f"Bonjour {name}, b" if name else "B"
     login_url = _app_login_url()
     html = _render_template(
         "account_created_email.html",
         title=subject,
         color="#008D24",
         icon="&#10004;",
-        headline="Compte créé avec succès",
+        headline="Bienvenue sur EDG Support !",
         subtitle=(
-            f"{greeting}otre compte EDG Support a été créé et est maintenant actif. "
-            "Vous pouvez dès à présent vous connecter avec les identifiants choisis lors "
-            "de votre inscription."
+            f"{greeting}ienvenue sur EDG Support, la plateforme de gestion des demandes de "
+            "la Direction des Systèmes d'Information d'Électricité de Guinée. Votre compte "
+            "est actif : vous pouvez dès maintenant vous connecter, créer vos tickets et "
+            "suivre leur traitement."
         ),
         details={"Adresse email": to_email},
         action_url=login_url,
