@@ -271,6 +271,7 @@ Le ticket est :
 | --- | --- |
 | Nouveau | Ticket créé |
 | En attente qualification | Analyse initiale |
+| Qualifié | Qualifié par le chef de service et orienté vers un chef de division, en attente de répartition (file Distribution) — rétabli le 2026-10-14 |
 | Affecté | Assigné à un agent/service |
 | En cours | Traitement actif |
 | En attente utilisateur | Attente retour utilisateur |
@@ -437,6 +438,12 @@ Les statuts `pending` et `qualified` sont retirés par la même occasion. Les
 trois codes cessent d'être des **cibles** mais restent des **sources** de
 transition, afin qu'aucun ticket déjà en base ne se retrouve figé sans action
 disponible.
+
+**Mise à jour 2026-10-14 :** `qualified` (« Qualifié ») est **rétabli** avec un
+sens unique : le chef de service a qualifié le ticket et l'a orienté vers un chef
+de division, qui doit le répartir. Il remplace « En qualification » sur ce seul
+chemin ; `new / qualifying / reopened → qualified → assigned / in_progress`, et
+annulation / rejet possibles depuis `qualified`.
 
 ### 11.3 Base De Connaissance — RETIRÉE (2026-09-24)
 

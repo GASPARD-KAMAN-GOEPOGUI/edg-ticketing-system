@@ -21,8 +21,9 @@ Plateforme de gestion des requêtes/incidents pour **Électricité de Guinée (E
 - `admin` – administrateur système
 
 **Statuts requête (machine d'état):**
-`new → qualifying → qualified → assigned → in_progress → pending → resolved → closed`
-Branches : `rejected`, `escalated`, `reopened`
+`new → qualifying → qualified → assigned → in_progress → resolved → closed`
+`qualified` (« Qualifié ») = orienté vers un chef de division, en attente de répartition (rétabli 2026-10-14) ; `qualifying` reste pour les autres chemins (qualification sans cible, routage, transfert).
+Branches : `rejected`, `reopened`, `cancelled` (`pending` et `escalated` supprimés en 2026-09)
 
 **Priorités:** `low | medium | high | critical`
 **Niveaux escalade:** `L1 → L2 → L3 → DG`

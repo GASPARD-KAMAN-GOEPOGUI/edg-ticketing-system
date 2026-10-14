@@ -20,6 +20,19 @@
 - Tickets déjà passés à tort en « autre » : laissés tels quels (décision du
   2026-10-14), correction manuelle possible.
 
+**Statut « Qualifié » pour la Distribution**
+- Un ticket orienté par le chef de service vers un chef de division prend le
+  statut `qualified` (« Qualifié ») au lieu de `qualifying` (« En
+  qualification »), trompeur puisqu'il vient d'être qualifié. Les autres chemins
+  (qualification sans cible, routage, transfert) restent `qualifying`.
+- Backend : référentiel (`seed_references`, créé par `api.cli init`),
+  `ALLOWED_TRANSITIONS`, statuts actifs (file Distribution), rapports, export.
+  Tests : `test_distribution_status.py` (3).
+- Frontend : type, libellé, badge, capacités (annuler / rejeter / priorité…),
+  filtres et compteurs des écrans. Test : `capabilities-qualified.test.ts` (3).
+- Tickets déjà en Distribution en `qualifying` : bascule SQL ponctuelle en
+  production (voir message de déploiement).
+
 **Formulaire « Terminer le traitement » allégé**
 - Champs retirés : « Résumé final » (doublon de la solution, absent du PV) et
   « Travail réalisé ». Restent « Solution appliquée » (obligatoire) et
