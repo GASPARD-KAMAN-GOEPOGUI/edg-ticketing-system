@@ -35,7 +35,7 @@ import { getUser } from "@/lib/session";
 import { prefetch } from "@/lib/prefetch";
 
 const ACTIVE_STATUSES: RequestStatus[] = [
-  "new", "qualifying", "assigned", "in_progress", "reopened",
+  "new", "qualifying", "qualified", "assigned", "in_progress", "reopened",
 ];
 const TERMINAL_STATUSES = "resolved,closed,cancelled,rejected";
 

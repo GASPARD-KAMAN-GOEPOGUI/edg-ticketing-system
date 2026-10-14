@@ -135,12 +135,12 @@ const TICKET_ACTION_STATUSES: Record<TicketAction, RequestStatus[]> = {
   transmit_treatment: ["assigned", "in_progress"],
   close: ["resolved"],
   reopen: ["resolved", "closed", "rejected"],
-  cancel: ["new", "qualifying", "assigned", "in_progress"],
-  reject: ["new", "qualifying", "assigned", "in_progress"],
-  change_priority: ["new", "qualifying", "assigned", "in_progress", "reopened"],
+  cancel: ["new", "qualifying", "qualified", "assigned", "in_progress"],
+  reject: ["new", "qualifying", "qualified", "assigned", "in_progress"],
+  change_priority: ["new", "qualifying", "qualified", "assigned", "in_progress", "reopened"],
   change_service: ["new", "qualifying", "reopened"],
-  transfer_direction: ["new", "qualifying", "assigned", "in_progress", "reopened"],
-  accept_workflow_step: ["new", "qualifying", "assigned", "in_progress", "reopened"],
+  transfer_direction: ["new", "qualifying", "qualified", "assigned", "in_progress", "reopened"],
+  accept_workflow_step: ["new", "qualifying", "qualified", "assigned", "in_progress", "reopened"],
 };
 
 const OWN_REQUEST_ALLOWED_ACTIONS = new Set<TicketAction>([

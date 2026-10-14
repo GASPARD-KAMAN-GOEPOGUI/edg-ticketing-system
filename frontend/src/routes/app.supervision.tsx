@@ -109,7 +109,7 @@ type AgentStats = {
 // ── Constantes ────────────────────────────────────────────────────────────────
 
 const ACTIVE_STATUSES = new Set([
-  "new", "qualifying", "assigned", "in_progress", "reopened",
+  "new", "qualifying", "qualified", "assigned", "in_progress", "reopened",
 ]);
 
 // ── Composant principal ────────────────────────────────────────────────────────

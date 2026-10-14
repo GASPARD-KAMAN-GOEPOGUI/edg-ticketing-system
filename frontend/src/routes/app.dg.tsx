@@ -77,7 +77,7 @@ const PIE_COLORS = [
 ];
 
 const ACTIVE_STATUSES = new Set([
-  "new", "qualifying", "assigned", "in_progress", "reopened",
+  "new", "qualifying", "qualified", "assigned", "in_progress", "reopened",
 ]);
 
 const ALL_DIRECTIONS_VALUE = "all";
@@ -162,7 +162,8 @@ function GlobalView() {
       if (r.status === "closed") summary.closed += 1;
       else if (r.status === "resolved") summary.resolved += 1;
       else if (r.status === "in_progress" || r.status === "reopened") summary.inProgress += 1;
-      else if (r.status === "assigned") summary.assigned += 1;
+      // « Qualifié » = orienté vers un chef de division : bloc « Orientés ou assignés ».
+      else if (r.status === "assigned" || r.status === "qualified") summary.assigned += 1;
       else if (r.inTriage || r.status === "qualifying") summary.qualifying += 1;
       else if (r.status === "new") summary.new += 1;
     });

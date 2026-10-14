@@ -46,7 +46,7 @@ export const Route = createFileRoute("/app/sla-center")({
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const ACTIVE_STATUSES: RequestStatus[] = [
-  "new", "qualifying", "assigned", "in_progress", "reopened",
+  "new", "qualifying", "qualified", "assigned", "in_progress", "reopened",
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

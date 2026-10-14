@@ -6,11 +6,13 @@ export type Role =
   | "chef-division-support"
   | "admin";
 
-// "qualified", "pending" et "escalated" supprimés le 2026-09-28 : aucun ticket
-// ne les portait et plus aucune transition n'y menait.
+// "pending" et "escalated" supprimés le 2026-09-28. "qualified" rétabli le
+// 2026-10-14 : qualifié par le chef de service et orienté vers un chef de
+// division, en attente de répartition (file Distribution).
 export type RequestStatus =
   | "new"
   | "qualifying"
+  | "qualified"
   | "assigned"
   | "in_progress"
   | "resolved"
@@ -22,6 +24,7 @@ export type RequestStatus =
 export const statusOrder: RequestStatus[] = [
   "new",
   "qualifying",
+  "qualified",
   "assigned",
   "in_progress",
   "resolved",
@@ -1178,6 +1181,7 @@ export const requests: RequestItem[] = [
 export const statusLabels: Record<RequestStatus, string> = {
   new: "Nouvelle",
   qualifying: "En qualification",
+  qualified: "Qualifié",
   assigned: "Assignée",
   in_progress: "En cours",
   resolved: "Résolue",

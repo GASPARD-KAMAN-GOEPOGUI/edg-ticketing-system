@@ -13,6 +13,7 @@ import { statusLabels } from "./mock-data";
 export const PERSONAL_ACTIVE_STATUSES = [
   "new",
   "qualifying",
+  "qualified",
   "assigned",
   "in_progress",
   "resolved",

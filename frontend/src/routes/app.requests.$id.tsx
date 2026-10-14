@@ -447,7 +447,7 @@ type TimelineItem = RequestItem["timeline"][number];
 const DETAIL_STATUS_LABELS: Record<string, string> = {
   new: "Création",
   qualifying: "Qualification",
-  qualified: "Orienté",
+  qualified: "Qualifié",
   assigned: "Assigné",
   in_progress: "En traitement",
   pending: "En attente",
