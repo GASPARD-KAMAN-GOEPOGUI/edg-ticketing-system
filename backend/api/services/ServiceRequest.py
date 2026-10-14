@@ -3016,19 +3016,20 @@ class RequestService(BaseService):
         (request.assignee_id == actor.id) parmi les rôles traitants, sans restriction
         de rôle supplémentaire (les restrictions historiques portaient sur les
         rôles chef de département et directeur, retirés le 2026-09-25)
-        (BR-DIRECTOR-RESOLVE-001). Résumé/solution/travail réalisé désormais
-        obligatoires pour tous les rôles (remplace le motif "exceptionnel" réservé
-        à chief-service (role supprime), Lot 2.6).
+        (BR-DIRECTOR-RESOLVE-001). Solution appliquée obligatoire pour tous les
+        rôles ; résumé et travail réalisé facultatifs depuis le 2026-10-14
+        (formulaire réduit à solution + recommandations).
         """
         clean_summary = summary.strip() if isinstance(summary, str) else ""
         clean_solution = solution.strip() if isinstance(solution, str) else ""
         clean_work_done = work_done.strip() if isinstance(work_done, str) else ""
-        if not clean_summary:
-            raise self.bad_request("Le résumé final est obligatoire.", error_code=ErrorCode.MISSING_REQUIRED_FIELD)
+        # Seule la solution appliquée est obligatoire depuis le 2026-10-14 : le
+        # formulaire n'a plus que « Solution appliquée » et « Recommandations ».
+        # Résumé et travail réalisé restent enregistrés s'ils sont fournis.
         if not clean_solution:
             raise self.bad_request("La solution appliquée est obligatoire.", error_code=ErrorCode.MISSING_REQUIRED_FIELD)
-        if not clean_work_done:
-            raise self.bad_request("Le travail réalisé est obligatoire.", error_code=ErrorCode.MISSING_REQUIRED_FIELD)
+        # Texte repris dans le journal et la notification au requérant.
+        outcome = clean_summary or clean_solution
         clean_recommendations = recommendations.strip() if isinstance(recommendations, str) else ""
 
         effective_role = str(getattr(actor, "role", actor_role or "") or "")
@@ -3085,7 +3086,7 @@ class RequestService(BaseService):
         await self.detail_repo.create_event({
             "workflow_id": wf_id_res,
             "event_type": "treatment_completed",
-            "label": f"Traitement terminé — {clean_summary}",
+            "label": f"Traitement terminé — {outcome}",
             "actor_id": actor_id,
             "actor_name": actor_name,
             "activated": True,
@@ -3093,9 +3094,9 @@ class RequestService(BaseService):
                 "event_status": "resolved",
                 "source_role": actor_role,
                 "actor_role": actor_role,
-                "summary": clean_summary,
+                "summary": clean_summary or None,
                 "solution": clean_solution,
-                "work_done": clean_work_done,
+                "work_done": clean_work_done or None,
                 "recommendations": clean_recommendations or None,
                 "attachment_ids": [a["attachment_id"] for a in attachments] if attachments else None,
                 "attachments": attachments or None,
@@ -3121,7 +3122,7 @@ class RequestService(BaseService):
             # annoncé dans le corps, pas dans le titre.
             title="Ticket résolu",
             body=(
-                f"Le traitement du ticket {obj.ref} est terminé. Résumé : {clean_summary} "
+                f"Le traitement du ticket {obj.ref} est terminé. Solution : {outcome} "
                 f"Consultez la solution, puis confirmez la résolution ou rouvrez le ticket "
                 f"si le problème persiste. "
                 # BR-AUTO-VALIDATION-001 — le demandeur doit savoir dès maintenant

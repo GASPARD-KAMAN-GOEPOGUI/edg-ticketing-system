@@ -1203,10 +1203,13 @@ async def assign_request(
 
 
 class ResolveBody(BaseModel):
-    summary: str
+    # Formulaire « Terminer le traitement » réduit le 2026-10-14 à la solution
+    # appliquée (obligatoire) et aux recommandations : résumé final et travail
+    # réalisé retirés. Encore acceptés s'ils sont envoyés (clients plus anciens).
     solution: str
-    work_done: str
     recommendations: Optional[str] = None
+    summary: Optional[str] = None
+    work_done: Optional[str] = None
     attachment_ids: Optional[list[str]] = None
 
 
@@ -1219,8 +1222,8 @@ async def resolve_request(
     att_svc: AttachmentService = Depends(_att_svc),
 ):
     """BR-TRANSMIT-001 — "Terminer le traitement". Autorisé à l'intervenant actuel
-    (request.assignee_id == actor.id) parmi les rôles traitants. Résumé, solution
-    et travail réalisé désormais obligatoires pour tous les rôles."""
+    (request.assignee_id == actor.id) parmi les rôles traitants. Seule la solution
+    appliquée est obligatoire (2026-10-14)."""
     attachments = await _validate_attachment_ids(att_svc, id, body.attachment_ids)
     return await svc.resolve(
         id,
