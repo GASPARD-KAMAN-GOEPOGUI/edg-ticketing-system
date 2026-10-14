@@ -1,5 +1,25 @@
 # Journal des mises à jour — EDG Connect
 
+## Session 2026-10-14 — Qualification : catégorie et priorité réellement enregistrées
+
+- **Cause** : la File d'attente (chef de service) et le constat (technicien)
+  envoyaient le LIBELLÉ (« Réseau ») ; `_translate_codes` cherchait le CODE
+  (`reseau`) et retombait en silence sur « autre » (catégorie) / « medium »
+  (priorité). Le constat envoyait aussi le libellé de priorité (« Haute »).
+- **Backend** (`ServiceRequest._qualification_code`) : `qualify_triage` et
+  `field_check` n'acceptent qu'un code (ou un libellé exact, casse indifférente)
+  présent au référentiel ; valeur inconnue → refus 400 (`INVALID_FIELD_VALUE`),
+  ticket inchangé. L'écart constaté par le technicien requalifie bien le ticket
+  (BR-FIELD-CHECK-REQUALIFY-001, désormais effectif). SLA non recalculé, comme
+  pour `change_priority`. Tests : `test_qualification_codes.py` (7).
+- **Frontend** (`lib/qualification-options.ts`) : catégories
+  (`/references/request-categories`) et priorités
+  (`/references/priority-definitions`) lues en base, libellé affiché, code envoyé,
+  pour la File d'attente et le constat ; fiche du ticket : catégorie et valeurs
+  observées affichées par leur libellé ; fiche rafraîchie après qualification.
+- Tickets déjà passés à tort en « autre » : laissés tels quels (décision du
+  2026-10-14), correction manuelle possible.
+
 ## Session 2026-10-13 — PV d'intervention : aperçu avant téléchargement, logo en production
 
 **Sécurité — route de diagnostic publique supprimée**

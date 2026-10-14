@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
 import type { RequestItem, Appreciation } from "@/lib/mock-data";
-import { roleLabels, priorityLabels } from "@/lib/mock-data";
+import { roleLabels } from "@/lib/mock-data";
 import { AppreciationForm } from "@/components/appreciation-form";
 import { cn, formatElapsedHours } from "@/lib/utils";
 import { useRole, useUser } from "@/lib/session";
@@ -67,7 +67,7 @@ import {
   type RawAttachment,
 } from "@/lib/api/requests";
 import { invalidateTicketQueries } from "@/lib/realtime/invalidation-map";
-import { fetchRequestCategories } from "@/lib/api/admin-config";
+import { labelOf, useQualificationOptions } from "@/lib/qualification-options";
 import { buildAvatarUrl, fetchUser, fetchUsers, fetchUsersByIds, type AccountUser } from "@/lib/api/accounts";
 import { fetchDirections, fetchDepartments, fetchUnits, fetchUnit } from "@/lib/api/directions-units";
 import type { Direction, Unit } from "@/lib/api/directions-units";
@@ -989,14 +989,9 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
 
   // Même référentiel que la qualification du chef de service (File d'attente) :
   // les deux bouts de la comparaison doivent parler la même langue.
-  const { data: observedCategoryItems = [] } = useQuery({
-    queryKey: ["admin-ref", "request_categories"],
-    queryFn: fetchRequestCategories,
-    staleTime: 300_000,
-  });
-  const observedCategories = observedCategoryItems
-    .filter((c) => c.status)
-    .map((c) => c.label);
+  // Libellé affiché, code envoyé (voir lib/qualification-options.ts).
+  const { categories: qualificationCategories, priorities: qualificationPriorities } =
+    useQualificationOptions();
 
   // Un écart remet en cause la qualification du chef de service : le caractériser
   // est obligatoire, au même titre que les observations. Un constat conforme n'a
@@ -2155,7 +2150,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
               <StatusBadge status={r.status} />
               <PriorityBadge priority={r.priority} />
               <span className="inline-flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-xs font-medium capitalize text-muted-foreground">
-                {r.category}
+                {labelOf(qualificationCategories, r.category)}
               </span>
             </div>
             <p className="mt-5 text-sm text-muted-foreground">
@@ -2442,8 +2437,8 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                           <SelectValue placeholder="Choisir" />
                         </SelectTrigger>
                         <SelectContent>
-                          {observedCategories.map((c) => (
-                            <SelectItem key={c} value={c}>{c}</SelectItem>
+                          {qualificationCategories.map((c) => (
+                            <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -2457,10 +2452,8 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                           <SelectValue placeholder="Choisir" />
                         </SelectTrigger>
                         <SelectContent>
-                          {(["low", "medium", "high", "critical"] as const).map((p) => (
-                            <SelectItem key={p} value={priorityLabels[p]}>
-                              {priorityLabels[p]}
-                            </SelectItem>
+                          {qualificationPriorities.map((p) => (
+                            <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -3231,13 +3224,13 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                       {Boolean(fieldCheckInfos.observed_category) && (
                         <div>
                           <dt className="text-xs text-muted-foreground">Catégorie observée</dt>
-                          <dd className="font-medium">{String(fieldCheckInfos.observed_category)}</dd>
+                          <dd className="font-medium">{labelOf(qualificationCategories, String(fieldCheckInfos.observed_category))}</dd>
                         </div>
                       )}
                       {Boolean(fieldCheckInfos.observed_priority) && (
                         <div>
                           <dt className="text-xs text-muted-foreground">Priorité observée</dt>
-                          <dd className="font-medium">{String(fieldCheckInfos.observed_priority)}</dd>
+                          <dd className="font-medium">{labelOf(qualificationPriorities, String(fieldCheckInfos.observed_priority))}</dd>
                         </div>
                       )}
                     </dl>
@@ -3861,7 +3854,7 @@ export function RequestDetailPage({ id, context = "requests" }: RequestDetailPag
                 <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Tag className="h-3.5 w-3.5" /> Catégorie
                 </dt>
-                <dd className="min-w-0 truncate font-medium" title={r.category}>{r.category}</dd>
+                <dd className="min-w-0 truncate font-medium" title={labelOf(qualificationCategories, r.category)}>{labelOf(qualificationCategories, r.category)}</dd>
               </div>
               <div className="flex items-center justify-between gap-3 border-b border-border/30 py-3">
                 <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">

@@ -17,8 +17,7 @@ import {
 } from "@/components/ui/select";
 import { fetchTriage, fetchRequest, qualifyTriage } from "@/lib/api/requests";
 import { fetchUsers } from "@/lib/api/accounts";
-import { fetchRequestCategories } from "@/lib/api/admin-config";
-import { priorityLabels } from "@/lib/mock-data";
+import { useQualificationOptions } from "@/lib/qualification-options";
 import type { Priority, Role } from "@/lib/mock-data";
 import { toast } from "sonner";
 import {
@@ -79,7 +78,6 @@ function normalizeQueueStatus(status?: string) {
   return STATUS_ALIASES[clean] ?? clean;
 }
 
-const PRIORITIES: Priority[] = ["low", "medium", "high", "critical"];
 // Cibles possibles pour le routage d'un ticket depuis la file d'attente ("Personne
 // cible") — reste large (tous les roles traitants), distinct de qui peut ACCEDER a
 // cette page (PAGE_ACCESS_ROLES, restreint au Module 2).
@@ -181,12 +179,9 @@ function QualifyTab({ focusTicketId }: { focusTicketId?: string }) {
     setForms((prev) => ({ ...prev, [id]: { ...getForm(id), ...patch } }));
   }
 
-  const { data: categoryItems = [] } = useQuery({
-    queryKey: ["admin-ref", "request_categories"],
-    queryFn: fetchRequestCategories,
-    staleTime: 300_000,
-  });
-  const categories = categoryItems.filter((c) => c.status).map((c) => c.label);
+  // Catégories et priorités lues dans les référentiels : libellé affiché, code
+  // envoyé (voir lib/qualification-options.ts).
+  const { categories, priorities } = useQualificationOptions();
 
   // Les règles de routage, la liste des directions et les cascades
   // Direction → Département → Service ont été retirées de cet écran : la cible
@@ -259,6 +254,9 @@ function QualifyTab({ focusTicketId }: { focusTicketId?: string }) {
       toast.success(`Ticket ${req?.ref ?? ""} orienté avec succès.`);
       setExpanded(null);
       queryClient.invalidateQueries({ queryKey: ["qualify"] });
+      // Fiche du ticket (cache de 15 s) : sinon l'ouvrir juste après montrait
+      // encore l'ancienne catégorie / priorité.
+      queryClient.invalidateQueries({ queryKey: ["request", id] });
       queryClient.invalidateQueries({ queryKey: ["queue"] });
       queryClient.invalidateQueries({ queryKey: ["requests"] });
       queryClient.invalidateQueries({ queryKey: ["my-tickets"] });
@@ -288,6 +286,9 @@ function QualifyTab({ focusTicketId }: { focusTicketId?: string }) {
       toast.success(`Ticket ${req?.ref ?? ""} pris en charge.`);
       setExpanded(null);
       queryClient.invalidateQueries({ queryKey: ["qualify"] });
+      // Fiche du ticket (cache de 15 s) : sinon l'ouvrir juste après montrait
+      // encore l'ancienne catégorie / priorité.
+      queryClient.invalidateQueries({ queryKey: ["request", id] });
       queryClient.invalidateQueries({ queryKey: ["queue"] });
       queryClient.invalidateQueries({ queryKey: ["requests"] });
       queryClient.invalidateQueries({ queryKey: ["my-tickets"] });
@@ -488,7 +489,7 @@ function QualifyTab({ focusTicketId }: { focusTicketId?: string }) {
                             <SelectValue placeholder="Choisir" />
                           </SelectTrigger>
                           <SelectContent>
-                            {categories.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                            {categories.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </div>
@@ -502,7 +503,7 @@ function QualifyTab({ focusTicketId }: { focusTicketId?: string }) {
                             <SelectValue placeholder="Choisir" />
                           </SelectTrigger>
                           <SelectContent>
-                            {PRIORITIES.map((p) => <SelectItem key={p} value={p}>{priorityLabels[p]}</SelectItem>)}
+                            {priorities.map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </div>
