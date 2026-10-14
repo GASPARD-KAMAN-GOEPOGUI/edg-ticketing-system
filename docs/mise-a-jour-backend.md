@@ -20,6 +20,15 @@
 - Tickets déjà passés à tort en « autre » : laissés tels quels (décision du
   2026-10-14), correction manuelle possible.
 
+**File d'attente : boutons « Prendre le ticket » / « Assigner »**
+- « Prendre le ticket » : catégorie + priorité ; « Assigner » (orientation vers
+  un chef de division) : catégorie + priorité + chef de division. La **solution
+  proposée devient facultative** (décision produit, écart assumé à la procédure
+  tâche 1.3) — le contrôle 422 de `POST /requests/{id}/qualify` est retiré.
+- Libellés « Solution proposée (facultatif) », « Chef de division support (pour
+  assigner) » ; sous les boutons grisés, ce qui manque est affiché.
+- Test : `test_distribution_status.py` (orientation sans solution proposée → 200).
+
 **Statut « Qualifié » pour la Distribution**
 - Un ticket orienté par le chef de service vers un chef de division prend le
   statut `qualified` (« Qualifié ») au lieu de `qualifying` (« En

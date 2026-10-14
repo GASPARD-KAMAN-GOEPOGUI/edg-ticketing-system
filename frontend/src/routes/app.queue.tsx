@@ -367,16 +367,20 @@ function QualifyTab({ focusTicketId }: { focusTicketId?: string }) {
             const isOpen = expanded === req.id;
             const form = getForm(req.id);
             const people = isOpen ? unitPeople : [];
-            // Procédure tâche 1.3 — la qualification est un point de contrôle
-            // bloquant : rien ne part de la file d'attente sans catégorie,
-            // priorité et solution proposée explicitement saisies. Aucun repli
-            // sur une valeur par défaut, qui laisserait passer un ticket que
-            // personne n'a réellement qualifié.
-            const qualified = Boolean(
-              form.category && form.priority && form.proposedSolution.trim(),
-            );
-            // Orienter exige en plus le chef de division support destinataire.
+            // Rien ne part de la file d'attente sans catégorie et priorité
+            // explicitement choisies (aucun repli sur une valeur par défaut). La
+            // solution proposée est FACULTATIVE depuis le 2026-10-14 (décision
+            // produit, écart assumé à la procédure tâche 1.3).
+            const qualified = Boolean(form.category && form.priority);
+            // Orienter exige en plus le chef de division support destinataire ;
+            // prendre le ticket pour soi, non.
             const canAssign = qualified && Boolean(form.personId);
+            // Ce qui manque, affiché sous les boutons grisés.
+            const missingHint = !qualified
+              ? "Choisissez la catégorie et la priorité."
+              : !form.personId
+                ? "Choisissez un chef de division support pour assigner."
+                : null;
             const isPending = qualifyMut.isPending && qualifyMut.variables?.id === req.id;
             const status = normalizeQueueStatus(req.status);
             const canTake =
@@ -525,7 +529,7 @@ function QualifyTab({ focusTicketId }: { focusTicketId?: string }) {
                         {/* Procédure tâche 1.3 — point de contrôle de l'imputation */}
                         <div>
                           <Label htmlFor={`proposed-solution-${req.id}`}>
-                            Solution proposée <span className="text-destructive">*</span>
+                            Solution proposée <span className="text-xs text-muted-foreground">(facultatif)</span>
                           </Label>
                           <Textarea
                             id={`proposed-solution-${req.id}`}
@@ -536,14 +540,13 @@ function QualifyTab({ focusTicketId }: { focusTicketId?: string }) {
                           />
                           <p className="mt-1 text-xs text-muted-foreground">
                             Lue par le chef de division support puis par le technicien.
-                            Jamais visible du requérant. Obligatoire pour prendre comme
-                            pour orienter le ticket.
+                            Jamais visible du requérant.
                           </p>
                         </div>
 
                         <div className="grid gap-4 sm:grid-cols-2">
                           <div>
-                            <Label>Chef de division support <span className="text-destructive">*</span></Label>
+                            <Label>Chef de division support <span className="text-xs text-muted-foreground">(pour assigner)</span></Label>
                             <Select
                               value={form.personId}
                               onValueChange={(v) => patchForm(req.id, { personId: v })}
@@ -617,6 +620,9 @@ function QualifyTab({ focusTicketId }: { focusTicketId?: string }) {
                         )}
                       </div>
                     </div>
+                    {canUseAssignForm && missingHint && (
+                      <p className="text-right text-xs text-muted-foreground">{missingHint}</p>
+                    )}
                   </div>
                 )}
               </GlassCard>
